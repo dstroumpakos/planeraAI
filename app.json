@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Voyage Buddy",
-    "slug": "voyage-buddy",
+    "name": "Planera AI Travel Planner",
+    "slug": "planera-ai-travel-planner",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/appicon-1024x1024-01-s9s9iw.png",
