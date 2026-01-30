@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "timestamp": 1764353496406,
+  "assets": [
+    {
+      "id": "nx71a45dd66338p4x3g9y341kn7w9zzx",
+      "path": "/assets/bloom/images/image-zyrrgm.png",
+      "size": 1585424,
+      "mimeType": "image/png",
+      "type": "image"
+    },
+    {
+      "id": "nx7cq81yxzk6an2cxw1bjgrsph7w8k9k",
+      "path": "/assets/bloom/images/image-1dbiuq.png",
+      "size": 1585424,
+      "mimeType": "image/png",
+      "type": "image"
+    }
+  ]
+}

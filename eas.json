@@ -1,0 +1,51 @@
+{
+  "cli": {
+    "version": ">= 15.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "base": {
+      "node": "20.18.0",
+      "env": {
+        "NPM_CONFIG_LEGACY_PEER_DEPS": "true",
+        "RCT_NEW_ARCH_ENABLED": "0",
+        "NO_FLIPPER": "1"
+      },
+      "cache": {
+        "disabled": true
+      }
+    },
+    "development": {
+      "extends": "base",
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": {
+        "buildConfiguration": "Debug",
+        "env": {
+          "RCT_NEW_ARCH_ENABLED": "0"
+        }
+      }
+    },
+    "preview": {
+      "extends": "base",
+      "distribution": "internal",
+      "ios": {
+        "env": {
+          "RCT_NEW_ARCH_ENABLED": "0"
+        }
+      }
+    },
+    "production": {
+      "extends": "base",
+      "autoIncrement": true,
+      "ios": {
+        "env": {
+          "RCT_NEW_ARCH_ENABLED": "0"
+        }
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}
