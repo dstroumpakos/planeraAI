@@ -76,6 +76,5 @@
       }
     }
   },
-  "private": true,
-  "packageManager": "npm@10.8.2"
+  "private": true
 }
