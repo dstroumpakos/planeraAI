@@ -1,4 +1,4 @@
-mmodule.exports = function (api) {
+module.exports = function (api) {
   const platform = api.caller((caller) => caller?.platform);
   api.cache.using(() => platform || "default");
 
