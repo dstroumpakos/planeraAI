@@ -8,7 +8,7 @@
       "node": "20.18.0",
       "env": {
         "NPM_CONFIG_LEGACY_PEER_DEPS": "true",
-        "RCT_NEW_ARCH_ENABLED": "0",
+        "RCT_NEW_ARCH_ENABLED": "1",
         "NO_FLIPPER": "1"
       },
       "cache": {
@@ -22,7 +22,7 @@
       "ios": {
         "buildConfiguration": "Debug",
         "env": {
-          "RCT_NEW_ARCH_ENABLED": "0"
+          "RCT_NEW_ARCH_ENABLED": "1"
         }
       }
     },
@@ -31,7 +31,7 @@
       "distribution": "internal",
       "ios": {
         "env": {
-          "RCT_NEW_ARCH_ENABLED": "0"
+          "RCT_NEW_ARCH_ENABLED": "1"
         }
       }
     },
@@ -40,7 +40,7 @@
       "autoIncrement": true,
       "ios": {
         "env": {
-          "RCT_NEW_ARCH_ENABLED": "0"
+          "RCT_NEW_ARCH_ENABLED": "1"
         }
       }
     }
