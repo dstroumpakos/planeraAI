@@ -3,10 +3,10 @@ import { authMutation, authQuery } from "./functions";
 
 export const getPlan = authQuery({
     args: {},
-    handler: async (ctx) => {
+    handler: async (ctx: any) => {
         const userPlan = await ctx.db
             .query("userPlans")
-            .withIndex("by_user", (q) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
             .unique();
 
         if (!userPlan) {
@@ -35,10 +35,10 @@ export const upgradeToPremium = authMutation({
     args: {
         planType: v.optional(v.union(v.literal("monthly"), v.literal("yearly"))),
     },
-    handler: async (ctx, args) => {
+    handler: async (ctx: any, args: any) => {
         const userPlan = await ctx.db
             .query("userPlans")
-            .withIndex("by_user", (q) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
             .unique();
 
         // Set subscription duration based on plan type
@@ -70,12 +70,12 @@ export const purchaseTripPack = authMutation({
     args: {
         pack: v.union(v.literal("single"), v.literal("triple"), v.literal("ten")),
     },
-    handler: async (ctx, args) => {
+    handler: async (ctx: any, args: any) => {
         const creditsToAdd = args.pack === "single" ? 1 : args.pack === "triple" ? 3 : 10;
 
         const userPlan = await ctx.db
             .query("userPlans")
-            .withIndex("by_user", (q) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
             .unique();
 
         if (userPlan) {
@@ -99,10 +99,10 @@ export const purchaseTripPack = authMutation({
 // Check if user can generate a trip
 export const canGenerateTrip = authQuery({
     args: {},
-    handler: async (ctx) => {
+    handler: async (ctx: any) => {
         const userPlan = await ctx.db
             .query("userPlans")
-            .withIndex("by_user", (q) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
             .unique();
 
         if (!userPlan) {
@@ -137,10 +137,10 @@ export const canGenerateTrip = authQuery({
 // Use a trip credit (called when generating a trip)
 export const useTripCredit = authMutation({
     args: {},
-    handler: async (ctx) => {
+    handler: async (ctx: any) => {
         const userPlan = await ctx.db
             .query("userPlans")
-            .withIndex("by_user", (q) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
             .unique();
 
         if (!userPlan) {
@@ -216,10 +216,10 @@ export const getSettings = authQuery({
       dealAlerts: v.optional(v.boolean()),
       tripReminders: v.optional(v.boolean()),
     }),
-    handler: async (ctx) => {
+    handler: async (ctx: any) => {
         const settings = await ctx.db
             .query("userSettings")
-            .withIndex("by_user", (q) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
             .unique();
 
         if (!settings) {
@@ -237,7 +237,7 @@ export const getSettings = authQuery({
                 currency: undefined,
                 language: undefined,
                 theme: undefined,
-                onboardingCompleted: undefined,
+                onboardingCompleted: false,
                 name: undefined,
                 email: undefined,
                 phone: undefined,
@@ -286,10 +286,10 @@ export const getSettings = authQuery({
 export const completeOnboarding = authMutation({
   args: {},
   returns: v.null(),
-  handler: async (ctx) => {
+  handler: async (ctx: any) => {
     const settings = await ctx.db
         .query("userSettings")
-        .withIndex("by_user", (q) => q.eq("userId", ctx.user._id))
+        .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
         .unique();
 
     if (settings) {
@@ -318,10 +318,10 @@ export const saveTravelPreferences = authMutation({
     skipHotels: v.optional(v.boolean()),
   },
   returns: v.null(),
-  handler: async (ctx, args) => {
+  handler: async (ctx: any, args: any) => {
     const settings = await ctx.db
         .query("userSettings")
-        .withIndex("by_user", (q) => q.eq("userId", ctx.user._id))
+        .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
         .unique();
 
     const updateData = {
@@ -353,10 +353,10 @@ export const updatePersonalInfo = authMutation({
         dateOfBirth: v.optional(v.string()),
     },
     returns: v.null(),
-    handler: async (ctx, args) => {
+    handler: async (ctx: any, args: any) => {
         const settings = await ctx.db
             .query("userSettings")
-            .withIndex("by_user", (q) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
             .unique();
 
         if (settings) {
@@ -390,10 +390,10 @@ export const updateTravelPreferences = authMutation({
         travelStyle: v.optional(v.string()),
     },
     returns: v.null(),
-    handler: async (ctx, args) => {
+    handler: async (ctx: any, args: any) => {
         const settings = await ctx.db
             .query("userSettings")
-            .withIndex("by_user", (q) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
             .unique();
 
         if (settings) {
@@ -415,10 +415,10 @@ export const updateAppSettings = authMutation({
         currency: v.optional(v.string()),
     },
     returns: v.null(),
-    handler: async (ctx, args) => {
+    handler: async (ctx: any, args: any) => {
         const settings = await ctx.db
             .query("userSettings")
-            .withIndex("by_user", (q) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
             .unique();
 
         if (settings) {
@@ -442,10 +442,10 @@ export const updateNotifications = authMutation({
         tripReminders: v.optional(v.boolean()),
     },
     returns: v.null(),
-    handler: async (ctx, args) => {
+    handler: async (ctx: any, args: any) => {
         const settings = await ctx.db
             .query("userSettings")
-            .withIndex("by_user", (q) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
             .unique();
 
         if (settings) {
@@ -466,10 +466,10 @@ export const updateDarkMode = authMutation({
         darkMode: v.boolean(),
     },
     returns: v.null(),
-    handler: async (ctx, args) => {
+    handler: async (ctx: any, args: any) => {
         const settings = await ctx.db
             .query("userSettings")
-            .withIndex("by_user", (q) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
             .unique();
 
         if (settings) {
@@ -488,7 +488,7 @@ export const updateDarkMode = authMutation({
 export const generateUploadUrl = authMutation({
     args: {},
     returns: v.string(),
-    handler: async (ctx) => {
+    handler: async (ctx: any) => {
         return await ctx.storage.generateUploadUrl();
     },
 });
@@ -498,10 +498,10 @@ export const saveProfilePicture = authMutation({
         storageId: v.id("_storage"),
     },
     returns: v.null(),
-    handler: async (ctx, args) => {
+    handler: async (ctx: any, args: any) => {
         const settings = await ctx.db
             .query("userSettings")
-            .withIndex("by_user", (q) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
             .unique();
 
         // Delete old profile picture if exists
@@ -525,10 +525,10 @@ export const saveProfilePicture = authMutation({
 export const cancelSubscription = authMutation({
     args: {},
     returns: v.object({ success: v.boolean() }),
-    handler: async (ctx) => {
+    handler: async (ctx: any) => {
         const userPlan = await ctx.db
             .query("userPlans")
-            .withIndex("by_user", (q) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
             .unique();
 
         if (!userPlan) {
@@ -554,7 +554,7 @@ export const getProfileImageUrl = authQuery({
         storageId: v.id("_storage"),
     },
     returns: v.union(v.string(), v.null()),
-    handler: async (ctx, args) => {
+    handler: async (ctx: any, args: any) => {
         return await ctx.storage.getUrl(args.storageId);
     },
 });

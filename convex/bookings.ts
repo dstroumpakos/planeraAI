@@ -8,7 +8,7 @@ export const trackClick = authMutation({
     item: v.string(),
     url: v.string(),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx: any, args: any) => {
     await ctx.db.insert("bookings", {
       userId: ctx.user._id,
       tripId: args.tripId,
@@ -23,10 +23,10 @@ export const trackClick = authMutation({
 
 export const getMyBookings = authQuery({
   args: {},
-  handler: async (ctx) => {
+  handler: async (ctx: any) => {
     return await ctx.db
       .query("bookings")
-      .withIndex("by_user", (q) => q.eq("userId", ctx.user._id))
+      .withIndex("by_user", (q:any) => q.eq("userId", ctx.user._id))
       .order("desc")
       .collect();
   },
