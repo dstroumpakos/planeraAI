@@ -2,12 +2,13 @@
 // This file MUST have a default export that renders properly
 
 import { useEffect, useState, useRef } from "react";
-import { View, Text, StyleSheet } from "react-native";
+import { View, Text, StyleSheet, Platform } from "react-native";
 import { ConvexReactClient } from "convex/react";
 import { Stack } from "expo-router";
 import { ThemeProvider } from "@/lib/ThemeContext";
 import { ConvexNativeAuthProvider } from "@/lib/ConvexAuthProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { authClient } from "@/lib/auth-client";
 
 // Environment validation - safe at module scope (just reads process.env)
 function validateEnvironment(): { valid: boolean; errors: string[] } {
@@ -125,6 +126,13 @@ function AppContent() {
             if (__DEV__) {
                 console.log("[BOOT] Convex client created successfully");
             }
+            
+            // Configure Google Sign-In on native platforms
+           //f (Platform.OS !== "web") {
+             // authClient.configureGoogleSignIn().catch((err) => {
+               //   console.warn("[BOOT] Failed to configure Google Sign-In:", err);
+               //);
+           //
         } catch (error) {
             console.error("[BOOT] Failed to create Convex client:", error);
             setInitError(error instanceof Error ? error.message : "Unknown error");

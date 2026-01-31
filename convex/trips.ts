@@ -18,7 +18,7 @@ export const create = authMutation({
         selectedTravelerIds: v.optional(v.array(v.id("travelers"))),
     },
     returns: v.id("trips"),
-    handler: async (ctx, args) => {
+    handler: async (ctx: any, args: any) => {
         console.log("🚀 Creating trip with args:", JSON.stringify(args, null, 2));
 
         // Validate numeric fields
@@ -58,7 +58,7 @@ export const create = authMutation({
         // Check if user can generate a trip
         const userPlan = await ctx.db
             .query("userPlans")
-            .withIndex("by_user", (q) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
             .unique();
 
         // Check permissions
@@ -171,7 +171,7 @@ export const getTripDetails = internalQuery({
             itinerary: v.optional(v.any()),
         })
     ),
-    handler: async (ctx, args) => {
+    handler: async (ctx: any, args: any) => {
         return await ctx.db.get(args.tripId);
     },
 });
@@ -182,7 +182,7 @@ export const getTravelerAgesForTrip = internalQuery({
         tripId: v.id("trips"),
     },
     returns: v.array(v.number()),
-    handler: async (ctx, args) => {
+    handler: async (ctx: any, args: any) => {
         const trip = await ctx.db.get(args.tripId);
         if (!trip || !trip.selectedTravelerIds || trip.selectedTravelerIds.length === 0) {
             return [];
@@ -216,7 +216,7 @@ export const updateItinerary = internalMutation({
         status: v.union(v.literal("generating"), v.literal("completed"), v.literal("failed")),
     },
     returns: v.null(),
-    handler: async (ctx, args) => {
+    handler: async (ctx: any, args: any) => {
         await ctx.db.patch(args.tripId, {
             itinerary: args.itinerary,
             status: args.status,
@@ -250,10 +250,10 @@ export const list = authQuery({
             destinations: v.optional(v.any()),
         })
     ),
-    handler: async (ctx) => {
+    handler: async (ctx: any) => {
         return await ctx.db
             .query("trips")
-            .withIndex("by_user", (q) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
             .order("desc")
             .collect();
     },
@@ -261,13 +261,13 @@ export const list = authQuery({
 
 export const get = authQuery({
     args: { tripId: v.id("trips") },
-    handler: async (ctx, args) => {
+    handler: async (ctx: any, args: any) => {
         const trip = await ctx.db.get(args.tripId);
         if (!trip) return null;
 
         const userPlan = await ctx.db
             .query("userPlans")
-            .withIndex("by_user", (q) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
             .unique();
 
         // Check if user has full access (premium subscription OR has/used trip credits)
@@ -305,7 +305,7 @@ export const update = authMutation({
         travelers: v.optional(v.number()),
         interests: v.optional(v.array(v.string())),
     },
-    handler: async (ctx, args) => {
+    handler: async (ctx: any, args: any) => {
         const { tripId, ...updates } = args;
         await ctx.db.patch(tripId, updates);
     },
@@ -313,7 +313,7 @@ export const update = authMutation({
 
 export const regenerate = authMutation({
     args: { tripId: v.id("trips") },
-    handler: async (ctx, args) => {
+    handler: async (ctx: any, args: any) => {
         const trip = await ctx.db.get(args.tripId);
         if (!trip) throw new Error("Trip not found");
 
@@ -330,7 +330,7 @@ export const regenerate = authMutation({
 
 export const deleteTrip = authMutation({
     args: { tripId: v.id("trips") },
-    handler: async (ctx, args) => {
+    handler: async (ctx: any, args: any) => {
         await ctx.db.delete(args.tripId);
 
     },
@@ -345,16 +345,16 @@ export const getTrendingDestinations = query({
         avgRating: v.float64(),
         interests: v.array(v.string()),
     })),
-    handler: async (ctx) => {
+    handler: async (ctx: any) => {
         // Get completed trips only (using status index)
         const completedTrips = await ctx.db
             .query("trips")
-            .withIndex("by_status", (q) => q.eq("status", "completed"))
+            .withIndex("by_status", (q: any) => q.eq("status", "completed"))
             .collect();
 
         // Filter for trips from the last 30 days
         const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
-        const recentTrips = completedTrips.filter((trip) => 
+        const recentTrips = completedTrips.filter((trip: any) => 
             trip._creationTime >= thirtyDaysAgo
         );
 
@@ -371,7 +371,7 @@ export const getTrendingDestinations = query({
             ratings: number[];
         }> = {};
 
-        recentTrips.forEach((trip) => {
+        recentTrips.forEach((trip: any) => {
             if (!destinationMap[trip.destination]) {
                 destinationMap[trip.destination] = {
                     count: 0,
@@ -427,11 +427,11 @@ export const getAllDestinations = query({
         avgRating: v.float64(),
         interests: v.array(v.string()),
     })),
-    handler: async (ctx) => {
+    handler: async (ctx: any) => {
         // Get completed trips only
         const completedTrips = await ctx.db
             .query("trips")
-            .withIndex("by_status", (q) => q.eq("status", "completed"))
+            .withIndex("by_status", (q: any) => q.eq("status", "completed"))
             .collect();
 
         // If no trips, return empty array
@@ -469,7 +469,7 @@ export const getAllDestinations = query({
             ratings: number[];
         }> = {};
 
-        completedTrips.forEach((trip) => {
+        completedTrips.forEach((trip: any) => {
             const normalizedDest = normalizeDestination(trip.destination);
             
             if (!destinationMap[normalizedDest]) {

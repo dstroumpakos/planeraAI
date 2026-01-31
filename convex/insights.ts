@@ -13,7 +13,7 @@ export const getCompletedTrips = authQuery({
         endDate: v.float64(),
         travelers: v.float64(),
     })),
-    handler: async (ctx) => {
+    handler: async (ctx: any) => {
         if (!ctx.user) {
             return [];
         }
@@ -24,14 +24,14 @@ export const getCompletedTrips = authQuery({
         // Get dismissed trips
         const dismissedTripsData = await ctx.db
             .query("dismissedTrips")
-            .withIndex("by_user", (q) => q.eq("userId", userId))
+            .withIndex("by_user", (q: any) => q.eq("userId", userId))
             .collect();
         
-        const dismissedTripIds = new Set(dismissedTripsData.map(d => d.tripId));
+        const dismissedTripIds = new Set(dismissedTripsData.map((d: any) => d.tripId));
         
         const trips = await ctx.db
             .query("trips")
-            .withIndex("by_user", (q) => q.eq("userId", userId))
+            .withIndex("by_user", (q: any) => q.eq("userId", userId))
             .collect();
 
         // Filter to only completed trips (endDate has passed) and not dismissed
@@ -65,7 +65,7 @@ export const hasCompletedTripTo = authQuery({
         destination: v.string(),
     },
     returns: v.boolean(),
-    handler: async (ctx, args) => {
+    handler: async (ctx: any, args: any) => {
         if (!ctx.user) {
             return false;
         }
@@ -74,7 +74,7 @@ export const hasCompletedTripTo = authQuery({
         const now = Date.now();
         const trips = await ctx.db
             .query("trips")
-            .withIndex("by_user", (q) => q.eq("userId", userId))
+            .withIndex("by_user", (q: any) => q.eq("userId", userId))
             .collect();
 
         // Check if any completed trip matches the destination
@@ -93,17 +93,17 @@ export const hasCompletedTripTo = authQuery({
 });
 
 // Traveler insights functions
-export const list = authQuery({
+export const list: any = authQuery({
     args: {
         destination: v.optional(v.string()),
         paginationOpts: paginationOptsValidator,
     },
-    handler: async (ctx, args) => {
+    handler: async (ctx: any, args: any) => {
         if (args.destination) {
             const destinationId = args.destination.toLowerCase().replace(/\s+/g, '-');
             return await ctx.db
                 .query("insights")
-                .withIndex("by_destination", (q) => q.eq("destinationId", destinationId))
+                .withIndex("by_destination", (q: any) => q.eq("destinationId", destinationId))
                 .order("desc")
                 .paginate(args.paginationOpts);
         } else {
@@ -130,7 +130,7 @@ export const create = authMutation({
         ),
         verified: v.boolean(),
     },
-    handler: async (ctx, args) => {
+    handler: async (ctx: any, args: any) => {
         if (!ctx.user) {
             throw new Error("Unauthorized");
         }
@@ -157,7 +157,7 @@ export const like = authMutation({
     args: {
         insightId: v.id("insights"),
     },
-    handler: async (ctx, args) => {
+    handler: async (ctx: any, args: any) => {
         const insight = await ctx.db.get(args.insightId);
         if (!insight) {
             throw new Error("Insight not found");
@@ -173,7 +173,7 @@ export const dismissTrip = authMutation({
     args: {
         tripId: v.id("trips"),
     },
-    handler: async (ctx, args) => {
+    handler: async (ctx: any, args: any) => {
         if (!ctx.user) {
             throw new Error("Unauthorized");
         }
@@ -181,7 +181,7 @@ export const dismissTrip = authMutation({
         // Check if already dismissed
         const existing = await ctx.db
             .query("dismissedTrips")
-            .withIndex("by_user_and_trip", (q) => 
+            .withIndex("by_user_and_trip", (q: any) => 
                 q.eq("userId", ctx.user._id).eq("tripId", args.tripId)
             )
             .unique();
@@ -232,20 +232,20 @@ export const getDestinationInsights = query({
         createdAt: v.float64(),
         updatedAt: v.optional(v.float64()),
     })),
-    handler: async (ctx, args) => {
+    handler: async (ctx: any, args: any) => {
         // Normalize destination to lowercase slug
         const destinationId = args.destination.toLowerCase().replace(/\s+/g, '-');
         
         const insights = await ctx.db
             .query("insights")
-            .withIndex("by_destination", (q) =>
+            .withIndex("by_destination", (q: any) =>
                 q.eq("destinationId", destinationId)
             )
             .order("desc")
             .take(10);
         
         // Filter approved insights in memory
-        return insights.filter(insight => insight.moderationStatus === "approved");
+        return insights.filter((insight: any) => insight.moderationStatus === "approved");
     },
 });
 
@@ -269,7 +269,7 @@ export const shareInsight = authMutation({
             attribution: v.optional(v.string()),
         })),
     },
-    handler: async (ctx, args) => {
+    handler: async (ctx: any, args: any) => {
         const destinationId = args.destination.toLowerCase().replace(/\\s+/g, '-');
         
         await ctx.db.insert("insights", {

@@ -104,7 +104,7 @@ export const saveBooking = internalMutation({
     departureTimestamp: v.optional(v.float64()),
   },
   returns: v.id("flightBookings"),
-  handler: async (ctx, args) => {
+  handler: async (ctx: any, args: any) => {
     // Get the trip to find the userId
     const trip = await ctx.db.get(args.tripId);
     if (!trip) {
@@ -174,13 +174,13 @@ export const getBookingsForTrip = query({
     })),
     createdAt: v.float64(),
   })),
-  handler: async (ctx, args) => {
+  handler: async (ctx: any, args: any) => {
     const bookings = await ctx.db
       .query("flightBookings")
-      .withIndex("by_trip", (q) => q.eq("tripId", args.tripId))
+      .withIndex("by_trip", (q: any) => q.eq("tripId", args.tripId))
       .collect();
     
-    return bookings.map(b => ({
+    return bookings.map((b: any) => ({
       _id: b._id,
       bookingReference: b.bookingReference,
       totalAmount: b.totalAmount,
@@ -204,7 +204,7 @@ export const getBookingsForTrip = query({
         origin: b.returnFlight.origin,
         destination: b.returnFlight.destination,
       } : undefined,
-      passengers: b.passengers.map(p => ({
+      passengers: b.passengers.map((p: any) => ({
         givenName: p.givenName,
         familyName: p.familyName,
         email: p.email,
@@ -313,17 +313,17 @@ export const getUserFlightBookings = authQuery({
     isUpcoming: v.boolean(),
     isPast: v.boolean(),
   })),
-  handler: async (ctx) => {
+  handler: async (ctx: any) => {
     const bookings = await ctx.db
       .query("flightBookings")
-      .withIndex("by_user", (q) => q.eq("userId", ctx.user._id))
+      .withIndex("by_user", (q:any) => q.eq("userId", ctx.user._id))
       .order("desc")
       .collect();
     
     const now = Date.now();
     
     // Get trip destinations for each booking
-    const results = await Promise.all(bookings.map(async (b) => {
+    const results = await Promise.all(bookings.map(async (b: any) => {
       const trip = await ctx.db.get(b.tripId);
       
       // Parse departure date to determine if flight is upcoming or past

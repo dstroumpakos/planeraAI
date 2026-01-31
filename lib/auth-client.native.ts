@@ -1,3 +1,4 @@
+
 // Native-specific auth client implementation
 // This file is used on iOS/Android to avoid importing better-auth directly
 // which contains webpack-style dynamic imports that crash Hermes
@@ -7,14 +8,22 @@
 
 import Constants from "expo-constants";
 import * as SecureStore from "expo-secure-store";
+import { Platform } from "react-native";
 
 // Storage keys - these are safe at module scope (just strings)
 const getStoragePrefix = () => Constants.expoConfig?.scheme || "planera";
 const getSessionKey = () => `${getStoragePrefix()}_session`;
 const getTokenKey = () => `${getStoragePrefix()}_token`;
+const getUserKey = () => `${getStoragePrefix()}_user`;
 
-// Get the base URL for auth requests
+// Get the base URL for auth requests - MUST be EXPO_PUBLIC_CONVEX_SITE_URL
 const BASE_URL = process.env.EXPO_PUBLIC_CONVEX_SITE_URL;
+
+// Convex URL for native auth actions
+const CONVEX_URL = process.env.EXPO_PUBLIC_CONVEX_URL;
+
+// Google Web Client ID for native sign-in
+const GOOGLE_WEB_CLIENT_ID = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID;
 
 // Types - exported for use by consumers
 export interface AuthUser {
@@ -73,10 +82,12 @@ async function deleteSecureItem(key: string): Promise<void> {
 
 // Get stored token - ONLY call after mount
 async function getStoredToken(): Promise<string | null> {
-  return getSecureItem(getTokenKey());
+  const token = await getSecureItem(getTokenKey());
+  console.log("[Auth] getStoredToken:", token ? "FOUND" : "MISSING");
+  return token;
 }
 
-// Make authenticated fetch request
+// Make authenticated fetch request with detailed logging
 async function authFetch<T>(
   endpoint: string,
   options: RequestInit = {}
@@ -98,19 +109,27 @@ async function authFetch<T>(
     }
 
     const url = `${BASE_URL}${endpoint}`;
+    console.log("[Auth] Fetching:", options.method || "GET", url);
+
     const response = await fetch(url, {
       ...options,
       headers,
       credentials: "include",
     });
 
+    console.log("[Auth] Response status:", response.status);
+
+    // Read body as text first for debugging
+    const bodyText = await response.text();
+    console.log("[Auth] Response body:", bodyText.substring(0, 500));
+
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error("[Auth] Request failed:", response.status, errorText);
-      return { data: null, error: new Error(errorText || `HTTP ${response.status}`) };
+      console.error("[Auth] Request failed:", response.status, bodyText);
+      return { data: null, error: new Error(bodyText || `HTTP ${response.status}`) };
     }
 
-    const data = await response.json();
+    // Parse JSON from text
+    const data = bodyText ? JSON.parse(bodyText) : null;
     return { data, error: null };
   } catch (error) {
     console.error("[Auth] Fetch error:", error);
@@ -126,24 +145,43 @@ function createNativeAuthClient() {
   let initialized = false;
   let initPromise: Promise<void> | null = null;
 
+  // Google Sign-In instance (lazy loaded)
+  let googleSignInConfigured = false;
+
   const notifyListeners = (session: SessionData | null) => {
     currentSession = session;
+    console.log("[Auth] Notifying listeners, authenticated:", !!session?.session);
     listeners.forEach((listener) => listener(session));
   };
 
-  // Store session data
+  // Store session data - handles Better Auth response format
   const storeSession = async (session: AuthSession, user: AuthUser) => {
+    console.log("[Auth] Storing session for user:", user.id);
     await setSecureItem(getSessionKey(), JSON.stringify({ session, user }));
+    await setSecureItem(getUserKey(), JSON.stringify(user));
     if (session.token) {
       await setSecureItem(getTokenKey(), session.token);
+      console.log("[Auth] Token stored successfully");
     }
     notifyListeners({ session, user });
   };
 
+  // Create session object from Better Auth token+user response
+  const createSessionFromResponse = (token: string, user: AuthUser): AuthSession => {
+    return {
+      id: `native_${Date.now()}`,
+      userId: user.id,
+      token,
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+    };
+  };
+
   // Clear session data
   const clearSession = async () => {
+    console.log("[Auth] Clearing session");
     await deleteSecureItem(getSessionKey());
     await deleteSecureItem(getTokenKey());
+    await deleteSecureItem(getUserKey());
     notifyListeners(null);
   };
 
@@ -151,7 +189,7 @@ function createNativeAuthClient() {
   const loadStoredSession = async () => {
     if (initialized) return;
     initialized = true;
-    
+
     try {
       console.log("[Auth] Loading stored session...");
       const stored = await getSecureItem(getSessionKey());
@@ -159,7 +197,7 @@ function createNativeAuthClient() {
         const parsed = JSON.parse(stored);
         currentSession = parsed;
         notifyListeners(parsed);
-        console.log("[Auth] Restored session from storage");
+        console.log("[Auth] Restored session from storage, userId:", parsed.user?.id);
       } else {
         console.log("[Auth] No stored session found");
       }
@@ -182,12 +220,251 @@ function createNativeAuthClient() {
     await ensureInit();
   };
 
-  // DO NOT call loadStoredSession() here at module scope!
-  // It will be called lazily on first use or via explicit init()
+  // Configure Google Sign-In (call once before using)
+  const configureGoogleSignIn = async () => {
+    if (googleSignInConfigured || Platform.OS === "web") return;
+    
+    try {
+      const { GoogleSignin } = await import("@react-native-google-signin/google-signin");
+      
+      if (!GOOGLE_WEB_CLIENT_ID) {
+        console.warn("[Auth] EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID not set");
+        return;
+      }
+      
+      GoogleSignin.configure({
+        webClientId: GOOGLE_WEB_CLIENT_ID,
+        offlineAccess: true,
+        scopes: ["profile", "email"],
+      });
+      
+      googleSignInConfigured = true;
+      console.log("[Auth] Google Sign-In configured");
+    } catch (error) {
+      console.warn("[Auth] Failed to configure Google Sign-In:", error);
+    }
+  };
+
+  // Native Google Sign-In
+  const nativeGoogleSignIn = async (): Promise<AuthResponse<SessionData>> => {
+    await ensureInit();
+    
+    if (Platform.OS === "web") {
+      return { data: null, error: new Error("Native Google Sign-In not available on web") };
+    }
+    
+    try {
+      console.log("[Auth] Starting native Google Sign-In...");
+      
+      // Import dynamically to avoid issues on web
+      const { GoogleSignin, statusCodes } = await import("@react-native-google-signin/google-signin");
+      
+      // Configure if not already done
+      await configureGoogleSignIn();
+      
+      // Check if user has previously signed in and sign out to ensure fresh sign-in
+      try {
+        const currentUser = GoogleSignin.getCurrentUser();
+        if (currentUser) {
+          await GoogleSignin.signOut();
+        }
+      } catch (e) {
+        // Ignore errors when checking/clearing previous sign-in
+      }
+      
+      // Sign in
+      const userInfo = await GoogleSignin.signIn();
+      console.log("[Auth] Google Sign-In response:", userInfo ? "Success" : "No user info");
+      
+      if (!userInfo.data?.idToken) {
+        return { data: null, error: new Error("No ID token received from Google") };
+      }
+      
+      // Call Convex action to verify token and create session
+      console.log("[Auth] Calling Convex signInWithGoogle action...");
+      const response = await fetch(`${CONVEX_URL}/api/action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          path: "authNative:signInWithGoogle",
+          args: {
+            idToken: userInfo.data.idToken,
+            displayName: userInfo.data.user?.name,
+          },
+        }),
+      });
+      
+      const responseText = await response.text();
+      console.log("[Auth] Raw Convex response status:", response.status);
+      console.log("[Auth] Raw Convex response:", responseText.substring(0, 200));
+      
+      let result;
+      try {
+        const parsed = JSON.parse(responseText);
+        // Convex action responses may be wrapped in a 'value' field
+        result = parsed.value !== undefined ? parsed.value : parsed;
+      } catch (e) {
+        console.error("[Auth] Failed to parse Convex response:", e);
+        return { data: null, error: new Error("Invalid response from server") };
+      }
+      
+      console.log("[Auth] Convex signInWithGoogle result:", {
+        success: result?.success,
+        hasToken: !!result?.token,
+        hasUser: !!result?.user,
+        error: result?.error,
+      });
+      
+      if (!result || !result.success || result.error) {
+        return { data: null, error: new Error(result?.error || "Google sign-in failed") };
+      }
+      
+      // Store session
+      const session = createSessionFromResponse(result.token, result.user);
+      await storeSession(session, result.user);
+      
+      return { data: { session, user: result.user }, error: null };
+    } catch (error: any) {
+      console.error("[Auth] Native Google Sign-In error:", error);
+      
+      // Handle specific error codes
+      const { statusCodes } = await import("@react-native-google-signin/google-signin");
+      if (error.code === statusCodes.SIGN_IN_CANCELLED) {
+        return { data: null, error: new Error("Sign-in cancelled") };
+      }
+      if (error.code === statusCodes.IN_PROGRESS) {
+        return { data: null, error: new Error("Sign-in already in progress") };
+      }
+      if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+        return { data: null, error: new Error("Google Play Services not available") };
+      }
+      
+      return { data: null, error: error as Error };
+    }
+  };
+
+  // Native Apple Sign-In
+  const nativeAppleSignIn = async (): Promise<AuthResponse<SessionData>> => {
+    await ensureInit();
+    
+    if (Platform.OS !== "ios") {
+      return { data: null, error: new Error("Apple Sign-In is only available on iOS") };
+    }
+    
+    try {
+      console.log("[Auth] Starting native Apple Sign-In...");
+      
+      // Import dynamically
+      const AppleAuthentication = await import("expo-apple-authentication");
+      
+      // Check if Apple Sign-In is available
+      const isAvailable = await AppleAuthentication.isAvailableAsync();
+      if (!isAvailable) {
+        return { data: null, error: new Error("Apple Sign-In not available on this device") };
+      }
+      
+      // Sign in
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+
+console.log("[Auth] Apple credential raw:", {
+  hasIdentityToken: !!credential.identityToken,
+  identityTokenType: typeof credential.identityToken,
+  identityTokenLength: credential.identityToken?.length,
+  email: credential.email,
+  fullName: credential.fullName,
+});
+
+      
+      console.log("[Auth] Apple Sign-In credential received");
+      
+      if (!credential.identityToken) {
+        return { data: null, error: new Error("No identity token received from Apple") };
+      }
+      
+      // Call Convex action to verify token and create session
+      console.log("[Auth] Calling Convex signInWithApple action...");
+      // ✅ Build args OUTSIDE JSON.stringify
+const appleArgs: any = {
+  identityToken: credential.identityToken,
+};
+
+// only include email if it's a real string
+if (typeof credential.email === "string" && credential.email.length > 0) {
+  appleArgs.email = credential.email;
+}
+
+// only include fullName if it has real values
+const givenName = credential.fullName?.givenName ?? undefined;
+const familyName = credential.fullName?.familyName ?? undefined;
+
+if (givenName || familyName) {
+  appleArgs.fullName = { givenName, familyName };
+}
+
+const response = await fetch(`${CONVEX_URL}/api/action`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    path: "authNative:signInWithApple",
+    args: appleArgs,
+  }),
+});
+      
+      const responseText = await response.text();
+      console.log("[Auth] Raw Convex response status:", response.status);
+      console.log("[Auth] Raw Convex response:", responseText.substring(0, 200));
+      
+      let result;
+      try {
+        const parsed = JSON.parse(responseText);
+  if (parsed?.status === "error") {
+    return { data: null, error: new Error(parsed.errorMessage || "Server Error") };
+  }
+  result = parsed.value !== undefined ? parsed.value : parsed;
+} catch (e) {
+  console.error("[Auth] Failed to parse Convex response:", e);
+  return { data: null, error: new Error("Invalid response from server") };
+}
+      
+      console.log("[Auth] Convex signInWithApple result:", {
+        success: result?.success,
+        hasToken: !!result?.token,
+        hasUser: !!result?.user,
+        error: result?.error,
+      });
+      
+      if (!result || !result.success || result.error) {
+        return { data: null, error: new Error(result?.error || "Apple sign-in failed") };
+      }
+      
+      // Store session
+      const session = createSessionFromResponse(result.token, result.user);
+      await storeSession(session, result.user);
+      
+      return { data: { session, user: result.user }, error: null };
+    } catch (error: any) {
+      console.error("[Auth] Native Apple Sign-In error:", error);
+      
+      // Handle cancellation
+      if (error.code === "ERR_CANCELED") {
+        return { data: null, error: new Error("Sign-in cancelled") };
+      }
+      
+      return { data: null, error: error as Error };
+    }
+  };
 
   return {
     // Explicit initialization - call from useEffect
     init,
+
+    // Configure Google Sign-In (call early in app lifecycle)
+    configureGoogleSignIn,
 
     // Sign in with email/password
     signIn: {
@@ -199,35 +476,63 @@ function createNativeAuthClient() {
         password: string;
       }): Promise<AuthResponse<SessionData>> => {
         await ensureInit();
+        console.log("[Auth] Signing in with email:", email);
+
         const response = await authFetch<any>("/api/auth/sign-in/email", {
           method: "POST",
           body: JSON.stringify({ email, password }),
         });
 
-        if (response.data?.session && response.data?.user) {
-          await storeSession(response.data.session, response.data.user);
-          return { data: { session: response.data.session, user: response.data.user }, error: null };
+        if (response.error) {
+          return { data: null, error: response.error };
         }
 
-        return { data: null, error: response.error };
+        const data = response.data;
+        console.log("[Auth] Sign-in response keys:", data ? Object.keys(data) : "null");
+
+        // Better Auth returns: { redirect: true, token: "...", user: {...}, url: "..." }
+        // OR: { session: {...}, user: {...} }
+        if (data?.token && data?.user) {
+          const session = createSessionFromResponse(data.token, data.user);
+          await storeSession(session, data.user);
+          return { data: { session, user: data.user }, error: null };
+        } else if (data?.session && data?.user) {
+          await storeSession(data.session, data.user);
+          return { data: { session: data.session, user: data.user }, error: null };
+        }
+
+        console.error("[Auth] Unexpected sign-in response format:", data);
+        return { data: null, error: new Error("Invalid response from server") };
       },
 
-      // Social sign in (Google, Apple, etc.)
+      // Social sign in - NOW USES NATIVE SDK instead of OAuth redirect
       social: async ({
         provider,
         callbackURL,
       }: {
         provider: string;
         callbackURL?: string;
-      }): Promise<AuthResponse<{ url: string }>> => {
+      }): Promise<AuthResponse<SessionData | { url: string }>> => {
         await ensureInit();
+        console.log("[Auth] Starting social sign-in with provider:", provider);
+
+        // Use native sign-in for Google and Apple on mobile
+        if (provider === "google" && Platform.OS !== "web") {
+          return nativeGoogleSignIn();
+        }
+        
+        if (provider === "apple" && Platform.OS === "ios") {
+          return nativeAppleSignIn();
+        }
+
+        // Fallback to OAuth redirect for web or unsupported providers
         const scheme = Constants.expoConfig?.scheme || "planera";
         const redirectURL = callbackURL || `${scheme}://`;
-        
+
         const response = await authFetch<any>("/api/auth/sign-in/social", {
           method: "POST",
-          body: JSON.stringify({ 
-            provider, 
+          body: JSON.stringify({
+            provider,
             callbackURL: redirectURL,
             mode: "expo",
           }),
@@ -240,20 +545,41 @@ function createNativeAuthClient() {
         return { data: null, error: response.error };
       },
 
+      // Native Google Sign-In (direct method)
+      google: nativeGoogleSignIn,
+
+      // Native Apple Sign-In (direct method)
+      apple: nativeAppleSignIn,
+
       // Anonymous sign in
       anonymous: async (): Promise<AuthResponse<SessionData>> => {
         await ensureInit();
+        console.log("[Auth] Starting anonymous sign-in");
+
         const response = await authFetch<any>("/api/auth/sign-in/anonymous", {
           method: "POST",
           body: JSON.stringify({}),
         });
 
-        if (response.data?.session && response.data?.user) {
-          await storeSession(response.data.session, response.data.user);
-          return { data: { session: response.data.session, user: response.data.user }, error: null };
+        if (response.error) {
+          return { data: null, error: response.error };
         }
 
-        return { data: null, error: response.error };
+        const data = response.data;
+        console.log("[Auth] Anonymous sign-in response keys:", data ? Object.keys(data) : "null");
+
+        // Handle both response formats
+        if (data?.token && data?.user) {
+          const session = createSessionFromResponse(data.token, data.user);
+          await storeSession(session, data.user);
+          return { data: { session, user: data.user }, error: null };
+        } else if (data?.session && data?.user) {
+          await storeSession(data.session, data.user);
+          return { data: { session: data.session, user: data.user }, error: null };
+        }
+
+        console.error("[Auth] Unexpected anonymous sign-in response format:", data);
+        return { data: null, error: new Error("Invalid response from server") };
       },
     },
 
@@ -269,24 +595,54 @@ function createNativeAuthClient() {
         name?: string;
       }): Promise<AuthResponse<SessionData>> => {
         await ensureInit();
+        console.log("[Auth] Signing up with email:", email);
+
         const response = await authFetch<any>("/api/auth/sign-up/email", {
           method: "POST",
           body: JSON.stringify({ email, password, name }),
         });
 
-        if (response.data?.session && response.data?.user) {
-          await storeSession(response.data.session, response.data.user);
-          return { data: { session: response.data.session, user: response.data.user }, error: null };
+        if (response.error) {
+          return { data: null, error: response.error };
         }
 
-        return { data: null, error: response.error };
+        const data = response.data;
+        console.log("[Auth] Sign-up response keys:", data ? Object.keys(data) : "null");
+
+        // Handle both response formats
+        if (data?.token && data?.user) {
+          const session = createSessionFromResponse(data.token, data.user);
+          await storeSession(session, data.user);
+          return { data: { session, user: data.user }, error: null };
+        } else if (data?.session && data?.user) {
+          await storeSession(data.session, data.user);
+          return { data: { session: data.session, user: data.user }, error: null };
+        }
+
+        console.error("[Auth] Unexpected sign-up response format:", data);
+        return { data: null, error: new Error("Invalid response from server") };
       },
     },
 
     // Sign out
     signOut: async (): Promise<AuthResponse<null>> => {
       await ensureInit();
+      console.log("[Auth] Signing out");
+      
       try {
+        // Sign out from native providers if signed in
+        if (Platform.OS !== "web") {
+          try {
+            const { GoogleSignin } = await import("@react-native-google-signin/google-signin");
+            const currentUser = GoogleSignin.getCurrentUser();
+            if (currentUser) {
+              await GoogleSignin.signOut();
+            }
+          } catch (e) {
+            // Ignore Google sign-out errors
+          }
+        }
+        
         await authFetch("/api/auth/sign-out", { method: "POST" });
       } catch (error) {
         console.warn("[Auth] Sign out request failed:", error);
@@ -295,31 +651,66 @@ function createNativeAuthClient() {
       return { data: null, error: null };
     },
 
-    // Get current session
+    // Get current session from server
     getSession: async (): Promise<AuthResponse<SessionData>> => {
-      await ensureInit();
-      const response = await authFetch<SessionData>("/api/auth/get-session", {
-        method: "GET",
-      });
+  await ensureInit();
+  console.log("[Auth] Getting session via authNative.validateSession");
 
-      if (response.data?.session) {
-        await storeSession(response.data.session, response.data.user!);
-        return response;
-      }
+  const token = await getStoredToken();
+  if (!token) {
+    await clearSession();
+    return { data: { session: null, user: null }, error: null };
+  }
 
-      // If no valid session from server, clear local storage
-      if (!response.error) {
-        await clearSession();
-      }
+  try {
+    const response = await fetch(`${CONVEX_URL}/api/action`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        path: "authNative:validateSession",
+        args: { token },
+      }),
+    });
 
-      return { data: { session: null, user: null }, error: response.error };
-    },
+    const rawText = await response.text();
+    console.log("[Auth] validateSession status:", response.status);
+    console.log("[Auth] validateSession body:", rawText.substring(0, 500));
+
+    if (!response.ok) {
+      await clearSession();
+      return { data: { session: null, user: null }, error: new Error(rawText) };
+    }
+
+    const parsed = rawText ? JSON.parse(rawText) : null;
+
+if (parsed?.status === "error") {
+  await clearSession();
+  return { data: { session: null, user: null }, error: new Error(parsed.errorMessage || "Server Error") };
+}
+
+const result = parsed?.value !== undefined ? parsed.value : parsed;
+
+
+    // Expecting something like: { success: true, user: {...} }
+    if (!result?.success || !result?.user) {
+      await clearSession();
+      return { data: { session: null, user: null }, error: null };
+    }
+
+    // Rebuild a local session object (token is your stored session token)
+    const session = createSessionFromResponse(token, result.user);
+    await storeSession(session, result.user);
+
+    return { data: { session, user: result.user }, error: null };
+  } catch (e: any) {
+    console.warn("[Auth] validateSession fetch failed:", e);
+    await clearSession();
+    return { data: { session: null, user: null }, error: e };
+  }
+},
 
     // React hook for session (returns current state)
     useSession: () => {
-      // This is a simplified version - in the real implementation,
-      // this would be a proper React hook with useState/useEffect
-      // The actual hook behavior is handled by ConvexBetterAuthProvider
       return {
         data: currentSession,
         isPending: false,
@@ -343,7 +734,7 @@ function createNativeAuthClient() {
       notify: () => notifyListeners(currentSession),
     },
 
-    // For Convex integration
+    // For Convex integration - returns the stored token
     getToken: getStoredToken,
   };
 }

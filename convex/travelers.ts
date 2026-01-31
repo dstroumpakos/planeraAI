@@ -24,10 +24,10 @@ export const list = authQuery({
       updatedAt: v.optional(v.float64()),
     })
   ),
-  handler: async (ctx) => {
+  handler: async (ctx: any) => {
     const travelers = await ctx.db
       .query("travelers")
-      .withIndex("by_user", (q) => q.eq("userId", ctx.user._id))
+      .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
       .collect();
     return travelers;
   },
@@ -57,7 +57,7 @@ export const get = authQuery({
     }),
     v.null()
   ),
-  handler: async (ctx, args) => {
+  handler: async (ctx: any, args: any) => {
     const traveler = await ctx.db.get(args.id);
     if (!traveler || traveler.userId !== ctx.user._id) {
       return null;
@@ -82,12 +82,12 @@ export const create = authMutation({
     isDefault: v.optional(v.boolean()),
   },
   returns: v.id("travelers"),
-  handler: async (ctx, args) => {
+  handler: async (ctx: any, args: any) => {
     // If this is marked as default, unmark any existing defaults
     if (args.isDefault) {
       const existingTravelers = await ctx.db
         .query("travelers")
-        .withIndex("by_user", (q) => q.eq("userId", ctx.user._id))
+        .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
         .collect();
       
       for (const traveler of existingTravelers) {
@@ -100,7 +100,7 @@ export const create = authMutation({
     // Check if this is the first traveler - make it default
     const existingCount = await ctx.db
       .query("travelers")
-      .withIndex("by_user", (q) => q.eq("userId", ctx.user._id))
+      .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
       .collect();
     
     const isFirstTraveler = existingCount.length === 0;
@@ -142,7 +142,7 @@ export const update = authMutation({
     isDefault: v.optional(v.boolean()),
   },
   returns: v.null(),
-  handler: async (ctx, args) => {
+  handler: async (ctx: any, args: any) => {
     const traveler = await ctx.db.get(args.id);
     if (!traveler || traveler.userId !== ctx.user._id) {
       throw new Error("Traveler not found");
@@ -152,7 +152,7 @@ export const update = authMutation({
     if (args.isDefault) {
       const existingTravelers = await ctx.db
         .query("travelers")
-        .withIndex("by_user", (q) => q.eq("userId", ctx.user._id))
+        .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
         .collect();
       
       for (const t of existingTravelers) {
@@ -177,7 +177,7 @@ export const update = authMutation({
 export const remove = authMutation({
   args: { id: v.id("travelers") },
   returns: v.null(),
-  handler: async (ctx, args) => {
+  handler: async (ctx: any, args: any) => {
     const traveler = await ctx.db.get(args.id);
     if (!traveler || traveler.userId !== ctx.user._id) {
       throw new Error("Traveler not found");
@@ -195,7 +195,7 @@ export const isBookingReady = authQuery({
     ready: v.boolean(),
     missingFields: v.array(v.string()),
   }),
-  handler: async (ctx, args) => {
+  handler: async (ctx: any, args: any) => {
     const traveler = await ctx.db.get(args.id);
     if (!traveler || traveler.userId !== ctx.user._id) {
       return { ready: false, missingFields: ["Traveler not found"] };
@@ -251,7 +251,7 @@ export const getWithAges = authQuery({
       passengerType: v.union(v.literal("adult"), v.literal("child"), v.literal("infant")),
     })
   ),
-  handler: async (ctx, args) => {
+  handler: async (ctx: any, args: any) => {
     const travelers = [];
     const departureDate = new Date(args.departureDate);
 

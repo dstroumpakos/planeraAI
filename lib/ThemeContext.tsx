@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { useQuery, useMutation } from 'convex/react';
+import { useQuery, useMutation, useConvexAuth } from "convex/react";
 import { api } from '@/convex/_generated/api';
-import { useConvexAuth } from 'convex/react';
 
 // Planera Colors - Light Mode (cream/yellow theme)
 export const LIGHT_COLORS = {
@@ -56,7 +55,15 @@ const ThemeContext = createContext<ThemeContextType>({
 });
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-    const { isAuthenticated } = useConvexAuth();
+    let isAuthenticated = false;
+
+try {
+    isAuthenticated = useConvexAuth().isAuthenticated;
+} catch {
+    // ConvexProviderWithAuth not ready yet
+    isAuthenticated = false;
+}
+
     const userSettings = useQuery(
         api.users.getSettings,
         isAuthenticated ? {} : "skip"

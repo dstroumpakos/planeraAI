@@ -4,7 +4,7 @@
     "slug": "planera-ai-travel-planner",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/appicon-1024x1024-01-s9s9iw.png",
+    "icon": "./assets/images/appicon-1024x1024-01-9h6cls.jpg",
     "scheme": "myapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -18,7 +18,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/appicon-1024x1024-01-s9s9iw.png",
+        "foregroundImage": "./assets/images/appicon-1024x1024-01-9h6cls.jpg",
         "backgroundColor": "#ffffff"
       },
       "newArchEnabled": true
@@ -41,7 +41,8 @@
       ],
       "expo-secure-store",
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      "@react-native-google-signin/google-signin"
     ],
     "experiments": {
       "typedRoutes": true
