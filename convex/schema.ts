@@ -8,13 +8,20 @@ export default defineSchema({
         origin: v.optional(v.string()),
         startDate: v.float64(),
         endDate: v.float64(),
-        budget: v.union(v.float64(), v.string()),
-        travelers: v.float64(),
+         // V1: budgetTotal is the primary budget field (numeric, total for all travelers)
+        budgetTotal: v.optional(v.float64()),
+        // V1: travelerCount is the primary traveler count field
+        travelerCount: v.optional(v.float64()),
+        // V1: computed field: budgetTotal / travelerCount
+        perPersonBudget: v.optional(v.float64()),
+        // Legacy fields (kept for backward compatibility)
+        budget: v.optional(v.union(v.float64(), v.string())),
+        travelers: v.optional(v.float64()),
         interests: v.array(v.string()),
         skipFlights: v.optional(v.boolean()),
         skipHotel: v.optional(v.boolean()),
         preferredFlightTime: v.optional(v.string()),
-        // Selected traveler profiles for flight booking
+        // Selected traveler profiles for flight booking (disabled in V1)
         selectedTravelerIds: v.optional(v.array(v.id("travelers"))),
         status: v.union(
             v.literal("pending"),
@@ -500,4 +507,23 @@ export default defineSchema({
         createdAt: v.float64(),
     })
         .index("by_token", ["token"]),
+
+    // V1: AI-generated Top 5 sights for destinations
+    destinationSights: defineTable({
+        // Link to trip for trip-specific sights
+        tripId: v.optional(v.id("trips")),
+        // Destination key for caching (e.g., "paris-france", "tokyo-japan")
+        destinationKey: v.string(),
+        // Array of 5 sights
+        sights: v.array(v.object({
+            name: v.string(),
+            shortDescription: v.string(),
+            neighborhoodOrArea: v.optional(v.string()),
+            bestTimeToVisit: v.optional(v.string()),
+            estDurationHours: v.optional(v.string()),
+        })),
+        createdAt: v.float64(),
+    })
+        .index("by_trip", ["tripId"])
+        .index("by_destination_key", ["destinationKey"]),
 });

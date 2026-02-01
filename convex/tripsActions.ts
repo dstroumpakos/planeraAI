@@ -5,6 +5,7 @@ import { internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import OpenAI from "openai";
 import * as duffel from "./flights/duffel";
+import { FEATURES } from "./_features";
 
 // Helper function to generate travel style guidance for OpenAI prompt
 function generateTravelStyleGuidance(interests: string[]): string {
@@ -70,11 +71,14 @@ export const generate = internalAction({
         console.log("  - Origin:", origin);
         console.log("  - Start Date:", new Date(trip.startDate).toISOString());
         console.log("  - End Date:", new Date(trip.endDate).toISOString());
-        console.log("  - Travelers:", trip.travelers);
-        console.log("  - Budget:", trip.budget);
+          console.log("  - Travelers:", trip.travelerCount ?? trip.travelers ?? 1);
+        console.log("  - Budget:", trip.budgetTotal ?? trip.budget);
         console.log("  - Interests:", trip.interests);
         console.log("  - Selected Traveler IDs:", trip.selectedTravelerIds || "none");
         
+        // V1: Get traveler count with fallback
+        const travelerCount = trip.travelerCount ?? trip.travelers ?? 1;
+
         // Get traveler ages for flight search (if travelers were selected)
         let travelerAges: number[] = [];
         if (trip.selectedTravelerIds && trip.selectedTravelerIds.length > 0) {
@@ -145,7 +149,7 @@ export const generate = internalAction({
 
                         console.log(`🔍 Searching flights via Duffel: ${originCode} -> ${destCode}`);
                         console.log(`   Origin input: "${origin}", Destination input: "${trip.destination}"`);
-                        console.log(`   Departure: ${departureDate}, Return: ${returnDate}, Adults: ${trip.travelers}`);
+                       console.log(`   Departure: ${departureDate}, Return: ${returnDate}, Adults: ${trip.travelerCount ?? trip.travelers ?? 1}`);
                         
                         // Validate IATA codes before calling Duffel
                         if (!originCode || !destCode) {
@@ -163,7 +167,7 @@ export const generate = internalAction({
                             destinationCode: destCode,
                             departureDate,
                             returnDate,
-                            adults: trip.travelers,
+                            adults: travelerCount,
                             passengerAges: travelerAges.length > 0 ? travelerAges : undefined,
                         });
 
@@ -176,7 +180,7 @@ export const generate = internalAction({
                                 destCode,
                                 new Date(trip.startDate).toISOString().split('T')[0],
                                 new Date(trip.endDate).toISOString().split('T')[0],
-                                trip.travelers,
+                                travelerCount,
                                 preferredFlightTime || "any"
                             );
                         } else {
@@ -230,7 +234,7 @@ export const generate = internalAction({
                             destCode,
                             new Date(trip.startDate).toISOString().split('T')[0],
                             new Date(trip.endDate).toISOString().split('T')[0],
-                            trip.travelers,
+                            travelerCount,
                             preferredFlightTime || "any"
                         );
                     }
@@ -244,7 +248,7 @@ export const generate = internalAction({
                         destCode,
                         new Date(trip.startDate).toISOString().split('T')[0],
                         new Date(trip.endDate).toISOString().split('T')[0],
-                        trip.travelers,
+                        travelerCount,
                         preferredFlightTime || "any"
                     );
                 }
@@ -279,7 +283,7 @@ export const generate = internalAction({
 
             // 5. Generate transportation options
             console.log("🚗 Generating transportation options...");
-            const transportation = generateTransportationOptions(trip.destination, origin, trip.travelers);
+            const transportation = generateTransportationOptions(trip.destination, origin, trip.travelerCount ?? trip.travelers ?? 1);
             console.log(`✅ Transportation ready: ${transportation.length} options`);
 
             // 6. Generate day-by-day itinerary with OpenAI
@@ -288,11 +292,11 @@ export const generate = internalAction({
             if (hasOpenAIKey) {
                 try {
                     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-                    const budgetDisplay = typeof trip.budget === "number" ? `€${trip.budget}` : trip.budget;
+                    const budgetDisplay = typeof trip.budgetTotal === "number" ? `€${trip.budgetTotal}` : trip.budgetTotal;
                     const itineraryPrompt = `Create a detailed day-by-day itinerary for a trip to ${trip.destination} from ${new Date(trip.startDate).toDateString()} to ${new Date(trip.endDate).toDateString()}.
 
 Budget: ${budgetDisplay}
-Travelers: ${trip.travelers}
+Travelers: ${trip.travelerCount ?? trip.travelers ?? 1}
 Interests: ${trip.interests.join(", ")}
 
 ${generateTravelStyleGuidance(trip.interests)}
@@ -367,7 +371,7 @@ Make sure prices are realistic for ${trip.destination}. Museums typically cost �
                 restaurants,
                 transportation,
                 dayByDayItinerary,
-                estimatedDailyExpenses: calculateDailyExpenses(Number(trip.budget)),
+               estimatedDailyExpenses: calculateDailyExpenses(Number(trip.budgetTotal)),
             };
 
             console.log("✅ Trip generation complete!");
@@ -756,6 +760,12 @@ function getFallbackHotels(destination: string) {
 
 // Helper function to search for activities using Viator API
 async function searchActivities(destination: string) {
+    // V1: Viator is disabled - always use AI-generated fallback data
+    if (!FEATURES.VIATOR || !FEATURES.ACTIVITIES_PROVIDER) {
+        console.log("⚠️ Viator/Activities provider disabled in V1 - using AI-generated sights");
+        return getFallbackActivities(destination);
+    }
+    
     interface ViatorProduct {
         title?: string;
         name?: string;
@@ -965,7 +975,7 @@ function getFallbackActivities(destination: string) {
         { name: "Main Museum Visit", title: "Main Museum Visit", type: "museum", price: 20, currency: "EUR", rating: 4.6, reviewCount: 300, duration: "2 hours", description: "Explore the city's main museum", bookingUrl: `https://www.viator.com/searchResults/all?text=${encodeURIComponent(destination)}`, skipTheLine: true, dataSource: "fallback", image: null, imageUrl: null },
         { name: "Local Food Experience", title: "Local Food Experience", type: "food", price: 65, currency: "EUR", rating: 4.7, reviewCount: 200, duration: "3 hours", description: "Taste local specialties with a foodie guide", bookingUrl: `https://www.viator.com/searchResults/all?text=${encodeURIComponent(destination)}`, skipTheLine: false, dataSource: "fallback", image: null, imageUrl: null },
         { name: "Walking Tour", title: "Walking Tour", type: "tour", price: 18, currency: "EUR", rating: 4.4, reviewCount: 400, duration: "2 hours", description: "Explore the historic center on foot", bookingUrl: `https://www.viator.com/searchResults/all?text=${encodeURIComponent(destination)}`, skipTheLine: false, dataSource: "fallback", image: null, imageUrl: null },
-        { name: "Sunset Experience", title: "Sunset Experience", type: "experience", price: 45, currency: "EUR", rating: 4.8, reviewCount: 150, duration: "2 hours", description: "Watch the sunset from the best viewpoint", bookingUrl: `https://www.viator.com/searchResults/all?text=${encodeURIComponent(destination)}`, skipTheLine: false, dataSource: "fallback", image: null, imageUrl: null },
+          { name: "Sunset Viewpoint", title: "Sunset Viewpoint", type: "free", price: 0, skipTheLine: false, skipTheLinePrice: null, duration: "1 hour", bookingUrl: null, tips: "Arrive 30 min before sunset" },
     ];
 }
 
@@ -1359,7 +1369,7 @@ function getActivitiesWithPrices(destination: string) {
     return [
         { title: `City Highlights Tour`, description: "Discover the best of the city with a local guide", type: "tour", price: 25, skipTheLine: false, skipTheLinePrice: null, duration: "3 hours", bookingUrl: `https://www.getyourguide.com/s/?q=${encodeURIComponent(destination)}`, tips: null },
         { title: "Main Museum", description: "Explore local history and culture", type: "museum", price: 15, skipTheLine: true, skipTheLinePrice: 25, duration: "2 hours", bookingUrl: `https://www.viator.com/searchResults/all?text=${encodeURIComponent(destination)}`, tips: null },
-        { title: "Walking Tour", description: "Explore the historic center", type: "tour", price: 12, skipTheLine: false, skipTheLinePrice: null, duration: "2 hours", bookingUrl: `https://www.getyourguide.com/s/?q=${encodeURIComponent(destination)}`, tips: null },
+        { title: "Walking Tour", description: "Explore the historic center", type: "tour", price: 12, skipTheLine: false, skipTheLinePrice: null, duration: "2 hours", bookingUrl: `https://www.viator.com/searchResults/all?text=${encodeURIComponent(destination)}`, tips: null },
         { title: "Local Market Visit", description: "Experience local life and cuisine", type: "free", price: 0, skipTheLine: false, skipTheLinePrice: null, duration: "2-3 hours", bookingUrl: null, tips: "Best in the morning" },
         { title: "Sunset Viewpoint", description: "Best views of the city", type: "free", price: 0, skipTheLine: false, skipTheLinePrice: null, duration: "1 hour", bookingUrl: null, tips: "Arrive 30 min before sunset" },
     ];

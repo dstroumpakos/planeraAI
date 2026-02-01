@@ -1,20 +1,16 @@
 import { useState } from "react";
 import React from "react";
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Platform, Modal, Image, Switch, FlatList } from "react-native";
+import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Modal, Image } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Calendar, DateData } from 'react-native-calendars';
-import * as Location from 'expo-location';
-import { LinearGradient } from 'expo-linear-gradient';
-import { AIRPORTS } from "@/lib/airports";
 import { INTERESTS } from "@/lib/data";
 import { useTheme } from "@/lib/ThemeContext";
 
 import logoImage from "@/assets/images/appicon-1024x1024-01-1vb1vx.png";
-import { Id } from "@/convex/_generated/dataModel";
 
 // Popular destinations list
 const DESTINATIONS = [
@@ -71,13 +67,12 @@ const DESTINATIONS = [
 export default function CreateTripScreen() {
     const router = useRouter();
     const params = useLocalSearchParams();
-    const { colors, isDarkMode } = useTheme();
+    const { colors, } = useTheme();
     const prefilledDestination = params.prefilledDestination as string | undefined;
     
     const createTrip = useMutation(api.trips.create);
-    const userPlan = useQuery(api.users.getPlan);
     const userSettings = useQuery(api.users.getSettings) as any;
-    const travelers = useQuery(api.travelers.list);
+    // V1: Traveler profiles disabled - removed travelers query
     
     const [loading, setLoading] = useState(false);
     const [showCalendar, setShowCalendar] = useState(false);
@@ -88,79 +83,25 @@ export default function CreateTripScreen() {
     const [errorMessage, setErrorMessage] = useState("");
     const [showDestinationSuggestions, setShowDestinationSuggestions] = useState(false);
     const [destinationSuggestions, setDestinationSuggestions] = useState<typeof DESTINATIONS>([]);
-    const [selectedTravelerIds, setSelectedTravelerIds] = useState<Id<"travelers">[]>([]);
 
     const [formData, setFormData] = useState({
         destination: prefilledDestination || "",
         origin: "San Francisco, CA",
         startDate: new Date().getTime(),
         endDate: new Date().getTime() + 7 * 24 * 60 * 60 * 1000,
-        budget: 2000,
-        travelers: 1,
+         // V1: budgetTotal is the primary budget field
+        budgetTotal: 2000,
+        // V1: travelerCount is the primary traveler count field (1-12)
+        travelerCount: 1,
         interests: [] as string[],
         skipFlights: false,
         skipHotel: false,
         preferredFlightTime: "any" as "any" | "morning" | "afternoon" | "evening" | "night",
     });
 
-    // Helper: Calculate age at departure date
-    const calculateAgeAtDate = (dob: string, targetDate: number): number => {
-        const birthDate = new Date(dob);
-        const target = new Date(targetDate);
-        let age = target.getFullYear() - birthDate.getFullYear();
-        const monthDiff = target.getMonth() - birthDate.getMonth();
-        if (monthDiff < 0 || (monthDiff === 0 && target.getDate() < birthDate.getDate())) {
-            age--;
-        }
-        return age;
-    };
+        // V1: Compute per-person budget on the fly
+    const perPersonBudget = Math.round(formData.budgetTotal / formData.travelerCount);
 
-    // Helper: Get passenger type from age
-    const getPassengerType = (age: number): "adult" | "child" | "infant" => {
-        if (age < 2) return "infant";
-        if (age < 12) return "child";
-        return "adult";
-    };
-
-    // Helper: Check if traveler profile is complete
-    const isTravelerComplete = (traveler: any): boolean => {
-        return !!(
-            traveler.firstName &&
-            traveler.lastName &&
-            traveler.dateOfBirth &&
-            traveler.gender &&
-            traveler.passportNumber &&
-            traveler.passportIssuingCountry &&
-            traveler.passportExpiryDate &&
-            new Date(traveler.passportExpiryDate) > new Date()
-        );
-    };
-
-    // Helper: Toggle traveler selection
-    const toggleTravelerSelection = (travelerId: Id<"travelers">) => {
-        if (selectedTravelerIds.includes(travelerId)) {
-            setSelectedTravelerIds(prev => prev.filter(id => id !== travelerId));
-        } else {
-            setSelectedTravelerIds(prev => [...prev, travelerId]);
-        }
-    };
-
-    // Auto-select default traveler on mount
-    React.useEffect(() => {
-        if (travelers && travelers.length > 0 && selectedTravelerIds.length === 0) {
-            const defaultTraveler = travelers.find(t => t.isDefault);
-            if (defaultTraveler && isTravelerComplete(defaultTraveler)) {
-                setSelectedTravelerIds([defaultTraveler._id]);
-            }
-        }
-    }, [travelers]);
-
-    // Update traveler count when selection changes
-    React.useEffect(() => {
-        if (selectedTravelerIds.length > 0) {
-            setFormData(prev => ({ ...prev, travelers: selectedTravelerIds.length }));
-        }
-    }, [selectedTravelerIds]);
 
     // Apply user preferences when loaded
     React.useEffect(() => {
@@ -168,8 +109,8 @@ export default function CreateTripScreen() {
             setFormData(prev => ({
                 ...prev,
                 origin: userSettings.homeAirport || prev.origin,
-                budget: userSettings.defaultBudget || prev.budget,
-                travelers: userSettings.defaultTravelers || prev.travelers,
+                budgetTotal: userSettings.defaultBudget || prev.budgetTotal,
+                travelerCount: userSettings.defaultTravelers || prev.travelerCount,
                 interests: userSettings.interests && userSettings.interests.length > 0 ? userSettings.interests : prev.interests,
                 skipFlights: userSettings.skipFlights ?? prev.skipFlights,
                 skipHotel: userSettings.skipHotels ?? prev.skipHotel,
@@ -280,39 +221,7 @@ export default function CreateTripScreen() {
         setShowCalendar(false);
     };
 
-    // Get selected travelers with computed ages
-    const getSelectedTravelersWithAges = () => {
-        if (!travelers) return [];
-        return selectedTravelerIds
-            .map(id => travelers.find(t => t._id === id))
-            .filter(Boolean)
-            .map(traveler => {
-                const age = calculateAgeAtDate(traveler!.dateOfBirth, formData.startDate);
-                return {
-                    ...traveler!,
-                    age,
-                    passengerType: getPassengerType(age),
-                };
-            });
-    };
-
-    // Check if all selected travelers are booking-ready
-    const areAllTravelersReady = (): { ready: boolean; issues: string[] } => {
-        const issues: string[] = [];
-        const selected = getSelectedTravelersWithAges();
-        
-        if (!formData.skipFlights && selected.length === 0) {
-            issues.push("Please select at least one traveler for flight search");
-        }
-        
-        for (const traveler of selected) {
-            if (!isTravelerComplete(traveler)) {
-                issues.push(`${traveler.firstName}'s profile is incomplete`);
-            }
-        }
-        
-        return { ready: issues.length === 0, issues };
-    };
+     // V1: Traveler profiles disabled - removed getSelectedTravelersWithAges and areAllTravelersReady
 
     const handleSubmit = async () => {
         if (!formData.destination) {
@@ -325,26 +234,14 @@ export default function CreateTripScreen() {
             return;
         }
 
-        // Validate travelers when flights are enabled
-        if (!formData.skipFlights) {
-            const { ready, issues } = areAllTravelersReady();
-            if (!ready) {
-                Alert.alert(
-                    "Traveler Information Required",
-                    issues.join("\n") + "\n\nComplete traveler information is required to search for flights.",
-                    [
-                        { text: "Cancel", style: "cancel" },
-                        { 
-                            text: "Add Travelers", 
-                            onPress: () => router.push("/settings/traveler-profiles")
-                        }
-                    ]
-                );
-                return;
-            }
+          // V1: Validate travelerCount (1-12)
+        if (formData.travelerCount < 1 || formData.travelerCount > 12) {
+            Alert.alert("Error", "Number of travelers must be between 1 and 12");
+            return;
         }
 
-        if (!formData.budget || isNaN(Number(formData.budget)) || Number(formData.budget) <= 0) {
+       // V1: Validate budgetTotal
+        if (!formData.budgetTotal || isNaN(Number(formData.budgetTotal)) || Number(formData.budgetTotal) <= 0) {
             Alert.alert("Error", "Please enter a valid budget amount");
             return;
         }
@@ -358,15 +255,14 @@ export default function CreateTripScreen() {
                 origin: formData.origin,
                 startDate: Number(formData.startDate),
                 endDate: Number(formData.endDate),
-                budget: Number(formData.budget),
-                travelers: Number(formData.travelers),
+                // V1: Use new field names
+                budgetTotal: Number(formData.budgetTotal),
+                travelerCount: Number(formData.travelerCount),
                 interests: formData.interests,
                 skipFlights: formData.skipFlights,
                 skipHotel: formData.skipHotel,
                 preferredFlightTime: formData.preferredFlightTime,
-                selectedTravelerIds: !formData.skipFlights && selectedTravelerIds.length > 0 
-                    ? selectedTravelerIds 
-                    : undefined,
+                 // V1: Traveler profiles disabled
             });
             
             router.push(`/trip/${tripId}`);
@@ -396,18 +292,6 @@ export default function CreateTripScreen() {
         } else {
             setFormData({ ...formData, interests: [...formData.interests, interest] });
         }
-    };
-
-    const toggleFlightSearch = () => {
-        setFormData(prev => ({ ...prev, skipFlights: !prev.skipFlights }));
-    };
-
-    const toggleHotelSearch = () => {
-        setFormData(prev => ({ ...prev, skipHotel: !prev.skipHotel }));
-    };
-
-    const togglePreferredFlightTime = (time: "any" | "morning" | "afternoon" | "evening" | "night") => {
-        setFormData(prev => ({ ...prev, preferredFlightTime: time }));
     };
 
     if (showLoadingScreen) {
@@ -589,166 +473,59 @@ export default function CreateTripScreen() {
                     </View>
                 </View>
 
-                {/* Who's Going Section - Traveler Profiles */}
-                <View style={[styles.card, { backgroundColor: colors.card }]}>
-                    <View style={styles.sectionHeaderRow}>
-                        <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>WHO'S GOING?</Text>
-                        <TouchableOpacity 
-                            onPress={() => router.push("/settings/traveler-profiles")}
-                            style={styles.manageTravelersLink}
-                        >
-                            <Text style={[styles.manageTravelersText, { color: colors.primary }]}>Manage Travelers</Text>
-                            <Ionicons name="chevron-forward" size={16} color={colors.primary} />
-                        </TouchableOpacity>
+  {/* Who's Going Section - V1: Simple Traveler Count (Profiles Disabled) */}
+                  
+                    {/* V1: Simple stepper for traveler count */}
+                    <View style={[styles.numberInputContainer, { backgroundColor: colors.secondary }]}>
+                        <Text style={[styles.inputLabel, { color: colors.text }]}>Number of Travelers</Text>
+                        <View style={styles.counterContainer}>
+                            <TouchableOpacity 
+                                style={[styles.counterButton, { backgroundColor: colors.card }]}
+                                onPress={() => setFormData(prev => ({ 
+                                    ...prev, 
+                                    travelerCount: Math.max(1, prev.travelerCount - 1) 
+                                }))}
+                                disabled={formData.travelerCount <= 1}
+                            >
+                                <Ionicons name="remove" size={24} color={formData.travelerCount <= 1 ? colors.textMuted : colors.text} />
+                            </TouchableOpacity>
+                            <Text style={[styles.counterValue, { color: colors.text }]}>{formData.travelerCount}</Text>
+                            <TouchableOpacity 
+                                style={[styles.counterButton, { backgroundColor: colors.card }]}
+                                onPress={() => setFormData(prev => ({ 
+                                    ...prev, 
+                                    travelerCount: Math.min(12, prev.travelerCount + 1) 
+                                }))}
+                                disabled={formData.travelerCount >= 12}
+                            >
+                                <Ionicons name="add" size={24} color={formData.travelerCount >= 12 ? colors.textMuted : colors.text} />
+                            </TouchableOpacity>
+                        </View>
                     </View>
-                    
-                    {!formData.skipFlights ? (
-                        // Traveler profile selection for flights
-                        <View>
-                            {!travelers || travelers.length === 0 ? (
-                                <TouchableOpacity 
-                                    style={[styles.addTravelerPrompt, { backgroundColor: colors.secondary, borderColor: colors.border }]}
-                                    onPress={() => router.push("/settings/traveler-profiles")}
-                                >
-                                    <Ionicons name="person-add-outline" size={24} color={colors.primary} />
-                                    <View style={styles.addTravelerPromptText}>
-                                        <Text style={[styles.addTravelerTitle, { color: colors.text }]}>Add Traveler Profiles</Text>
-                                        <Text style={[styles.addTravelerSubtitle, { color: colors.textMuted }]}>
-                                            Required for flight search. Add passport info for each traveler.
-                                        </Text>
-                                    </View>
-                                    <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
-                                </TouchableOpacity>
-                            ) : (
-                                <View style={styles.travelersList}>
-                                    {travelers.map((traveler) => {
-                                        const isSelected = selectedTravelerIds.includes(traveler._id);
-                                        const isComplete = isTravelerComplete(traveler);
-                                        const age = calculateAgeAtDate(traveler.dateOfBirth, formData.startDate);
-                                        const passengerType = getPassengerType(age);
-                                        
-                                        return (
-                                            <TouchableOpacity
-                                                key={traveler._id}
-                                                style={[
-                                                    styles.travelerSelectItem,
-                                                    { backgroundColor: colors.secondary, borderColor: isSelected ? colors.primary : colors.border },
-                                                    isSelected && { borderWidth: 2 }
-                                                ]}
-                                                onPress={() => {
-                                                    if (!isComplete) {
-                                                        Alert.alert(
-                                                            "Incomplete Profile",
-                                                            `${traveler.firstName}'s profile is missing required information. Complete their profile to select them.`,
-                                                            [
-                                                                { text: "Cancel", style: "cancel" },
-                                                                { text: "Edit Profile", onPress: () => router.push("/settings/traveler-profiles") }
-                                                            ]
-                                                        );
-                                                        return;
-                                                    }
-                                                    toggleTravelerSelection(traveler._id);
-                                                }}
-                                            >
-                                                <View style={[
-                                                    styles.travelerCheckbox,
-                                                    { borderColor: isComplete ? colors.primary : colors.textMuted },
-                                                    isSelected && { backgroundColor: colors.primary }
-                                                ]}>
-                                                    {isSelected && <Ionicons name="checkmark" size={14} color={colors.text} />}
-                                                </View>
-                                                
-                                                <View style={styles.travelerSelectInfo}>
-                                                    <View style={styles.travelerNameRow}>
-                                                        <Text style={[styles.travelerSelectName, { color: colors.text }]}>
-                                                            {traveler.firstName} {traveler.lastName}
-                                                        </Text>
-                                                        {traveler.isDefault && (
-                                                            <View style={[styles.primaryBadge, { backgroundColor: colors.primary }]}>
-                                                                <Text style={styles.primaryBadgeText}>Primary</Text>
-                                                            </View>
-                                                        )}
-                                                    </View>
-                                                    <View style={styles.travelerMetaRow}>
-                                                        <Text style={[styles.travelerSelectMeta, { color: colors.textMuted }]}>
-                                                            {age} years • {passengerType.charAt(0).toUpperCase() + passengerType.slice(1)}
-                                                        </Text>
-                                                        {!isComplete && (
-                                                            <View style={styles.incompleteWarning}>
-                                                                <Ionicons name="alert-circle" size={14} color="#DC2626" />
-                                                                <Text style={styles.incompleteText}>Incomplete</Text>
-                                                            </View>
-                                                        )}
-                                                    </View>
-                                                </View>
-                                            </TouchableOpacity>
-                                        );
-                                    })}
-                                    
-                                    <TouchableOpacity 
-                                        style={[styles.addAnotherTraveler, { borderColor: colors.border }]}
-                                        onPress={() => router.push("/settings/traveler-profiles")}
-                                    >
-                                        <Ionicons name="add" size={20} color={colors.primary} />
-                                        <Text style={[styles.addAnotherText, { color: colors.primary }]}>Add Another Traveler</Text>
-                                    </TouchableOpacity>
-                                </View>
-                            )}
-                            
-                            {selectedTravelerIds.length > 0 && (
-                                <View style={[styles.passengerSummary, { backgroundColor: isDarkMode ? "#1F1F1F" : "#F0FDF4", borderColor: isDarkMode ? "#22543D" : "#BBF7D0" }]}>
-                                    <Ionicons name="checkmark-circle" size={18} color="#059669" />
-                                    <Text style={[styles.passengerSummaryText, { color: "#059669" }]}>
-                                        {selectedTravelerIds.length} traveler{selectedTravelerIds.length > 1 ? "s" : ""} selected
-                                        {" • "}
-                                        {getSelectedTravelersWithAges().filter(t => t.passengerType === "adult").length} adult
-                                        {getSelectedTravelersWithAges().filter(t => t.passengerType === "child").length > 0 && 
-                                            `, ${getSelectedTravelersWithAges().filter(t => t.passengerType === "child").length} child`}
-                                        {getSelectedTravelersWithAges().filter(t => t.passengerType === "infant").length > 0 && 
-                                            `, ${getSelectedTravelersWithAges().filter(t => t.passengerType === "infant").length} infant`}
-                                    </Text>
-                                </View>
-                            )}
-                        </View>
-                    ) : (
-                        // Simple counter when flights are skipped
-                        <View style={[styles.numberInputContainer, { backgroundColor: colors.secondary }]}>
-                            <Text style={[styles.inputLabel, { color: colors.text }]}>Number of Travelers</Text>
-                            <View style={styles.counterContainer}>
-                                <TouchableOpacity 
-                                    style={[styles.counterButton, { backgroundColor: colors.card }]}
-                                    onPress={() => setFormData(prev => ({ ...prev, travelers: Math.max(1, prev.travelers - 1) }))}
-                                >
-                                    <Ionicons name="remove" size={24} color={colors.text} />
-                                </TouchableOpacity>
-                                <Text style={[styles.counterValue, { color: colors.text }]}>{formData.travelers}</Text>
-                                <TouchableOpacity 
-                                    style={[styles.counterButton, { backgroundColor: colors.card }]}
-                                    onPress={() => setFormData(prev => ({ ...prev, travelers: prev.travelers + 1 }))}
-                                >
-                                    <Ionicons name="add" size={24} color={colors.text} />
-                                </TouchableOpacity>
-                            </View>
-                        </View>
-                    )}
-                </View>
 
                 {/* Budget Section */}
                 <View style={[styles.card, { backgroundColor: colors.card }]}>
-                    <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>BUDGET (EUR) <Text style={{ color: colors.error }}>*</Text></Text>
+                        <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>TOTAL BUDGET (EUR) <Text style={{ color: colors.error }}>*</Text></Text>
                     <View style={[styles.budgetInputContainer, { backgroundColor: colors.secondary }]}>
                         <Text style={[styles.currencySymbol, { color: colors.text }]}>€</Text>
                         <TextInput
                             style={[styles.budgetInput, { color: colors.text }]}
-                            value={formData.budget.toString()}
+                            value={formData.budgetTotal.toString()}
                             onChangeText={(text) => {
                                 const value = parseInt(text.replace(/[^0-9]/g, '')) || 0;
-                                setFormData({ ...formData, budget: value });
+                                setFormData({ ...formData, budgetTotal: value });
                             }}
                             keyboardType="numeric"
-                            placeholder="Enter budget"
+                            placeholder="Enter total budget"
                             placeholderTextColor={colors.textMuted}
                         />
+                    </View>
+                       {/* V1: Show per-person budget breakdown */}
+                    <View style={[styles.perPersonBudgetContainer, { backgroundColor: colors.secondary, marginTop: 12 }]}>
+                        <Ionicons name="person-outline" size={18} color={colors.primary} />
+                        <Text style={[styles.perPersonBudgetText, { color: colors.text }]}>
+                            Estimated budget per person: <Text style={{ fontWeight: '700', color: colors.primary }}>€{perPersonBudget}</Text>
+                        </Text>
                     </View>
                 </View>
 
@@ -791,58 +568,6 @@ export default function CreateTripScreen() {
                             </TouchableOpacity>
                         ))}
                     </View>
-                </View>
-
-                {/* Flight Preferences Section */}
-                {!formData.skipFlights && (
-                    <View style={[styles.card, { backgroundColor: colors.card }]}>
-                        <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>Flight Preference</Text>
-                        <View style={styles.flightPreferencesContainer}>
-                            {(['any', 'morning', 'afternoon', 'evening', 'night'] as const).map((time) => (
-                                <TouchableOpacity
-                                    key={time}
-                                    style={[
-                                        styles.flightTimeButton,
-                                        { backgroundColor: colors.secondary, borderColor: colors.primary },
-                                        formData.preferredFlightTime === time && { backgroundColor: colors.primary },
-                                    ]}
-                                    onPress={() => setFormData({ ...formData, preferredFlightTime: time })}
-                                >
-                                    <Ionicons 
-                                        name={
-                                            time === 'morning' ? 'sunny' :
-                                            time === 'afternoon' ? 'cloud' :
-                                            time === 'evening' ? 'cloud' :
-                                            time === 'night' ? 'moon' :
-                                            'time'
-                                        }
-                                        size={20}
-                                        color={formData.preferredFlightTime === time ? colors.text : colors.primary}
-                                    />
-                                    <Text style={[
-                                        styles.flightTimeText,
-                                        { color: colors.text },
-                                    ]}>
-                                        {time.charAt(0).toUpperCase() + time.slice(1)}
-                                    </Text>
-                                </TouchableOpacity>
-                            ))}
-                        </View>
-                    </View>
-                )}
-
-                {/* Hotel Preference Section */}
-                <View style={[styles.card, { backgroundColor: colors.card }]}>
-                    <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>Hotel Preference</Text>
-                    <TouchableOpacity 
-                        style={[styles.skipHotelContainer, { backgroundColor: colors.secondary }]}
-                        onPress={() => setFormData(prev => ({ ...prev, skipHotel: !prev.skipHotel }))}
-                    >
-                        <View style={[styles.checkbox, { borderColor: colors.text }, formData.skipHotel && { backgroundColor: colors.primary, borderColor: colors.primary }]}>
-                            {formData.skipHotel && <Ionicons name="checkmark" size={14} color={colors.text} />}
-                        </View>
-                        <Text style={[styles.skipFlightsText, { color: colors.text }]}>I already have accommodation (Skip hotel search)</Text>
-                    </TouchableOpacity>
                 </View>
 
                 {/* Generate Button */}
@@ -1227,6 +952,18 @@ const styles = StyleSheet.create({
         color: '#1A1A1A',
         padding: 0,
     },
+     perPersonBudgetContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        borderRadius: 12,
+    },
+    perPersonBudgetText: {
+        fontSize: 14,
+        fontWeight: '500',
+    },
     interestsContainer: {
         flexDirection: "row",
         gap: 12,
@@ -1501,44 +1238,5 @@ const styles = StyleSheet.create({
     passengerSummaryText: {
         fontSize: 13,
         fontWeight: "500",
-    },
-    flightPreferencesContainer: {
-        flexDirection: "row",
-        gap: 10,
-        flexWrap: "wrap",
-    },
-    flightTimeButton: {
-        flex: 1,
-        minWidth: "30%",
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 8,
-        paddingVertical: 12,
-        paddingHorizontal: 12,
-        borderRadius: 12,
-        backgroundColor: "#FFF8E1",
-        borderWidth: 2,
-        borderColor: "#FFE500",
-    },
-    flightTimeButtonActive: {
-        backgroundColor: "#FFE500",
-        borderColor: "#FFE500",
-    },
-    flightTimeText: {
-        fontSize: 13,
-        fontWeight: "600",
-        color: "#1A1A1A",
-    },
-    flightTimeTextActive: {
-        color: "#1A1A1A",
-    },
-    skipHotelContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingVertical: 12,
-        paddingHorizontal: 16,
-        backgroundColor: '#FFF8E1',
-        borderRadius: 12,
     },
 });

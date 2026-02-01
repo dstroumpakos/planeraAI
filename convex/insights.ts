@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { authMutation, authQuery } from "./functions";
 import { paginationOptsValidator } from "convex/server";
 import { query } from "./_generated/server";
+import { Id } from "./_generated/dataModel";
 
 // Get user's completed trips (trips where endDate has passed)
 export const getCompletedTrips = authQuery({
@@ -36,7 +37,7 @@ export const getCompletedTrips = authQuery({
 
         // Filter to only completed trips (endDate has passed) and not dismissed
         const completedTrips: Array<{
-            _id: typeof trips[0]["_id"];
+             _id: Id<"trips">;
             destination: string;
             startDate: number;
             endDate: number;
@@ -50,7 +51,8 @@ export const getCompletedTrips = authQuery({
                     destination: trip.destination,
                     startDate: trip.startDate,
                     endDate: trip.endDate,
-                    travelers: trip.travelers,
+                    // V1: Use travelerCount as primary, fallback to travelers, default to 1
+                    travelers: trip.travelerCount ?? trip.travelers ?? 1,
                 });
             }
         }

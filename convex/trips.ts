@@ -9,12 +9,18 @@ export const create = authMutation({
         origin: v.string(),
         startDate: v.float64(),
         endDate: v.float64(),
-        budget: v.union(v.float64(), v.string()), // Accept both for backward compatibility
-        travelers: v.float64(),
+        // V1: budgetTotal (numeric, required)
+        budgetTotal: v.float64(),
+        // V1: travelerCount (numeric, required, min 1, max 12)
+        travelerCount: v.float64(),
+        // Legacy field for backward compatibility
+        budget: v.optional(v.union(v.float64(), v.string())),
+        travelers: v.optional(v.float64()),
         interests: v.array(v.string()),
         skipFlights: v.optional(v.boolean()),
         skipHotel: v.optional(v.boolean()),
         preferredFlightTime: v.optional(v.string()),
+         // Disabled in V1 - traveler profiles not used
         selectedTravelerIds: v.optional(v.array(v.id("travelers"))),
     },
     returns: v.id("trips"),
@@ -24,37 +30,22 @@ export const create = authMutation({
         // Validate numeric fields
         if (isNaN(args.startDate)) throw new Error("Invalid startDate: NaN");
         if (isNaN(args.endDate)) throw new Error("Invalid endDate: NaN");
-        if (isNaN(args.travelers)) throw new Error("Invalid travelers: NaN");
-
-        // If traveler IDs provided, validate they belong to this user and get passenger breakdown
-        let passengerBreakdown: { adults: number; children: number; infants: number } | null = null;
-        if (args.selectedTravelerIds && args.selectedTravelerIds.length > 0) {
-            const departureDate = new Date(args.startDate);
-            let adults = 0, children = 0, infants = 0;
-            
-            for (const travelerId of args.selectedTravelerIds) {
-                const traveler = await ctx.db.get(travelerId);
-                if (!traveler || traveler.userId !== ctx.user._id) {
-                    throw new Error("Invalid traveler selected");
-                }
-                
-                // Calculate age at departure date
-                const birthDate = new Date(traveler.dateOfBirth);
-                let age = departureDate.getFullYear() - birthDate.getFullYear();
-                const monthDiff = departureDate.getMonth() - birthDate.getMonth();
-                if (monthDiff < 0 || (monthDiff === 0 && departureDate.getDate() < birthDate.getDate())) {
-                    age--;
-                }
-                
-                if (age < 2) infants++;
-                else if (age < 12) children++;
-                else adults++;
-            }
-            
-            passengerBreakdown = { adults, children, infants };
-            console.log("📊 Passenger breakdown:", passengerBreakdown);
+         if (isNaN(args.travelerCount)) throw new Error("Invalid travelerCount: NaN");
+        if (isNaN(args.budgetTotal)) throw new Error("Invalid budgetTotal: NaN");
+        
+        // V1 validation: travelerCount must be 1-12
+        if (args.travelerCount < 1 || args.travelerCount > 12) {
+            throw new Error("Traveler count must be between 1 and 12");
+    }
+ // V1 validation: budgetTotal must be positive
+        if (args.budgetTotal <= 0) {
+            throw new Error("Budget must be greater than 0");
         }
-
+        
+        // Compute perPersonBudget
+        const perPersonBudget = Math.round(args.budgetTotal / args.travelerCount);
+        console.log(`💰 Budget: €${args.budgetTotal} total / ${args.travelerCount} travelers = €${perPersonBudget} per person`);
+    
         // Check if user can generate a trip
         const userPlan = await ctx.db
             .query("userPlans")
@@ -109,14 +100,20 @@ export const create = authMutation({
             origin: args.origin,
             startDate: args.startDate,
             endDate: args.endDate,
-            budget: args.budget,
-            travelers: args.travelers,
+            // V1: New fields
+            budgetTotal: args.budgetTotal,
+            travelerCount: args.travelerCount,
+            perPersonBudget: perPersonBudget,
+            // Legacy fields (for backward compatibility)
+            budget: args.budgetTotal, // Store as number
+            travelers: args.travelerCount,
             interests: args.interests,
             status: "generating",
             skipFlights: args.skipFlights ?? false,
             skipHotel: args.skipHotel ?? false,
             preferredFlightTime: args.preferredFlightTime ?? "any",
-            selectedTravelerIds: args.selectedTravelerIds,
+            // V1: Disabled - not passing traveler profiles
+            selectedTravelerIds: undefined,
         });
 
         const flightInfo = args.skipFlights 
@@ -127,10 +124,10 @@ export const create = authMutation({
             ? "Note: User already has accommodation booked, so DO NOT include hotel recommendations."
             : "";
 
-        const prompt = `Plan a trip to ${args.destination} for ${args.travelers} people.
+        const prompt = `Plan a trip to ${args.destination} for ${args.travelerCount} people.
         ${flightInfo}
         ${hotelInfo}
-        Budget: ${args.budget}.
+         Budget: €${args.budgetTotal} total (€${perPersonBudget} per person).
         Dates: ${new Date(args.startDate).toDateString()} to ${new Date(args.endDate).toDateString()}.
         Interests: ${args.interests.join(", ")}.`;
 
@@ -160,8 +157,13 @@ export const getTripDetails = internalQuery({
             origin: v.optional(v.string()),
             startDate: v.number(),
             endDate: v.number(),
-            budget: v.union(v.number(), v.string()),
-            travelers: v.number(),
+               // V1: New fields
+            budgetTotal: v.optional(v.number()),
+            travelerCount: v.optional(v.number()),
+            perPersonBudget: v.optional(v.number()),
+            // Legacy fields (optional for backward compatibility)
+            budget: v.optional(v.union(v.number(), v.string())),
+            travelers: v.optional(v.number()),
             interests: v.array(v.string()),
             skipFlights: v.optional(v.boolean()),
             skipHotel: v.optional(v.boolean()),
@@ -236,8 +238,13 @@ export const list = authQuery({
             origin: v.optional(v.string()),
             startDate: v.float64(),
             endDate: v.float64(),
-            budget: v.union(v.float64(), v.string()),
-            travelers: v.float64(),
+            // V1: New fields
+            budgetTotal: v.optional(v.float64()),
+            travelerCount: v.optional(v.float64()),
+            perPersonBudget: v.optional(v.float64()),
+            // Legacy fields
+            budget: v.optional(v.union(v.float64(), v.string())),
+            travelers: v.optional(v.float64()),
             interests: v.array(v.string()),
             skipFlights: v.optional(v.boolean()),
             skipHotel: v.optional(v.boolean()),
@@ -251,29 +258,87 @@ export const list = authQuery({
         })
     ),
     handler: async (ctx: any) => {
-        return await ctx.db
+        const trips = await ctx.db
             .query("trips")
             .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
             .order("desc")
             .collect();
+            // Compute perPersonBudget on the fly for older trips that don't have it
+        return trips.map(trip => {
+            const budgetTotal = trip.budgetTotal ?? (typeof trip.budget === 'number' ? trip.budget : 2000);
+            const travelerCount = trip.travelerCount ?? trip.travelers ?? 1;
+            const perPersonBudget = trip.perPersonBudget ?? Math.round(budgetTotal / travelerCount);
+            
+            return {
+                ...trip,
+                budgetTotal,
+                travelerCount,
+                perPersonBudget,
+            };
+        });
     },
 });
 
 export const get = authQuery({
     args: { tripId: v.id("trips") },
+    returns: v.union(
+        v.null(),
+        v.object({
+            _id: v.id("trips"),
+            _creationTime: v.number(),
+            userId: v.string(),
+            destination: v.string(),
+            origin: v.optional(v.string()),
+            startDate: v.number(),
+            endDate: v.number(),
+            // V1: budget is now optional, prefer budgetTotal
+            budget: v.optional(v.union(v.number(), v.string())),
+            budgetTotal: v.optional(v.number()),
+            // V1: travelers is now optional, prefer travelerCount
+            travelers: v.optional(v.number()),
+            travelerCount: v.optional(v.number()),
+            perPersonBudget: v.optional(v.number()),
+            interests: v.array(v.string()),
+            skipFlights: v.optional(v.boolean()),
+            skipHotel: v.optional(v.boolean()),
+            preferredFlightTime: v.optional(v.string()),
+            selectedTravelerIds: v.optional(v.array(v.id("travelers"))),
+            status: v.union(v.literal("pending"), v.literal("generating"), v.literal("completed"), v.literal("failed"), v.literal("archived")),
+            itinerary: v.optional(v.any()),
+            itineraryItems: v.optional(v.any()),
+            isMultiCity: v.optional(v.boolean()),
+            destinations: v.optional(v.any()),
+            optimizedRoute: v.optional(v.any()),
+            errorMessage: v.optional(v.string()),
+            hasBeenRegenerated: v.optional(v.boolean()),
+            destinationImage: v.optional(v.object({
+                url: v.string(),
+                photographer: v.string(),
+                attribution: v.string(),
+            })),
+            // User plan info
+            userPlan: v.optional(v.string()),
+            hasFullAccess: v.optional(v.boolean()),
+            isSubscriptionActive: v.optional(v.boolean()),
+            tripCredits: v.optional(v.number()),
+        })
+    ),
     handler: async (ctx: any, args: any) => {
         const trip = await ctx.db.get(args.tripId);
         if (!trip) return null;
-
+     
+        // Get user plan info
         const userPlan = await ctx.db
             .query("userPlans")
             .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
             .unique();
 
-        // Check if user has full access (premium subscription OR has/used trip credits)
-        const isSubscriptionActive = userPlan?.plan === "premium" && 
+      // Check if user has full access
+        const isSubscriptionActive = Boolean(
+            userPlan?.plan === "premium" && 
             userPlan?.subscriptionExpiresAt && 
-            userPlan.subscriptionExpiresAt > Date.now();
+           userPlan.subscriptionExpiresAt > Date.now()
+        );
         
         const tripCredits = userPlan?.tripCredits ?? 0;
         const tripsGenerated = userPlan?.tripsGenerated ?? 0;
@@ -281,7 +346,7 @@ export const get = authQuery({
         // User has full access if:
         // 1. They have an active premium subscription, OR
         // 2. They have trip credits (paid for trips), OR
-        // 3. They used their free trial (tripsGenerated >= 1 means they've generated at least one trip)
+         // 3. They used their free trial (first trip)
         const hasFullAccess = isSubscriptionActive || tripCredits > 0 || tripsGenerated >= 1;
 
         return {
@@ -383,11 +448,12 @@ export const getTrendingDestinations = query({
 
             destinationMap[trip.destination].count += 1;
             
-            // Parse budget if it's a string
-            const budgetNum = typeof trip.budget === "string" 
-                ? parseFloat(trip.budget) 
-                : trip.budget;
-            if (!isNaN(budgetNum)) {
+             // Get budget value - prefer budgetTotal, then budget
+            const budgetValue = trip.budgetTotal ?? trip.budget;
+            const budgetNum = typeof budgetValue === "string" 
+                ? parseFloat(budgetValue) 
+                : budgetValue;
+            if (budgetNum !== undefined && !isNaN(budgetNum)) {
                 destinationMap[trip.destination].budgets.push(budgetNum);
             }
 
@@ -484,11 +550,12 @@ export const getAllDestinations = query({
 
             destinationMap[normalizedDest].count += 1;
             
-            // Parse budget if it's a string
-            const budgetNum = typeof trip.budget === "string" 
-                ? parseFloat(trip.budget) 
-                : trip.budget;
-            if (!isNaN(budgetNum)) {
+        // Get budget value - prefer budgetTotal, then budget
+            const budgetValue = trip.budgetTotal ?? trip.budget;
+            const budgetNum = typeof budgetValue === "string" 
+                ? parseFloat(budgetValue) 
+                : budgetValue;
+            if (budgetNum !== undefined && !isNaN(budgetNum)) {
                 destinationMap[normalizedDest].budgets.push(budgetNum);
             }
 
