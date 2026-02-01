@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as _features from "../_features.js";
 import type * as authNative from "../authNative.js";
 import type * as authNativeDb from "../authNativeDb.js";
 import type * as bookingDraft from "../bookingDraft.js";
@@ -16,6 +17,7 @@ import type * as bookingLinks from "../bookingLinks.js";
 import type * as bookings from "../bookings.js";
 import type * as emailHelpers from "../emailHelpers.js";
 import type * as emails from "../emails.js";
+import type * as features from "../features.js";
 import type * as flightBooking from "../flightBooking.js";
 import type * as flightBookingMutations from "../flightBookingMutations.js";
 import type * as flights_duffel from "../flights/duffel.js";
@@ -26,6 +28,8 @@ import type * as helpers_unsplash from "../helpers/unsplash.js";
 import type * as images from "../images.js";
 import type * as insights from "../insights.js";
 import type * as postmark from "../postmark.js";
+import type * as sights from "../sights.js";
+import type * as sightsAction from "../sightsAction.js";
 import type * as travelers from "../travelers.js";
 import type * as trips from "../trips.js";
 import type * as tripsActions from "../tripsActions.js";
@@ -38,6 +42,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  _features: typeof _features;
   authNative: typeof authNative;
   authNativeDb: typeof authNativeDb;
   bookingDraft: typeof bookingDraft;
@@ -46,6 +51,7 @@ declare const fullApi: ApiFromModules<{
   bookings: typeof bookings;
   emailHelpers: typeof emailHelpers;
   emails: typeof emails;
+  features: typeof features;
   flightBooking: typeof flightBooking;
   flightBookingMutations: typeof flightBookingMutations;
   "flights/duffel": typeof flights_duffel;
@@ -56,6 +62,8 @@ declare const fullApi: ApiFromModules<{
   images: typeof images;
   insights: typeof insights;
   postmark: typeof postmark;
+  sights: typeof sights;
+  sightsAction: typeof sightsAction;
   travelers: typeof travelers;
   trips: typeof trips;
   tripsActions: typeof tripsActions;

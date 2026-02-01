@@ -9,12 +9,14 @@ import {
   SafeAreaView,
   TextInput,
   Image,
+  StatusBar,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { useQuery, useAction } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Ionicons } from "@expo/vector-icons";
 import { useConvexAuth } from "@/lib/auth-components";
+import { useToken } from "@/lib/useAuthenticatedMutation";
 import { ImageWithAttribution } from "@/components/ImageWithAttribution";
 import { useTheme } from "@/lib/ThemeContext";
 
@@ -22,20 +24,31 @@ export default function HomeScreen() {
   const router = useRouter();
   const { isAuthenticated, isLoading: authLoading } = useConvexAuth();
   const { colors } = useTheme();
+  const { token, isLoading: tokenLoading } = useToken();
   const [destinationImages, setDestinationImages] = useState<Record<string, any>>({});
   const [searchQuery, setSearchQuery] = useState("");
   const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
 
-  const userSettings = useQuery(api.users.getSettings);
-  const userPlan = useQuery(api.users.getPlan);
-  const trips = useQuery(api.trips.list);
+  // Debug logging
+  useEffect(() => {
+    console.log("[HomeScreen] Token status:", {
+      tokenPresent: !!token,
+      tokenLoading,
+      authLoading,
+      isAuthenticated,
+    });
+  }, [token, tokenLoading, authLoading, isAuthenticated]);
+
+  const userSettings = useQuery(api.users.getSettings as any, { token: token || "skip" });
+  const userPlan = useQuery(api.users.getPlan as any, { token: token || "skip" });
+  const trips = useQuery(api.trips.list as any, { token: token || "skip" });
   const trendingDestinations = useQuery(api.trips.getTrendingDestinations);
   const getImages = useAction(api.images.getDestinationImages);
 
   const getProfileImageUrl = useQuery(
-    api.users.getProfileImageUrl,
-    userSettings?.profilePicture 
-      ? { storageId: userSettings.profilePicture } 
+    api.users.getProfileImageUrl as any,
+    token && userSettings?.profilePicture
+      ? { storageId: userSettings.profilePicture, token } 
       : "skip"
   );
 
@@ -67,7 +80,7 @@ export default function HomeScreen() {
     }
   }, [getProfileImageUrl]);
 
-  if (authLoading) {
+  if (authLoading || tokenLoading) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
         <View style={styles.loadingContainer}>
@@ -77,7 +90,8 @@ export default function HomeScreen() {
     );
   }
 
-  if (!isAuthenticated) {
+  // Check if we have a token instead of relying on isAuthenticated
+  if (!token) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
         <View style={styles.authContainer}>
@@ -127,7 +141,9 @@ export default function HomeScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+    <>
+      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView 
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
@@ -240,6 +256,7 @@ export default function HomeScreen() {
                       imageUrl={destinationImages[destination.destination].url}
                       photographerName={destinationImages[destination.destination].photographer}
                       photographerUrl={destinationImages[destination.destination].photographerUrl}
+                      photoUrl={destinationImages[destination.destination].attribution}
                     />
                   ) : (
                     <View style={[styles.trendingImagePlaceholder, { backgroundColor: colors.secondary }]}>
@@ -309,6 +326,7 @@ export default function HomeScreen() {
         )}
       </ScrollView>
     </SafeAreaView>
+    </>
   );
 }
 

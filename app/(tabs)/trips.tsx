@@ -1,6 +1,6 @@
-import { Text, View, StyleSheet, TouchableOpacity, FlatList, ActivityIndicator, Alert } from "react-native";
+import { Text, View, StyleSheet, TouchableOpacity, FlatList, ActivityIndicator, Alert, StatusBar } from "react-native";
 import { useQuery, useMutation } from "convex/react";
-import { useConvexAuth } from "@/lib/auth-components";
+import { useToken } from "@/lib/useAuthenticatedMutation";
 import { api } from "@/convex/_generated/api";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -10,9 +10,9 @@ import { useTheme } from "@/lib/ThemeContext";
 
 export default function TripsScreen() {
     const router = useRouter();
-    const { isAuthenticated } = useConvexAuth();
+    const { token } = useToken();
     const { colors } = useTheme();
-    const trips = useQuery(api.trips.list, isAuthenticated ? {} : "skip");
+    const trips = useQuery(api.trips.list as any, { token: token || "skip" });
     const deleteTrip = useMutation(api.trips.deleteTrip);
 
     const handleDelete = (tripId: Id<"trips">) => {
@@ -39,7 +39,9 @@ export default function TripsScreen() {
     }
 
     return (
-        <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+        <>
+            <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
+            <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
             <View style={styles.header}>
                 <Text style={[styles.headerTitle, { color: colors.text }]}>My Trips</Text>
                 <TouchableOpacity 
@@ -109,6 +111,7 @@ export default function TripsScreen() {
                 />
             )}
         </SafeAreaView>
+        </>
     );
 }
 

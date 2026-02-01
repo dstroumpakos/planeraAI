@@ -1,8 +1,8 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Image, Linking, Platform, Alert, Modal, TextInput, KeyboardAvoidingView } from "react-native";
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Image, Linking, Platform, Alert, Modal, TextInput, KeyboardAvoidingView, Keyboard, StatusBar } from "react-native";
 import { useQuery, useMutation, useAction } from "convex/react";
-import { api } from "@/convex/_generated/api";
 import { Id } from "@/convex/_generated/dataModel";
+import { api } from "@/convex/_generated/api";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useState, useEffect, useRef } from "react";
@@ -12,6 +12,7 @@ import ActivityCard from "@/components/ActivityCard";
 import { ImageWithAttribution } from "@/components/ImageWithAttribution";
 import { useTheme } from "@/lib/ThemeContext";
 import { LinearGradient } from "expo-linear-gradient";
+import { useAuthenticatedMutation, useToken } from "@/lib/useAuthenticatedMutation";
 
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Calendar } from 'react-native-calendars';
@@ -238,9 +239,10 @@ export default function TripDetails() {
     const { id } = useLocalSearchParams();
     const router = useRouter();
     const { colors, isDarkMode } = useTheme();
-    const trip = useQuery(api.trips.get, { tripId: id as Id<"trips"> });
-    const updateTrip = useMutation(api.trips.update);
-    const regenerateTrip = useMutation(api.trips.regenerate);
+    const { token } = useToken();
+    const trip = useQuery(token ? (api.trips.get as any) : "skip", token ? { token, tripId: id as Id<"trips"> } : "skip");
+    const updateTrip = useAuthenticatedMutation(api.trips.update as any);
+    const regenerateTrip = useAuthenticatedMutation(api.trips.regenerate as any);
     const trackClick = useMutation(api.bookings.trackClick);
     const insights = useQuery(api.insights.getDestinationInsights, trip ? { destination: trip.destination } : "skip");
     const { image: destinationImage } = useDestinationImage(trip?.destination);
@@ -497,8 +499,19 @@ export default function TripDetails() {
                     
                     {/* Center Content */}
                     <View style={styles.loadingCenterContent}>
-                        {/* Destination Name */}
-                        <Text style={styles.loadingDestination}>{trip.destination}</Text>
+                        {/* Trip Title with Route */}
+                        <View style={styles.loadingTitleContainer}>
+                            <Text style={styles.loadingDestination}>{trip.origin || "Unknown"}</Text>
+                            <Ionicons name="arrow-down" size={20} color="#FFE500" style={styles.loadingArrow} />
+                            <Text style={styles.loadingDestination}>{trip.destination}</Text>
+                        </View>
+                        
+                        {/* Trip Details */}
+                        <View style={styles.loadingTripDetails}>
+                            <Text style={styles.loadingTripDetailText}>
+                                {trip.travelers || 1} traveler{(trip.travelers || 1) !== 1 ? 's' : ''} • {Math.ceil((trip.endDate - trip.startDate) / (1000 * 60 * 60 * 24))} days
+                            </Text>
+                        </View>
                         
                         {/* Animated Plane Icon */}
                         <View style={styles.loadingIconContainer}>
@@ -508,7 +521,7 @@ export default function TripDetails() {
                         {/* Status Text */}
                         <Text style={styles.loadingTitle}>Creating your perfect trip</Text>
                         <Text style={styles.loadingSubtitle}>
-                            Finding the best flights, hotels & activities...
+                            Building your itinerary...
                         </Text>
                         
                         {/* Progress Bar */}
@@ -528,22 +541,22 @@ export default function TripDetails() {
                         <View style={styles.loadingSteps}>
                             <View style={styles.loadingStep}>
                                 <Ionicons 
-                                    name={loadingProgress > 20 ? "checkmark-circle" : "ellipse-outline"} 
+                                    name={loadingProgress > 33 ? "checkmark-circle" : "ellipse-outline"} 
                                     size={20} 
-                                    color={loadingProgress > 20 ? "#10B981" : "rgba(255,255,255,0.5)"} 
+                                    color={loadingProgress > 33 ? "#10B981" : "rgba(255,255,255,0.5)"} 
                                 />
-                                <Text style={[styles.loadingStepText, loadingProgress > 20 && styles.loadingStepComplete]}>
-                                    Searching flights
+                                <Text style={[styles.loadingStepText, loadingProgress > 33 && styles.loadingStepComplete]}>
+                                    Creating itinerary
                                 </Text>
                             </View>
                             <View style={styles.loadingStep}>
                                 <Ionicons 
-                                    name={loadingProgress > 45 ? "checkmark-circle" : "ellipse-outline"} 
+                                    name={loadingProgress > 66 ? "checkmark-circle" : "ellipse-outline"} 
                                     size={20} 
-                                    color={loadingProgress > 45 ? "#10B981" : "rgba(255,255,255,0.5)"} 
+                                    color={loadingProgress > 66 ? "#10B981" : "rgba(255,255,255,0.5)"} 
                                 />
-                                <Text style={[styles.loadingStepText, loadingProgress > 45 && styles.loadingStepComplete]}>
-                                    Finding accommodations
+                                <Text style={[styles.loadingStepText, loadingProgress > 66 && styles.loadingStepComplete]}>
+                                    Adding activities
                                 </Text>
                             </View>
                             <View style={styles.loadingStep}>
@@ -623,7 +636,7 @@ export default function TripDetails() {
     const duration = Math.ceil((trip.endDate - trip.startDate) / (1000 * 60 * 60 * 24));
     const travelers = trip.travelers || 1;
 
-    const allAccommodations = trip.itinerary?.hotels || [];
+    const allAccommodations = Array.isArray(trip.itinerary?.hotels) ? trip.itinerary.hotels : [];
     
     // Filter accommodations based on selected type
     const filteredAccommodations = accommodationType === 'all' 
@@ -634,9 +647,9 @@ export default function TripDetails() {
     const hotelsCount = allAccommodations.filter((acc: any) => acc.type === 'hotel' || !acc.type).length;
     const airbnbsCount = allAccommodations.filter((acc: any) => acc.type === 'airbnb').length;
     
-    const selectedAccommodation = selectedHotelIndex !== null 
+    const selectedAccommodation = selectedHotelIndex !== null && allAccommodations.length > 0
         ? allAccommodations[selectedHotelIndex] 
-        : allAccommodations[0];
+        : (allAccommodations.length > 0 ? allAccommodations[0] : null);
     
     // Get selected flight from options if available
     const flightOptions = itinerary?.flights?.options;
@@ -1092,6 +1105,7 @@ export default function TripDetails() {
                             imageUrl={destinationImage.url}
                             photographerName={destinationImage.photographer}
                             photographerUrl={destinationImage.photographerUrl}
+                            photoUrl={destinationImage.attribution}
                         />
                     ) : (
                         <Image 
@@ -1265,123 +1279,23 @@ export default function TripDetails() {
                     {activeFilter === 'flights' && (
                         <View>
                             <Text style={styles.sectionTitle}>Available Flights</Text>
-                            {trip.skipFlights ? (
-                                <View style={[styles.card, styles.skippedCard]}>
-                                    <View style={styles.skippedSection}>
-                                        <View style={styles.skippedIconContainer}>
-                                            <Ionicons name="airplane" size={32} color="#64748B" />
-                                        </View>
-                                        <Text style={styles.skippedTitle}>Flight Search Skipped</Text>
-                                        <Text style={styles.skippedText}>
-                                            {trip.itinerary?.flights?.message || "You've chosen to skip flight searches for this trip."}
-                                        </Text>
-                                        <View style={styles.skippedDivider} />
-                                        <Text style={styles.skippedHint}>
-                                            To enable flight booking, create a traveler profile in Settings with your passport details.
-                                        </Text>
-                                        <TouchableOpacity 
-                                            style={styles.skippedButton}
-                                            onPress={() => router.push('/settings/traveler-profiles')}
-                                        >
-                                            <Ionicons name="person-add-outline" size={18} color="#1A1A1A" />
-                                            <Text style={styles.skippedButtonText}>Create Traveler Profile</Text>
-                                        </TouchableOpacity>
+                            <View style={[styles.card, styles.skippedCard]}>
+                                <View style={styles.skippedSection}>
+                                    <View style={styles.skippedIconContainer}>
+                                        <Ionicons name="airplane" size={32} color={colors.primary} />
                                     </View>
+                                    <Text style={styles.skippedTitle}>Coming in Next Updates</Text>
+                                    <Text style={styles.skippedText}>
+                                        Flight booking and search will be available soon. We're working hard to bring you the best flight options!
+                                    </Text>
                                 </View>
-                            ) : (
-                                <>
-                                    {trip.itinerary?.flights?.options?.map((flight: any, index: number) => (
-                                        <View key={index} style={[styles.card, flight.isBestPrice && styles.bestPriceCard]}>
-                                            {flight.isBestPrice && (
-                                                <View style={styles.bestPriceBadge}>
-                                                    <Text style={styles.bestPriceBadgeText}>Best Price</Text>
-                                                </View>
-                                            )}
-                                            <View style={styles.flightHeader}>
-                                                <View>
-                                                    <Text style={styles.airlineName}>{flight.outbound.airline}</Text>
-                                                    <Text style={styles.flightTime}>{flight.outbound.departure} - {flight.outbound.arrival}</Text>
-                                                </View>
-                                                <Text style={styles.flightPrice}>€{flight.pricePerPerson}</Text>
-                                            </View>
-                                            <View style={styles.flightRoute}>
-                                                <Text style={styles.airportCode}>{trip.origin ? trip.origin.substring(0, 3).toUpperCase() : 'ORG'}</Text>
-                                                <View style={styles.flightLineContainer}>
-                                                    <View style={styles.flightLine} />
-                                                    <Ionicons name="airplane" size={16} color="#64748B" style={styles.flightIcon} />
-                                                </View>
-                                                <Text style={styles.airportCode}>{trip.destination ? trip.destination.substring(0, 3).toUpperCase() : 'DST'}</Text>
-                                            </View>
-                                            <Text style={styles.flightDuration}>{flight.outbound.duration} • {flight.outbound.stops === 0 ? 'Direct' : `${flight.outbound.stops} Stop(s)`}</Text>
-                                            
-                                            <View style={styles.divider} />
-                                            
-                                            <View style={styles.flightHeader}>
-                                                <View>
-                                                    <Text style={styles.airlineName}>{flight.return.airline}</Text>
-                                                    <Text style={styles.flightTime}>{flight.return.departure} - {flight.return.arrival}</Text>
-                                                </View>
-                                            </View>
-                                            <View style={styles.flightRoute}>
-                                                <Text style={styles.airportCode}>{trip.destination ? trip.destination.substring(0, 3).toUpperCase() : 'DST'}</Text>
-                                                <View style={styles.flightLineContainer}>
-                                                    <View style={styles.flightLine} />
-                                                    <Ionicons name="airplane" size={16} color="#64748B" style={[styles.flightIcon, { transform: [{ rotate: '180deg' }] }]} />
-                                                </View>
-                                                <Text style={styles.airportCode}>{trip.origin ? trip.origin.substring(0, 3).toUpperCase() : 'ORG'}</Text>
-                                            </View>
-                                            <Text style={styles.flightDuration}>{flight.return.duration} • {flight.return.stops === 0 ? 'Direct' : `${flight.return.stops} Stop(s)`}</Text>
-                                            
-                                            {/* Book Flight Button - Navigate to booking flow for Duffel, or open URL for fallback */}
-                                            <TouchableOpacity 
-                                                style={styles.bookFlightButton}
-                                                onPress={() => {
-                                                    // Check if this is a Duffel flight (has offer ID)
-                                                    if (flight.id && trip.itinerary?.flights?.dataSource === 'duffel') {
-                                                        // Navigate to booking screen with passenger details form
-                                                        router.push({
-                                                            pathname: '/flight-booking',
-                                                            params: {
-                                                                offerId: flight.id,
-                                                                tripId: id,
-                                                                passengers: String(trip.travelers || 1),
-                                                                flightInfo: JSON.stringify({
-                                                                    outbound: flight.outbound,
-                                                                    return: flight.return,
-                                                                    pricePerPerson: flight.pricePerPerson,
-                                                                    currency: flight.currency || 'EUR',
-                                                                }),
-                                                            },
-                                                        });
-                                                    } else if (flight.bookingUrl) {
-                                                        // Fallback: open booking URL directly
-                                                        Linking.openURL(flight.bookingUrl);
-                                                    } else {
-                                                        // No booking option available
-                                                        if (Platform.OS !== 'web') {
-                                                            Alert.alert('Booking Unavailable', 'No booking link available for this flight. Please search for this flight on your preferred booking site.');
-                                                        }
-                                                    }
-                                                }}
-                                            >
-                                                <Text style={styles.bookFlightButtonText}>Book Flight</Text>
-                                                <Ionicons name="arrow-forward" size={16} color="#FFFFFF" />
-                                            </TouchableOpacity>
-                                        </View>
-                                    ))}
-                                    {(!trip.itinerary?.flights || 
-                                        (trip.itinerary.flights.options && trip.itinerary.flights.options.length === 0) ||
-                                        (Array.isArray(trip.itinerary.flights) && trip.itinerary.flights.length === 0)
-                                    ) && (
-                                        <Text style={styles.emptyText}>No flights found.</Text>
-                                    )}
-                                </>
-                            )}
+                            </View>
                         </View>
                     )}
 
                     {activeFilter === 'sights' && (
-                         <Text style={[styles.sectionTitle, { color: colors.text }]}>Top 5 Sights</Text>
+                        <>
+                            <Text style={[styles.sectionTitle, { color: colors.text }]}>Top 5 Sights</Text>
                             
                             {/* V1: AI-generated Top 5 Sights (Viator disabled) */}
                             {topSights === undefined ? (
@@ -1466,64 +1380,23 @@ export default function TripDetails() {
                                     </TouchableOpacity>
                                 </View>
                             )}
+                        </>
                     )}
 
                     {activeFilter === 'stays' && (
                         <View>
                             <Text style={styles.sectionTitle}>Accommodations</Text>
-                            {trip.skipHotel ? (
-                                <View style={[styles.card, styles.skippedCard]}>
-                                    <View style={styles.skippedSection}>
-                                        <View style={styles.skippedIconContainer}>
-                                            <Ionicons name="bed" size={32} color="#64748B" />
-                                        </View>
-                                        <Text style={styles.skippedTitle}>Hotel Search Skipped</Text>
-                                        <Text style={styles.skippedText}>
-                                            You've chosen to skip hotel searches for this trip. This could be because you already have accommodation booked or you're staying with friends/family.
-                                        </Text>
-                                        <View style={styles.skippedDivider} />
-                                        <Text style={styles.skippedHint}>
-                                            To enable hotel booking, create a traveler profile in Settings with your details.
-                                        </Text>
-                                        <TouchableOpacity 
-                                            style={styles.skippedButton}
-                                            onPress={() => router.push('/settings/traveler-profiles')}
-                                        >
-                                            <Ionicons name="person-add-outline" size={18} color="#1A1A1A" />
-                                            <Text style={styles.skippedButtonText}>Create Traveler Profile</Text>
-                                        </TouchableOpacity>
+                            <View style={[styles.card, styles.skippedCard]}>
+                                <View style={styles.skippedSection}>
+                                    <View style={styles.skippedIconContainer}>
+                                        <Ionicons name="bed" size={32} color={colors.primary} />
                                     </View>
+                                    <Text style={styles.skippedTitle}>Coming in Next Updates</Text>
+                                    <Text style={styles.skippedText}>
+                                        Hotel and accommodation booking will be available soon. We're working hard to bring you the best options!
+                                    </Text>
                                 </View>
-                            ) : (
-                                <>
-                                    {trip.itinerary?.hotels?.map((hotel: any, index: number) => (
-                                        <View key={index} style={styles.card}>
-                                            <View style={styles.row}>
-                                                <View style={styles.flightInfo}>
-                                                    <Text style={styles.cardTitle}>{hotel.name}</Text>
-                                                    <Text style={styles.cardSubtitle}>{hotel.address}</Text>
-                                                    <View style={styles.ratingContainer}>
-                                                        <Ionicons name="star" size={14} color="#F59E0B" />
-                                                        <Text style={styles.ratingText}>{hotel.rating} Stars</Text>
-                                                    </View>
-                                                    <Text style={styles.activityDesc} numberOfLines={3}>{hotel.description}</Text>
-                                                    <Text style={styles.price}>€{hotel.price} / night</Text>
-                                                </View>
-                                            </View>
-                                            <View style={styles.amenitiesContainer}>
-                                                {hotel.amenities?.map((amenity: string, i: number) => (
-                                                    <View key={i} style={styles.amenityBadge}>
-                                                        <Text style={styles.amenityText}>{amenity}</Text>
-                                                    </View>
-                                                ))}
-                                            </View>
-                                        </View>
-                                    ))}
-                                    {(!trip.itinerary?.hotels || trip.itinerary.hotels.length === 0) && (
-                                        <Text style={styles.emptyText}>No accommodations found.</Text>
-                                    )}
-                                </>
-                            )}
+                            </View>
                         </View>
                     )}
 
@@ -1655,9 +1528,9 @@ export default function TripDetails() {
 
             {/* Floating Action Bar */}
             <View style={styles.fabContainer}>
-                <View style={styles.fab}>
+                <View style={[styles.fab, { backgroundColor: colors.primary }]}>
                     <TouchableOpacity style={styles.fabIconButton} onPress={() => setIsEditing(true)}>
-                        <Ionicons name="pencil" size={20} color="#475569" />
+                        <Ionicons name="pencil" size={20} color={colors.text} />
                     </TouchableOpacity>
                 </View>
             </View>
@@ -1670,185 +1543,207 @@ export default function TripDetails() {
             >
                 <KeyboardAvoidingView 
                     behavior={Platform.OS === "ios" ? "padding" : "height"}
-                    style={styles.modalContainer}
+                    style={[styles.modalContainer, { backgroundColor: colors.background }]}
                     keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
                 >
-                    <View style={styles.modalHeader}>
-                        <Text style={styles.modalTitle}>Edit Trip Details</Text>
-                        <TouchableOpacity onPress={() => setIsEditing(false)}>
-                            <Ionicons name="close" size={24} color="#1C1C1E" />
-                        </TouchableOpacity>
-                    </View>
-                    
-                    <ScrollView contentContainerStyle={styles.modalContent}>
-                        <View style={styles.inputGroup}>
-                            <Text style={styles.label}>Destination</Text>
-                            <View style={styles.lockedInput}>
-                                <Text style={styles.lockedInputText}>{editForm.destination}</Text>
-                                <Ionicons name="lock-closed" size={16} color="#94A3B8" />
-                            </View>
+                    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+                        <View style={[styles.modalHeader, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
+                            <TouchableOpacity onPress={() => setIsEditing(false)}>
+                                <Ionicons name="chevron-back" size={24} color={colors.text} />
+                            </TouchableOpacity>
+                            <Text style={[styles.modalTitle, { color: colors.text }]}>Edit Trip</Text>
+                            <View style={{ width: 24 }} />
                         </View>
-
-                        <View style={styles.inputGroup}>
-                            <Text style={styles.label}>Dates</Text>
-                            <View style={styles.datesContainer}>
-                                <TouchableOpacity 
-                                    style={styles.dateInputButton}
-                                    onPress={() => {
-                                        setSelectingDate('start');
-                                        setShowCalendar(true);
-                                    }}
-                                >
-                                    <Text style={styles.dateLabel}>START DATE</Text>
-                                    <View style={styles.dateValueContainer}>
-                                        <Ionicons name="calendar-outline" size={20} color="#1A1A1A" />
-                                        <Text style={styles.dateValueText}>{formatDate(editForm.startDate)}</Text>
-                                    </View>
-                                </TouchableOpacity>
+                        
+                        <ScrollView contentContainerStyle={[styles.modalContent, { backgroundColor: colors.background }]}>
+                            {/* Trip Basics Section */}
+                            <View style={styles.sectionContainer}>
+                                <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>Trip Basics</Text>
                                 
-                                <View style={styles.dateSeparator} />
-
-                                <TouchableOpacity 
-                                    style={styles.dateInputButton}
-                                    onPress={() => {
-                                        setSelectingDate('end');
-                                        setShowCalendar(true);
-                                    }}
-                                >
-                                    <Text style={styles.dateLabel}>END DATE</Text>
-                                    <View style={styles.dateValueContainer}>
-                                        <Ionicons name="calendar-outline" size={20} color="#1A1A1A" />
-                                        <Text style={styles.dateValueText}>{formatDate(editForm.endDate)}</Text>
-                                    </View>
-                                </TouchableOpacity>
-                            </View>
-                        </View>
-
-                        {showCalendar && (
-                            <Modal
-                                visible={showCalendar}
-                                transparent={true}
-                                animationType="slide"
-                                onRequestClose={() => setShowCalendar(false)}
-                            >
-                                <View style={styles.calendarModalContainer}>
-                                    <View style={styles.calendarModal}>
-                                        <View style={styles.calendarHeader}>
-                                            <TouchableOpacity onPress={() => setShowCalendar(false)}>
-                                                <Text style={styles.calendarHeaderText}>Cancel</Text>
-                                            </TouchableOpacity>
-                                            <Text style={styles.calendarHeaderTitle}>
-                                                {selectingDate === 'start' ? 'Start Date' : 'End Date'}
-                                            </Text>
-                                            <TouchableOpacity onPress={() => setShowCalendar(false)}>
-                                                <Text style={styles.calendarHeaderText}>Done</Text>
-                                            </TouchableOpacity>
-                                        </View>
-                                        <Calendar
-                                            onDayPress={handleDayPress}
-                                            markedDates={getMarkedDates()}
-                                            minDate={new Date().toISOString().split('T')[0]}
-                                            theme={{
-                                                backgroundColor: '#FAF9F6',
-                                                calendarBackground: '#FAF9F6',
-                                                textSectionTitleColor: '#1A1A1A',
-                                                textSectionTitleDisabledColor: '#9B9B9B',
-                                                selectedDayBackgroundColor: '#FFE500',
-                                                selectedDayTextColor: '#1A1A1A',
-                                                todayTextColor: '#FFE500',
-                                                dayTextColor: '#1A1A1A',
-                                                textDisabledColor: '#9B9B9B',
-                                                dotColor: '#FFE500',
-                                                selectedDotColor: '#1A1A1A',
-                                                arrowColor: '#1A1A1A',
-                                                monthTextColor: '#1A1A1A',
-                                                textMonthFontWeight: '700',
-                                                textDayFontSize: 14,
-                                                textMonthFontSize: 16,
-                                                textDayHeaderFontSize: 12,
-                                            }}
-                                        />
+                                <View style={[styles.card, styles.inputGroup, { backgroundColor: colors.card }]}>
+                                    <Text style={[styles.label, { color: colors.text }]}>Destination</Text>
+                                    <View style={[styles.lockedInput, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
+                                        <Text style={[styles.lockedInputText, { color: colors.textMuted }]}>{editForm.destination}</Text>
+                                        <Ionicons name="lock-closed" size={16} color={colors.textMuted} />
                                     </View>
                                 </View>
-                            </Modal>
-                        )}
 
-                        <View style={styles.inputGroup}>
-                            <Text style={styles.label}>Budget (€) <Text style={{ color: '#EF4444' }}>*</Text></Text>
-                            <TextInput
-                                style={styles.input}
-                                value={editForm.budget.toString()}
-                                onChangeText={(text) => {
-                                    const numValue = parseInt(text) || 0;
-                                    setEditForm(prev => ({ ...prev, budget: numValue }));
-                                }}
-                                keyboardType="numeric"
-                                placeholder="e.g. 2000"
-                            />
-                        </View>
+                                <View style={[styles.card, styles.inputGroup, { backgroundColor: colors.card }]}>
+                                    <Text style={[styles.label, { color: colors.text }]}>Dates</Text>
+                                    <View style={styles.datesContainer}>
+                                        <TouchableOpacity 
+                                            style={[styles.dateInputButton, { backgroundColor: colors.card, borderColor: colors.border }]}
+                                            onPress={() => {
+                                                setSelectingDate('start');
+                                                setShowCalendar(true);
+                                            }}
+                                        >
+                                            <Text style={[styles.dateLabel, { color: colors.textMuted }]}>START DATE</Text>
+                                            <View style={styles.dateValueContainer}>
+                                                <Ionicons name="calendar-outline" size={20} color={colors.text} />
+                                                <Text style={[styles.dateValueText, { color: colors.text }]}>{formatDate(editForm.startDate)}</Text>
+                                            </View>
+                                        </TouchableOpacity>
+                                        
+                                        <View style={[styles.dateSeparator, { backgroundColor: colors.border }]} />
 
-                        <View style={styles.inputGroup}>
-                            <Text style={styles.label}>Travelers</Text>
-                            <TextInput
-                                style={styles.input}
-                                value={editForm.travelers.toString()}
-                                onChangeText={(text) => {
-                                    const numValue = parseInt(text) || 1;
-                                    setEditForm(prev => ({ ...prev, travelers: numValue }));
-                                }}
-                                keyboardType="number-pad"
-                                placeholder="Number of travelers"
-                            />
-                        </View>
-
-                        <View style={styles.inputGroup}>
-                            <Text style={styles.label}>Travel Style</Text>
-                            <View style={styles.interestsContainer}>
-                                {INTERESTS.map((interest) => (
-                                    <TouchableOpacity
-                                        key={interest}
-                                        style={[
-                                            styles.interestTag,
-                                            editForm.interests.includes(interest) && styles.interestTagActive,
-                                        ]}
-                                        onPress={() => toggleInterest(interest)}
-                                    >
-                                        <Ionicons 
-                                            name={
-                                                interest === "Adventure" ? "trail-sign" : 
-                                                interest === "Culinary" ? "restaurant" : 
-                                                interest === "Culture" ? "library" :
-                                                interest === "Relaxation" ? "cafe" :
-                                                interest === "Nightlife" ? "wine" :
-                                                interest === "Nature" ? "leaf" :
-                                                interest === "History" ? "book" :
-                                                interest === "Shopping" ? "cart" :
-                                                interest === "Luxury" ? "diamond" :
-                                                interest === "Family" ? "people" :
-                                                "sparkles"
-                                            } 
-                                            size={20} 
-                                            color={editForm.interests.includes(interest) ? "#1A1A1A" : "#546E7A"}
-                                        />
-                                        <Text style={[
-                                            styles.interestTagText,
-                                            editForm.interests.includes(interest) && styles.interestTagTextActive,
-                                        ]}>
-                                            {interest}
-                                        </Text>
-                                    </TouchableOpacity>
-                                ))}
+                                        <TouchableOpacity 
+                                            style={[styles.dateInputButton, { backgroundColor: colors.card, borderColor: colors.border }]}
+                                            onPress={() => {
+                                                setSelectingDate('end');
+                                                setShowCalendar(true);
+                                            }}
+                                        >
+                                            <Text style={[styles.dateLabel, { color: colors.textMuted }]}>END DATE</Text>
+                                            <View style={styles.dateValueContainer}>
+                                                <Ionicons name="calendar-outline" size={20} color={colors.text} />
+                                                <Text style={[styles.dateValueText, { color: colors.text }]}>{formatDate(editForm.endDate)}</Text>
+                                            </View>
+                                        </TouchableOpacity>
+                                    </View>
+                                </View>
                             </View>
-                        </View>
 
-                        <TouchableOpacity 
-                            style={styles.saveButton}
-                            onPress={handleSaveAndRegenerate}
-                        >
-                            <Text style={styles.saveButtonText}>Save & Regenerate</Text>
-                        </TouchableOpacity>
-                        <View style={{ height: 40 }} />
-                    </ScrollView>
+                            {showCalendar && (
+                                <Modal
+                                    visible={showCalendar}
+                                    transparent={true}
+                                    animationType="slide"
+                                    onRequestClose={() => setShowCalendar(false)}
+                                >
+                                    <View style={styles.calendarModalContainer}>
+                                        <View style={[styles.calendarModal, { backgroundColor: colors.card }]}>
+                                            <View style={[styles.calendarHeader, { borderBottomColor: colors.border }]}>
+                                                <TouchableOpacity onPress={() => setShowCalendar(false)}>
+                                                    <Text style={[styles.calendarHeaderText, { color: colors.primary }]}>Cancel</Text>
+                                                </TouchableOpacity>
+                                                <Text style={[styles.calendarHeaderTitle, { color: colors.text }]}>
+                                                    {selectingDate === 'start' ? 'Start Date' : 'End Date'}
+                                                </Text>
+                                                <TouchableOpacity onPress={() => setShowCalendar(false)}>
+                                                    <Text style={[styles.calendarHeaderText, { color: colors.primary }]}>Done</Text>
+                                                </TouchableOpacity>
+                                            </View>
+                                            <Calendar
+                                                onDayPress={handleDayPress}
+                                                markedDates={getMarkedDates()}
+                                                minDate={new Date().toISOString().split('T')[0]}
+                                                theme={{
+                                                    backgroundColor: colors.background,
+                                                    calendarBackground: colors.background,
+                                                    textSectionTitleColor: colors.text,
+                                                    textSectionTitleDisabledColor: colors.textMuted,
+                                                    selectedDayBackgroundColor: colors.primary,
+                                                    selectedDayTextColor: colors.text,
+                                                    todayTextColor: colors.primary,
+                                                    dayTextColor: colors.text,
+                                                    textDisabledColor: colors.textMuted,
+                                                    dotColor: colors.primary,
+                                                    selectedDotColor: colors.text,
+                                                    arrowColor: colors.text,
+                                                    monthTextColor: colors.text,
+                                                    textMonthFontWeight: '700',
+                                                    textDayFontSize: 14,
+                                                    textMonthFontSize: 16,
+                                                    textDayHeaderFontSize: 12,
+                                                }}
+                                            />
+                                        </View>
+                                    </View>
+                                </Modal>
+                            )}
+
+                            {/* Budget Section */}
+                            <View style={styles.sectionContainer}>
+                                <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>Budget & Travelers</Text>
+                                
+                                <View style={[styles.card, styles.inputGroup, { backgroundColor: colors.card }]}>
+                                    <Text style={[styles.label, { color: colors.text }]}>Budget (€)</Text>
+                                    <TextInput
+                                        style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+                                        value={editForm.budget.toString()}
+                                        onChangeText={(text) => {
+                                            const numValue = parseInt(text) || 0;
+                                            setEditForm(prev => ({ ...prev, budget: numValue }));
+                                        }}
+                                        keyboardType="numeric"
+                                        placeholder="e.g. 2000"
+                                        placeholderTextColor={colors.textMuted}
+                                    />
+                                </View>
+
+                                <View style={[styles.card, styles.inputGroup, { backgroundColor: colors.card }]}>
+                                    <Text style={[styles.label, { color: colors.text }]}>Travelers</Text>
+                                    <TextInput
+                                        style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+                                        value={editForm.travelers.toString()}
+                                        onChangeText={(text) => {
+                                            const numValue = parseInt(text) || 1;
+                                            setEditForm(prev => ({ ...prev, travelers: numValue }));
+                                        }}
+                                        keyboardType="number-pad"
+                                        placeholder="Number of travelers"
+                                        placeholderTextColor={colors.textMuted}
+                                    />
+                                </View>
+                            </View>
+
+                            {/* Travel Style Section */}
+                            <View style={styles.sectionContainer}>
+                                <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>Travel Style</Text>
+                                
+                                <View style={[styles.card, styles.inputGroup, { backgroundColor: colors.card }]}>
+                                    <View style={styles.interestsContainer}>
+                                        {INTERESTS.map((interest) => (
+                                            <TouchableOpacity
+                                                key={interest}
+                                                style={[
+                                                    styles.interestTag,
+                                                    { backgroundColor: colors.secondary, borderColor: colors.border },
+                                                    editForm.interests.includes(interest) && { backgroundColor: colors.primary, borderColor: colors.primary },
+                                                ]}
+                                                onPress={() => toggleInterest(interest)}
+                                            >
+                                                <Ionicons 
+                                                    name={
+                                                        interest === "Adventure" ? "trail-sign" : 
+                                                        interest === "Culinary" ? "restaurant" : 
+                                                        interest === "Culture" ? "library" :
+                                                        interest === "Relaxation" ? "cafe" :
+                                                        interest === "Nightlife" ? "wine" :
+                                                        interest === "Nature" ? "leaf" :
+                                                        interest === "History" ? "book" :
+                                                        interest === "Shopping" ? "cart" :
+                                                        interest === "Luxury" ? "diamond" :
+                                                        interest === "Family" ? "people" :
+                                                        "sparkles"
+                                                    } 
+                                                    size={20} 
+                                                    color={editForm.interests.includes(interest) ? "white" : colors.textMuted}
+                                                />
+                                                <Text style={[
+                                                    styles.interestTagText,
+                                                    { color: colors.textMuted },
+                                                    editForm.interests.includes(interest) && { color: "white" },
+                                                ]}>
+                                                    {interest}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </View>
+                                </View>
+                            </View>
+
+                            <TouchableOpacity 
+                                style={[styles.saveButton, styles.card, { backgroundColor: colors.primary }]}
+                                onPress={handleSaveAndRegenerate}
+                            >
+                                <Ionicons name="checkmark" size={20} color={colors.text} style={{ marginRight: 8 }} />
+                                <Text style={[styles.saveButtonText, { color: colors.text }]}>Save & Regenerate</Text>
+                            </TouchableOpacity>
+                            <View style={{ height: 40 }} />
+                        </ScrollView>
+                    </SafeAreaView>
                 </KeyboardAvoidingView>
             </Modal>
         </View>
@@ -2094,13 +1989,1155 @@ const styles = StyleSheet.create({
           fontSize: 11,
     },
    loadingContainer: {
-        padding: 24,
-        borderRadius: 12,
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 12, 
+        flex: 1,
+        backgroundColor: "#000000",
     },
     loadingtext: {
         fontSize: 14,
+    },
+    // Loading screen styles
+    center: {
+        flex: 1,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    loadingBackgroundImage: {
+        ...StyleSheet.absoluteFillObject,
+        width: "100%",
+        height: "100%",
+    },
+    loadingOverlay: {
+        ...StyleSheet.absoluteFillObject,
+    },
+    loadingContent: {
+        flex: 1,
+        justifyContent: "space-between",
+        paddingHorizontal: 24,
+        paddingTop: 16,
+        paddingBottom: 40,
+    },
+    loadingBackButton: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        backgroundColor: "rgba(255,255,255,0.2)",
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    loadingCenterContent: {
+        flex: 1,
+        justifyContent: "center",
+        alignItems: "center",
+    },
+    loadingTitleContainer: {
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 4,
+        marginBottom: 8,
+    },
+    loadingDestination: {
+        fontSize: 28,
+        fontWeight: "700",
+        color: "white",
+        textAlign: "center",
+    },
+    loadingArrow: {
+        marginVertical: 2,
+    },
+    loadingTripDetails: {
+        marginBottom: 24,
+    },
+    loadingTripDetailText: {
+        fontSize: 14,
+        color: "rgba(255,255,255,0.8)",
+        textAlign: "center",
+    },
+    loadingIconContainer: {
+        marginBottom: 24,
+    },
+    loadingTitle: {
+        fontSize: 24,
+        fontWeight: "700",
+        color: "white",
+        textAlign: "center",
+        marginBottom: 8,
+    },
+    loadingSubtitle: {
+        fontSize: 14,
+        color: "rgba(255,255,255,0.8)",
+        textAlign: "center",
+        marginBottom: 32,
+    },
+    progressBarContainer: {
+        width: "100%",
+        marginBottom: 32,
+    },
+    progressBarBackground: {
+        height: 6,
+        backgroundColor: "rgba(255,255,255,0.2)",
+        borderRadius: 3,
+        overflow: "hidden",
+        marginBottom: 12,
+    },
+    progressBarFill: {
+        height: "100%",
+        backgroundColor: "#FFE500",
+        borderRadius: 3,
+    },
+    progressText: {
+        textAlign: "center",
+        color: "white",
+        fontSize: 14,
+        fontWeight: "600",
+    },
+    loadingSteps: {
+        gap: 16,
+    },
+    loadingStep: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+    },
+    loadingStepText: {
+        color: "rgba(255,255,255,0.7)",
+        fontSize: 12,
+    },
+    loadingStepComplete: {
+        color: "#10B981",
+    },
+    loadingAttribution: {
+        marginTop: 20,
+    },
+    loadingAttributionText: {
+        color: "rgba(255,255,255,0.6)",
+        fontSize: 11,
+        textAlign: "center",
+    },
+    imageIndicators: {
+        flexDirection: "row",
+        justifyContent: "center",
+        alignItems: "center",
+        gap: 6,
+        paddingBottom: 24,
+    },
+    imageIndicator: {
+        width: 6,
+        height: 6,
+        borderRadius: 3,
+        backgroundColor: "rgba(255,255,255,0.4)",
+    },
+    imageIndicatorActive: {
+        backgroundColor: "white",
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+    },
+    // Error styles
+    errorContainer: {
+        flex: 1,
+        alignItems: "center",
+        justifyContent: "center",
+        paddingHorizontal: 24,
+    },
+    errorTitle: {
+        fontSize: 20,
+        fontWeight: "700",
+        marginTop: 16,
+        marginBottom: 8,
+    },
+    errorMessage: {
+        fontSize: 14,
+        textAlign: "center",
+        marginBottom: 24,
+        lineHeight: 20,
+    },
+    errorButton: {
+        paddingHorizontal: 24,
+        paddingVertical: 12,
+        borderRadius: 8,
+    },
+    errorButtonText: {
+        fontWeight: "600",
+        textAlign: "center",
+    },
+    // Card styles
+    card: {
+        backgroundColor: "white",
+        borderRadius: 12,
+        padding: 16,
+        marginBottom: 16,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 8,
+        elevation: 2,
+    },
+    skippedCard: {
+        backgroundColor: "#F0F9FF",
+    },
+    skippedFlightsContainer: {
+        alignItems: "center",
+        paddingVertical: 24,
+        gap: 12,
+    },
+    skippedFlightsTitle: {
+        fontSize: 16,
+        fontWeight: "600",
+    },
+    skippedFlightsText: {
+        fontSize: 13,
+        textAlign: "center",
+        color: "#64748B",
+    },
+    // Additional styles
+    sectionTitle: {
+        fontSize: 18,
+        fontWeight: "700",
+        marginBottom: 16,
+        color: "#1A1A1A",
+    },
+    emptyText: {
+        textAlign: "center",
+        color: "#94A3B8",
+        fontSize: 14,
+        marginVertical: 24,
+    },
+    emptySightsContainer: {
+        alignItems: "center",
+        paddingVertical: 32,
+        borderRadius: 12,
+    },
+    emptySightsTitle: {
+        fontSize: 18,
+        fontWeight: "600",
+        marginTop: 16,
+        marginBottom: 8,
+    },
+    emptySightsText: {
+        fontSize: 14,
+        textAlign: "center",
+        marginBottom: 20,
+    },
+    generateSightsButton: {
+        paddingHorizontal: 24,
+        paddingVertical: 12,
+        borderRadius: 8,
+    },
+    generateSightsButtonText: {
+        fontSize: 14,
+        fontWeight: "600",
+    },
+    loadingText: {
+        fontSize: 12,
+    },
+    aiDisclaimer: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        padding: 12,
+        borderRadius: 8,
+        marginTop: 16,
+    },
+    aiDisclaimerText: {
+        fontSize: 12,
+        flex: 1,
+    },
+    // Flight-related styles
+    bestPriceBanner: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        backgroundColor: "#DCFCE7",
+        borderRadius: 8,
+        marginBottom: 16,
+    },
+    bestPriceText: {
+        fontSize: 12,
+        fontWeight: "600",
+        color: "#15803D",
+    },
+    flightOptionsLabel: {
+        fontSize: 14,
+        fontWeight: "600",
+        marginBottom: 12,
+    },
+    flightOptionsScroll: {
+        marginBottom: 16,
+    },
+    flightOptionCard: {
+        backgroundColor: "white",
+        borderRadius: 12,
+        padding: 12,
+        marginRight: 12,
+        borderWidth: 2,
+        borderColor: "#E2E8F0",
+        minWidth: 140,
+    },
+    flightOptionCardSelected: {
+        borderColor: "#14B8A6",
+        backgroundColor: "#F0FDFA",
+    },
+    bestPriceBadge: {
+        backgroundColor: "#10B981",
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 4,
+        alignSelf: "flex-start",
+        marginBottom: 8,
+    },
+    bestPriceBadgeText: {
+        color: "white",
+        fontSize: 10,
+        fontWeight: "700",
+    },
+    flightOptionAirline: {
+        fontSize: 12,
+        fontWeight: "600",
+    },
+    flightOptionTime: {
+        fontSize: 12,
+        color: "#64748B",
+    },
+    flightOptionPrice: {
+        fontSize: 13,
+        fontWeight: "700",
+        color: "#14B8A6",
+    },
+    flightOptionStops: {
+        fontSize: 11,
+        color: "#94A3B8",
+    },
+    selectedFlightDetails: {
+        backgroundColor: "#F8FAFC",
+        borderRadius: 12,
+        padding: 16,
+        marginTop: 16,
+    },
+    routeDisplay: {
+        flexDirection: "row",
+        alignItems: "center",
+        marginBottom: 16,
+    },
+    routePoint: {
+        alignItems: "center",
+        gap: 8,
+        flex: 1,
+    },
+    routeAirport: {
+        fontSize: 12,
+        fontWeight: "600",
+        textAlign: "center",
+    },
+    routeLine: {
+        flex: 2,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        marginHorizontal: 8,
+    },
+    routeDash: {
+        flex: 1,
+        height: 2,
+        backgroundColor: "#E2E8F0",
+    },
+    flightHeader: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: 16,
+    },
+    flightPrice: {
+        fontSize: 16,
+        fontWeight: "700",
+        color: "#14B8A6",
+    },
+    luggageBadge: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+        backgroundColor: "rgba(20, 184, 166, 0.1)",
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 6,
+    },
+    luggageText: {
+        fontSize: 11,
+        fontWeight: "600",
+        color: "#14B8A6",
+    },
+    dataSourceBadge: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        backgroundColor: "rgba(255, 149, 0, 0.1)",
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 6,
+        marginBottom: 12,
+    },
+    dataSourceText: {
+        fontSize: 11,
+        fontWeight: "600",
+        color: "#FF9500",
+    },
+    flightSegment: {
+        marginBottom: 16,
+    },
+    segmentHeader: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        marginBottom: 12,
+    },
+    segmentTitle: {
+        fontSize: 14,
+        fontWeight: "600",
+    },
+    row: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: 8,
+    },
+    flightInfo: {
+        flex: 1,
+    },
+    cardTitle: {
+        fontSize: 14,
+        fontWeight: "600",
+        color: "#1A1A1A",
+        marginBottom: 4,
+    },
+    cardSubtitle: {
+        fontSize: 12,
+        color: "#64748B",
+    },
+    duration: {
+        fontSize: 12,
+        color: "#94A3B8",
+    },
+    flightTimes: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        paddingTop: 8,
+        borderTopWidth: 1,
+        borderTopColor: "#E2E8F0",
+    },
+    time: {
+        fontSize: 12,
+        fontWeight: "600",
+        color: "#1A1A1A",
+    },
+    divider: {
+        height: 1,
+        backgroundColor: "#E2E8F0",
+        marginVertical: 12,
+    },
+    baggageSection: {
+        marginTop: 16,
+        paddingTop: 16,
+        borderTopWidth: 1,
+        borderTopColor: "#E2E8F0",
+    },
+    baggageSectionTitle: {
+        fontSize: 14,
+        fontWeight: "600",
+        marginBottom: 12,
+    },
+    baggageOption: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+        paddingVertical: 8,
+    },
+    baggageCheckbox: {
+        width: 20,
+        height: 20,
+        borderRadius: 4,
+        borderWidth: 2,
+        borderColor: "#E2E8F0",
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    baggageLabel: {
+        flex: 1,
+        fontSize: 13,
+        color: "#1A1A1A",
+    },
+    baggagePrice: {
+        fontSize: 13,
+        fontWeight: "600",
+        color: "#14B8A6",
+    },
+    baggageCostInfo: {
+        backgroundColor: "rgba(251, 191, 36, 0.1)",
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 6,
+        marginTop: 8,
+    },
+    baggageCostText: {
+        fontSize: 12,
+        color: "#B45309",
+    },
+    affiliateButton: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 8,
+        backgroundColor: "#14B8A6",
+        paddingHorizontal: 24,
+        paddingVertical: 12,
+        borderRadius: 8,
+        marginTop: 16,
+    },
+    affiliateButtonText: {
+        color: "white",
+        fontSize: 14,
+        fontWeight: "600",
+    },
+    // Baggage option styles
+    baggageOptionLeft: {
+        flex: 1,
+    },
+    baggageOptionInfo: {
+        flex: 1,
+    },
+    baggageOptionTitle: {
+        fontSize: 13,
+        fontWeight: "600",
+        color: "#1A1A1A",
+    },
+    baggageOptionTitleSelected: {
+        color: "#14B8A6",
+    },
+    baggageOptionDesc: {
+        fontSize: 12,
+        color: "#64748B",
+        marginTop: 4,
+    },
+    includedBadge: {
+        backgroundColor: "rgba(34, 197, 94, 0.1)",
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 4,
+    },
+    includedText: {
+        fontSize: 11,
+        fontWeight: "600",
+        color: "#22C55E",
+    },
+    baggageOptionSelectable: {
+        flexDirection: "row",
+        alignItems: "center",
+        paddingVertical: 12,
+        paddingHorizontal: 12,
+        borderRadius: 8,
+        borderWidth: 2,
+        borderColor: "#E2E8F0",
+        marginBottom: 8,
+    },
+    baggageOptionSelected: {
+        borderColor: "#14B8A6",
+        backgroundColor: "#F0FDFA",
+    },
+    baggageOptionRight: {
+        alignItems: "flex-end",
+        justifyContent: "center",
+    },
+    baggagePriceSelected: {
+        color: "#14B8A6",
+    },
+    checkbox: {
+        width: 20,
+        height: 20,
+        borderRadius: 4,
+        borderWidth: 2,
+        borderColor: "#E2E8F0",
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    checkboxSelected: {
+        borderColor: "#14B8A6",
+        backgroundColor: "#14B8A6",
+    },
+    baggageSummary: {
+        backgroundColor: "#F8FAFC",
+        padding: 12,
+        borderRadius: 8,
+        marginTop: 12,
+    },
+    baggageSummaryText: {
+        fontSize: 13,
+        fontWeight: "600",
+        color: "#1A1A1A",
+    },
+    // Flight price style (standalone)
+    price: {
+        fontSize: 14,
+        fontWeight: "700",
+        color: "#14B8A6",
+    },
+    // Header image overlay styles
+    headerImageOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: "rgba(0, 0, 0, 0.2)",
+        justifyContent: "flex-end",
+        padding: 16,
+    },
+    headerTitleOverlay: {
+        paddingBottom: 16,
+    },
+    headerTitleOnImage: {
+        fontSize: 32,
+        fontWeight: "700",
+        color: "white",
+        marginBottom: 12,
+    },
+    headerSubtitleRow: {
+        flexDirection: "row",
+        gap: 8,
+        flexWrap: "wrap",
+    },
+    headerDateBadge: {
+        backgroundColor: "rgba(255, 255, 255, 0.15)",
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 8,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+    },
+    headerDateText: {
+        fontSize: 12,
+        fontWeight: "600",
+        color: "white",
+    },
+    headerTravelersBadge: {
+        backgroundColor: "rgba(255, 255, 255, 0.15)",
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 8,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+    },
+    headerTravelersText: {
+        fontSize: 12,
+        fontWeight: "600",
+        color: "white",
+    },
+    // Meta styles for activities
+    metaDuration: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+    },
+    metaDurationText: {
+        fontSize: 12,
+        fontWeight: "500",
+    },
+    // Restaurant styles
+    restaurantHeader: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        marginBottom: 12,
+    },
+    tripAdvisorLogo: {
+        width: 80,
+        height: 20,
+        resizeMode: "contain",
+    },
+    ratingContainer: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+        marginVertical: 8,
+    },
+    ratingText: {
+        fontSize: 13,
+        fontWeight: "600",
+        color: "#1A1A1A",
+    },
+    addressText: {
+        fontSize: 12,
+        color: "#64748B",
+        marginTop: 4,
+    },
+    // Skipped section styles
+    skippedSection: {
+        alignItems: "center",
+        justifyContent: "center",
+        paddingVertical: 32,
+    },
+    skippedIconContainer: {
+        width: 60,
+        height: 60,
+        borderRadius: 30,
+        backgroundColor: "#F1F5F9",
+        alignItems: "center",
+        justifyContent: "center",
+        marginBottom: 12,
+    },
+    skippedTitle: {
+        fontSize: 16,
+        fontWeight: "600",
+        color: "#1A1A1A",
+        marginBottom: 8,
+    },
+    skippedText: {
+        fontSize: 13,
+        color: "#64748B",
+        textAlign: "center",
+        marginHorizontal: 16,
+    },
+    skippedDivider: {
+        height: 1,
+        backgroundColor: "#E2E8F0",
+        marginTop: 12,
+    },
+    // Additional missing styles
+    skippedHint: {
+        fontSize: 12,
+        color: "#64748B",
+        marginTop: 8,
+    },
+    skippedButton: {
+        backgroundColor: "#14B8A6",
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        borderRadius: 6,
+        marginTop: 16,
+    },
+    skippedButtonText: {
+        fontSize: 13,
+        fontWeight: "600",
+        color: "white",
+    },
+    bestPriceCard: {
+        borderColor: "#15803D",
+        borderWidth: 2,
+        backgroundColor: "rgba(34, 197, 94, 0.05)",
+    },
+    airlineName: {
+        fontSize: 13,
+        fontWeight: "600",
+        color: "#1A1A1A",
+    },
+    flightTime: {
+        fontSize: 12,
+        color: "#64748B",
+        marginTop: 4,
+    },
+    flightRoute: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        marginVertical: 8,
+    },
+    airportCode: {
+        fontSize: 11,
+        fontWeight: "600",
+        color: "#1A1A1A",
+    },
+    flightLineContainer: {
+        flex: 1,
+        alignItems: "center",
+        justifyContent: "center",
+        marginHorizontal: 8,
+    },
+    flightLine: {
+        flex: 1,
+        height: 1,
+        backgroundColor: "#E2E8F0",
+    },
+    flightIcon: {
+        width: 16,
+        height: 16,
+    },
+    flightDuration: {
+        fontSize: 12,
+        color: "#94A3B8",
+        marginTop: 4,
+    },
+    bookFlightButton: {
+        backgroundColor: "#14B8A6",
+        paddingHorizontal: 24,
+        paddingVertical: 12,
+        borderRadius: 8,
+        marginTop: 12,
+        alignItems: "center",
+    },
+    bookFlightButtonText: {
+        color: "white",
+        fontSize: 14,
+        fontWeight: "600",
+    },
+    sightHeader: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        marginBottom: 12,
+    },
+    sightNumber: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    sightNumberText: {
+        fontSize: 12,
+        fontWeight: "700",
+    },
+    sightMeta: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+        marginTop: 8,
+    },
+    amenitiesContainer: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: 6,
+        marginTop: 8,
+    },
+    amenityBadge: {
+        backgroundColor: "rgba(100, 116, 139, 0.1)",
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 4,
+    },
+    amenityText: {
+        fontSize: 11,
+        color: "#475569",
+    },
+    transportHeader: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        marginBottom: 12,
+    },
+    transportOption: {
+        backgroundColor: "#F8FAFC",
+        padding: 12,
+        borderRadius: 8,
+        marginBottom: 8,
+    },
+    transportMode: {
+        fontSize: 13,
+        fontWeight: "600",
+        color: "#1A1A1A",
+    },
+    transportDesc: {
+        fontSize: 12,
+        color: "#64748B",
+        marginTop: 4,
+    },
+    transportPrice: {
+        fontSize: 12,
+        fontWeight: "600",
+        color: "#14B8A6",
+        marginTop: 6,
+    },
+    bookButton: {
+        backgroundColor: "#14B8A6",
+        paddingHorizontal: 16,
+        paddingVertical: 10,
+        borderRadius: 6,
+        marginTop: 8,
+        alignItems: "center",
+    },
+    bookButtonText: {
+        color: "white",
+        fontSize: 13,
+        fontWeight: "600",
+    },
+    // Insights section styles
+    insightsSection: {
+        paddingHorizontal: 16,
+        paddingVertical: 24,
+        backgroundColor: "#F8FAFC",
+    },
+    insightsSubtitle: {
+        fontSize: 14,
+        color: "#64748B",
+        marginBottom: 16,
+    },
+    insightsScroll: {
+        marginHorizontal: -16,
+        paddingHorizontal: 16,
+    },
+    insightCard: {
+        backgroundColor: "white",
+        borderRadius: 12,
+        padding: 12,
+        marginRight: 12,
+        borderWidth: 1,
+        borderColor: "#E2E8F0",
+        minWidth: 280,
+    },
+    insightHeader: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: 8,
+    },
+    insightCategoryBadge: {
+        backgroundColor: "rgba(100, 116, 139, 0.1)",
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 4,
+    },
+    insightCategoryText: {
+        fontSize: 11,
+        fontWeight: "600",
+        color: "#475569",
+        textTransform: "capitalize",
+    },
+    insightLikes: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+    },
+    insightLikesText: {
+        fontSize: 12,
+        fontWeight: "600",
+        color: "#EF4444",
+    },
+    insightContent: {
+        fontSize: 13,
+        color: "#1A1A1A",
+        lineHeight: 18,
+        marginVertical: 8,
+    },
+    insightDate: {
+        fontSize: 11,
+        color: "#94A3B8",
+    },
+    // FAB styles
+    fabContainer: {
+        position: "absolute",
+        bottom: 24,
+        right: 24,
+    },
+    fab: {
+        width: 60,
+        height: 60,
+        borderRadius: 30,
+        backgroundColor: "#14B8A6",
+        alignItems: "center",
+        justifyContent: "center",
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 3.84,
+        elevation: 5,
+    },
+    fabIconButton: {
+        width: 100,
+        height: 100,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    // Modal styles
+    modalContainer: {
+        flex: 1,
+        backgroundColor: "#F8F8F5",
+    },
+    modalHeader: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        backgroundColor: "white",
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        borderBottomWidth: 1,
+        borderBottomColor: "#E2E8F0",
+    },
+    modalTitle: {
+        fontSize: 18,
+        fontWeight: "700",
+        color: "#1A1A1A",
+    },
+    modalContent: {
+        paddingHorizontal: 16,
+        paddingVertical: 24,
+        backgroundColor: "#F8F8F5",
+    },
+    sectionContainer: {
+        marginBottom: 32,
+    },
+    sectionLabel: {
+        fontSize: 14,
+        fontWeight: "600",
+        color: "#64748B",
+        marginBottom: 12,
+        marginLeft: 4,
+        textTransform: "uppercase",
+        letterSpacing: 0.5,
+    },
+    // Input styles
+    inputGroup: {
+        marginBottom: 12,
+    },
+    label: {
+        fontSize: 13,
+        fontWeight: "600",
+        color: "#1A1A1A",
+        marginBottom: 8,
+    },
+    lockedInput: {
+        backgroundColor: "#F1F5F9",
+        paddingHorizontal: 12,
+        paddingVertical: 12,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: "#E2E8F0",
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+    },
+    lockedInputText: {
+        fontSize: 14,
+        color: "#64748B",
+        fontWeight: "500",
+    },
+    input: {
+        backgroundColor: "white",
+        paddingHorizontal: 12,
+        paddingVertical: 12,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: "#E2E8F0",
+        fontSize: 14,
+        color: "#1A1A1A",
+    },
+    datesContainer: {
+        flexDirection: "row",
+        gap: 12,
+    },
+    dateInputButton: {
+        flex: 1,
+        backgroundColor: "white",
+        borderWidth: 1,
+        borderColor: "#E2E8F0",
+        borderRadius: 8,
+        paddingHorizontal: 12,
+        paddingVertical: 12,
+    },
+    dateLabel: {
+        fontSize: 11,
+        fontWeight: "700",
+        color: "#94A3B8",
+        marginBottom: 6,
+        textTransform: "uppercase",
+        letterSpacing: 0.3,
+    },
+    dateValueContainer: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+    },
+    dateValueText: {
+        fontSize: 14,
+        fontWeight: "600",
+        color: "#1A1A1A",
+    },
+    dateSeparator: {
+        alignSelf: "center",
+        width: 1,
+        height: 50,
+        backgroundColor: "#E2E8F0",
+    },
+    calendarModalContainer: {
+        flex: 1,
+        backgroundColor: "rgba(0, 0, 0, 0.5)",
+        justifyContent: "flex-end",
+    },
+    calendarModal: {
+        backgroundColor: "white",
+        borderTopLeftRadius: 16,
+        borderTopRightRadius: 16,
+        maxHeight: "90%",
+    },
+    calendarHeader: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        paddingHorizontal: 16,
+        paddingVertical: 12,
+        borderBottomWidth: 1,
+        borderBottomColor: "#E2E8F0",
+    },
+    calendarHeaderText: {
+        fontSize: 13,
+        fontWeight: "600",
+        color: "#14B8A6",
+    },
+    calendarHeaderTitle: {
+        fontSize: 14,
+        fontWeight: "600",
+        color: "#1A1A1A",
+    },
+    saveButton: {
+        backgroundColor: "#14B8A6",
+        paddingHorizontal: 24,
+        paddingVertical: 16,
+        borderRadius: 12,
+        alignItems: "center",
+        justifyContent: "center",
+        flexDirection: "row",
+        marginTop: 16,
+        shadowColor: "#14B8A6",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.2,
+        shadowRadius: 12,
+        elevation: 4,
+    },
+    saveButtonText: {
+        color: "white",
+        fontSize: 15,
+        fontWeight: "700",
+    },
+    // Interests and other styles
+    interestsContainer: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: 8,
+    },
+    interestTag: {
+        backgroundColor: "#F1F5F9",
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+        borderRadius: 24,
+        borderWidth: 1,
+        borderColor: "#E2E8F0",
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+    },
+    interestTagActive: {
+        backgroundColor: "#14B8A6",
+        borderColor: "#14B8A6",
+    },
+    interestTagText: {
+        fontSize: 13,
+        color: "#64748B",
+        fontWeight: "500",
+    },
+    interestTagTextActive: {
+        color: "white",
+    },
+    section: {
+        paddingHorizontal: 16,
+        paddingVertical: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: "#E2E8F0",
     },
 });

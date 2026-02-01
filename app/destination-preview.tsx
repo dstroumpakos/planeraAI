@@ -1,5 +1,5 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, StatusBar } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -114,7 +114,9 @@ export default function DestinationPreviewScreen() {
 
     return (
         <View style={[styles.container, { backgroundColor: colors.background }]}>
-            <View style={styles.heroSection}>
+            <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
+            <SafeAreaView style={styles.safeContainer} edges={["top"]}>
+                <View style={styles.heroSection}>
                 {loading ? (
                     <View style={[styles.heroBackground, { backgroundColor: "#1A1A2E" }]}>
                         <ActivityIndicator size="large" color={colors.primary} />
@@ -125,12 +127,8 @@ export default function DestinationPreviewScreen() {
                             imageUrl={image.url}
                             photographerName={image.photographer}
                             photographerUrl={image.photographerUrl}
-                            downloadLocation={image.downloadLocation}
-                            onDownload={() => {
-                                if (image.downloadLocation) {
-                                    trackDownload({ downloadLocation: image.downloadLocation }).catch(console.error);
-                                }
-                            }}
+                            photoUrl={image.attribution}
+                            position="top"
                         />
                     </View>
                 ) : (
@@ -169,6 +167,7 @@ export default function DestinationPreviewScreen() {
                     </View>
                 </View>
             </View>
+            </SafeAreaView>
 
             <ScrollView style={styles.contentSection} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
                 <View style={[styles.infoCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -237,6 +236,7 @@ export default function DestinationPreviewScreen() {
 
 const styles = StyleSheet.create({
     container: { flex: 1 },
+    safeContainer: { flex: 1 },
     heroSection: { height: 320, position: "relative" },
     heroImageWrapper: { flex: 1, overflow: "hidden" },
     heroImageContainer: { flex: 1, width: "100%", height: "100%" },

@@ -1,6 +1,7 @@
-import { Text, View, StyleSheet, Image, TouchableOpacity, ActivityIndicator, TextInput, Alert, ScrollView, KeyboardAvoidingView, Platform } from "react-native";
+import { Text, View, StyleSheet, Image, TouchableOpacity, ActivityIndicator, TextInput, Alert, ScrollView, KeyboardAvoidingView, Platform, StatusBar } from "react-native";
 import { useConvexAuth } from "@/lib/auth-components";
 import { authClient } from "@/lib/auth-client";
+import { useToken } from "@/lib/useAuthenticatedMutation";
 import { Redirect, useRouter } from "expo-router";
 import { useState, useEffect } from "react";
 import { Ionicons } from "@expo/vector-icons";
@@ -15,7 +16,8 @@ const ENABLE_GOOGLE = false;
 
 // Component to handle authenticated user redirect based on onboarding status
 function AuthenticatedRedirect() {
-    const settings = useQuery(api.users.getSettings);
+    const { token } = useToken();
+    const settings = useQuery(api.users.getSettings as any, { token: token || "skip" });
 
     // Still loading settings from Convex
     if (settings === undefined) {
@@ -120,11 +122,16 @@ export default function Index() {
                 if (result.error.message !== "Sign-in cancelled") {
                     Alert.alert("Error", result.error.message || "Google sign in failed");
                 }
+                setOauthLoading(null);
+            } else {
+                // Success - navigate after a brief delay to let auth state update
+                console.log("[Index] Google Sign-In successful, redirecting...");
+                setTimeout(() => {
+                    router.replace("/(tabs)");
+                }, 2000);  // Increased to 2 seconds
             }
-            // Success: session storage triggers auth provider -> isAuthenticated becomes true
         } catch (error: any) {
             Alert.alert("Error", error.message || "Google sign in failed");
-        } finally {
             setOauthLoading(null);
         }
     };
@@ -145,11 +152,17 @@ export default function Index() {
                 if (result.error.message !== "Sign-in cancelled") {
                     Alert.alert("Error", result.error.message || "Apple sign in failed");
                 }
+                setOauthLoading(null);
+            } else {
+                // Success - wait a bit longer to ensure token is stored
+                console.log("[Index] Apple Sign-In successful, waiting before redirecting...");
+                setTimeout(() => {
+                    console.log("[Index] Now redirecting to main app");
+                    router.replace("/(tabs)");
+                }, 2000);  // Increased to 2 seconds
             }
-            // Success: session storage triggers auth provider -> isAuthenticated becomes true
         } catch (error: any) {
             Alert.alert("Error", error.message || "Apple sign in failed");
-        } finally {
             setOauthLoading(null);
         }
     };
@@ -160,11 +173,16 @@ export default function Index() {
             const result = await authClient.signIn.anonymous();
             if (result.error) {
                 Alert.alert("Error", result.error.message || "Anonymous sign in failed");
+                setOauthLoading(null);
+            } else {
+                // Success - navigate after a brief delay to let auth state update
+                console.log("[Index] Anonymous Sign-In successful, redirecting...");
+                setTimeout(() => {
+                    router.replace("/onboarding");
+                }, 2000);  // Increased to 2 seconds
             }
-            // Success: session storage triggers auth provider -> isAuthenticated becomes true
         } catch (error: any) {
             Alert.alert("Error", error.message || "Anonymous sign in failed");
-        } finally {
             setOauthLoading(null);
         }
     };
@@ -375,20 +393,7 @@ export default function Index() {
                             <Text style={styles.primaryButtonText}>Sign Up with Email</Text>
                         </TouchableOpacity>
 
-                        <TouchableOpacity 
-                            style={styles.guestButton} 
-                            onPress={handleAnonymousSignIn}
-                            disabled={oauthLoading !== null}
-                        >
-                            {oauthLoading === "anonymous" ? (
-                                <ActivityIndicator color={COLORS.textSecondary} />
-                            ) : (
-                                <>
-                                    <Ionicons name="person-outline" size={20} color={COLORS.textSecondary} style={styles.socialIcon} />
-                                    <Text style={styles.guestButtonText}>Continue as Guest</Text>
-                                </>
-                            )}
-                        </TouchableOpacity>
+
 
                         <TouchableOpacity onPress={() => { setIsEmailAuth(true); setIsSignUp(false); }}>
                             <Text style={styles.memberText}>
@@ -423,6 +428,7 @@ export default function Index() {
     // Not authenticated - show splash/onboarding/auth screens
     return (
         <View style={styles.container}>
+            <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
             <SafeAreaView style={styles.safeArea}>
                 {currentStep === 0 && renderSplash()}
                 {currentStep === 1 && renderOnboarding()}

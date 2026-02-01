@@ -4,11 +4,13 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
+import { useToken } from "@/lib/useAuthenticatedMutation";
 import { useState, useEffect } from "react";
 
 export default function Notifications() {
     const router = useRouter();
-    const settings = useQuery(api.users.getSettings);
+    const { token } = useToken();
+    const settings = useQuery(api.users.getSettings as any, { token: token || "skip" });
     const updateNotifications = useMutation(api.users.updateNotifications);
 
     const [pushNotifications, setPushNotifications] = useState(true);
@@ -28,6 +30,7 @@ export default function Notifications() {
     const handleSave = async () => {
         try {
             await updateNotifications({
+                token: token || "",
                 pushNotifications,
                 emailNotifications,
                 dealAlerts,

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import React from "react";
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Modal, Image } from "react-native";
+import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Modal, Image, StatusBar } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
@@ -9,6 +9,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Calendar, DateData } from 'react-native-calendars';
 import { INTERESTS } from "@/lib/data";
 import { useTheme } from "@/lib/ThemeContext";
+import { useAuthenticatedMutation, useToken } from "@/lib/useAuthenticatedMutation";
 
 import logoImage from "@/assets/images/appicon-1024x1024-01-1vb1vx.png";
 
@@ -70,8 +71,9 @@ export default function CreateTripScreen() {
     const { colors, } = useTheme();
     const prefilledDestination = params.prefilledDestination as string | undefined;
     
-    const createTrip = useMutation(api.trips.create);
-    const userSettings = useQuery(api.users.getSettings) as any;
+    const createTrip = useAuthenticatedMutation(api.trips.create as any);
+    const { token } = useToken();
+    const userSettings = useQuery(api.users.getSettings as any, { token: token || "skip" }) as any;
     // V1: Traveler profiles disabled - removed travelers query
     
     const [loading, setLoading] = useState(false);
@@ -327,7 +329,9 @@ export default function CreateTripScreen() {
     }
 
     return (
-        <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+        <>
+            <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
+            <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
             <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
                 {/* Header */}
                 <View style={styles.headerSection}>
@@ -474,10 +478,10 @@ export default function CreateTripScreen() {
                 </View>
 
   {/* Who's Going Section - V1: Simple Traveler Count (Profiles Disabled) */}
-                  
+                <View style={[styles.card, { backgroundColor: colors.card }]}>
+                    <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>NUMBER OF TRAVELERS <Text style={{ color: colors.error }}>*</Text></Text>
                     {/* V1: Simple stepper for traveler count */}
                     <View style={[styles.numberInputContainer, { backgroundColor: colors.secondary }]}>
-                        <Text style={[styles.inputLabel, { color: colors.text }]}>Number of Travelers</Text>
                         <View style={styles.counterContainer}>
                             <TouchableOpacity 
                                 style={[styles.counterButton, { backgroundColor: colors.card }]}
@@ -502,6 +506,7 @@ export default function CreateTripScreen() {
                             </TouchableOpacity>
                         </View>
                     </View>
+                </View>
 
                 {/* Budget Section */}
                 <View style={[styles.card, { backgroundColor: colors.card }]}>
@@ -639,6 +644,7 @@ export default function CreateTripScreen() {
                 </Modal>
             </ScrollView>
         </SafeAreaView>
+        </>
     );
 }
 
@@ -895,7 +901,7 @@ const styles = StyleSheet.create({
     numberInputContainer: {
         flexDirection: "row",
         alignItems: "center",
-        justifyContent: "space-between",
+        justifyContent: "center",
         backgroundColor: "#FFF8E1",
         borderRadius: 14,
         paddingHorizontal: 16,

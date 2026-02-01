@@ -9,6 +9,7 @@ import { Id } from "@/convex/_generated/dataModel";
 import { useTheme } from "@/lib/ThemeContext";
 import * as Haptics from "expo-haptics";
 import { COUNTRIES } from "@/lib/data";
+import { useToken } from "@/lib/useAuthenticatedMutation";
 
 interface TravelerForm {
   firstName: string;
@@ -39,7 +40,8 @@ const emptyForm: TravelerForm = {
 export default function TravelerProfiles() {
   const router = useRouter();
   const { colors, isDarkMode } = useTheme();
-  const travelers = useQuery(api.travelers.list);
+  const { token } = useToken();
+  const travelers = useQuery(api.travelers.list as any, { token: token || "skip" });
   const createTraveler = useMutation(api.travelers.create);
   const updateTraveler = useMutation(api.travelers.update);
   const removeTraveler = useMutation(api.travelers.remove);
@@ -94,7 +96,7 @@ export default function TravelerProfiles() {
             style: "destructive",
             onPress: async () => {
               try {
-                await removeTraveler({ id });
+                await removeTraveler({ token: token || "", id });
                 Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
               } catch (error) {
                 Alert.alert("Error", "Failed to delete traveler");
@@ -153,6 +155,7 @@ export default function TravelerProfiles() {
     try {
       if (editingId) {
         await updateTraveler({
+          token: token || "",
           id: editingId,
           firstName: form.firstName.trim(),
           lastName: form.lastName.trim(),
@@ -167,6 +170,7 @@ export default function TravelerProfiles() {
         });
       } else {
         await createTraveler({
+          token: token || "",
           firstName: form.firstName.trim(),
           lastName: form.lastName.trim(),
           dateOfBirth: form.dateOfBirth,

@@ -24,10 +24,30 @@ import { api } from "./_generated/api";
 
 // ---- Helpers ----
 
-async function validateToken(ctx: any, token: string): Promise<any> {
-  const res: any = await ctx.runAction(api.authNative.validateSession, { token });
-  if (!res?.success || !res?.user) throw new ConvexError("Authentication required");
-  return res.user as any;
+async function validateTokenDirect(ctx: any, token: string): Promise<any> {
+  // Look up the session in the database
+  const sessions = await ctx.db
+    .query("sessions")
+    .filter((q: any) => q.eq(q.field("token"), token))
+    .collect();
+  
+  if (!sessions || sessions.length === 0) {
+    throw new ConvexError("Invalid session token");
+  }
+  
+  const session = sessions[0];
+  
+  // Get the user from userSettings using the string userId (not a Convex doc ID)
+  const userSettings = await ctx.db
+    .query("userSettings")
+    .withIndex("by_user", (q: any) => q.eq("userId", session.userId))
+    .unique();
+  
+  if (!userSettings) {
+    throw new ConvexError("User not found");
+  }
+  
+  return userSettings;
 }
 
 
@@ -42,28 +62,72 @@ function getBearerTokenFromHeaders(ctx: any): string | null {
 }
 
 // ---- AUTH QUERY ----
-// Usage: authQuery({ args: { token: v.string(), ... }, handler: async (ctx, args) => { ctx.user ... } })
-export const authQuery: any = customQuery(
-  query,
-  customCtx(async (ctx: any, args: any) => {
-    const token = args?.token;
-    if (!token || typeof token !== "string") throw new ConvexError("Authentication required");
-    const user: any = await validateToken(ctx, token);
-    return { user };
-  })
-);
+// Simple wrapper that validates token before calling the actual query handler
+export const authQuery: any = (config: any) => {
+  return query({
+    args: config.args,
+    handler: async (ctx: any, args: any) => {
+      const token = args?.token;
+      console.log("[authQuery] Called with token:", token ? "PRESENT" : "MISSING");
+      
+      // Skip if token is the skip marker
+      if (token === "skip") {
+        console.log("[authQuery] Query skipped (skip marker)");
+        return null;
+      }
+      
+      // Validate token exists
+      if (!token || typeof token !== "string") {
+        console.log("[authQuery] Authentication failed - no token");
+        throw new ConvexError("Authentication required");
+      }
+      
+      // Validate token directly from database
+      const user: any = await validateTokenDirect(ctx, token);
+      console.log("[authQuery] User authenticated:", user.id);
+      
+      // Inject user into context for the handler
+      ctx.user = user;
+      
+      // Call the original handler with user in context
+      return await config.handler(ctx, args);
+    }
+  });
+};
 
 // ---- AUTH MUTATION ----
-// Usage: authMutation({ args: { token: v.string(), ... }, handler: async (ctx, args) => { ctx.user ... } })
-export const authMutation: any = customMutation(
-  mutation,
-  customCtx(async (ctx: any, args: any) => {
-    const token = args?.token;
-    if (!token || typeof token !== "string") throw new ConvexError("Authentication required");
-    const user: any = await validateToken(ctx, token);
-    return { user };
-  })
-);
+// Simple wrapper that validates token before calling the actual mutation handler
+export const authMutation: any = (config: any) => {
+  return mutation({
+    args: config.args,
+    handler: async (ctx: any, args: any) => {
+      const token = args?.token;
+      console.log("[authMutation] Called with token:", token ? "PRESENT" : "MISSING");
+      
+      // Skip if token is the skip marker
+      if (token === "skip") {
+        console.log("[authMutation] Mutation skipped (skip marker)");
+        return null;
+      }
+      
+      // Validate token exists
+      if (!token || typeof token !== "string") {
+        console.log("[authMutation] Authentication failed - no token");
+        throw new ConvexError("Authentication required");
+      }
+      
+      // Validate token directly from database
+      const user: any = await validateTokenDirect(ctx, token);
+      console.log("[authMutation] User authenticated:", user.id);
+      
+      // Inject user into context for the handler
+      ctx.user = user;
+      
+      // Call the original handler with user in context
+      return await config.handler(ctx, args);
+    }
+  });
+};
 
 // ---- AUTH ACTION ----
 // For actions you can pass token OR rely on Authorization header.
@@ -72,7 +136,7 @@ export const authAction: any = customAction(
   customCtx(async (ctx: any, args: any) => {
     const token = (typeof args?.token === "string" && args.token) || getBearerTokenFromHeaders(ctx);
     if (!token) throw new ConvexError("Authentication required");
-    const user: any = await validateToken(ctx, token);
+    const user: any = await validateTokenDirect(ctx, token);
     return { user };
   })
 );

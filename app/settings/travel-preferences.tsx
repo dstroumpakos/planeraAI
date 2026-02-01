@@ -4,13 +4,15 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
+import { useToken } from "@/lib/useAuthenticatedMutation";
 import { useState, useEffect } from "react";
 import { INTERESTS } from "@/lib/data";
 import { AIRPORTS } from "@/lib/airports";
 
 export default function TravelPreferences() {
     const router = useRouter();
-    const settings = useQuery(api.users.getSettings) as any;
+    const { token } = useToken();
+    const settings = useQuery(api.users.getSettings as any, { token: token || "skip" }) as any;
     const updatePreferences = useMutation(api.users.updateTravelPreferences);
 
     const [homeAirport, setHomeAirport] = useState("");
@@ -63,6 +65,7 @@ export default function TravelPreferences() {
     const handleSave = async () => {
         try {
             await updatePreferences({
+                token: token || "",
                 homeAirport,
                 defaultInterests,
                 defaultSkipFlights,

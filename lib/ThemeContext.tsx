@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useQuery, useMutation, useConvexAuth } from "convex/react";
 import { api } from '@/convex/_generated/api';
+import { useToken } from '@/lib/useAuthenticatedMutation';
 
 // Planera Colors - Light Mode (cream/yellow theme)
 export const LIGHT_COLORS = {
@@ -64,9 +65,10 @@ try {
     isAuthenticated = false;
 }
 
+    const { token } = useToken();
     const userSettings = useQuery(
         api.users.getSettings,
-        isAuthenticated ? {} : "skip"
+        token ? { token } : "skip"
     );
     const updateDarkMode = useMutation(api.users.updateDarkMode);
     const [isDarkMode, setIsDarkMode] = useState(false);
@@ -80,9 +82,9 @@ try {
     const toggleDarkMode = async () => {
         const newValue = !isDarkMode;
         setIsDarkMode(newValue);
-        if (isAuthenticated) {
+        if (isAuthenticated && token) {
             try {
-                await updateDarkMode({ darkMode: newValue });
+                await updateDarkMode({ token, darkMode: newValue });
             } catch (error) {
                 console.error("Failed to save dark mode preference:", error);
             }

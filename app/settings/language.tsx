@@ -4,11 +4,13 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
+import { useToken } from "@/lib/useAuthenticatedMutation";
 import { useState, useEffect } from "react";
 
 export default function Language() {
     const router = useRouter();
-    const settings = useQuery(api.users.getSettings);
+    const { token } = useToken();
+    const settings = useQuery(api.users.getSettings as any, { token: token || "skip" });
     const updateAppSettings = useMutation(api.users.updateAppSettings);
 
     const [selectedLanguage, setSelectedLanguage] = useState("en");
@@ -24,6 +26,7 @@ export default function Language() {
     const handleSave = async () => {
         try {
             await updateAppSettings({
+                token: token || "",
                 language: selectedLanguage,
                 currency: selectedCurrency,
             });

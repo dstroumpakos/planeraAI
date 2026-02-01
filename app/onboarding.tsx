@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Switch, Platform, Alert, ActivityIndicator, KeyboardAvoidingView, Modal } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Switch, Platform, Alert, ActivityIndicator, KeyboardAvoidingView, Modal, StatusBar } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -8,6 +8,7 @@ import { useState, useEffect } from "react";
 import { INTERESTS, COUNTRIES } from "@/lib/data";
 import { AIRPORTS } from "@/lib/airports";
 import * as Haptics from "expo-haptics";
+import { useToken } from "@/lib/useAuthenticatedMutation";
 
 type OnboardingStep = "welcome" | "traveler-choice" | "my-profile" | "add-travelers" | "preferences";
 type TravelerChoice = "just-me" | "me-others" | "skip-profile";
@@ -40,7 +41,7 @@ const emptyForm: TravelerForm = {
 
 export default function Onboarding() {
   const router = useRouter();
-  const [step, setStep] = useState<OnboardingStep>("welcome");
+  const [step, setStep] = useState<OnboardingStep>("preferences");
   const [travelerChoice, setTravelerChoice] = useState<TravelerChoice>("just-me");
   const [myProfile, setMyProfile] = useState<TravelerForm>(emptyForm);
   const [saving, setSaving] = useState(false);
@@ -75,9 +76,10 @@ export default function Onboarding() {
   const createTraveler = useMutation(api.travelers.create);
   const saveTravelPreferences = useMutation(api.users.saveTravelPreferences);
   const completeOnboarding = useMutation(api.users.completeOnboarding);
+  const { token } = useToken();
   
   // Query existing travelers
-  const existingTravelers = useQuery(api.travelers.list);
+  const existingTravelers = useQuery(api.travelers.list as any, { token: token || "skip" });
 
   const hapticFeedback = () => {
     if (Platform.OS !== "web") {
@@ -175,6 +177,7 @@ export default function Onboarding() {
     setSaving(true);
     try {
       await createTraveler({
+        token: token || "",
         firstName: myProfile.firstName.trim(),
         lastName: myProfile.lastName.trim(),
         dateOfBirth: myProfile.dateOfBirth,
@@ -221,6 +224,7 @@ export default function Onboarding() {
     setSaving(true);
     try {
       await createTraveler({
+        token: token || "",
         firstName: travelerForm.firstName.trim(),
         lastName: travelerForm.lastName.trim(),
         dateOfBirth: travelerForm.dateOfBirth,
@@ -271,6 +275,7 @@ export default function Onboarding() {
     setSaving(true);
     try {
       await saveTravelPreferences({
+        token: token || "",
         homeAirport,
         defaultBudget: parseInt(defaultBudget) || undefined,
         interests: selectedInterests,
@@ -279,7 +284,7 @@ export default function Onboarding() {
         skipHotels,
       });
 
-      await completeOnboarding();
+      await completeOnboarding({ token: token || "" });
 
       hapticFeedback();
       router.replace("/(tabs)");
@@ -312,11 +317,12 @@ export default function Onboarding() {
       </View>
     </View>
   );
-
   // WELCOME SCREEN
   if (step === "welcome") {
     return (
-      <SafeAreaView style={styles.container}>
+      <>
+        <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
+        <SafeAreaView style={styles.container}>
         <View style={styles.welcomeContent}>
           <View style={styles.logoContainer}>
             <View style={styles.logoInner}>
@@ -376,12 +382,15 @@ export default function Onboarding() {
           </TouchableOpacity>
         </View>
       </SafeAreaView>
+      </>
     );
   }
 
   // TRAVELER CHOICE SCREEN
   if (step === "traveler-choice") {
     return (
+      <>
+        <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
           <TouchableOpacity style={styles.backButton} onPress={() => setStep("welcome")}>
@@ -508,13 +517,16 @@ export default function Onboarding() {
           </TouchableOpacity>
         </View>
       </SafeAreaView>
+      </>
     );
   }
 
   // MY PROFILE SCREEN
   if (step === "my-profile") {
     return (
-      <SafeAreaView style={styles.container}>
+      <>
+        <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
+        <SafeAreaView style={styles.container}>
         <KeyboardAvoidingView 
           style={{ flex: 1 }} 
           behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -762,13 +774,16 @@ export default function Onboarding() {
           </TouchableOpacity>
         </Modal>
       </SafeAreaView>
+      </>
     );
   }
 
   // ADD TRAVELERS SCREEN
   if (step === "add-travelers") {
     return (
-      <SafeAreaView style={styles.container}>
+      <>
+        <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
+        <SafeAreaView style={styles.container}>
         <KeyboardAvoidingView 
           style={{ flex: 1 }} 
           behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -1075,6 +1090,7 @@ export default function Onboarding() {
           </SafeAreaView>
         </Modal>
       </SafeAreaView>
+      </>
     );
   }
 
@@ -1088,7 +1104,9 @@ export default function Onboarding() {
     ];
 
     return (
-      <SafeAreaView style={styles.container}>
+      <>
+        <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
+        <SafeAreaView style={styles.container}>
         <KeyboardAvoidingView 
           style={{ flex: 1 }} 
           behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -1318,6 +1336,7 @@ export default function Onboarding() {
           </View>
         </KeyboardAvoidingView>
       </SafeAreaView>
+      </>
     );
   }
 

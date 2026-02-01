@@ -5,6 +5,7 @@ import { internal } from "./_generated/api";
 
 export const create = authMutation({
     args: {
+        token: v.string(),
         destination: v.string(),
         origin: v.string(),
         startDate: v.float64(),
@@ -228,7 +229,9 @@ export const updateItinerary = internalMutation({
 });
 
 export const list = authQuery({
-    args: {},
+    args: {
+        token: v.string(),
+    },
     returns: v.array(
         v.object({
             _id: v.id("trips"),
@@ -264,7 +267,7 @@ export const list = authQuery({
             .order("desc")
             .collect();
             // Compute perPersonBudget on the fly for older trips that don't have it
-        return trips.map(trip => {
+        return trips.map((trip: any) => {
             const budgetTotal = trip.budgetTotal ?? (typeof trip.budget === 'number' ? trip.budget : 2000);
             const travelerCount = trip.travelerCount ?? trip.travelers ?? 1;
             const perPersonBudget = trip.perPersonBudget ?? Math.round(budgetTotal / travelerCount);
@@ -280,7 +283,10 @@ export const list = authQuery({
 });
 
 export const get = authQuery({
-    args: { tripId: v.id("trips") },
+    args: { 
+        token: v.string(),
+        tripId: v.id("trips") 
+    },
     returns: v.union(
         v.null(),
         v.object({
@@ -361,6 +367,7 @@ export const get = authQuery({
 
 export const update = authMutation({
     args: {
+        token: v.string(),
         tripId: v.id("trips"),
         destination: v.optional(v.string()),
         origin: v.optional(v.string()),
@@ -377,7 +384,10 @@ export const update = authMutation({
 });
 
 export const regenerate = authMutation({
-    args: { tripId: v.id("trips") },
+    args: { 
+        token: v.string(),
+        tripId: v.id("trips") 
+    },
     handler: async (ctx: any, args: any) => {
         const trip = await ctx.db.get(args.tripId);
         if (!trip) throw new Error("Trip not found");
@@ -394,7 +404,10 @@ export const regenerate = authMutation({
 });
 
 export const deleteTrip = authMutation({
-    args: { tripId: v.id("trips") },
+    args: { 
+        token: v.string(),
+        tripId: v.id("trips") 
+    },
     handler: async (ctx: any, args: any) => {
         await ctx.db.delete(args.tripId);
 

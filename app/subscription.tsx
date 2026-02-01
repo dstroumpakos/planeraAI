@@ -3,6 +3,7 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
+import { useToken } from "@/lib/useAuthenticatedMutation";
 import { useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useTheme } from "@/lib/ThemeContext";
@@ -10,17 +11,18 @@ import { useTheme } from "@/lib/ThemeContext";
 export default function SubscriptionScreen() {
     const router = useRouter();
     const { colors } = useTheme();
+    const { token } = useToken();
     const upgradeToPremium = useMutation(api.users.upgradeToPremium);
     const purchaseTripPack = useMutation(api.users.purchaseTripPack);
     const cancelSubscription = useMutation(api.users.cancelSubscription);
-    const userPlan = useQuery(api.users.getPlan);
+    const userPlan = useQuery(api.users.getPlan as any, { token: token || "skip" });
     const [loading, setLoading] = useState<string | null>(null);
     const [selectedPlan, setSelectedPlan] = useState<"yearly" | "monthly" | "single">("yearly");
 
     const handleUpgrade = async (planType: "monthly" | "yearly") => {
         setLoading(planType);
         try {
-            await upgradeToPremium({ planType });
+            await upgradeToPremium({ token: token || "", planType });
             if (Platform.OS !== "web") {
                 Alert.alert("Success", "You are now a Premium member!");
             }
@@ -38,7 +40,7 @@ export default function SubscriptionScreen() {
     const handlePurchasePack = async () => {
         setLoading("single");
         try {
-            await purchaseTripPack({ pack: "single" });
+            await purchaseTripPack({ token: token || "", pack: "single" });
             if (Platform.OS !== "web") {
                 Alert.alert("Success", "Trip credit added!");
             }

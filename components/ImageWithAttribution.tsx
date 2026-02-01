@@ -6,7 +6,7 @@ interface ImageWithAttributionProps {
   imageUrl: string;
   photographerName: string;
   photographerUrl?: string;
-  downloadLocation?: string;
+  photoUrl?: string;
   onDownload?: () => void;
   onImagePress?: () => void;
   position?: "top" | "bottom";
@@ -16,7 +16,7 @@ export function ImageWithAttribution({
   imageUrl,
   photographerName,
   photographerUrl,
-  downloadLocation,
+  photoUrl,
   onDownload,
   onImagePress,
   position = "bottom",
@@ -35,9 +35,7 @@ export function ImageWithAttribution({
 
   const handleUnsplashPress = async () => {
     try {
-      const unsplashUrl = photographerUrl
-        ? `https://unsplash.com?utm_source=planera&utm_medium=referral`
-        : "https://unsplash.com";
+      const unsplashUrl = photoUrl || "https://unsplash.com";
       await Linking.openURL(unsplashUrl);
     } catch (error) {
       console.error("Failed to open Unsplash URL:", error);
@@ -69,7 +67,7 @@ export function ImageWithAttribution({
         ]}
         pointerEvents="auto"
       >
-        <View style={styles.attributionContent}>
+        <View style={[styles.attributionContent, { justifyContent: isTop ? "flex-end" : "flex-start" }]}>
           <Text style={styles.attributionText}>Photo by </Text>
           <Pressable
             onPress={handlePhotographerPress}

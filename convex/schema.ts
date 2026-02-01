@@ -508,6 +508,17 @@ export default defineSchema({
     })
         .index("by_token", ["token"]),
 
+    // V1: Session tokens for API authentication
+    sessions: defineTable({
+        userId: v.string(),
+        token: v.string(),
+        sessionId: v.string(),
+        createdAt: v.float64(),
+        expiresAt: v.float64(),
+    })
+        .index("by_token", ["token"])
+        .index("by_user", ["userId"]),
+
     // V1: AI-generated Top 5 sights for destinations
     destinationSights: defineTable({
         // Link to trip for trip-specific sights

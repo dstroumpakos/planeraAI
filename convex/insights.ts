@@ -6,7 +6,7 @@ import { Id } from "./_generated/dataModel";
 
 // Get user's completed trips (trips where endDate has passed)
 export const getCompletedTrips = authQuery({
-    args: {},
+    args: { token: v.string() },
     returns: v.array(v.object({
         _id: v.id("trips"),
         destination: v.string(),
@@ -65,6 +65,7 @@ export const getCompletedTrips = authQuery({
 export const hasCompletedTripTo = authQuery({
     args: {
         destination: v.string(),
+        token: v.string(),
     },
     returns: v.boolean(),
     handler: async (ctx: any, args: any) => {

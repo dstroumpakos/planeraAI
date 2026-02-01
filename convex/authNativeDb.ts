@@ -111,6 +111,17 @@ export const upsertUserAndCreateSession = internalMutation({
     const sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(7)}`;
     console.log("[AuthNativeDb] Generated sessionId:", sessionId);
     
+    // Save session to database
+    const expiresAt = Date.now() + (30 * 24 * 60 * 60 * 1000); // 30 days
+    await ctx.db.insert("sessions", {
+      userId: uniqueUserId,
+      token: args.sessionToken,
+      sessionId,
+      createdAt: Date.now(),
+      expiresAt,
+    });
+    console.log("[AuthNativeDb] Saved session to database with token");
+    
     // Construct the result object
     const result: UpsertResult = {
       userId: uniqueUserId,

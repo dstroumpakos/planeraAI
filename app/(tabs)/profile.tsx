@@ -1,10 +1,11 @@
-import { View, Text, StyleSheet, TouchableOpacity, Alert, ScrollView, Modal, Image, Platform } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Alert, ScrollView, Modal, Image, Platform, StatusBar, TextInput } from "react-native";
 import { authClient } from "@/lib/auth-client";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
+import { useToken } from "@/lib/useAuthenticatedMutation";
 import { useState } from "react";
 import * as ImagePicker from "expo-image-picker";
 import { useTheme } from "@/lib/ThemeContext";
@@ -13,14 +14,15 @@ import * as Haptics from "expo-haptics";
 export default function Profile() {
     const router = useRouter();
     const { data: session } = authClient.useSession();
-    const trips = useQuery(api.trips.list);
-    const userPlan = useQuery(api.users.getPlan);
-    const userSettings = useQuery(api.users.getSettings);
+    const { token } = useToken();
+    const trips = useQuery(api.trips.list as any, { token: token || "skip" });
+    const userPlan = useQuery(api.users.getPlan as any, { token: token || "skip" });
+    const userSettings = useQuery(api.users.getSettings as any, { token: token || "skip" });
     
     // Get profile image URL if profilePicture storage ID exists
     const profileImageUrl = useQuery(
-        api.users.getProfileImageUrl,
-        userSettings?.profilePicture ? { storageId: userSettings.profilePicture } : "skip"
+        api.users.getProfileImageUrl as any,
+        userSettings?.profilePicture ? { storageId: userSettings.profilePicture, token: token || "skip" } : "skip"
     );
     
     const generateUploadUrl = useMutation(api.users.generateUploadUrl);
@@ -29,6 +31,10 @@ export default function Profile() {
     const { isDarkMode, toggleDarkMode, colors } = useTheme();
     const [menuVisible, setMenuVisible] = useState(false);
     const [uploading, setUploading] = useState(false);
+    const [isEditingName, setIsEditingName] = useState(false);
+    const [editedName, setEditedName] = useState(user?.name || "");
+    
+    const updateUserName = useMutation(api.users.updateUserName);
 
     const handleLogout = async () => {
         try {
@@ -73,7 +79,7 @@ export default function Profile() {
                 
                 try {
                     // Get upload URL
-                    const uploadUrl = await generateUploadUrl();
+                    const uploadUrl = await generateUploadUrl({ token: token || "" });
                     
                     // Fetch the image and upload
                     const response = await fetch(result.assets[0].uri);
@@ -88,7 +94,7 @@ export default function Profile() {
                     const { storageId } = await uploadResponse.json();
                     
                     // Save to user settings
-                    await saveProfilePicture({ storageId });
+                    await saveProfilePicture({ token: token || "", storageId });
                     
                     if (Platform.OS !== 'web') {
                         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -112,6 +118,29 @@ export default function Profile() {
     const completedTrips = trips?.filter((t: any) => t.status === "completed").length || 0;
     const isPremium = userPlan?.plan === "premium";
 
+    const handleSaveName = async () => {
+        if (!editedName.trim()) {
+            Alert.alert("Error", "Name cannot be empty");
+            return;
+        }
+        
+        try {
+            await updateUserName({ token: token || "", name: editedName.trim() });
+            setIsEditingName(false);
+            if (Platform.OS !== 'web') {
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            }
+        } catch (error) {
+            console.error("Failed to update name:", error);
+            Alert.alert("Error", "Failed to update name");
+        }
+    };
+
+    const handleCancelEditName = () => {
+        setIsEditingName(false);
+        setEditedName(user?.name || "");
+    };
+
     const menuItems = [
         {
             title: "My Flights",
@@ -129,14 +158,14 @@ export default function Profile() {
             iconColor: colors.primary,
             action: () => router.push("/(tabs)/trips")
         },
-        {
-            title: "Traveler Profiles",
-            subtitle: "Manage passport & traveler info",
-            icon: "people-outline",
-            iconBg: isDarkMode ? "#1D3D2E" : "#D1FAE5",
-            iconColor: "#059669",
-            action: () => router.push("/settings/traveler-profiles")
-        },
+        // {
+        //     title: "Traveler Profiles",
+        //     subtitle: "Manage passport & traveler info",
+        //     icon: "people-outline",
+        //     iconBg: isDarkMode ? "#1D3D2E" : "#D1FAE5",
+        //     iconColor: "#059669",
+        //     action: () => router.push("/settings/traveler-profiles")
+        // },
         {
             title: "Travel Preferences",
             subtitle: "Dietary, Airlines, Seats",
@@ -145,20 +174,22 @@ export default function Profile() {
             iconColor: colors.primary,
             action: () => router.push("/settings/travel-preferences")
         },
-        {
-            title: "Payment Methods",
-            subtitle: "Visa ending in 4242",
-            icon: "card-outline",
-            iconBg: isDarkMode ? "#2D1B4E" : "#F3E8FF",
-            iconColor: "#9333EA",
-            action: () => router.push("/subscription")
-        },
+        // {
+        //     title: "Payment Methods",
+        //     subtitle: "Visa ending in 4242",
+        //     icon: "card-outline",
+        //     iconBg: isDarkMode ? "#2D1B4E" : "#F3E8FF",
+        //     iconColor: "#9333EA",
+        //     action: () => router.push("/subscription")
+        // },
     ];
 
     const styles = createStyles(colors, isDarkMode);
 
     return (
-        <SafeAreaView style={styles.container}>
+        <>
+            <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
+            <SafeAreaView style={styles.container}>
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => router.back()}>
                     <Ionicons name="arrow-back" size={24} color={colors.text} />
@@ -272,7 +303,44 @@ export default function Profile() {
                             />
                         </TouchableOpacity>
                     </View>
-                    <Text style={styles.userName}>{user?.name || "Planera User"}</Text>
+                    {!isEditingName ? (
+                        <TouchableOpacity 
+                            style={styles.nameContainer}
+                            onPress={() => {
+                                setEditedName(user?.name || "");
+                                setIsEditingName(true);
+                            }}
+                        >
+                            <Text style={styles.userName}>{user?.name || "Planera User"}</Text>
+                            <Ionicons name="pencil-outline" size={16} color={colors.primary} />
+                        </TouchableOpacity>
+                    ) : (
+                        <View style={styles.editNameFieldContainer}>
+                            <TextInput
+                                style={[styles.editNameField, { color: colors.text, borderColor: colors.border, backgroundColor: colors.background }]}
+                                placeholder="Enter your name"
+                                placeholderTextColor={colors.textMuted}
+                                value={editedName}
+                                onChangeText={setEditedName}
+                                maxLength={50}
+                                autoFocus
+                            />
+                            <View style={styles.editNameFieldActions}>
+                                <TouchableOpacity 
+                                    style={[styles.editNameFieldButton, { backgroundColor: colors.background, borderColor: colors.border }]}
+                                    onPress={handleCancelEditName}
+                                >
+                                    <Ionicons name="close" size={18} color={colors.text} />
+                                </TouchableOpacity>
+                                <TouchableOpacity 
+                                    style={[styles.editNameFieldButton, { backgroundColor: colors.primary }]}
+                                    onPress={handleSaveName}
+                                >
+                                    <Ionicons name="checkmark" size={18} color={colors.text} />
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    )}
                     <View style={styles.memberBadge}>
                         <Ionicons name="diamond-outline" size={14} color={colors.textMuted} />
                         <Text style={styles.memberText}>
@@ -345,6 +413,7 @@ export default function Profile() {
                 <View style={{ height: 120 }} />
             </ScrollView>
         </SafeAreaView>
+        </>
     );
 }
 
@@ -414,6 +483,12 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
         fontSize: 24,
         fontWeight: "800",
         color: colors.text,
+        marginBottom: 8,
+    },
+    nameContainer: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
         marginBottom: 8,
     },
     memberBadge: {
@@ -594,4 +669,62 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
     toggleKnobActive: {
         alignSelf: "flex-end",
     },
-});
+    editNameFieldContainer: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+        marginBottom: 8,
+    },
+    editNameField: {
+        flex: 1,
+        borderWidth: 1,
+        borderRadius: 12,
+        padding: 12,
+        fontSize: 16,
+        fontWeight: "600",
+    },
+    editNameFieldActions: {
+        flexDirection: "row",
+        gap: 8,
+    },
+    editNameFieldButton: {
+        width: 44,
+        height: 44,
+        borderRadius: 12,
+        alignItems: "center",
+        justifyContent: "center",
+        borderWidth: 1,
+    },
+    editNameModal: {
+        borderRadius: 16,
+        padding: 24,
+        marginHorizontal: 24,
+        borderWidth: 1,
+    },
+    editNameTitle: {
+        fontSize: 18,
+        fontWeight: "700",
+        marginBottom: 16,
+    },
+    editNameInput: {
+        borderWidth: 1,
+        borderRadius: 12,
+        padding: 12,
+        fontSize: 16,
+        marginBottom: 20,
+    },
+    editNameActions: {
+        flexDirection: "row",
+        gap: 12,
+    },
+    editNameButton: {
+        flex: 1,
+        paddingVertical: 12,
+        borderRadius: 12,
+        alignItems: "center",
+        borderWidth: 1,
+    },
+    editNameButtonText: {
+        fontSize: 16,
+        fontWeight: "600",
+    },});

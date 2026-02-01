@@ -116,6 +116,17 @@ function AppContent() {
             }
             return;
         }
+
+        // Initialize auth client FIRST
+        (async () => {
+            try {
+                console.log("[BOOT] Initializing auth client...");
+                await authClient.init();
+                console.log("[BOOT] Auth client initialized");
+            } catch (error) {
+                console.error("[BOOT] Failed to initialize auth client:", error);
+            }
+        })();
         
         // Create Convex client inside useEffect (after mount)
         try {

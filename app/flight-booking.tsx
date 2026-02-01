@@ -7,6 +7,7 @@ import { Id } from "@/convex/_generated/dataModel";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/lib/ThemeContext";
+import { useToken } from "@/lib/useAuthenticatedMutation";
 
 interface PassengerForm {
   givenName: string;
@@ -71,9 +72,10 @@ export default function FlightBookingScreen() {
 
   const getFlightOffer = useAction(api.flightBooking.getFlightOffer);
   const createBooking = useAction(api.flightBooking.createFlightBooking);
+  const { token } = useToken();
   
   // Fetch saved traveler profiles if IDs are provided
-  const savedTravelers = useQuery(api.travelers.list);
+  const savedTravelers = useQuery(api.travelers.list as any, { token: token || "skip" });
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);

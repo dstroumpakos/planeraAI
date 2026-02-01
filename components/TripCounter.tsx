@@ -2,6 +2,7 @@ import React from "react";
 import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
+import { useToken } from "@/lib/useAuthenticatedMutation";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 
@@ -16,7 +17,8 @@ const COLORS = {
 
 export default function TripCounter() {
     const router = useRouter();
-    const userPlan = useQuery(api.users.getPlan);
+    const { token } = useToken();
+    const userPlan = useQuery(api.users.getPlan as any, { token: token || "skip" });
 
     if (!userPlan) return null;
 

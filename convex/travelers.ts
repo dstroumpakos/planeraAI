@@ -3,7 +3,7 @@ import { authMutation, authQuery } from "./functions";
 
 // List all travelers for the current user
 export const list = authQuery({
-  args: {},
+  args: { token: v.string() },
   returns: v.array(
     v.object({
       _id: v.id("travelers"),
@@ -35,7 +35,7 @@ export const list = authQuery({
 
 // Get a single traveler by ID
 export const get = authQuery({
-  args: { id: v.id("travelers") },
+  args: { id: v.id("travelers"), token: v.string() },
   returns: v.union(
     v.object({
       _id: v.id("travelers"),

@@ -13,9 +13,10 @@ import {
   Platform,
   ScrollView,
   Image,
+  StatusBar,
 } from "react-native";
 import { useQuery, useMutation, usePaginatedQuery } from "convex/react";
-import { useConvexAuth } from "@/lib/auth-components";
+import { useToken } from "@/lib/useAuthenticatedMutation";
 import { api } from "@/convex/_generated/api";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
@@ -33,7 +34,7 @@ const CATEGORIES = [
 ];
 
 export default function InsightsScreen() {
-  const { isAuthenticated, isLoading: isAuthLoading } = useConvexAuth();
+  const { token, isLoading: tokenLoading } = useToken();
   const { colors, isDarkMode } = useTheme();
   const insets = useSafeAreaInsets();
   const [tripToVerify, setTripToVerify] = useState<any>(null);
@@ -53,28 +54,33 @@ export default function InsightsScreen() {
   // Get user's completed trips - only when authenticated
   const completedTrips = useQuery(
     api.insights.getCompletedTrips,
-    isAuthenticated ? {} : "skip"
+    token ? { token } : "skip"
   );
 
   const createInsight = useMutation(api.insights.create);
   const dismissTrip = useMutation(api.insights.dismissTrip);
 
-  // Show loading state while auth is initializing
-  if (isAuthLoading) {
+  // Show loading state while token is loading
+  if (tokenLoading) {
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={[styles.loadingText, { color: colors.textMuted }]}>Loading...</Text>
-        </View>
-      </SafeAreaView>
+      <>
+        <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
+        <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={colors.primary} />
+            <Text style={[styles.loadingText, { color: colors.textMuted }]}>Loading...</Text>
+          </View>
+        </SafeAreaView>
+      </>
     );
   }
 
   // Show sign-in prompt if not authenticated
-  if (!isAuthenticated) {
+  if (!token) {
     return (
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      <>
+        <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
+        <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
         <View style={styles.authContainer}>
           <Ionicons name="bulb-outline" size={64} color={colors.primary} />
           <Text style={[styles.authTitle, { color: colors.text }]}>Traveler Insights</Text>
@@ -83,6 +89,7 @@ export default function InsightsScreen() {
           </Text>
         </View>
       </SafeAreaView>
+      </>
     );
   }
 
@@ -171,7 +178,9 @@ export default function InsightsScreen() {
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+    <>
+      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
         <TouchableOpacity 
           style={styles.backButton}
@@ -347,6 +356,7 @@ export default function InsightsScreen() {
         </View>
       </Modal>
     </SafeAreaView>
+    </>
   );
 }
 

@@ -4,11 +4,13 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
+import { useToken } from "@/lib/useAuthenticatedMutation";
 import { useState, useEffect } from "react";
 
 export default function PersonalInfo() {
     const router = useRouter();
-    const settings = useQuery(api.users.getSettings);
+    const { token } = useToken();
+    const settings = useQuery(api.users.getSettings as any, { token: token || "skip" });
     const updatePersonalInfo = useMutation(api.users.updatePersonalInfo);
 
     const [name, setName] = useState("");
@@ -27,7 +29,7 @@ export default function PersonalInfo() {
 
     const handleSave = async () => {
         try {
-            await updatePersonalInfo({ name, email, phone, dateOfBirth });
+            await updatePersonalInfo({ token: token || "", name, email, phone, dateOfBirth });
             Alert.alert("Success", "Personal information updated successfully!");
             router.back();
         } catch (error) {

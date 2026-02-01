@@ -2,7 +2,9 @@ import { v } from "convex/values";
 import { authMutation, authQuery } from "./functions";
 
 export const getPlan = authQuery({
-    args: {},
+    args: {
+        token: v.string(),
+    },
     handler: async (ctx: any) => {
         const userPlan = await ctx.db
             .query("userPlans")
@@ -33,6 +35,7 @@ export const getPlan = authQuery({
 
 export const upgradeToPremium = authMutation({
     args: {
+        token: v.string(),
         planType: v.optional(v.union(v.literal("monthly"), v.literal("yearly"))),
     },
     handler: async (ctx: any, args: any) => {
@@ -68,6 +71,7 @@ export const upgradeToPremium = authMutation({
 // Purchase trip packs
 export const purchaseTripPack = authMutation({
     args: {
+        token: v.string(),
         pack: v.union(v.literal("single"), v.literal("triple"), v.literal("ten")),
     },
     handler: async (ctx: any, args: any) => {
@@ -98,7 +102,9 @@ export const purchaseTripPack = authMutation({
 
 // Check if user can generate a trip
 export const canGenerateTrip = authQuery({
-    args: {},
+    args: {
+        token: v.string(),
+    },
     handler: async (ctx: any) => {
         const userPlan = await ctx.db
             .query("userPlans")
@@ -136,7 +142,9 @@ export const canGenerateTrip = authQuery({
 
 // Use a trip credit (called when generating a trip)
 export const useTripCredit = authMutation({
-    args: {},
+    args: {
+        token: v.string(),
+    },
     handler: async (ctx: any) => {
         const userPlan = await ctx.db
             .query("userPlans")
@@ -190,7 +198,9 @@ export const useTripCredit = authMutation({
 });
 
 export const getSettings = authQuery({
-    args: {},
+    args: {
+        token: v.string(),
+    },
     returns: v.object({
       homeAirport: v.optional(v.string()),
       defaultBudget: v.optional(v.number()),
@@ -284,7 +294,9 @@ export const getSettings = authQuery({
 });
 
 export const completeOnboarding = authMutation({
-  args: {},
+  args: {
+    token: v.string(),
+  },
   returns: v.null(),
   handler: async (ctx: any) => {
     const settings = await ctx.db
@@ -309,6 +321,7 @@ export const completeOnboarding = authMutation({
 // Save travel preferences directly to userSettings table
 export const saveTravelPreferences = authMutation({
   args: {
+    token: v.string(),
     homeAirport: v.optional(v.string()),
     defaultBudget: v.optional(v.number()),
     defaultTravelers: v.optional(v.number()),
@@ -347,6 +360,7 @@ export const saveTravelPreferences = authMutation({
 
 export const updatePersonalInfo = authMutation({
     args: {
+        token: v.string(),
         name: v.optional(v.string()),
         email: v.optional(v.string()),
         phone: v.optional(v.string()),
@@ -374,6 +388,7 @@ export const updatePersonalInfo = authMutation({
 
 export const updateTravelPreferences = authMutation({
     args: {
+        token: v.string(),
         // Travel preference fields only (no budget)
         homeAirport: v.optional(v.string()),
         defaultInterests: v.optional(v.array(v.string())),
@@ -391,17 +406,18 @@ export const updateTravelPreferences = authMutation({
     },
     returns: v.null(),
     handler: async (ctx: any, args: any) => {
+        const { token, ...updates } = args;
         const settings = await ctx.db
             .query("userSettings")
             .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
             .unique();
 
         if (settings) {
-            await ctx.db.patch(settings._id, args);
+            await ctx.db.patch(settings._id, updates);
         } else {
             await ctx.db.insert("userSettings", {
                 userId: ctx.user._id,
-                ...args,
+                ...updates,
             });
         }
 
@@ -411,22 +427,24 @@ export const updateTravelPreferences = authMutation({
 
 export const updateAppSettings = authMutation({
     args: {
+        token: v.string(),
         language: v.optional(v.string()),
         currency: v.optional(v.string()),
     },
     returns: v.null(),
     handler: async (ctx: any, args: any) => {
+        const { token, ...updates } = args;
         const settings = await ctx.db
             .query("userSettings")
             .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
             .unique();
 
         if (settings) {
-            await ctx.db.patch(settings._id, args);
+            await ctx.db.patch(settings._id, updates);
         } else {
             await ctx.db.insert("userSettings", {
                 userId: ctx.user._id,
-                ...args,
+                ...updates,
             });
         }
 
@@ -436,6 +454,7 @@ export const updateAppSettings = authMutation({
 
 export const updateNotifications = authMutation({
     args: {
+        token: v.string(),
         pushNotifications: v.optional(v.boolean()),
         emailNotifications: v.optional(v.boolean()),
         dealAlerts: v.optional(v.boolean()),
@@ -443,17 +462,18 @@ export const updateNotifications = authMutation({
     },
     returns: v.null(),
     handler: async (ctx: any, args: any) => {
+        const { token, ...updates } = args;
         const settings = await ctx.db
             .query("userSettings")
             .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
             .unique();
 
         if (settings) {
-            await ctx.db.patch(settings._id, args);
+            await ctx.db.patch(settings._id, updates);
         } else {
             await ctx.db.insert("userSettings", {
                 userId: ctx.user._id,
-                ...args,
+                ...updates,
             });
         }
 
@@ -463,6 +483,7 @@ export const updateNotifications = authMutation({
 
 export const updateDarkMode = authMutation({
     args: {
+        token: v.string(),
         darkMode: v.boolean(),
     },
     returns: v.null(),
@@ -486,7 +507,9 @@ export const updateDarkMode = authMutation({
 });
 
 export const generateUploadUrl = authMutation({
-    args: {},
+    args: {
+        token: v.string(),
+    },
     returns: v.string(),
     handler: async (ctx: any) => {
         return await ctx.storage.generateUploadUrl();
@@ -495,6 +518,7 @@ export const generateUploadUrl = authMutation({
 
 export const saveProfilePicture = authMutation({
     args: {
+        token: v.string(),
         storageId: v.id("_storage"),
     },
     returns: v.null(),
@@ -523,7 +547,9 @@ export const saveProfilePicture = authMutation({
 });
 
 export const cancelSubscription = authMutation({
-    args: {},
+    args: {
+        token: v.string(),
+    },
     returns: v.object({ success: v.boolean() }),
     handler: async (ctx: any) => {
         const userPlan = await ctx.db
@@ -551,6 +577,7 @@ export const cancelSubscription = authMutation({
 
 export const getProfileImageUrl = authQuery({
     args: {
+        token: v.string(),
         storageId: v.id("_storage"),
     },
     returns: v.union(v.string(), v.null()),

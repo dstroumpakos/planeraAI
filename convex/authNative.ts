@@ -106,11 +106,17 @@ console.log("[AuthNative] Apple token decoded (pre-verify):", {
   email: decoded.email,
 });
 
-    // Verify the token
+    // Verify the token WITHOUT audience validation (we'll check manually below)
     const { payload } = await jose.jwtVerify(identityToken, JWKS, {
       issuer: "https://appleid.apple.com",
-      audience: appleBundleId,
-    });
+    } as any);
+    
+    // Custom audience validation to accept both production and development
+    // Accept production bundle ID or Expo dev client audience
+    const validAudiences = [appleBundleId, "host.exp.Exponent"];
+    if (!validAudiences.includes(payload.aud as string)) {
+      throw new Error(`Invalid aud claim: ${payload.aud}. Expected one of: ${validAudiences.join(", ")}`);
+    }
     
     console.log("[AuthNative] Apple token verified:", {
       sub: payload.sub,

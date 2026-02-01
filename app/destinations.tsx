@@ -13,14 +13,14 @@ import { useRouter } from "expo-router";
 import { useQuery, useAction } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Ionicons } from "@expo/vector-icons";
-import { useConvexAuth } from "@/lib/auth-components";
+import { useToken } from "@/lib/useAuthenticatedMutation";
 import { ImageWithAttribution } from "@/components/ImageWithAttribution";
 import { LinearGradient } from "expo-linear-gradient";
 import { useTheme } from "@/lib/ThemeContext";
 
 export default function DestinationsScreen() {
   const router = useRouter();
-  const { isAuthenticated, isLoading: authLoading } = useConvexAuth();
+  const { token, isLoading: tokenLoading } = useToken();
   const { colors } = useTheme();
   const [destinationImages, setDestinationImages] = useState<Record<string, any>>({});
   const [searchQuery, setSearchQuery] = useState("");
@@ -55,7 +55,7 @@ export default function DestinationsScreen() {
     dest.destination.toLowerCase().includes(searchQuery.toLowerCase())
   ) || [];
 
-  if (authLoading) {
+  if (tokenLoading) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
         <View style={styles.loadingContainer}>
@@ -65,7 +65,7 @@ export default function DestinationsScreen() {
     );
   }
 
-  if (!isAuthenticated) {
+  if (!token) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
         <View style={styles.authContainer}>
@@ -76,7 +76,9 @@ export default function DestinationsScreen() {
   }
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+    <>
+      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity 
@@ -147,6 +149,7 @@ export default function DestinationsScreen() {
                     imageUrl={destinationImages[destination.destination].url}
                     photographerName={destinationImages[destination.destination].photographer}
                     photographerUrl={destinationImages[destination.destination].photographerUrl}
+                    photoUrl={destinationImages[destination.destination].attribution}
                     position="top"
                   />
                 ) : (
@@ -215,6 +218,7 @@ export default function DestinationsScreen() {
         )}
       </ScrollView>
     </SafeAreaView>
+    </>
   );
 }
 
