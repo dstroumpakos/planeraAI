@@ -117,37 +117,32 @@ function AppContent() {
             return;
         }
 
-        // Initialize auth client FIRST
+        // Initialize auth client FIRST and WAIT for completion
         (async () => {
             try {
                 console.log("[BOOT] Initializing auth client...");
                 await authClient.init();
-                console.log("[BOOT] Auth client initialized");
+                console.log("[BOOT] Auth client initialized - token loaded from SecureStore");
+                
+                // CRITICAL: Create Convex client AFTER auth is initialized
+                // This ensures the token is available when fetchAccessToken is called
+                try {
+                    const client = new ConvexReactClient(process.env.EXPO_PUBLIC_CONVEX_URL!, {
+                        unsavedChangesWarning: false,
+                    });
+                    setConvex(client);
+                    if (__DEV__) {
+                        console.log("[BOOT] Convex client created successfully after auth init");
+                    }
+                } catch (error) {
+                    console.error("[BOOT] Failed to create Convex client:", error);
+                    setInitError(error instanceof Error ? error.message : "Unknown error");
+                }
             } catch (error) {
                 console.error("[BOOT] Failed to initialize auth client:", error);
+                setInitError("Auth initialization failed");
             }
         })();
-        
-        // Create Convex client inside useEffect (after mount)
-        try {
-            const client = new ConvexReactClient(process.env.EXPO_PUBLIC_CONVEX_URL!, {
-                unsavedChangesWarning: false,
-            });
-            setConvex(client);
-            if (__DEV__) {
-                console.log("[BOOT] Convex client created successfully");
-            }
-            
-            // Configure Google Sign-In on native platforms
-           //f (Platform.OS !== "web") {
-             // authClient.configureGoogleSignIn().catch((err) => {
-               //   console.warn("[BOOT] Failed to configure Google Sign-In:", err);
-               //);
-           //
-        } catch (error) {
-            console.error("[BOOT] Failed to create Convex client:", error);
-            setInitError(error instanceof Error ? error.message : "Unknown error");
-        }
     }, []);
 
     // Show loading while checking environment

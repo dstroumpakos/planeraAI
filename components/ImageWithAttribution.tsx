@@ -55,6 +55,7 @@ export function ImageWithAttribution({
         ]}
         onPress={onImagePress}
         disabled={!onImagePress}
+        pointerEvents={onImagePress ? "auto" : "none"}
       />
 
       <LinearGradient
@@ -65,13 +66,13 @@ export function ImageWithAttribution({
           styles.attributionOverlay,
           isTop ? styles.attributionTop : styles.attributionBottom,
         ]}
-        pointerEvents="auto"
+        pointerEvents="box-none"
       >
-        <View style={[styles.attributionContent, { justifyContent: isTop ? "flex-end" : "flex-start" }]}>
+        <View style={[styles.attributionContent, { justifyContent: isTop ? "flex-end" : "flex-start" }]} pointerEvents="auto">
           <Text style={styles.attributionText}>Photo by </Text>
           <Pressable
             onPress={handlePhotographerPress}
-            hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+            hitSlop={{ top: 15, bottom: 15, left: 8, right: 8 }}
           >
             {({ pressed }) => (
               <Text
@@ -88,7 +89,7 @@ export function ImageWithAttribution({
           <Text style={styles.attributionText}> on </Text>
           <Pressable
             onPress={handleUnsplashPress}
-            hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+            hitSlop={{ top: 15, bottom: 15, left: 8, right: 8 }}
           >
             {({ pressed }) => (
               <Text
@@ -142,8 +143,8 @@ const styles = StyleSheet.create({
     right: 0,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    zIndex: 10,
-    elevation: 10,
+    zIndex: 100,
+    elevation: 100,
   },
   attributionTop: {
     top: 0,

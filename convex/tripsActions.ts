@@ -33,6 +33,44 @@ function generateTravelStyleGuidance(interests: string[]): string {
     return guidance;
 }
 
+// Helper function to generate local experiences guidance for OpenAI prompt
+function generateLocalExperiencesGuidance(localExperiences: string[] | undefined): string {
+    if (!localExperiences || localExperiences.length === 0) {
+        return "";
+    }
+
+    const experienceLabels: Record<string, string> = {
+        "local-food": "local food and street food spots (authentic eateries, food stalls, and local favorites where residents actually eat)",
+        "markets": "traditional markets (farmers markets, flea markets, antique markets, and local produce markets)",
+        "hidden-gems": "hidden gems and off-the-beaten-path locations (secret spots, lesser-known attractions, local favorites)",
+        "workshops": "cultural workshops and hands-on experiences (cooking classes, craft workshops, art sessions, traditional crafts)",
+        "nature": "nature and outdoor spots that locals love (neighborhood parks, scenic walks, local hiking spots, urban gardens)",
+        "nightlife": "nightlife and local bars (neighborhood bars, local pubs, live music venues, late-night spots where locals go)",
+        "neighborhoods": "authentic neighborhood walks (residential areas, local streets, community spots, away from tourist zones)",
+        "festivals": "festivals and seasonal events (local celebrations, community events, seasonal activities happening during the visit)",
+    };
+
+    const selectedExperiences = localExperiences
+        .map(exp => experienceLabels[exp])
+        .filter(Boolean);
+
+    if (selectedExperiences.length === 0) {
+        return "";
+    }
+
+    return `
+
+LOCAL EXPERIENCES PRIORITY: The traveler wants authentic, non-touristy experiences. Prioritize these in the itinerary:
+${selectedExperiences.map(exp => `- ${exp}`).join("\n")}
+
+Guidelines for local experiences:
+- Recommend places where locals actually go, not tourist traps
+- Include specific neighborhood names and local tips
+- Avoid generic tourist recommendations when possible
+- Do NOT include prices, booking links, or ticket information for these experiences
+- Focus on atmosphere, authenticity, and local connection`;
+}
+
 export const generate = internalAction({
     args: { 
         tripId: v.id("trips"), 
@@ -293,6 +331,7 @@ export const generate = internalAction({
                 try {
                     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
                     const budgetDisplay = typeof trip.budgetTotal === "number" ? `€${trip.budgetTotal}` : trip.budgetTotal;
+                    const localExperiencesGuidance = generateLocalExperiencesGuidance(trip.localExperiences);
                     const itineraryPrompt = `Create a detailed day-by-day itinerary for a trip to ${trip.destination} from ${new Date(trip.startDate).toDateString()} to ${new Date(trip.endDate).toDateString()}.
 
 Budget: ${budgetDisplay}
@@ -300,12 +339,18 @@ Travelers: ${trip.travelerCount ?? trip.travelers ?? 1}
 Interests: ${trip.interests.join(", ")}
 
 ${generateTravelStyleGuidance(trip.interests)}
+${localExperiencesGuidance}
 
 IMPORTANT: For each activity, include:
 - Realistic entry prices in EUR
 - Whether "Skip the Line" tickets are available (for museums, attractions)
 - Skip the Line price (usually 5-15€ more than regular)
-- A booking URL (use real booking platforms like GetYourGuide, Viator, or official sites)
+- Duration of the activity
+
+For local experiences (cooking classes, workshops, food tours, neighborhood walks, etc.):
+- Set "isLocalExperience": true
+- Set "type": "local-experience"
+- Include a detailed description of what makes it authentic/local
 
 Include specific activities, restaurants, and attractions for each day. Format as JSON with structure:
 {
@@ -319,14 +364,14 @@ Include specific activities, restaurants, and attractions for each day. Format a
           "time": "09:00 AM",
           "title": "Activity name",
           "description": "Brief description",
-          "type": "attraction|museum|restaurant|tour|free",
+          "type": "attraction|museum|restaurant|tour|free|local-experience",
           "price": 25,
           "currency": "EUR",
           "skipTheLine": true,
           "skipTheLinePrice": 35,
           "duration": "2-3 hours",
-          "bookingUrl": "https://www.getyourguide.com/...",
-          "tips": "Best to visit early morning"
+          "tips": "Best to visit early morning",
+          "isLocalExperience": false
         }
       ]
     }
@@ -981,10 +1026,94 @@ function getFallbackActivities(destination: string) {
 
 // Helper function to search for restaurants using TripAdvisor API
 async function searchRestaurants(destination: string) {
-    // TripAdvisor Content API requires domain whitelisting which may not be configured
-    // Using fallback data for now - user can set up TripAdvisor API key and configure domain
-    console.log(`🍽️ Using fallback restaurants for: ${destination}`);
-    return getFallbackRestaurants(destination);
+    const tripadvisorKey = process.env.TRIPADVISOR_API_KEY;
+    
+    if (!tripadvisorKey) {
+        console.log(`🍽️ TripAdvisor API key not configured, using fallback restaurants for: ${destination}`);
+        return getFallbackRestaurants(destination);
+    }
+
+    try {
+        console.log(`🍽️ Attempting to fetch restaurants from TripAdvisor for: ${destination}`);
+        
+        // Search directly for restaurants in the destination
+        const searchUrl = `https://api.content.tripadvisor.com/api/v1/location/search?key=${tripadvisorKey}&searchQuery=${encodeURIComponent("restaurants " + destination)}&category=restaurants&language=en`;
+        
+        console.log(`📡 Searching TripAdvisor for restaurants in: ${destination}`);
+        
+        const searchResponse = await fetch(searchUrl, {
+            method: "GET",
+            headers: {
+                "Accept": "application/json",
+            }
+        });
+        
+        console.log(`📊 TripAdvisor Response Status: ${searchResponse.status}`);
+        
+        if (!searchResponse.ok) {
+            const errorBody = await searchResponse.text();
+            console.error(`❌ TripAdvisor search failed (${searchResponse.status}):`, errorBody.substring(0, 200));
+            return getFallbackRestaurants(destination);
+        }
+        
+        const searchData = await searchResponse.json() as any;
+        
+        if (!searchData.data || searchData.data.length === 0) {
+            console.log(`❌ No restaurants found for: ${destination}`);
+            return getFallbackRestaurants(destination);
+        }
+        
+        console.log(`✅ Found ${searchData.data.length} results from TripAdvisor`);
+        
+        // Get details for each restaurant to get the web_url
+        const restaurantsWithDetails = await Promise.all(
+            searchData.data.slice(0, 5).map(async (item: any) => {
+                try {
+                    // Fetch details for each restaurant to get the web_url
+                    const detailsUrl = `https://api.content.tripadvisor.com/api/v1/location/${item.location_id}/details?key=${tripadvisorKey}&language=en`;
+                    const detailsResponse = await fetch(detailsUrl, {
+                        method: "GET",
+                        headers: { "Accept": "application/json" }
+                    });
+                    
+                    if (detailsResponse.ok) {
+                        const details = await detailsResponse.json() as any;
+                        return {
+                            name: details.name || item.name || "Restaurant",
+                            cuisine: details.cuisine?.map((c: any) => c.localized_name || c.name).join(", ") || "Various",
+                            priceRange: details.price_level || "€€",
+                            rating: parseFloat(details.rating) || 4.0,
+                            reviewCount: parseInt(details.num_reviews) || 0,
+                            address: details.address_obj?.address_string || item.address_obj?.address_string || destination,
+                            tripAdvisorUrl: details.web_url || `https://www.tripadvisor.com/Restaurant_Review-g${item.location_id}`,
+                            dataSource: "tripadvisor",
+                        };
+                    }
+                } catch (e) {
+                    console.log(`⚠️ Could not fetch details for ${item.name}`);
+                }
+                
+                // Fallback if details fetch fails - construct URL manually
+                return {
+                    name: item.name || "Restaurant",
+                    cuisine: "Various",
+                    priceRange: "€€",
+                    rating: 4.0,
+                    reviewCount: 0,
+                    address: item.address_obj?.address_string || destination,
+                    tripAdvisorUrl: `https://www.tripadvisor.com/Restaurant_Review-g${item.location_id}`,
+                    dataSource: "tripadvisor",
+                };
+            })
+        );
+        
+        console.log(`✅ Returning ${restaurantsWithDetails.length} restaurants with TripAdvisor URLs`);
+        return restaurantsWithDetails;
+    } catch (error) {
+        console.error("❌ TripAdvisor API error:", error);
+        console.log(`🍽️ Falling back to default restaurants for: ${destination}`);
+        return getFallbackRestaurants(destination);
+    }
 }
 
 // Fallback restaurants when TripAdvisor API is unavailable
@@ -1023,6 +1152,13 @@ function getFallbackRestaurants(destination: string) {
             { name: "El Xampanyet", cuisine: "Catalan Tapas", priceRange: "€", rating: 4.4, reviewCount: 5430, address: "Carrer de Montcada 22", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187497-Barcelona", dataSource: "fallback" },
             { name: "Can Culleretes", cuisine: "Catalan", priceRange: "€€", rating: 4.3, reviewCount: 2890, address: "Carrer d'en Quintana 5", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187497-Barcelona", dataSource: "fallback" },
         ],
+        "marrakech": [
+            { name: "Dar Moha", cuisine: "Moroccan", priceRange: "€€€", rating: 4.8, reviewCount: 2890, address: "81 Rue Dar el Bacha", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g143998-Marrakech", dataSource: "fallback" },
+            { name: "Riad Karmela", cuisine: "Moroccan", priceRange: "€€", rating: 4.6, reviewCount: 1560, address: "Medina", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g143998-Marrakech", dataSource: "fallback" },
+            { name: "Café de la Paz", cuisine: "Moroccan", priceRange: "€", rating: 4.5, reviewCount: 3210, address: "Jemaa el-Fnaa", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g143998-Marrakech", dataSource: "fallback" },
+            { name: "Tagine Palace", cuisine: "Moroccan", priceRange: "€€", rating: 4.4, reviewCount: 2340, address: "Atlas Mountains View", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g143998-Marrakech", dataSource: "fallback" },
+            { name: "Souk Market Eats", cuisine: "Street Food", priceRange: "€", rating: 4.3, reviewCount: 4560, address: "Souk Medina", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g143998-Marrakech", dataSource: "fallback" },
+        ],
     };
     
     // Check if we have fallback for this city
@@ -1032,24 +1168,196 @@ function getFallbackRestaurants(destination: string) {
         }
     }
     
-    // Generic fallback
-    return [
-        { name: "Local Bistro", cuisine: "Local", priceRange: "€€", rating: 4.5, reviewCount: 250, address: "City Center", tripAdvisorUrl: `https://www.tripadvisor.com/Restaurants-${encodeURIComponent(destination)}`, dataSource: "fallback" },
-        { name: "Traditional Restaurant", cuisine: "Traditional", priceRange: "€€", rating: 4.4, reviewCount: 180, address: "Old Town", tripAdvisorUrl: `https://www.tripadvisor.com/Restaurants-${encodeURIComponent(destination)}`, dataSource: "fallback" },
-        { name: "Fine Dining", cuisine: "International", priceRange: "€€€€", rating: 4.8, reviewCount: 120, address: "Downtown", tripAdvisorUrl: `https://www.tripadvisor.com/Restaurants-${encodeURIComponent(destination)}`, dataSource: "fallback" },
-        { name: "Street Food Market", cuisine: "Street Food", priceRange: "€", rating: 4.3, reviewCount: 420, address: "Market Square", tripAdvisorUrl: `https://www.tripadvisor.com/Restaurants-${encodeURIComponent(destination)}`, dataSource: "fallback" },
-        { name: "Seafood Restaurant", cuisine: "Seafood", priceRange: "€€€", rating: 4.6, reviewCount: 310, address: "Harbor Area", tripAdvisorUrl: `https://www.tripadvisor.com/Restaurants-${encodeURIComponent(destination)}`, dataSource: "fallback" },
-    ];
+    // Generic fallback - 5 restaurants for any destination
+    const cuisines = ["Local", "Traditional", "International", "Street Food", "Fine Dining"];
+    const areas = ["City Center", "Old Town", "Downtown", "Market Square", "Waterfront"];
+    const priceRanges = ["€", "€€", "€€", "€€€", "€€€€"];
+    
+    return cuisines.map((cuisine, index) => ({
+        name: `${cuisine} ${areas[index]} Restaurant`,
+        cuisine: cuisine,
+        priceRange: priceRanges[index],
+        rating: 4.2 + (index * 0.1),
+        reviewCount: 250 + (index * 100),
+        address: areas[index],
+        tripAdvisorUrl: `https://www.tripadvisor.com/Restaurants-${encodeURIComponent(destination)}`,
+        dataSource: "fallback",
+    }));
 }
 
 // Helper function to generate transportation options
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 function generateTransportationOptions(destination: string, origin: string, travelers: number) {
+    // Extract city name from destination (e.g., "Barcelona, Spain" -> "barcelona")
+    const city = destination.split(',')[0].toLowerCase().trim();
+    
+    // City-specific transportation data
+    const cityTransport: Record<string, any[]> = {
+        "barcelona": [
+            {
+                type: "public_transport",
+                provider: "TMB Barcelona",
+                description: "Metro, bus, and tram network covering the entire city",
+                options: [
+                    { mode: "Metro", description: "8 lines covering all major attractions", singleTicketPrice: 2.55, dayPassPrice: 11.20 },
+                    { mode: "T-Casual Card", description: "10 trips on metro/bus/tram", singleTicketPrice: 11.35 },
+                    { mode: "Hola BCN!", description: "Unlimited travel for tourists", dayPassPrice: 17.50 },
+                ],
+            },
+            {
+                type: "rideshare",
+                provider: "Uber / Cabify / Bolt",
+                description: "Rideshare apps widely available",
+                estimatedPrice: "8-15€ within city center",
+            },
+            {
+                type: "taxi",
+                provider: "Barcelona Taxi",
+                description: "Yellow & black taxis, metered fares",
+                estimatedPrice: "10-20€ within city",
+                features: ["Airport: ~40€", "Cash & card accepted"],
+            },
+        ],
+        "paris": [
+            {
+                type: "public_transport",
+                provider: "RATP Paris",
+                description: "Metro, RER, bus network",
+                options: [
+                    { mode: "Metro", description: "16 lines, runs until 1am (2am weekends)", singleTicketPrice: 2.15, dayPassPrice: 16.60 },
+                    { mode: "Navigo Easy", description: "Rechargeable card for t+ tickets", singleTicketPrice: 2.15 },
+                    { mode: "Paris Visite", description: "Tourist pass with unlimited travel", dayPassPrice: 14.95 },
+                ],
+            },
+            {
+                type: "rideshare",
+                provider: "Uber / Bolt / FREE NOW",
+                description: "Widely available throughout Paris",
+                estimatedPrice: "10-20€ within city",
+            },
+        ],
+        "rome": [
+            {
+                type: "public_transport",
+                provider: "ATAC Roma",
+                description: "Metro, bus, and tram network",
+                options: [
+                    { mode: "Metro", description: "3 lines (A, B, C)", singleTicketPrice: 1.50, dayPassPrice: 7.00 },
+                    { mode: "Roma Pass", description: "48/72hr transport + museums", dayPassPrice: 32.00 },
+                ],
+            },
+            {
+                type: "taxi",
+                provider: "Rome Taxi",
+                description: "White taxis with meters",
+                estimatedPrice: "10-15€ within center",
+                features: ["Fixed airport fare: €50", "Use official taxi stands"],
+            },
+        ],
+        "tokyo": [
+            {
+                type: "public_transport",
+                provider: "Tokyo Metro & JR",
+                description: "Extensive train and metro network",
+                options: [
+                    { mode: "Suica/Pasmo Card", description: "Rechargeable IC card for all transport", singleTicketPrice: 1.50 },
+                    { mode: "Tokyo Subway Ticket", description: "Unlimited metro for tourists", dayPassPrice: 8.00 },
+                    { mode: "JR Pass", description: "For bullet trains & JR lines (7 days)", dayPassPrice: 50.00 },
+                ],
+            },
+        ],
+        "london": [
+            {
+                type: "public_transport",
+                provider: "TfL London",
+                description: "Tube, buses, and Overground",
+                options: [
+                    { mode: "Oyster Card", description: "Pay as you go with daily cap", singleTicketPrice: 2.80, dayPassPrice: 8.10 },
+                    { mode: "Contactless", description: "Use your bank card directly", singleTicketPrice: 2.80 },
+                    { mode: "Travelcard", description: "Unlimited daily/weekly travel", dayPassPrice: 15.20 },
+                ],
+            },
+            {
+                type: "rideshare",
+                provider: "Uber / Bolt",
+                description: "Available throughout London",
+                estimatedPrice: "15-25£ within zones 1-2",
+            },
+        ],
+        "new york": [
+            {
+                type: "public_transport",
+                provider: "MTA New York",
+                description: "Subway and buses 24/7",
+                options: [
+                    { mode: "OMNY / MetroCard", description: "Tap to pay or buy a card", singleTicketPrice: 2.90, dayPassPrice: 34.00 },
+                    { mode: "7-Day Unlimited", description: "Best for tourists", dayPassPrice: 34.00 },
+                ],
+            },
+            {
+                type: "rideshare",
+                provider: "Uber / Lyft",
+                description: "Widely available",
+                estimatedPrice: "$15-30 within Manhattan",
+            },
+            {
+                type: "taxi",
+                provider: "Yellow Cab",
+                description: "Iconic NYC taxis",
+                estimatedPrice: "$15-25 + tip",
+                features: ["JFK: ~$70 flat rate", "Cash & card accepted"],
+            },
+        ],
+        "amsterdam": [
+            {
+                type: "public_transport",
+                provider: "GVB Amsterdam",
+                description: "Trams, buses, and metro",
+                options: [
+                    { mode: "OV-chipkaart", description: "Rechargeable card", singleTicketPrice: 2.40, dayPassPrice: 9.00 },
+                    { mode: "I amsterdam City Card", description: "Transport + museums", dayPassPrice: 65.00 },
+                ],
+            },
+            {
+                type: "bike",
+                provider: "Bike Rental",
+                description: "The Dutch way! Rent a bike",
+                estimatedPrice: "12-15€/day",
+                features: ["OV-fiets at stations", "MacBike", "Yellow Bike"],
+            },
+        ],
+    };
+    
+    // Check if we have specific data for this city
+    const specificData = cityTransport[city];
+    
+    if (specificData) {
+        return specificData;
+    }
+    
+    // Generic transportation options for unknown cities
     return [
-        { name: "Public Transport Pass", price: 15, currency: "EUR", description: "24-hour public transport pass" },
-        { name: "Taxi/Uber", price: 25, currency: "EUR", description: "Average taxi ride in city" },
-        { name: "Car Rental", price: 50, currency: "EUR", description: "Daily car rental" },
-        { name: "Bike Rental", price: 10, currency: "EUR", description: "Daily bike rental" },
+        {
+            type: "public_transport",
+            provider: "Local Public Transport",
+            description: "Check Google Maps for local transit options",
+            options: [
+                { mode: "Bus/Metro", description: "Most cities have public transport", singleTicketPrice: 2.00, dayPassPrice: 8.00 },
+            ],
+        },
+        {
+            type: "rideshare",
+            provider: "Uber / Bolt / Local Apps",
+            description: "Rideshare apps are available in most cities",
+            estimatedPrice: "Varies by city",
+        },
+        {
+            type: "taxi",
+            provider: "Local Taxis",
+            description: "Official taxis from stands or call",
+            estimatedPrice: "Varies by city",
+            features: ["Always use metered taxis", "Ask hotel to call for you"],
+        },
     ];
 }
 

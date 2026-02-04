@@ -18,6 +18,8 @@ export const create = authMutation({
         budget: v.optional(v.union(v.float64(), v.string())),
         travelers: v.optional(v.float64()),
         interests: v.array(v.string()),
+        // Local Experiences for authentic local recommendations
+        localExperiences: v.optional(v.array(v.string())),
         skipFlights: v.optional(v.boolean()),
         skipHotel: v.optional(v.boolean()),
         preferredFlightTime: v.optional(v.string()),
@@ -109,6 +111,7 @@ export const create = authMutation({
             budget: args.budgetTotal, // Store as number
             travelers: args.travelerCount,
             interests: args.interests,
+            localExperiences: args.localExperiences ?? [],
             status: "generating",
             skipFlights: args.skipFlights ?? false,
             skipHotel: args.skipHotel ?? false,
@@ -125,12 +128,16 @@ export const create = authMutation({
             ? "Note: User already has accommodation booked, so DO NOT include hotel recommendations."
             : "";
 
+        const localExperiencesInfo = args.localExperiences && args.localExperiences.length > 0
+            ? `\nLocal Experiences requested: ${args.localExperiences.join(", ")}. Prioritize authentic, non-touristy options for these experiences.`
+            : "";
+
         const prompt = `Plan a trip to ${args.destination} for ${args.travelerCount} people.
         ${flightInfo}
         ${hotelInfo}
          Budget: €${args.budgetTotal} total (€${perPersonBudget} per person).
         Dates: ${new Date(args.startDate).toDateString()} to ${new Date(args.endDate).toDateString()}.
-        Interests: ${args.interests.join(", ")}.`;
+        Interests: ${args.interests.join(", ")}.${localExperiencesInfo}`;
 
         // Schedule the generation action from tripsActions.ts
         await ctx.scheduler.runAfter(0, internal.tripsActions.generate, { 
@@ -166,6 +173,7 @@ export const getTripDetails = internalQuery({
             budget: v.optional(v.union(v.number(), v.string())),
             travelers: v.optional(v.number()),
             interests: v.array(v.string()),
+            localExperiences: v.optional(v.array(v.string())),
             skipFlights: v.optional(v.boolean()),
             skipHotel: v.optional(v.boolean()),
             preferredFlightTime: v.optional(v.string()),

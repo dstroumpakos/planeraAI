@@ -17,6 +17,7 @@ const ENABLE_GOOGLE = false;
 // Component to handle authenticated user redirect based on onboarding status
 function AuthenticatedRedirect() {
     const { token } = useToken();
+    // @ts-ignore
     const settings = useQuery(api.users.getSettings as any, { token: token || "skip" });
 
     // Still loading settings from Convex

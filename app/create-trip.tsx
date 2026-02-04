@@ -13,6 +13,18 @@ import { useAuthenticatedMutation, useToken } from "@/lib/useAuthenticatedMutati
 
 import logoImage from "@/assets/images/appicon-1024x1024-01-1vb1vx.png";
 
+// Local Experiences categories
+const LOCAL_EXPERIENCES = [
+    { id: "local-food", label: "Local food & street food", icon: "restaurant" as const },
+    { id: "markets", label: "Traditional markets", icon: "storefront" as const },
+    { id: "hidden-gems", label: "Hidden gems", icon: "compass" as const },
+    { id: "workshops", label: "Cultural workshops", icon: "color-palette" as const },
+    { id: "nature", label: "Nature & outdoor spots", icon: "leaf" as const },
+    { id: "nightlife", label: "Nightlife & local bars", icon: "wine" as const },
+    { id: "neighborhoods", label: "Neighborhood walks", icon: "walk" as const },
+    { id: "festivals", label: "Festivals & seasonal events", icon: "calendar" as const },
+];
+
 // Popular destinations list
 const DESTINATIONS = [
     { city: "Paris", country: "France", image: "🇫🇷" },
@@ -71,8 +83,10 @@ export default function CreateTripScreen() {
     const { colors, } = useTheme();
     const prefilledDestination = params.prefilledDestination as string | undefined;
     
+    // @ts-ignore
     const createTrip = useAuthenticatedMutation(api.trips.create as any);
     const { token } = useToken();
+    // @ts-ignore
     const userSettings = useQuery(api.users.getSettings as any, { token: token || "skip" }) as any;
     // V1: Traveler profiles disabled - removed travelers query
     
@@ -96,6 +110,7 @@ export default function CreateTripScreen() {
         // V1: travelerCount is the primary traveler count field (1-12)
         travelerCount: 1,
         interests: [] as string[],
+        localExperiences: [] as string[],
         skipFlights: false,
         skipHotel: false,
         preferredFlightTime: "any" as "any" | "morning" | "afternoon" | "evening" | "night",
@@ -261,6 +276,7 @@ export default function CreateTripScreen() {
                 budgetTotal: Number(formData.budgetTotal),
                 travelerCount: Number(formData.travelerCount),
                 interests: formData.interests,
+                localExperiences: formData.localExperiences,
                 skipFlights: formData.skipFlights,
                 skipHotel: formData.skipHotel,
                 preferredFlightTime: formData.preferredFlightTime,
@@ -293,6 +309,14 @@ export default function CreateTripScreen() {
             setFormData({ ...formData, interests: formData.interests.filter((i) => i !== interest) });
         } else {
             setFormData({ ...formData, interests: [...formData.interests, interest] });
+        }
+    };
+
+    const toggleLocalExperience = (experienceId: string) => {
+        if (formData.localExperiences.includes(experienceId)) {
+            setFormData({ ...formData, localExperiences: formData.localExperiences.filter((e) => e !== experienceId) });
+        } else {
+            setFormData({ ...formData, localExperiences: [...formData.localExperiences, experienceId] });
         }
     };
 
@@ -569,6 +593,39 @@ export default function CreateTripScreen() {
                                     { color: colors.text },
                                 ]}>
                                     {interest}
+                                </Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+                </View>
+
+                {/* Local Experiences Section (Optional) */}
+                <View style={[styles.card, { backgroundColor: colors.card }]}>
+                    <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>Local Experiences</Text>
+                    <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>
+                        Experience the destination like a local (optional)
+                    </Text>
+                    <View style={styles.localExperiencesContainer}>
+                        {LOCAL_EXPERIENCES.map((experience) => (
+                            <TouchableOpacity
+                                key={experience.id}
+                                style={[
+                                    styles.localExperienceTag,
+                                    { backgroundColor: colors.secondary, borderColor: colors.primary },
+                                    formData.localExperiences.includes(experience.id) && { backgroundColor: colors.primary },
+                                ]}
+                                onPress={() => toggleLocalExperience(experience.id)}
+                            >
+                                <Ionicons 
+                                    name={experience.icon}
+                                    size={18} 
+                                    color={formData.localExperiences.includes(experience.id) ? colors.text : colors.primary}
+                                />
+                                <Text style={[
+                                    styles.localExperienceTagText,
+                                    { color: colors.text },
+                                ]}>
+                                    {experience.label}
                                 </Text>
                             </TouchableOpacity>
                         ))}
@@ -996,6 +1053,33 @@ const styles = StyleSheet.create({
         color: "#1A1A1A",
     },
     interestTagTextActive: {
+        color: "#1A1A1A",
+    },
+    sectionSubtitle: {
+        fontSize: 14,
+        fontWeight: "500",
+        marginBottom: 16,
+        marginTop: -4,
+    },
+    localExperiencesContainer: {
+        flexDirection: "row",
+        gap: 10,
+        flexWrap: "wrap",
+    },
+    localExperienceTag: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        paddingVertical: 10,
+        paddingHorizontal: 14,
+        borderRadius: 12,
+        backgroundColor: "#FFF8E1",
+        borderWidth: 2,
+        borderColor: "#FFE500",
+    },
+    localExperienceTagText: {
+        fontSize: 13,
+        fontWeight: "600",
         color: "#1A1A1A",
     },
     generateButton: {

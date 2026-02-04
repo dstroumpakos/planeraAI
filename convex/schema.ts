@@ -18,6 +18,8 @@ export default defineSchema({
         budget: v.optional(v.union(v.float64(), v.string())),
         travelers: v.optional(v.float64()),
         interests: v.array(v.string()),
+        // Local Experiences for authentic local recommendations
+        localExperiences: v.optional(v.array(v.string())),
         skipFlights: v.optional(v.boolean()),
         skipHotel: v.optional(v.boolean()),
         preferredFlightTime: v.optional(v.string()),
@@ -83,7 +85,26 @@ export default defineSchema({
         tripCredits: v.optional(v.float64()),
         subscriptionExpiresAt: v.optional(v.float64()),
         subscriptionType: v.optional(v.union(v.literal("monthly"), v.literal("yearly"))),
+        // Apple IAP tracking
+        lastTransactionId: v.optional(v.string()),
     }).index("by_user", ["userId"]),
+
+    // Apple In-App Purchase transaction history
+    iapTransactions: defineTable({
+        userId: v.string(),
+        productId: v.string(),
+        transactionId: v.string(),
+        receipt: v.optional(v.string()),
+        processedAt: v.float64(),
+        status: v.union(
+            v.literal("completed"),
+            v.literal("restored"),
+            v.literal("refunded"),
+            v.literal("failed")
+        ),
+    })
+        .index("by_user", ["userId"])
+        .index("by_transaction", ["transactionId"]),
 
     bookings: defineTable({
         userId: v.string(),
