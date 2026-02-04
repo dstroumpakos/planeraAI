@@ -12,6 +12,7 @@ import * as ImagePicker from "expo-image-picker";
 import { useTheme } from "@/lib/ThemeContext";
 import * as Haptics from "expo-haptics";
 import { Id } from "@/convex/_generated/dataModel";
+import Constants from "expo-constants";
 
 const INSIGHT_CATEGORIES = [
   { id: "food", label: "Food & Drink", icon: "restaurant" },
@@ -79,13 +80,15 @@ export default function Profile() {
     const handleLogout = async () => {
         try {
             await authClient.signOut();
-            await new Promise(resolve => setTimeout(resolve, 500));
+            // Clear any cached data and redirect to login
             router.replace("/");
         } catch (error) {
             console.error("Logout failed:", error);
             if (Platform.OS !== 'web') {
-                Alert.alert("Error", "Failed to log out");
+                Alert.alert("Error", "Failed to log out. Please try again.");
             }
+            // Still try to redirect even if signOut fails
+            router.replace("/");
         }
     };
 
@@ -271,7 +274,7 @@ export default function Profile() {
 
     return (
         <>
-            <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
+            <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor="transparent" translucent={true} />
             <SafeAreaView style={styles.container}>
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => router.back()}>
@@ -517,26 +520,24 @@ export default function Profile() {
                 </View>
 
                 {/* Share Travel Insights Section */}
-                {completedTrips && completedTrips.length > 0 && (
-                    <>
-                        <Text style={styles.sectionTitle}>SHARE YOUR EXPERIENCE</Text>
-                        <TouchableOpacity 
-                            style={[styles.insightsCard, { backgroundColor: colors.card, borderColor: colors.border }]}
-                            onPress={() => router.push("/settings/share-insight")}
-                        >
-                            <View style={[styles.insightsIconContainer, { backgroundColor: isDarkMode ? 'rgba(255, 229, 0, 0.2)' : '#FFF8E1' }]}>
-                                <Ionicons name="bulb" size={24} color={colors.primary} />
-                            </View>
-                            <View style={styles.insightsTextContainer}>
-                                <Text style={[styles.insightsTitle, { color: colors.text }]}>Share Travel Tips</Text>
-                                <Text style={[styles.insightsSubtitle, { color: colors.textMuted }]}>
-                                    Help other travelers with insights from your {completedTrips.length} completed trip{completedTrips.length > 1 ? 's' : ''}
-                                </Text>
-                            </View>
-                            <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
-                        </TouchableOpacity>
-                    </>
-                )}
+                <>
+                    <Text style={styles.sectionTitle}>SHARE YOUR EXPERIENCE</Text>
+                    <TouchableOpacity 
+                        style={[styles.insightsCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+                        onPress={() => router.push("/settings/share-insight")}
+                    >
+                        <View style={[styles.insightsIconContainer, { backgroundColor: isDarkMode ? 'rgba(255, 229, 0, 0.2)' : '#FFF8E1' }]}>
+                            <Ionicons name="bulb" size={24} color={colors.primary} />
+                        </View>
+                        <View style={styles.insightsTextContainer}>
+                            <Text style={[styles.insightsTitle, { color: colors.text }]}>Share Travel Tips</Text>
+                            <Text style={[styles.insightsSubtitle, { color: colors.textMuted }]}>
+                                Help other travelers with insights from your trips
+                            </Text>
+                        </View>
+                        <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+                    </TouchableOpacity>
+                </>
 
                 {/* My Traveler Insights Section */}
                 {myInsights && myInsights.length > 0 && (
@@ -641,7 +642,7 @@ export default function Profile() {
                 </View>
 
                 {/* Version */}
-                <Text style={styles.versionText}>PLANERA V2.4.0</Text>
+                <Text style={styles.versionText}>PLANERA V{Constants.expoConfig?.version || '1.0.0'}</Text>
 
                 {/* Bottom Spacing */}
                 <View style={{ height: 120 }} />

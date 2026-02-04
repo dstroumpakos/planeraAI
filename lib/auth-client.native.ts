@@ -355,7 +355,19 @@ function createNativeAuthClient() {
       console.log("[Auth] Starting native Apple Sign-In...");
       
       // Import dynamically
-      const AppleAuthentication = await import("expo-apple-authentication");
+      let AppleAuthentication: any;
+      try {
+        AppleAuthentication = await import("expo-apple-authentication");
+      } catch (importError) {
+        console.error("[Auth] Failed to import expo-apple-authentication:", importError);
+        return { data: null, error: new Error("Failed to load Apple Sign-In. Try restarting the app or clearing Metro cache with: npx expo start -c") };
+      }
+      
+      // Check if the module loaded correctly (Metro cache issues can cause partial loads)
+      if (!AppleAuthentication?.isAvailableAsync || typeof AppleAuthentication.isAvailableAsync !== 'function') {
+        console.error("[Auth] AppleAuthentication.isAvailableAsync is not available - likely Metro cache issue");
+        return { data: null, error: new Error("Apple Sign-In module not loaded correctly. Please restart the app or run: npx expo start -c") };
+      }
       
       // Check if Apple Sign-In is available
       const isAvailable = await AppleAuthentication.isAvailableAsync();
@@ -466,7 +478,7 @@ const response = await fetch(`${CONVEX_URL}/api/action`, {
     // Configure Google Sign-In (call early in app lifecycle)
     configureGoogleSignIn,
 
-    // Sign in with email/password
+    // Sign in with email/password - uses Convex action
     signIn: {
       email: async ({
         email,
@@ -478,31 +490,46 @@ const response = await fetch(`${CONVEX_URL}/api/action`, {
         await ensureInit();
         console.log("[Auth] Signing in with email:", email);
 
-        const response = await authFetch<any>("/api/auth/sign-in/email", {
-          method: "POST",
-          body: JSON.stringify({ email, password }),
-        });
+        try {
+          // Call Convex action for email sign-in
+          const response = await fetch(`${CONVEX_URL}/api/action`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              path: "authNative:signInWithEmail",
+              args: {
+                email,
+                password,
+                isSignUp: false,
+              },
+            }),
+          });
 
-        if (response.error) {
-          return { data: null, error: response.error };
+          const responseText = await response.text();
+          console.log("[Auth] Raw Convex response status:", response.status);
+
+          let result;
+          try {
+            const parsed = JSON.parse(responseText);
+            result = parsed.value !== undefined ? parsed.value : parsed;
+          } catch (e) {
+            console.error("[Auth] Failed to parse Convex response:", e);
+            return { data: null, error: new Error("Invalid response from server") };
+          }
+
+          if (!result || !result.success || result.error) {
+            return { data: null, error: new Error(result?.error || "Sign-in failed") };
+          }
+
+          // Store session
+          const session = createSessionFromResponse(result.token, result.user);
+          await storeSession(session, result.user);
+
+          return { data: { session, user: result.user }, error: null };
+        } catch (error: any) {
+          console.error("[Auth] Sign-in error:", error);
+          return { data: null, error: error as Error };
         }
-
-        const data = response.data;
-        console.log("[Auth] Sign-in response keys:", data ? Object.keys(data) : "null");
-
-        // Better Auth returns: { redirect: true, token: "...", user: {...}, url: "..." }
-        // OR: { session: {...}, user: {...} }
-        if (data?.token && data?.user) {
-          const session = createSessionFromResponse(data.token, data.user);
-          await storeSession(session, data.user);
-          return { data: { session, user: data.user }, error: null };
-        } else if (data?.session && data?.user) {
-          await storeSession(data.session, data.user);
-          return { data: { session: data.session, user: data.user }, error: null };
-        }
-
-        console.error("[Auth] Unexpected sign-in response format:", data);
-        return { data: null, error: new Error("Invalid response from server") };
       },
 
       // Social sign in - NOW USES NATIVE SDK instead of OAuth redirect
@@ -551,39 +578,53 @@ const response = await fetch(`${CONVEX_URL}/api/action`, {
       // Native Apple Sign-In (direct method)
       apple: nativeAppleSignIn,
 
-      // Anonymous sign in
+      // Anonymous sign in - uses Convex action instead of HTTP
       anonymous: async (): Promise<AuthResponse<SessionData>> => {
         await ensureInit();
         console.log("[Auth] Starting anonymous sign-in");
 
-        const response = await authFetch<any>("/api/auth/sign-in/anonymous", {
-          method: "POST",
-          body: JSON.stringify({}),
-        });
+        try {
+          // Call Convex action to create anonymous user
+          const response = await fetch(`${CONVEX_URL}/api/action`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              path: "authNative:signInAnonymous",
+              args: {},
+            }),
+          });
 
-        if (response.error) {
-          return { data: null, error: response.error };
+          const responseText = await response.text();
+          console.log("[Auth] Raw Convex response status:", response.status);
+          console.log("[Auth] Raw Convex response:", responseText.substring(0, 200));
+
+          let result;
+          try {
+            const parsed = JSON.parse(responseText);
+            // Convex action responses may be wrapped in a 'value' field
+            result = parsed.value !== undefined ? parsed.value : parsed;
+          } catch (e) {
+            console.error("[Auth] Failed to parse Convex response:", e);
+            return { data: null, error: new Error("Invalid response from server") };
+          }
+
+          if (!result || !result.success || result.error) {
+            return { data: null, error: new Error(result?.error || "Anonymous sign-in failed") };
+          }
+
+          // Store session
+          const session = createSessionFromResponse(result.token, result.user);
+          await storeSession(session, result.user);
+
+          return { data: { session, user: result.user }, error: null };
+        } catch (error: any) {
+          console.error("[Auth] Anonymous sign-in error:", error);
+          return { data: null, error: error as Error };
         }
-
-        const data = response.data;
-        console.log("[Auth] Anonymous sign-in response keys:", data ? Object.keys(data) : "null");
-
-        // Handle both response formats
-        if (data?.token && data?.user) {
-          const session = createSessionFromResponse(data.token, data.user);
-          await storeSession(session, data.user);
-          return { data: { session, user: data.user }, error: null };
-        } else if (data?.session && data?.user) {
-          await storeSession(data.session, data.user);
-          return { data: { session: data.session, user: data.user }, error: null };
-        }
-
-        console.error("[Auth] Unexpected anonymous sign-in response format:", data);
-        return { data: null, error: new Error("Invalid response from server") };
       },
     },
 
-    // Sign up with email/password
+    // Sign up with email/password - uses Convex action
     signUp: {
       email: async ({
         email,
@@ -597,34 +638,51 @@ const response = await fetch(`${CONVEX_URL}/api/action`, {
         await ensureInit();
         console.log("[Auth] Signing up with email:", email);
 
-        const response = await authFetch<any>("/api/auth/sign-up/email", {
-          method: "POST",
-          body: JSON.stringify({ email, password, name }),
-        });
+        try {
+          // Call Convex action for email sign-up
+          const response = await fetch(`${CONVEX_URL}/api/action`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              path: "authNative:signInWithEmail",
+              args: {
+                email,
+                password,
+                isSignUp: true,
+                name,
+              },
+            }),
+          });
 
-        if (response.error) {
-          return { data: null, error: response.error };
+          const responseText = await response.text();
+          console.log("[Auth] Raw Convex response status:", response.status);
+
+          let result;
+          try {
+            const parsed = JSON.parse(responseText);
+            result = parsed.value !== undefined ? parsed.value : parsed;
+          } catch (e) {
+            console.error("[Auth] Failed to parse Convex response:", e);
+            return { data: null, error: new Error("Invalid response from server") };
+          }
+
+          if (!result || !result.success || result.error) {
+            return { data: null, error: new Error(result?.error || "Sign-up failed") };
+          }
+
+          // Store session
+          const session = createSessionFromResponse(result.token, result.user);
+          await storeSession(session, result.user);
+
+          return { data: { session, user: result.user }, error: null };
+        } catch (error: any) {
+          console.error("[Auth] Sign-up error:", error);
+          return { data: null, error: error as Error };
         }
-
-        const data = response.data;
-        console.log("[Auth] Sign-up response keys:", data ? Object.keys(data) : "null");
-
-        // Handle both response formats
-        if (data?.token && data?.user) {
-          const session = createSessionFromResponse(data.token, data.user);
-          await storeSession(session, data.user);
-          return { data: { session, user: data.user }, error: null };
-        } else if (data?.session && data?.user) {
-          await storeSession(data.session, data.user);
-          return { data: { session: data.session, user: data.user }, error: null };
-        }
-
-        console.error("[Auth] Unexpected sign-up response format:", data);
-        return { data: null, error: new Error("Invalid response from server") };
       },
     },
 
-    // Sign out
+    // Sign out - clear local session
     signOut: async (): Promise<AuthResponse<null>> => {
       await ensureInit();
       console.log("[Auth] Signing out");
@@ -642,10 +700,8 @@ const response = await fetch(`${CONVEX_URL}/api/action`, {
             // Ignore Google sign-out errors
           }
         }
-        
-        await authFetch("/api/auth/sign-out", { method: "POST" });
       } catch (error) {
-        console.warn("[Auth] Sign out request failed:", error);
+        console.warn("[Auth] Provider sign out failed:", error);
       }
       await clearSession();
       return { data: null, error: null };

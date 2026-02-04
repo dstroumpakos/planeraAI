@@ -346,6 +346,123 @@ export const signInWithApple = action({
   },
 });
 
+// Anonymous sign in - creates a guest user
+export const signInAnonymous = action({
+  args: {},
+  returns: v.object({
+    success: v.boolean(),
+    token: v.optional(v.string()),
+    user: v.optional(
+      v.object({
+        id: v.string(),
+        email: v.optional(v.string()),
+        name: v.optional(v.string()),
+        image: v.optional(v.string()),
+      })
+    ),
+    error: v.optional(v.string()),
+  }),
+  handler: async (ctx): Promise<SignInResponse> => {
+    console.log("[AuthNative] signInAnonymous called");
+
+    try {
+      // Generate a unique anonymous user ID
+      const anonymousId = `anon_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+      const sessionToken = generateSessionToken();
+
+      const result: UpsertResult = await ctx.runMutation(
+        internal.authNativeDb.upsertUserAndCreateSession,
+        {
+          provider: "anonymous",
+          providerUserId: anonymousId,
+          email: undefined,
+          name: "Guest User",
+          picture: undefined,
+          sessionToken,
+        }
+      );
+
+      console.log("[AuthNative] Anonymous sign-in successful:", {
+        userId: result.userId,
+        sessionId: result.sessionId,
+      });
+
+      return {
+        success: true,
+        token: result.token,
+        user: result.user,
+      };
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+      console.error("[AuthNative] Anonymous sign-in failed:", errorMessage);
+      return { success: false, error: errorMessage };
+    }
+  },
+});
+
+// Email/password sign in
+export const signInWithEmail = action({
+  args: {
+    email: v.string(),
+    password: v.string(),
+    isSignUp: v.optional(v.boolean()),
+    name: v.optional(v.string()),
+  },
+  returns: v.object({
+    success: v.boolean(),
+    token: v.optional(v.string()),
+    user: v.optional(
+      v.object({
+        id: v.string(),
+        email: v.optional(v.string()),
+        name: v.optional(v.string()),
+        image: v.optional(v.string()),
+      })
+    ),
+    error: v.optional(v.string()),
+  }),
+  handler: async (ctx, args): Promise<SignInResponse> => {
+    console.log("[AuthNative] signInWithEmail called:", {
+      email: args.email,
+      isSignUp: args.isSignUp,
+    });
+
+    try {
+      // For MVP, we'll create/get a user based on email
+      // In production, you'd want proper password hashing and verification
+      const sessionToken = generateSessionToken();
+
+      // Use email as the provider user ID (unique identifier)
+      const result: UpsertResult = await ctx.runMutation(
+        internal.authNativeDb.upsertUserAndCreateSession,
+        {
+          provider: "email",
+          providerUserId: args.email.toLowerCase(),
+          email: args.email.toLowerCase(),
+          name: args.name,
+          picture: undefined,
+          sessionToken,
+        }
+      );
+
+      console.log("[AuthNative] Email sign-in successful:", {
+        userId: result.userId,
+        isSignUp: args.isSignUp,
+      });
+
+      return {
+        success: true,
+        token: result.token,
+        user: result.user,
+      };
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
+      console.error("[AuthNative] Email sign-in failed:", errorMessage);
+      return { success: false, error: errorMessage };
+    }
+  },
+});
+
 // Validate a session token (called by auth provider)
 export const validateSession = action({
   args: { token: v.string() },

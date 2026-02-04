@@ -1087,6 +1087,7 @@ export default function TripDetails() {
 
     return (
         <View style={[styles.container, { backgroundColor: colors.background }]}>
+            <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor="transparent" translucent={true} />
             {/* Header - Minimal with just back button */}
             <SafeAreaView style={[styles.header, { backgroundColor: 'transparent', position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, borderBottomWidth: 0 }]}>
                 <View style={styles.headerContent}>
@@ -1380,7 +1381,7 @@ export default function TripDetails() {
 
                     {activeFilter === 'food' && (
                         <View>
-                            <Text style={styles.sectionTitle}>Top Restaurants</Text>
+                            <Text style={[styles.sectionTitle, { color: colors.text }]}>Top Restaurants</Text>
                             {trip.itinerary?.restaurants?.map((restaurant: any, index: number) => (
                                 <TouchableOpacity 
                                     key={index} 
@@ -1435,14 +1436,14 @@ export default function TripDetails() {
 
                     {activeFilter === 'flights' && (
                         <View>
-                            <Text style={styles.sectionTitle}>Available Flights</Text>
+                            <Text style={[styles.sectionTitle, { color: colors.text }]}>Available Flights</Text>
                             <View style={[styles.card, styles.skippedCard]}>
                                 <View style={styles.skippedSection}>
                                     <View style={styles.skippedIconContainer}>
                                         <Ionicons name="airplane" size={32} color={colors.primary} />
                                     </View>
-                                    <Text style={styles.skippedTitle}>Coming in Next Updates</Text>
-                                    <Text style={styles.skippedText}>
+                                    <Text style={[styles.skippedTitle, { color: '#1A1A1A' }]}>Coming in Next Updates</Text>
+                                    <Text style={[styles.skippedText, { color: '#64748B' }]}>
                                         Flight booking and search will be available soon. We're working hard to bring you the best flight options!
                                     </Text>
                                 </View>
@@ -1551,14 +1552,14 @@ export default function TripDetails() {
 
                     {activeFilter === 'stays' && (
                         <View>
-                            <Text style={styles.sectionTitle}>Accommodations</Text>
+                            <Text style={[styles.sectionTitle, { color: colors.text }]}>Accommodations</Text>
                             <View style={[styles.card, styles.skippedCard]}>
                                 <View style={styles.skippedSection}>
                                     <View style={styles.skippedIconContainer}>
                                         <Ionicons name="bed" size={32} color={colors.primary} />
                                     </View>
-                                    <Text style={styles.skippedTitle}>Coming in Next Updates</Text>
-                                    <Text style={styles.skippedText}>
+                                    <Text style={[styles.skippedTitle, { color: '#1A1A1A' }]}>Coming in Next Updates</Text>
+                                    <Text style={[styles.skippedText, { color: '#64748B' }]}>
                                         Hotel and accommodation booking will be available soon. We're working hard to bring you the best options!
                                     </Text>
                                 </View>
@@ -1672,17 +1673,17 @@ export default function TripDetails() {
             {/* Traveler Insights Section */}
             {insights && insights.length > 0 && (
                 <View style={styles.insightsSection}>
-                    <Text style={styles.sectionTitle}>Traveler Insights</Text>
-                    <Text style={styles.insightsSubtitle}>Tips from travelers who visited {trip.destination}</Text>
+                    <Text style={[styles.sectionTitle, { color: colors.text }]}>Traveler Insights</Text>
+                    <Text style={[styles.insightsSubtitle, { color: colors.textMuted }]}>Tips from travelers who visited {trip.destination}</Text>
                     <ScrollView 
                         horizontal 
                         showsHorizontalScrollIndicator={false}
                         style={styles.insightsScroll}
                     >
                         {insights.map((insight: any) => (
-                            <View key={insight._id} style={styles.insightCard}>
+                            <View key={insight._id} style={[styles.insightCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
                                 <View style={styles.insightHeader}>
-                                    <View style={styles.insightCategoryBadge}>
+                                    <View style={[styles.insightCategoryBadge, { backgroundColor: isDarkMode ? 'rgba(255, 229, 0, 0.2)' : 'rgba(100, 116, 139, 0.1)' }]}>
                                         <Ionicons 
                                             name={
                                                 insight.category === 'food' ? 'restaurant' :
@@ -1692,21 +1693,21 @@ export default function TripDetails() {
                                                 'bulb'
                                             }
                                             size={14} 
-                                            color="#92400E"
+                                            color={colors.primary}
                                         />
-                                        <Text style={styles.insightCategoryText}>
+                                        <Text style={[styles.insightCategoryText, { color: colors.textMuted }]}>
                                             {insight.category.replace('_', ' ')}
                                         </Text>
                                     </View>
                                     <View style={styles.insightLikes}>
                                         <Ionicons name="heart" size={14} color="#F59E0B" />
-                                        <Text style={styles.insightLikesText}>{insight.likes}</Text>
+                                        <Text style={[styles.insightLikesText, { color: colors.text }]}>{insight.likes}</Text>
                                     </View>
                                 </View>
-                                <Text style={styles.insightContent} numberOfLines={4}>
+                                <Text style={[styles.insightContent, { color: colors.text }]} numberOfLines={4}>
                                     {insight.content}
                                 </Text>
-                                <Text style={styles.insightDate}>
+                                <Text style={[styles.insightDate, { color: colors.textMuted }]}>
                                     {new Date(insight.createdAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
                                 </Text>
                             </View>

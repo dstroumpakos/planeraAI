@@ -23,10 +23,9 @@ import { useTheme } from "@/lib/ThemeContext";
 export default function HomeScreen() {
   const router = useRouter();
   const { isAuthenticated, isLoading: authLoading } = useConvexAuth();
-  const { colors } = useTheme();
+  const { colors, isDarkMode } = useTheme();
   const { token, isLoading: tokenLoading } = useToken();
   const [destinationImages, setDestinationImages] = useState<Record<string, any>>({});
-  const [searchQuery, setSearchQuery] = useState("");
   const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null);
 
   // Debug logging
@@ -142,7 +141,7 @@ export default function HomeScreen() {
 
   return (
     <>
-      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
+      <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor="transparent" translucent={true} />
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView 
         style={styles.scrollView}
@@ -177,24 +176,17 @@ export default function HomeScreen() {
         </View>
 
         {/* Search Bar */}
-        <View style={[styles.searchContainer, { backgroundColor: colors.card }]}>
+        <TouchableOpacity 
+          style={[styles.searchContainer, { backgroundColor: colors.card }]}
+          onPress={() => router.push("/create-trip")}
+          activeOpacity={0.7}
+        >
           <Ionicons name="search-outline" size={20} color={colors.textMuted} style={styles.searchIcon} />
-
-          <TextInput
-            style={[styles.searchInput, { color: colors.text }]}
-            placeholder="Where do you want to go?"
-            placeholderTextColor={colors.textMuted}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            onFocus={() => router.push("/create-trip")}
-          />
-          <TouchableOpacity 
-            style={[styles.searchButton, { backgroundColor: colors.primary }]}
-            onPress={() => router.push("/create-trip")}
-          >
+          <Text style={[styles.searchPlaceholder, { color: colors.textMuted }]}>Where do you want to go?</Text>
+          <View style={[styles.searchButton, { backgroundColor: colors.primary }]}>
             <Ionicons name="arrow-forward" size={20} color={colors.text} />
-          </TouchableOpacity>
-        </View>
+          </View>
+        </TouchableOpacity>
 
         {/* Feature Cards */}
         <ScrollView 
@@ -432,6 +424,11 @@ const styles = StyleSheet.create({
     marginLeft: 12,
     fontSize: 16,
     height: 40,
+  },
+  searchPlaceholder: {
+    flex: 1,
+    marginLeft: 12,
+    fontSize: 16,
   },
   searchButton: {
     width: 40,

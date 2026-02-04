@@ -11,7 +11,7 @@ import { useTheme } from "@/lib/ThemeContext";
 export default function TripsScreen() {
     const router = useRouter();
     const { token } = useToken();
-    const { colors } = useTheme();
+    const { colors, isDarkMode } = useTheme();
     const trips = useQuery(api.trips.list as any, { token: token || "skip" });
     const deleteTrip = useMutation(api.trips.deleteTrip);
 
@@ -38,9 +38,12 @@ export default function TripsScreen() {
         );
     }
 
+    // Handle null trips (user not authenticated or query failed)
+    const tripsList = trips || [];
+
     return (
         <>
-            <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
+            <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor="transparent" translucent={true} />
             <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
             <View style={styles.header}>
                 <Text style={[styles.headerTitle, { color: colors.text }]}>My Trips</Text>
@@ -52,7 +55,7 @@ export default function TripsScreen() {
                 </TouchableOpacity>
             </View>
 
-            {trips.length === 0 ? (
+            {tripsList.length === 0 ? (
                 <View style={styles.emptyState}>
                     <View style={[styles.emptyIconContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
                         <Ionicons name="airplane-outline" size={48} color={colors.primary} />
@@ -68,7 +71,7 @@ export default function TripsScreen() {
                 </View>
             ) : (
                 <FlatList
-                    data={trips}
+                    data={tripsList}
                     keyExtractor={(item) => item._id}
                     contentContainerStyle={styles.listContent}
                     renderItem={({ item }) => (

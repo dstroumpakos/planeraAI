@@ -644,7 +644,7 @@ export default function AtlasScreen() {
     if (tokenLoading) {
         return (
             <>
-                <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
+                <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor="transparent" translucent={true} />
                 <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
                     <View style={styles.loadingContainer}>
                         <ActivityIndicator size="large" color={colors.primary} />
@@ -659,7 +659,7 @@ export default function AtlasScreen() {
     if (!token) {
         return (
             <>
-                <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
+                <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor="transparent" translucent={true} />
                 <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
                     <View style={styles.authContainer}>
                         <Ionicons name="globe-outline" size={64} color={colors.primary} />
@@ -675,7 +675,7 @@ export default function AtlasScreen() {
 
     return (
         <>
-            <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
+            <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor="transparent" translucent={true} />
             <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
                 {/* Header */}
                 <View style={[styles.header, { borderBottomColor: colors.border }]}>

@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   TextInput,
+  StatusBar,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -21,7 +22,7 @@ import { useTheme } from "@/lib/ThemeContext";
 export default function DestinationsScreen() {
   const router = useRouter();
   const { token, isLoading: tokenLoading } = useToken();
-  const { colors } = useTheme();
+  const { colors, isDarkMode } = useTheme();
   const [destinationImages, setDestinationImages] = useState<Record<string, any>>({});
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -77,7 +78,7 @@ export default function DestinationsScreen() {
 
   return (
     <>
-      <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
+      <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor="transparent" translucent={true} />
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
       <View style={styles.header}>

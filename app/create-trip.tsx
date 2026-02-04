@@ -80,7 +80,7 @@ const DESTINATIONS = [
 export default function CreateTripScreen() {
     const router = useRouter();
     const params = useLocalSearchParams();
-    const { colors, } = useTheme();
+    const { colors, isDarkMode } = useTheme();
     const prefilledDestination = params.prefilledDestination as string | undefined;
     
     // @ts-ignore
@@ -354,7 +354,7 @@ export default function CreateTripScreen() {
 
     return (
         <>
-            <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
+            <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor="transparent" translucent={true} />
             <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
             <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
                 {/* Header */}
@@ -367,9 +367,7 @@ export default function CreateTripScreen() {
                             <Image source={logoImage} style={styles.headerLogo} resizeMode="contain" />
                             <Text style={[styles.headerLogoText, { color: colors.text }]}>PLANERA</Text>
                         </View>
-                        <TouchableOpacity style={[styles.settingsButton, { backgroundColor: colors.secondary }]}>
-                            <Ionicons name="settings-outline" size={24} color={colors.textMuted} />
-                        </TouchableOpacity>
+                        <View style={{ width: 44 }} />
                     </View>
                     
                     <View style={styles.titleSection}>
@@ -443,16 +441,6 @@ export default function CreateTripScreen() {
                             )}
                         </View>
                     </View>
-                    
-                    <TouchableOpacity 
-                        style={[styles.skipFlightsContainer, { borderTopColor: colors.border }]}
-                        onPress={() => setFormData(prev => ({ ...prev, skipFlights: !prev.skipFlights }))}
-                    >
-                        <View style={[styles.checkbox, { borderColor: colors.text }, formData.skipFlights && { backgroundColor: colors.primary, borderColor: colors.primary }]}>
-                            {formData.skipFlights && <Ionicons name="checkmark" size={14} color={colors.text} />}
-                        </View>
-                        <Text style={[styles.skipFlightsText, { color: colors.text }]}>I already have flights (Skip flight search)</Text>
-                    </TouchableOpacity>
 
                     <TouchableOpacity style={[styles.multiCityButton, { backgroundColor: colors.inputBackground, borderColor: colors.border }]} disabled={true}>
                         <View style={styles.multiCityContent}>
@@ -735,14 +723,15 @@ const styles = StyleSheet.create({
     logoContainer: {
         flexDirection: "row",
         alignItems: "center",
-        gap: 8,
+        gap: 0,
     },
     headerLogo: {
-        width: 28,
-        height: 28,
+        width: 56,
+        height: 56,
+        marginRight: -14,
     },
     headerLogoText: {
-        fontSize: 16,
+        fontSize: 14,
         fontWeight: "700",
         color: "#1A1A1A",
         letterSpacing: 1,

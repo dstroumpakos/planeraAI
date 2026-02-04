@@ -114,7 +114,7 @@ export default function DestinationPreviewScreen() {
 
     return (
         <View style={[styles.container, { backgroundColor: colors.background }]}>
-            <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
+            <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor="transparent" translucent={true} />
             <SafeAreaView style={styles.safeContainer} edges={["top"]}>
                 <View style={styles.heroSection}>
                 {loading ? (
