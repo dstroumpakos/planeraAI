@@ -82,10 +82,10 @@ export default function TabLayout() {
             <Tabs.Screen
                 name="insights"
                 options={{
-                    title: "Insights",
+                    title: "Atlas",
                     tabBarIcon: ({ color, focused }) => (
                         <View style={[styles.iconContainer, focused && { backgroundColor: colors.primary }]}>
-                            <Ionicons name={focused ? "bulb" : "bulb-outline"} size={24} color={focused ? colors.tabBar : color} />
+                            <Ionicons name={focused ? "globe" : "globe-outline"} size={24} color={focused ? colors.tabBar : color} />
                         </View>
                     ),
                 }}

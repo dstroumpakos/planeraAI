@@ -136,9 +136,9 @@ export default function DestinationPreviewScreen() {
                         <Text style={styles.heroEmoji}>{destinationData.emoji}</Text>
                     </View>
                 )}
-                <LinearGradient colors={["transparent", "rgba(0,0,0,0.7)"]} style={styles.heroGradient} />
+                <LinearGradient colors={["transparent", "rgba(0,0,0,0.7)"]} style={styles.heroGradient} pointerEvents="none" />
                 
-                <SafeAreaView style={styles.headerOverlay}>
+                <SafeAreaView style={styles.headerOverlay} pointerEvents="box-none">
                     <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
                         <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
                     </TouchableOpacity>

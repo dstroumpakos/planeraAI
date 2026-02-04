@@ -9,6 +9,7 @@
  */
 
 import type * as _features from "../_features.js";
+import type * as atlas from "../atlas.js";
 import type * as authNative from "../authNative.js";
 import type * as authNativeDb from "../authNativeDb.js";
 import type * as bookingDraft from "../bookingDraft.js";
@@ -43,6 +44,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   _features: typeof _features;
+  atlas: typeof atlas;
   authNative: typeof authNative;
   authNativeDb: typeof authNativeDb;
   bookingDraft: typeof bookingDraft;

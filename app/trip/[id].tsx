@@ -240,9 +240,13 @@ export default function TripDetails() {
     const router = useRouter();
     const { colors, isDarkMode } = useTheme();
     const { token } = useToken();
+    // @ts-ignore
     const trip = useQuery(token ? (api.trips.get as any) : "skip", token ? { token, tripId: id as Id<"trips"> } : "skip");
+    // @ts-ignore
     const updateTrip = useAuthenticatedMutation(api.trips.update as any);
+    // @ts-ignore
     const regenerateTrip = useAuthenticatedMutation(api.trips.regenerate as any);
+    // @ts-ignore
     const trackClick = useMutation(api.bookings.trackClick);
     const insights = useQuery(api.insights.getDestinationInsights, trip ? { destination: trip.destination } : "skip");
     const { image: destinationImage } = useDestinationImage(trip?.destination);
@@ -1201,9 +1205,10 @@ export default function TripDetails() {
                             {day.activities.map((activity: any, actIndex: number) => (
                                 <View key={actIndex} style={styles.timelineItem}>
                                     <View style={styles.timelineLeft}>
-                                        <View style={[styles.timelineIconContainer, { backgroundColor: colors.secondary }]}>
+                                        <View style={[styles.timelineIconContainer, { backgroundColor: activity.isLocalExperience ? colors.primary : colors.secondary }]}>
                                             <Ionicons 
                                                 name={
+                                                    activity.isLocalExperience ? 'star' :
                                                     activity.type === 'restaurant' ? 'restaurant' :
                                                     activity.type === 'museum' ? 'easel' :
                                                     activity.type === 'attraction' ? 'ticket' :
@@ -1216,10 +1221,138 @@ export default function TripDetails() {
                                         <Text style={[styles.timelineTime, { color: colors.textMuted }]}>{activity.time}</Text>
                                         {actIndex < day.activities.length - 1 && <View style={[styles.timelineLine, { backgroundColor: colors.border }]} />}
                                     </View>
-                                    <TouchableOpacity style={[styles.timelineCard, { backgroundColor: colors.card }]}>
+                                    <TouchableOpacity 
+                                        style={[styles.timelineCard, { backgroundColor: colors.card }]}
+                                        onPress={() => {
+                                            const title = activity.title?.toLowerCase() || '';
+                                            const description = activity.description?.toLowerCase() || '';
+                                            const type = activity.type?.toLowerCase() || '';
+                                            
+                                            // Extract the main venue/location from the title
+                                            // Common patterns: "Party at Razzmatazz", "Dinner at Can Culleretes", "Shopping in Gracia"
+                                            const extractVenue = (activityTitle: string): string => {
+                                                const patterns = [
+                                                    /(?:at|@)\s+(.+)$/i,           // "Party at Razzmatazz" → "Razzmatazz"
+                                                    /(?:in|around)\s+(.+)$/i,      // "Shopping in Gracia" → "Gracia"
+                                                    /(?:to|visit)\s+(.+)$/i,       // "Visit to Sagrada Familia" → "Sagrada Familia"
+                                                    /^visit\s+(.+)$/i,             // "Visit Sagrada Familia" → "Sagrada Familia"
+                                                    /^explore\s+(.+)$/i,           // "Explore El Born" → "El Born"
+                                                    /^discover\s+(.+)$/i,          // "Discover Gothic Quarter" → "Gothic Quarter"
+                                                    /:\s*(.+)$/i,                  // "Cooking Class: La Cuina" → "La Cuina"
+                                                ];
+                                                
+                                                for (const pattern of patterns) {
+                                                    const match = activityTitle.match(pattern);
+                                                    if (match && match[1]) {
+                                                        return match[1].trim();
+                                                    }
+                                                }
+                                                
+                                                // If no pattern matches, return the original title
+                                                return activityTitle;
+                                            };
+                                            
+                                            const venue = extractVenue(activity.title || '');
+                                            const searchQuery = encodeURIComponent(`${venue} ${trip.destination}`);
+                                            
+                                            // Helper function to open maps
+                                            const openMaps = () => {
+                                                if (Platform.OS === 'ios') {
+                                                    const appleMapsURL = `maps://maps.apple.com/?q=${searchQuery}`;
+                                                    Linking.openURL(appleMapsURL).catch(() => {
+                                                        Linking.openURL(`https://www.google.com/maps/search/${searchQuery}`);
+                                                    });
+                                                } else {
+                                                    Linking.openURL(`https://www.google.com/maps/search/${searchQuery}`);
+                                                }
+                                            };
+                                            
+                                            // Helper function to open booking search
+                                            const openBooking = () => {
+                                                Linking.openURL(`https://www.getyourguide.com/s/?q=${searchQuery}`);
+                                            };
+                                            
+                                            // Keywords that indicate a PLACE/LOCATION (open Maps)
+                                            const locationKeywords = [
+                                                'neighborhood', 'district', 'quarter', 'area', 'street', 'avenue',
+                                                'market', 'mercado', 'marché', 'mercato', 'bazaar', 'souk',
+                                                'shopping', 'shop', 'store', 'boutique',
+                                                'bar', 'pub', 'café', 'cafe', 'coffee',
+                                                'walk', 'stroll', 'wander', 'explore',
+                                                'park', 'garden', 'beach', 'plaza', 'square', 'piazza',
+                                                'viewpoint', 'lookout', 'mirador',
+                                                'hidden gem', 'local spot', 'local favorite',
+                                                'free', 'gratis'
+                                            ];
+                                            
+                                            // Keywords that indicate BOOKING NEEDED (open GetYourGuide)
+                                            const bookingKeywords = [
+                                                'museum', 'gallery', 'exhibition',
+                                                'class', 'workshop', 'lesson', 'course',
+                                                'cooking', 'culinary', 'cuisine',
+                                                'tour', 'guided', 'guide',
+                                                'ticket', 'entry', 'admission', 'skip the line',
+                                                'show', 'performance', 'concert', 'flamenco', 'fado',
+                                                'experience', 'activity', 'excursion',
+                                                'tasting', 'wine tasting', 'food tour',
+                                                'boat', 'cruise', 'sailing',
+                                                'bike', 'segway', 'scooter'
+                                            ];
+                                            
+                                            // Check if it's a booking-type activity
+                                            const combinedText = `${title} ${description} ${type}`;
+                                            const needsBooking = bookingKeywords.some(keyword => combinedText.includes(keyword));
+                                            const isLocation = locationKeywords.some(keyword => combinedText.includes(keyword));
+                                            
+                                            // Museums and attractions almost always need tickets
+                                            if (type === 'museum' || type === 'attraction') {
+                                                openBooking();
+                                                return;
+                                            }
+                                            
+                                            // Restaurants always go to maps
+                                            if (type === 'restaurant') {
+                                                openMaps();
+                                                return;
+                                            }
+                                            
+                                            // For local experiences, check keywords
+                                            if (activity.isLocalExperience) {
+                                                // If it's clearly a location/place, use maps
+                                                if (isLocation && !needsBooking) {
+                                                    openMaps();
+                                                    return;
+                                                }
+                                                // If it needs booking (class, tour, etc.), use GetYourGuide
+                                                if (needsBooking) {
+                                                    openBooking();
+                                                    return;
+                                                }
+                                                // Default for local experiences: maps (most are places to visit)
+                                                openMaps();
+                                                return;
+                                            }
+                                            
+                                            // For other types, check keywords
+                                            if (needsBooking && !isLocation) {
+                                                openBooking();
+                                                return;
+                                            }
+                                            
+                                            // Default: open maps
+                                            openMaps();
+                                        }}
+                                    >
                                         <View style={styles.timelineCardContent}>
                                             <View style={{flex: 1}}>
-                                                <Text style={[styles.activityTitle, { color: colors.text }]}>{activity.title}</Text>
+                                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                                    <Text style={[styles.activityTitle, { color: colors.text, flex: 1 }]}>{activity.title}</Text>
+                                                    {activity.isLocalExperience && (
+                                                        <View style={[styles.localBadge, { backgroundColor: colors.primary }]}>
+                                                            <Text style={[styles.localBadgeText, { color: colors.text }]}>Local</Text>
+                                                        </View>
+                                                    )}
+                                                </View>
                                                 <Text style={[styles.activityDesc, { color: colors.textMuted }]} numberOfLines={2}>{activity.description}</Text>
                                                 <View style={styles.activityMeta}>
                                                     <View style={[styles.metaBadge, { backgroundColor: colors.secondary }]}>
@@ -1230,6 +1363,13 @@ export default function TripDetails() {
                                                         <Text style={[styles.metaDurationText, { color: colors.textMuted }]}>{activity.duration || '1h'}</Text>
                                                     </View>
                                                 </View>
+                                            </View>
+                                            <View style={styles.googleMapsIcon}>
+                                                <Ionicons 
+                                                    name="open-outline" 
+                                                    size={16} 
+                                                    color={colors.primary} 
+                                                />
                                             </View>
                                         </View>
                                     </TouchableOpacity>
@@ -1242,36 +1382,53 @@ export default function TripDetails() {
                         <View>
                             <Text style={styles.sectionTitle}>Top Restaurants</Text>
                             {trip.itinerary?.restaurants?.map((restaurant: any, index: number) => (
-                                <View key={index} style={styles.card}>
+                                <TouchableOpacity 
+                                    key={index} 
+                                    style={[styles.card, { backgroundColor: colors.card }]}
+                                    onPress={() => {
+                                        if (restaurant.tripAdvisorUrl) {
+                                            Linking.openURL(restaurant.tripAdvisorUrl);
+                                        } else {
+                                            // Fallback to maps search
+                                            const searchQuery = encodeURIComponent(`${restaurant.name} ${trip.destination}`);
+                                            if (Platform.OS === 'ios') {
+                                                const appleMapsURL = `maps://maps.apple.com/?q=${searchQuery}`;
+                                                Linking.openURL(appleMapsURL).catch(() => {
+                                                    Linking.openURL(`https://www.google.com/maps/search/${searchQuery}`);
+                                                });
+                                            } else {
+                                                Linking.openURL(`https://www.google.com/maps/search/${searchQuery}`);
+                                            }
+                                        }
+                                    }}
+                                >
                                     <View style={styles.row}>
                                         <View style={styles.flightInfo}>
                                             <View style={styles.restaurantHeader}>
-                                                <Text style={styles.cardTitle}>{restaurant.name}</Text>
-                                                {restaurant.tripAdvisorUrl && (
-                                                    <Image 
-                                                        source={{ uri: "https://static.tacdn.com/img2/brand_refresh/Tripadvisor_lockup_horizontal_secondary_registered.svg" }} 
-                                                        style={styles.tripAdvisorLogo}
-                                                        resizeMode="contain"
-                                                    />
-                                                )}
+                                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
+                                                    {restaurant.tripAdvisorUrl && (
+                                                        <Image 
+                                                            source={{ uri: "https://files.readme.io/9f59534-Vector_1.png" }}
+                                                            style={{ width: 72, height: 72 }}
+                                                            resizeMode="contain"
+                                                        />
+                                                    )}
+                                                    <Text style={[styles.cardTitle, { color: colors.text }]}>{restaurant.name}</Text>
+                                                </View>
+                                                <Ionicons name="open-outline" size={20} color={colors.primary} />
                                             </View>
-                                            <Text style={styles.cardSubtitle}>{restaurant.cuisine} • {restaurant.priceRange}</Text>
+                                            <Text style={[styles.cardSubtitle, { color: colors.textMuted }]}>{restaurant.cuisine} • {restaurant.priceRange}</Text>
                                             <View style={styles.ratingContainer}>
                                                 <Ionicons name="star" size={14} color="#F59E0B" />
-                                                <Text style={styles.ratingText}>{restaurant.rating} ({restaurant.reviewCount} reviews)</Text>
+                                                <Text style={[styles.ratingText, { color: colors.text }]}>{restaurant.rating} ({restaurant.reviewCount} reviews)</Text>
                                             </View>
-                                            <Text style={styles.addressText}>{restaurant.address}</Text>
+                                            <Text style={[styles.addressText, { color: colors.textMuted }]}>{restaurant.address}</Text>
                                         </View>
-                                        {restaurant.tripAdvisorUrl && (
-                                            <TouchableOpacity onPress={() => Linking.openURL(restaurant.tripAdvisorUrl)}>
-                                                <Ionicons name="open-outline" size={24} color="#1A1A1A" />
-                                            </TouchableOpacity>
-                                        )}
                                     </View>
-                                </View>
+                                </TouchableOpacity>
                             ))}
                             {(!trip.itinerary?.restaurants || trip.itinerary.restaurants.length === 0) && (
-                                <Text style={styles.emptyText}>No restaurants found.</Text>
+                                <Text style={[styles.emptyText, { color: colors.textMuted }]}>No restaurants found.</Text>
                             )}
                         </View>
                     )}
@@ -1306,12 +1463,21 @@ export default function TripDetails() {
                             ) : topSights && topSights.sights && topSights.sights.length > 0 ? (
                                 <>
                                     {topSights.sights.map((sight: any, index: number) => (
-                                        <View key={index} style={[styles.card, { backgroundColor: colors.card }]}>
+                                        <TouchableOpacity 
+                                            key={index} 
+                                            style={[styles.card, { backgroundColor: colors.card }]}
+                                            onPress={() => {
+                                                const searchQuery = encodeURIComponent(`${sight.name} ${trip.destination}`);
+                                                // Sights usually need tickets, so open GetYourGuide
+                                                Linking.openURL(`https://www.getyourguide.com/s/?q=${searchQuery}`);
+                                            }}
+                                        >
                                             <View style={styles.sightHeader}>
                                                 <View style={[styles.sightNumber, { backgroundColor: colors.primary }]}>
                                                     <Text style={[styles.sightNumberText, { color: colors.text }]}>{index + 1}</Text>
                                                 </View>
                                                 <Text style={[styles.cardTitle, { color: colors.text, flex: 1 }]}>{sight.name}</Text>
+                                                <Ionicons name="ticket-outline" size={18} color={colors.primary} />
                                             </View>
                                             <Text style={[styles.activityDesc, { color: colors.textMuted }]}>{sight.shortDescription}</Text>
                                             <View style={styles.sightMeta}>
@@ -1334,7 +1500,7 @@ export default function TripDetails() {
                                                     </View>
                                                 )}
                                             </View>
-                                        </View>
+                                        </TouchableOpacity>
                                     ))}
                                     {/* AI Disclaimer */}
                                     <View style={[styles.aiDisclaimer, { backgroundColor: colors.secondary }]}>
@@ -1402,76 +1568,99 @@ export default function TripDetails() {
 
                     {activeFilter === 'transportation' && (
                         <View>
-                            <Text style={styles.sectionTitle}>Getting Around</Text>
-                            {trip.itinerary?.transportation?.map((option: any, index: number) => (
-                                <View key={index} style={styles.card}>
-                                    <View style={styles.row}>
-                                        <View style={styles.flightInfo}>
-                                            <View style={styles.transportHeader}>
-                                                <Ionicons 
-                                                    name={
-                                                        option.type === 'car_rental' ? 'car' :
-                                                        option.type === 'taxi' ? 'car-sport' :
-                                                        option.type === 'rideshare' ? 'phone-portrait' :
-                                                        'bus'
-                                                    } 
-                                                    size={24} 
-                                                    color="#1A1A1A" 
-                                                />
-                                                <Text style={styles.cardTitle}>
-                                                    {option.provider} {option.service ? `- ${option.service}` : ''}
-                                                </Text>
-                                            </View>
-                                            
-                                            {option.type === 'public_transport' ? (
-                                                <View>
-                                                    {option.options?.map((opt: any, i: number) => (
-                                                        <View key={i} style={styles.transportOption}>
-                                                            <Text style={styles.transportMode}>{opt.mode}</Text>
-                                                            <Text style={styles.transportDesc}>{opt.description}</Text>
-                                                            <Text style={styles.transportPrice}>
-                                                                Single: €{opt.singleTicketPrice} | Day Pass: €{opt.dayPassPrice}
-                                                            </Text>
-                                                        </View>
-                                                    ))}
-                                                </View>
-                                            ) : (
-                                                <View>
-                                                    <Text style={styles.cardSubtitle}>{option.description}</Text>
-                                                    <Text style={styles.price}>
-                                                        {option.estimatedPrice ? `€${option.estimatedPrice}` : `€${option.pricePerDay}/day`}
+                            <Text style={[styles.sectionTitle, { color: colors.text }]}>Getting Around</Text>
+                            {trip.itinerary?.transportation && trip.itinerary.transportation.length > 0 ? (
+                                trip.itinerary.transportation.map((option: any, index: number) => (
+                                    <View key={index} style={[styles.card, { backgroundColor: colors.card }]}>
+                                        <View style={styles.row}>
+                                            <View style={styles.flightInfo}>
+                                                <View style={styles.transportHeader}>
+                                                    <Ionicons 
+                                                        name={
+                                                            option.type === 'car_rental' ? 'car' :
+                                                            option.type === 'taxi' ? 'car-sport' :
+                                                            option.type === 'rideshare' ? 'phone-portrait' :
+                                                            option.type === 'public_transport' ? 'bus' :
+                                                            'navigate'
+                                                        } 
+                                                        size={24} 
+                                                        color={colors.text} 
+                                                    />
+                                                    <Text style={[styles.cardTitle, { color: colors.text }]}>
+                                                        {option.provider || option.type || 'Transport Option'}
+                                                        {option.service ? ` - ${option.service}` : ''}
                                                     </Text>
-                                                    {option.features && (
-                                                        <View style={styles.amenitiesContainer}>
-                                                            {option.features.map((feature: string, i: number) => (
-                                                                <View key={i} style={styles.amenityBadge}>
-                                                                    <Text style={styles.amenityText}>{feature}</Text>
-                                                                </View>
-                                                            ))}
-                                                        </View>
-                                                    )}
                                                 </View>
-                                            )}
+                                                
+                                                {option.type === 'public_transport' && option.options ? (
+                                                    <View>
+                                                        {option.options.map((opt: any, i: number) => (
+                                                            <View key={i} style={[styles.transportOption, { backgroundColor: colors.secondary }]}>
+                                                                <Text style={[styles.transportMode, { color: colors.text }]}>{opt.mode || 'Transit'}</Text>
+                                                                {opt.description && (
+                                                                    <Text style={[styles.transportDesc, { color: colors.textMuted }]}>{opt.description}</Text>
+                                                                )}
+                                                                {(opt.singleTicketPrice || opt.dayPassPrice) && (
+                                                                    <Text style={[styles.transportPrice, { color: colors.primary }]}>
+                                                                        {opt.singleTicketPrice ? `Single: €${opt.singleTicketPrice}` : ''}
+                                                                        {opt.singleTicketPrice && opt.dayPassPrice ? ' | ' : ''}
+                                                                        {opt.dayPassPrice ? `Day Pass: €${opt.dayPassPrice}` : ''}
+                                                                    </Text>
+                                                                )}
+                                                            </View>
+                                                        ))}
+                                                    </View>
+                                                ) : (
+                                                    <View>
+                                                        {option.description && (
+                                                            <Text style={[styles.cardSubtitle, { color: colors.textMuted }]}>{option.description}</Text>
+                                                        )}
+                                                        {option.estimatedPrice && (
+                                                            <Text style={[styles.price, { color: colors.primary }]}>
+                                                                {option.estimatedPrice}
+                                                            </Text>
+                                                        )}
+                                                        {option.features && option.features.length > 0 && (
+                                                            <View style={styles.amenitiesContainer}>
+                                                                {option.features.map((feature: string, i: number) => (
+                                                                    <View key={i} style={[styles.amenityBadge, { backgroundColor: colors.secondary }]}>
+                                                                        <Text style={[styles.amenityText, { color: colors.text }]}>{feature}</Text>
+                                                                    </View>
+                                                                ))}
+                                                            </View>
+                                                        )}
+                                                    </View>
+                                                )}
+                                            </View>
                                         </View>
+                                        {option.bookingUrl && (
+                                            <TouchableOpacity 
+                                                style={[styles.bookButton, { backgroundColor: colors.primary }]}
+                                                onPress={() => Linking.openURL(option.bookingUrl)}
+                                            >
+                                                <Text style={[styles.bookButtonText, { color: colors.text }]}>Book Now</Text>
+                                            </TouchableOpacity>
+                                        )}
                                     </View>
-                                    {option.bookingUrl && (
-                                        <TouchableOpacity 
-                                            style={styles.bookButton}
-                                            onPress={() => Linking.openURL(option.bookingUrl)}
-                                        >
-                                            <Text style={styles.bookButtonText}>Book Now</Text>
-                                        </TouchableOpacity>
-                                    )}
-                                </View>
-                            ))}
-                            {(!trip.itinerary?.transportation || trip.itinerary.transportation.length === 0) && (
-                                <View style={styles.card}>
+                                ))
+                            ) : (
+                                <View style={[styles.card, { backgroundColor: colors.card }]}>
                                     <View style={styles.skippedSection}>
-                                        <Ionicons name="car-outline" size={32} color="#94A3B8" />
-                                        <Text style={styles.skippedTitle}>Transportation Info</Text>
-                                        <Text style={styles.skippedText}>
-                                            Local transportation options for {trip.destination} will appear here.
+                                        <Ionicons name="car-outline" size={32} color={colors.textMuted} />
+                                        <Text style={[styles.skippedTitle, { color: colors.text }]}>Getting Around {trip.destination}</Text>
+                                        <Text style={[styles.skippedText, { color: colors.textMuted }]}>
+                                            We recommend using local taxis, rideshare apps (Uber/Bolt), or public transportation. Check Google Maps for the best routes.
                                         </Text>
+                                        <TouchableOpacity 
+                                            style={[styles.generateSightsButton, { backgroundColor: colors.primary, marginTop: 16 }]}
+                                            onPress={() => {
+                                                const searchQuery = encodeURIComponent(`public transport ${trip.destination}`);
+                                                Linking.openURL(`https://www.google.com/maps/search/${searchQuery}`);
+                                            }}
+                                        >
+                                            <Ionicons name="navigate" size={18} color={colors.text} />
+                                            <Text style={[styles.generateSightsButtonText, { color: colors.text }]}>Open in Google Maps</Text>
+                                        </TouchableOpacity>
                                     </View>
                                 </View>
                             )}
@@ -1959,12 +2148,26 @@ const styles = StyleSheet.create({
     timelineCardContent: {
         flexDirection: "row",
         gap: 12,
+        alignItems: "flex-start",
+    },
+    googleMapsIcon: {
+        marginLeft: 8,
+        justifyContent: "center",
     },
     activityTitle: {
         fontSize: 16,
         fontWeight: "700",
         color: "#1A1A1A",
         marginBottom: 4,
+    },
+    localBadge: {
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: 4,
+    },
+    localBadgeText: {
+        fontSize: 10,
+        fontWeight: "700",
     },
     activityDesc: {
         fontSize: 14,
@@ -2652,6 +2855,33 @@ const styles = StyleSheet.create({
         width: 80,
         height: 20,
         resizeMode: "contain",
+    },
+    tripAdvisorLogoSmall: {
+        width: 20,
+        height: 20,
+        resizeMode: "contain",
+    },
+    tripAdvisorOwl: {
+        width: 24,
+        height: 24,
+    },
+    tripAdvisorBadge: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        marginTop: 12,
+        paddingVertical: 8,
+        paddingHorizontal: 12,
+        backgroundColor: "#FFFFFF",
+        borderRadius: 8,
+        alignSelf: "flex-start",
+        borderWidth: 1,
+        borderColor: "#E2E8F0",
+    },
+    tripAdvisorText: {
+        fontSize: 13,
+        fontWeight: "600",
+        color: "#00AA6C",
     },
     ratingContainer: {
         flexDirection: "row",

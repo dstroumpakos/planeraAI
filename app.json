@@ -42,7 +42,8 @@
       "expo-secure-store",
       "expo-font",
       "expo-web-browser",
-      "@react-native-google-signin/google-signin"
+      "@react-native-google-signin/google-signin",
+      "expo-iap"
     ],
     "experiments": {
       "typedRoutes": true

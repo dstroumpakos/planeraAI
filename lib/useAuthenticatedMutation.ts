@@ -1,4 +1,4 @@
-import { useMutation, useQuery, FunctionReference } from "convex/react";
+import { useMutation, useQuery, useAction, FunctionReference } from "convex/react";
 import { authClient } from "./auth-client.native";
 import { useCallback, useEffect, useState } from "react";
 
@@ -96,6 +96,34 @@ export function useAuthenticatedMutation<Args extends Record<string, any>>(
       }
     },
     [mutationFn, token]
+  );
+}
+
+/**
+ * Hook for authenticated actions
+ * Automatically injects the token from authClient
+ */
+export function useAuthenticatedAction<Args extends Record<string, any>, Result>(
+  actionRef: FunctionReference<"action", "public", Args & { token: string }, Result>,
+  externalToken?: string | null
+) {
+  const { token: internalToken } = useToken();
+  const token = externalToken !== undefined ? externalToken : internalToken;
+  const actionFn = useAction(actionRef);
+
+  return useCallback(
+    async (args: Omit<Args, 'token'>): Promise<Result> => {
+      if (!token) {
+        throw new Error("Authentication required - no token available");
+      }
+      try {
+        return await actionFn({ token, ...args } as any);
+      } catch (error) {
+        console.error("[useAuthenticatedAction] Error:", error);
+        throw error;
+      }
+    },
+    [actionFn, token]
   );
 }
 

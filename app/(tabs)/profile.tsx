@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, TouchableOpacity, Alert, ScrollView, Modal, Image, Platform, StatusBar, TextInput } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Alert, ScrollView, Modal, Image, Platform, StatusBar, TextInput, FlatList, ActivityIndicator, Linking } from "react-native";
 import { authClient } from "@/lib/auth-client";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -6,10 +6,22 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useToken } from "@/lib/useAuthenticatedMutation";
+import { useAuthenticatedMutation } from "@/lib/useAuthenticatedMutation";
 import { useState } from "react";
 import * as ImagePicker from "expo-image-picker";
 import { useTheme } from "@/lib/ThemeContext";
 import * as Haptics from "expo-haptics";
+import { Id } from "@/convex/_generated/dataModel";
+
+const INSIGHT_CATEGORIES = [
+  { id: "food", label: "Food & Drink", icon: "restaurant" },
+  { id: "transport", label: "Transport", icon: "bus" },
+  { id: "neighborhoods", label: "Neighborhoods", icon: "map" },
+  { id: "timing", label: "Best Time", icon: "time" },
+  { id: "hidden_gem", label: "Hidden Gems", icon: "diamond" },
+  { id: "avoid", label: "What to Avoid", icon: "warning" },
+  { id: "other", label: "Other", icon: "information-circle" },
+];
 
 export default function Profile() {
     const router = useRouter();
@@ -19,6 +31,18 @@ export default function Profile() {
     const userPlan = useQuery(api.users.getPlan as any, { token: token || "skip" });
     const userSettings = useQuery(api.users.getSettings as any, { token: token || "skip" });
     
+    // Get completed trips for insights
+    const completedTrips = useQuery(
+        api.insights.getCompletedTrips,
+        token ? { token } : "skip"
+    );
+    
+    // Get user's own insights
+    const myInsights = useQuery(
+        api.insights.getMyInsights,
+        token ? { token } : "skip"
+    );
+    
     // Get profile image URL if profilePicture storage ID exists
     const profileImageUrl = useQuery(
         api.users.getProfileImageUrl as any,
@@ -27,14 +51,30 @@ export default function Profile() {
     
     const generateUploadUrl = useMutation(api.users.generateUploadUrl);
     const saveProfilePicture = useMutation(api.users.saveProfilePicture);
+    const createInsight = useMutation(api.insights.create);
+    const dismissTrip = useMutation(api.insights.dismissTrip);
     
     const { isDarkMode, toggleDarkMode, colors } = useTheme();
     const [menuVisible, setMenuVisible] = useState(false);
     const [uploading, setUploading] = useState(false);
     const [isEditingName, setIsEditingName] = useState(false);
-    const [editedName, setEditedName] = useState(user?.name || "");
+    const [editedName, setEditedName] = useState(userSettings?.name || user?.name || "");
     
-    const updateUserName = useMutation(api.users.updateUserName);
+    // Insights state
+    const [showInsightsModal, setShowInsightsModal] = useState(false);
+    const [selectedInsightTrip, setSelectedInsightTrip] = useState<{
+        _id: Id<"trips">;
+        destination: string;
+        startDate: number;
+        endDate: number;
+        travelers: number;
+    } | null>(null);
+    const [insightContent, setInsightContent] = useState("");
+    const [insightCategory, setInsightCategory] = useState("other");
+    const [insightStep, setInsightStep] = useState<"trips" | "form">("trips");
+    
+    // @ts-ignore
+    const updateUserName = useAuthenticatedMutation(api.users.updateUserName as any);
 
     const handleLogout = async () => {
         try {
@@ -115,7 +155,7 @@ export default function Profile() {
 
     const user = session?.user;
     const tripCount = trips?.length || 0;
-    const completedTrips = trips?.filter((t: any) => t.status === "completed").length || 0;
+    const completedTripsCount = trips?.filter((t: any) => t.status === "completed").length || 0;
     const isPremium = userPlan?.plan === "premium";
 
     const handleSaveName = async () => {
@@ -127,6 +167,7 @@ export default function Profile() {
         try {
             await updateUserName({ token: token || "", name: editedName.trim() });
             setIsEditingName(false);
+            await new Promise(resolve => setTimeout(resolve, 500));
             if (Platform.OS !== 'web') {
                 Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             }
@@ -138,21 +179,63 @@ export default function Profile() {
 
     const handleCancelEditName = () => {
         setIsEditingName(false);
-        setEditedName(user?.name || "");
+        setEditedName(userSettings?.name || user?.name || "");
+    };
+
+    // Insights handlers
+    const handleSubmitInsight = async () => {
+        if (!selectedInsightTrip || !insightContent) {
+            Alert.alert("Error", "Please select a trip and write your insight");
+            return;
+        }
+
+        try {
+            await createInsight({
+                destination: selectedInsightTrip.destination,
+                content: insightContent,
+                category: insightCategory as any,
+                verified: true,
+            });
+            resetInsightForm();
+            setShowInsightsModal(false);
+            Alert.alert("Success", "Thank you for sharing your insight! It will help other travelers.");
+        } catch (error) {
+            console.error(error);
+            Alert.alert("Error", "Failed to share insight");
+        }
+    };
+
+    const resetInsightForm = () => {
+        setSelectedInsightTrip(null);
+        setInsightContent("");
+        setInsightCategory("other");
+        setInsightStep("trips");
+    };
+
+    const handleSelectInsightTrip = (trip: any) => {
+        setSelectedInsightTrip(trip);
+        setInsightStep("form");
+    };
+
+    const formatInsightDate = (timestamp: number) => {
+        return new Date(timestamp).toLocaleDateString("en-US", {
+            month: "short",
+            year: "numeric",
+        });
     };
 
     const menuItems = [
-        {
-            title: "My Flights",
-            subtitle: "View booked flights & policies",
-            icon: "airplane-outline",
-            iconBg: isDarkMode ? "#1E3A5F" : "#DBEAFE",
-            iconColor: "#2563EB",
-            action: () => router.push("/settings/my-flights")
-        },
+        // {
+        //     title: "My Flights",
+        //     subtitle: "View booked flights & policies",
+        //     icon: "airplane-outline",
+        //     iconBg: isDarkMode ? "#1E3A5F" : "#DBEAFE",
+        //     iconColor: "#2563EB",
+        //     action: () => router.push("/settings/my-flights")
+        // },
         {
             title: "Saved Trips",
-            subtitle: `${completedTrips} upcoming, ${tripCount - completedTrips} past`,
+            subtitle: `${completedTripsCount} upcoming, ${tripCount - completedTripsCount} past`,
             icon: "bookmark-outline",
             iconBg: isDarkMode ? "#3D3D00" : "#FFF8E1",
             iconColor: colors.primary,
@@ -168,7 +251,7 @@ export default function Profile() {
         // },
         {
             title: "Travel Preferences",
-            subtitle: "Dietary, Airlines, Seats",
+            subtitle: "Airport, Budget, Interests",
             icon: "options-outline",
             iconBg: isDarkMode ? "#3D3D00" : "#FFF8E1",
             iconColor: colors.primary,
@@ -241,7 +324,13 @@ export default function Profile() {
                         <View style={styles.menuDivider} />
 
                         {/* Help & Support */}
-                        <TouchableOpacity style={styles.menuDropdownItem}>
+                        <TouchableOpacity 
+                            style={styles.menuDropdownItem}
+                            onPress={() => {
+                                setMenuVisible(false);
+                                Linking.openURL('mailto:support@planeraai.app?subject=Planera%20Support%20Request');
+                            }}
+                        >
                             <Ionicons name="help-circle-outline" size={20} color={colors.text} />
                             <Text style={styles.menuDropdownText}>Help & Support</Text>
                         </TouchableOpacity>
@@ -307,11 +396,11 @@ export default function Profile() {
                         <TouchableOpacity 
                             style={styles.nameContainer}
                             onPress={() => {
-                                setEditedName(user?.name || "");
+                                setEditedName(userSettings?.name || user?.name || "");
                                 setIsEditingName(true);
                             }}
                         >
-                            <Text style={styles.userName}>{user?.name || "Planera User"}</Text>
+                            <Text style={styles.userName}>{userSettings?.name || user?.name || "Planera User"}</Text>
                             <Ionicons name="pencil-outline" size={16} color={colors.primary} />
                         </TouchableOpacity>
                     ) : (
@@ -348,6 +437,40 @@ export default function Profile() {
                         </Text>
                     </View>
                 </View>
+
+                {/* Travel Interests */}
+                {userSettings?.interests && userSettings.interests.length > 0 && (
+                    <View style={styles.interestsSection}>
+                        <Text style={styles.interestsSectionTitle}>Travel Interests</Text>
+                        <View style={styles.interestsTags}>
+                            {userSettings.interests.map((interest: string) => (
+                                <View 
+                                    key={interest}
+                                    style={[styles.interestTag, { backgroundColor: colors.primary, borderColor: colors.primary }]}
+                                >
+                                    <Ionicons 
+                                        name={
+                                            interest === "Adventure" ? "trail-sign" : 
+                                            interest === "Culinary" ? "restaurant" : 
+                                            interest === "Culture" ? "library" :
+                                            interest === "Relaxation" ? "cafe" :
+                                            interest === "Nightlife" ? "wine" :
+                                            interest === "Nature" ? "leaf" :
+                                            interest === "History" ? "book" :
+                                            interest === "Shopping" ? "cart" :
+                                            interest === "Luxury" ? "diamond" :
+                                            "people"
+                                        } 
+                                        size={16}
+                                        color="#1A1A1A"
+                                        style={{ marginRight: 6 }}
+                                    />
+                                    <Text style={styles.interestTagText}>{interest}</Text>
+                                </View>
+                            ))}
+                        </View>
+                    </View>
+                )}
 
                 {/* Premium Upsell Card */}
                 {!isPremium && (
@@ -393,9 +516,120 @@ export default function Profile() {
                     ))}
                 </View>
 
+                {/* Share Travel Insights Section */}
+                {completedTrips && completedTrips.length > 0 && (
+                    <>
+                        <Text style={styles.sectionTitle}>SHARE YOUR EXPERIENCE</Text>
+                        <TouchableOpacity 
+                            style={[styles.insightsCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+                            onPress={() => router.push("/settings/share-insight")}
+                        >
+                            <View style={[styles.insightsIconContainer, { backgroundColor: isDarkMode ? 'rgba(255, 229, 0, 0.2)' : '#FFF8E1' }]}>
+                                <Ionicons name="bulb" size={24} color={colors.primary} />
+                            </View>
+                            <View style={styles.insightsTextContainer}>
+                                <Text style={[styles.insightsTitle, { color: colors.text }]}>Share Travel Tips</Text>
+                                <Text style={[styles.insightsSubtitle, { color: colors.textMuted }]}>
+                                    Help other travelers with insights from your {completedTrips.length} completed trip{completedTrips.length > 1 ? 's' : ''}
+                                </Text>
+                            </View>
+                            <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+                        </TouchableOpacity>
+                    </>
+                )}
+
+                {/* My Traveler Insights Section */}
+                {myInsights && myInsights.length > 0 && (
+                    <>
+                        <Text style={styles.sectionTitle}>MY TRAVELER INSIGHTS</Text>
+                        <ScrollView 
+                            horizontal 
+                            showsHorizontalScrollIndicator={false}
+                            style={styles.myInsightsScroll}
+                            contentContainerStyle={{ paddingHorizontal: 16 }}
+                        >
+                            {myInsights.map((insight: any) => (
+                                <View 
+                                    key={insight._id} 
+                                    style={[
+                                        styles.myInsightCard, 
+                                        { backgroundColor: colors.card, borderColor: colors.border }
+                                    ]}
+                                >
+                                    <View style={styles.myInsightHeader}>
+                                        <View style={[
+                                            styles.myInsightCategoryBadge,
+                                            { backgroundColor: isDarkMode ? 'rgba(255, 229, 0, 0.2)' : '#FFF8E1' }
+                                        ]}>
+                                            <Ionicons 
+                                                name={
+                                                    insight.category === 'food' ? 'restaurant' :
+                                                    insight.category === 'transport' ? 'bus' :
+                                                    insight.category === 'hidden_gem' ? 'diamond' :
+                                                    insight.category === 'avoid' ? 'warning' :
+                                                    insight.category === 'neighborhoods' ? 'map' :
+                                                    insight.category === 'timing' ? 'time' :
+                                                    'bulb'
+                                                }
+                                                size={14} 
+                                                color={colors.primary}
+                                            />
+                                            <Text style={[styles.myInsightCategoryText, { color: colors.primary }]}>
+                                                {insight.category.replace('_', ' ')}
+                                            </Text>
+                                        </View>
+                                        <View style={styles.myInsightLikes}>
+                                            <Ionicons name="heart" size={14} color="#F59E0B" />
+                                            <Text style={[styles.myInsightLikesText, { color: colors.textMuted }]}>{insight.likes}</Text>
+                                        </View>
+                                    </View>
+                                    <Text style={[styles.myInsightDestination, { color: colors.text }]}>
+                                        {insight.destination}
+                                    </Text>
+                                    <Text style={[styles.myInsightContent, { color: colors.textMuted }]} numberOfLines={3}>
+                                        {insight.content}
+                                    </Text>
+                                    <View style={styles.myInsightFooter}>
+                                        <Text style={[styles.myInsightDate, { color: colors.textMuted }]}>
+                                            {new Date(insight.createdAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+                                        </Text>
+                                        <View style={[
+                                            styles.myInsightStatusBadge,
+                                            { 
+                                                backgroundColor: insight.moderationStatus === 'approved' 
+                                                    ? (isDarkMode ? 'rgba(16, 185, 129, 0.2)' : '#D1FAE5')
+                                                    : insight.moderationStatus === 'pending'
+                                                    ? (isDarkMode ? 'rgba(251, 191, 36, 0.2)' : '#FEF3C7')
+                                                    : (isDarkMode ? 'rgba(239, 68, 68, 0.2)' : '#FEE2E2')
+                                            }
+                                        ]}>
+                                            <Text style={[
+                                                styles.myInsightStatusText,
+                                                { 
+                                                    color: insight.moderationStatus === 'approved' 
+                                                        ? '#059669'
+                                                        : insight.moderationStatus === 'pending'
+                                                        ? '#D97706'
+                                                        : '#DC2626'
+                                                }
+                                            ]}>
+                                                {insight.moderationStatus === 'approved' ? 'Published' : 
+                                                 insight.moderationStatus === 'pending' ? 'Pending' : 'Rejected'}
+                                            </Text>
+                                        </View>
+                                    </View>
+                                </View>
+                            ))}
+                        </ScrollView>
+                    </>
+                )}
+
                 {/* Help & Support */}
                 <View style={styles.helpSection}>
-                    <TouchableOpacity style={styles.helpItem}>
+                    <TouchableOpacity 
+                        style={styles.helpItem}
+                        onPress={() => Linking.openURL('mailto:support@planeraai.app?subject=Planera%20Support%20Request')}
+                    >
                         <Ionicons name="help-circle-outline" size={20} color={colors.textSecondary} />
                         <Text style={styles.helpText}>Help & Support</Text>
                     </TouchableOpacity>
@@ -412,6 +646,120 @@ export default function Profile() {
                 {/* Bottom Spacing */}
                 <View style={{ height: 120 }} />
             </ScrollView>
+
+            {/* Share Insights Modal */}
+            <Modal
+                visible={showInsightsModal}
+                animationType="slide"
+                presentationStyle="pageSheet"
+                onRequestClose={() => {
+                    setShowInsightsModal(false);
+                    resetInsightForm();
+                }}
+            >
+                <SafeAreaView style={[styles.insightsModalContainer, { backgroundColor: colors.background }]}>
+                    <View style={[styles.insightsModalHeader, { borderBottomColor: colors.border }]}>
+                        <TouchableOpacity 
+                            onPress={() => {
+                                if (insightStep === "form") {
+                                    setInsightStep("trips");
+                                } else {
+                                    setShowInsightsModal(false);
+                                    resetInsightForm();
+                                }
+                            }}
+                        >
+                            <Ionicons name={insightStep === "form" ? "chevron-back" : "close"} size={24} color={colors.text} />
+                        </TouchableOpacity>
+                        <Text style={[styles.insightsModalTitle, { color: colors.text }]}>Share Your Tips</Text>
+                        <View style={{ width: 24 }} />
+                    </View>
+
+                    <ScrollView style={styles.insightsModalContent} contentContainerStyle={styles.insightsModalScrollContent}>
+                        {insightStep === "trips" ? (
+                            <>
+                                <Text style={[styles.insightsModalSectionTitle, { color: colors.text }]}>Select a Completed Trip</Text>
+                                <Text style={[styles.insightsModalSectionSubtitle, { color: colors.textMuted }]}>
+                                    Choose a trip you've taken to share your experience
+                                </Text>
+                                {completedTrips?.map((trip: any) => (
+                                    <TouchableOpacity
+                                        key={trip._id}
+                                        style={[styles.insightTripCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+                                        onPress={() => handleSelectInsightTrip(trip)}
+                                    >
+                                        <View style={[styles.insightTripIcon, { backgroundColor: isDarkMode ? 'rgba(255, 229, 0, 0.2)' : '#FFF8E1' }]}>
+                                            <Ionicons name="airplane" size={20} color={colors.primary} />
+                                        </View>
+                                        <View style={styles.insightTripInfo}>
+                                            <Text style={[styles.insightTripDestination, { color: colors.text }]}>{trip.destination}</Text>
+                                            <Text style={[styles.insightTripDates, { color: colors.textMuted }]}>
+                                                {formatInsightDate(trip.startDate)} - {formatInsightDate(trip.endDate)}
+                                            </Text>
+                                        </View>
+                                        <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+                                    </TouchableOpacity>
+                                ))}
+                            </>
+                        ) : (
+                            <>
+                                <Text style={[styles.insightsModalSectionSubtitle, { color: colors.textMuted, marginBottom: 20 }]}>
+                                    Sharing insights for: <Text style={{ color: colors.primary, fontWeight: '600' }}>{selectedInsightTrip?.destination}</Text>
+                                </Text>
+
+                                <Text style={[styles.insightFormLabel, { color: colors.text }]}>Category</Text>
+                                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.insightCategoryScroll}>
+                                    {INSIGHT_CATEGORIES.map((cat) => (
+                                        <TouchableOpacity
+                                            key={cat.id}
+                                            style={[
+                                                styles.insightCategoryChip,
+                                                { backgroundColor: colors.inputBackground, borderColor: colors.border },
+                                                insightCategory === cat.id && { backgroundColor: colors.primary, borderColor: colors.primary },
+                                            ]}
+                                            onPress={() => setInsightCategory(cat.id)}
+                                        >
+                                            <Ionicons
+                                                name={cat.icon as any}
+                                                size={16}
+                                                color={insightCategory === cat.id ? colors.text : colors.textMuted}
+                                            />
+                                            <Text
+                                                style={[
+                                                    styles.insightCategoryText,
+                                                    { color: colors.textMuted },
+                                                    insightCategory === cat.id && { color: colors.text },
+                                                ]}
+                                            >
+                                                {cat.label}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    ))}
+                                </ScrollView>
+
+                                <Text style={[styles.insightFormLabel, { color: colors.text, marginTop: 20 }]}>Your Insight</Text>
+                                <TextInput
+                                    style={[styles.insightTextArea, { backgroundColor: colors.inputBackground, color: colors.text, borderColor: colors.border }]}
+                                    placeholder="Share your experience, tips, or recommendations..."
+                                    placeholderTextColor={colors.textMuted}
+                                    value={insightContent}
+                                    onChangeText={setInsightContent}
+                                    multiline
+                                    numberOfLines={5}
+                                />
+
+                                <TouchableOpacity 
+                                    style={[styles.insightSubmitButton, { backgroundColor: colors.primary }]} 
+                                    onPress={handleSubmitInsight}
+                                >
+                                    <Ionicons name="send" size={18} color={colors.text} />
+                                    <Text style={[styles.insightSubmitText, { color: colors.text }]}>Share Insight</Text>
+                                </TouchableOpacity>
+                            </>
+                        )}
+                    </ScrollView>
+                </SafeAreaView>
+            </Modal>
         </SafeAreaView>
         </>
     );
@@ -506,6 +854,34 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
         fontSize: 14,
         color: colors.textMuted,
         fontWeight: "500",
+    },
+    interestsSection: {
+        marginBottom: 24,
+    },
+    interestsSectionTitle: {
+        fontSize: 14,
+        fontWeight: "700",
+        color: colors.text,
+        marginBottom: 12,
+    },
+    interestsTags: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: 10,
+    },
+    interestTag: {
+        flexDirection: "row",
+        alignItems: "center",
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+        borderRadius: 20,
+        backgroundColor: colors.primary,
+        borderWidth: 1,
+    },
+    interestTagText: {
+        fontSize: 14,
+        fontWeight: "600",
+        color: "#1A1A1A",
     },
     premiumCard: {
         backgroundColor: isDarkMode ? "#1A2433" : "#1A2433",
@@ -727,4 +1103,199 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
     editNameButtonText: {
         fontSize: 16,
         fontWeight: "600",
-    },});
+    },
+    // Insights Section Styles
+    insightsCard: {
+        flexDirection: "row",
+        alignItems: "center",
+        padding: 16,
+        borderRadius: 16,
+        borderWidth: 1,
+        marginBottom: 24,
+    },
+    insightsIconContainer: {
+        width: 48,
+        height: 48,
+        borderRadius: 12,
+        justifyContent: "center",
+        alignItems: "center",
+        marginRight: 12,
+    },
+    insightsTextContainer: {
+        flex: 1,
+    },
+    insightsTitle: {
+        fontSize: 16,
+        fontWeight: "600",
+        marginBottom: 4,
+    },
+    insightsSubtitle: {
+        fontSize: 13,
+    },
+    // My Insights Section Styles
+    myInsightsScroll: {
+        marginBottom: 24,
+    },
+    myInsightCard: {
+        width: 260,
+        padding: 16,
+        borderRadius: 16,
+        borderWidth: 1,
+        marginRight: 12,
+    },
+    myInsightHeader: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: 10,
+    },
+    myInsightCategoryBadge: {
+        flexDirection: "row",
+        alignItems: "center",
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 12,
+        gap: 4,
+    },
+    myInsightCategoryText: {
+        fontSize: 12,
+        fontWeight: "600",
+        textTransform: "capitalize",
+    },
+    myInsightLikes: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+    },
+    myInsightLikesText: {
+        fontSize: 12,
+        fontWeight: "500",
+    },
+    myInsightDestination: {
+        fontSize: 15,
+        fontWeight: "700",
+        marginBottom: 6,
+    },
+    myInsightContent: {
+        fontSize: 13,
+        lineHeight: 19,
+        marginBottom: 12,
+    },
+    myInsightFooter: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+    },
+    myInsightDate: {
+        fontSize: 12,
+    },
+    myInsightStatusBadge: {
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 8,
+    },
+    myInsightStatusText: {
+        fontSize: 11,
+        fontWeight: "600",
+    },
+    // Insights Modal Styles
+    insightsModalContainer: {
+        flex: 1,
+    },
+    insightsModalHeader: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        padding: 16,
+        borderBottomWidth: 1,
+    },
+    insightsModalTitle: {
+        fontSize: 18,
+        fontWeight: "700",
+    },
+    insightsModalContent: {
+        flex: 1,
+    },
+    insightsModalScrollContent: {
+        padding: 20,
+    },
+    insightsModalSectionTitle: {
+        fontSize: 20,
+        fontWeight: "700",
+        marginBottom: 8,
+    },
+    insightsModalSectionSubtitle: {
+        fontSize: 14,
+        marginBottom: 24,
+    },
+    insightTripCard: {
+        flexDirection: "row",
+        alignItems: "center",
+        padding: 16,
+        borderRadius: 12,
+        borderWidth: 1,
+        marginBottom: 12,
+    },
+    insightTripIcon: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        justifyContent: "center",
+        alignItems: "center",
+        marginRight: 12,
+    },
+    insightTripInfo: {
+        flex: 1,
+    },
+    insightTripDestination: {
+        fontSize: 16,
+        fontWeight: "600",
+        marginBottom: 4,
+    },
+    insightTripDates: {
+        fontSize: 13,
+    },
+    insightFormLabel: {
+        fontSize: 14,
+        fontWeight: "600",
+        marginBottom: 12,
+    },
+    insightCategoryScroll: {
+        marginBottom: 8,
+    },
+    insightCategoryChip: {
+        flexDirection: "row",
+        alignItems: "center",
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 8,
+        marginRight: 8,
+        borderWidth: 1,
+    },
+    insightCategoryText: {
+        marginLeft: 6,
+        fontWeight: "500",
+        fontSize: 13,
+    },
+    insightTextArea: {
+        height: 120,
+        padding: 16,
+        borderRadius: 12,
+        borderWidth: 1,
+        fontSize: 16,
+        textAlignVertical: "top",
+    },
+    insightSubmitButton: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+        borderRadius: 12,
+        marginTop: 24,
+        gap: 8,
+    },
+    insightSubmitText: {
+        fontSize: 16,
+        fontWeight: "700",
+    },
+});

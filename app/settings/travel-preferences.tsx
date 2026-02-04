@@ -194,6 +194,24 @@ export default function TravelPreferences() {
                                 ]}
                                 onPress={() => toggleInterest(interest)}
                             >
+                                <Ionicons 
+                                    name={
+                                        interest === "Adventure" ? "trail-sign" : 
+                                        interest === "Culinary" ? "restaurant" : 
+                                        interest === "Culture" ? "library" :
+                                        interest === "Relaxation" ? "cafe" :
+                                        interest === "Nightlife" ? "wine" :
+                                        interest === "Nature" ? "leaf" :
+                                        interest === "History" ? "book" :
+                                        interest === "Shopping" ? "cart" :
+                                        interest === "Luxury" ? "diamond" :
+                                        interest === "Family" ? "people" :
+                                        "sparkles"
+                                    } 
+                                    size={16} 
+                                    color={defaultInterests.includes(interest) ? "#1A1A1A" : "#FFE500"}
+                                    style={{ marginRight: 6 }}
+                                />
                                 <Text style={[
                                     styles.interestText,
                                     defaultInterests.includes(interest) && styles.interestTextActive
@@ -236,8 +254,8 @@ export default function TravelPreferences() {
                     </ScrollView>
                 </View>
 
-                {/* Toggles */}
-                <View style={styles.section}>
+                {/* Toggles - Hidden in V1 */}
+                {/* <View style={styles.section}>
                     <Text style={styles.sectionTitle}>Default Settings</Text>
                     
                     <View style={styles.toggleRow}>
@@ -267,7 +285,7 @@ export default function TravelPreferences() {
                             thumbColor={Platform.OS === "ios" ? "#FFFFFF" : defaultSkipHotel ? "#FFFFFF" : "#F1F5F9"}
                         />
                     </View>
-                </View>
+                </View> */}
 
                 <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
                     <Text style={styles.saveButtonText}>Save Preferences</Text>
@@ -347,8 +365,10 @@ const styles = StyleSheet.create({
         gap: 8,
     },
     interestChip: {
-        paddingHorizontal: 16,
-        paddingVertical: 8,
+        flexDirection: "row",
+        alignItems: "center",
+        paddingHorizontal: 14,
+        paddingVertical: 10,
         borderRadius: 20,
         backgroundColor: "#FFF8E1",
         borderWidth: 2,

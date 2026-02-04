@@ -95,6 +95,24 @@ export const hasCompletedTripTo = authQuery({
     },
 });
 
+// Get user's own insights
+export const getMyInsights = authQuery({
+    args: { token: v.string() },
+    handler: async (ctx: any) => {
+        if (!ctx.user) {
+            return [];
+        }
+
+        const insights = await ctx.db
+            .query("insights")
+            .filter((q: any) => q.eq(q.field("userId"), ctx.user._id))
+            .order("desc")
+            .take(20);
+
+        return insights;
+    },
+});
+
 // Traveler insights functions
 export const list: any = authQuery({
     args: {
