@@ -6,6 +6,7 @@ interface UpsertResult {
   userId: string;
   sessionId: string;
   token: string;
+  isNewUser: boolean;
   user: {
     id: string;
     email?: string;
@@ -29,6 +30,7 @@ export const upsertUserAndCreateSession = internalMutation({
     userId: v.string(),
     sessionId: v.string(),
     token: v.string(),
+    isNewUser: v.boolean(),
     user: v.object({
       id: v.string(),
       email: v.optional(v.string()),
@@ -56,7 +58,8 @@ export const upsertUserAndCreateSession = internalMutation({
       .withIndex("by_user", (q) => q.eq("userId", uniqueUserId))
       .unique();
     
-    console.log("[AuthNativeDb] Existing user settings:", existingSettings ? "found" : "not found");
+    const isNewUser = !existingSettings;
+    console.log("[AuthNativeDb] Existing user settings:", existingSettings ? "found" : "not found", "isNewUser:", isNewUser);
     
     if (!existingSettings) {
       // Create new user settings
@@ -102,7 +105,7 @@ export const upsertUserAndCreateSession = internalMutation({
         userId: uniqueUserId,
         plan: "free",
         tripsGenerated: 0,
-        tripCredits: 3, // Free tier gets 3 trips
+        tripCredits: 1, // Free tier gets 1 trip
       });
       console.log("[AuthNativeDb] Created user plan:", newPlanId);
     }
@@ -127,6 +130,7 @@ export const upsertUserAndCreateSession = internalMutation({
       userId: uniqueUserId,
       sessionId,
       token: args.sessionToken,
+      isNewUser,
       user: {
         id: uniqueUserId,
         email: args.email,

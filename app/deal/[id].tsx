@@ -1,8 +1,10 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Linking } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Linking } from "react-native";
+import { Image } from "expo-image";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { DEALS } from "@/lib/data";
+import { optimizeUnsplashUrl, IMAGE_SIZES } from "@/lib/imageUtils";
 
 // NOTE: Using fixed width for hotel cards instead of Dimensions
 // This avoids top-level native API calls
@@ -39,7 +41,13 @@ export default function DealDetails() {
             <ScrollView contentContainerStyle={styles.scrollContent}>
                 {/* Hero Image */}
                 <View style={styles.imageContainer}>
-                    <Image source={{ uri: deal.image }} style={styles.heroImage} />
+                    <Image 
+                        source={{ uri: optimizeUnsplashUrl(deal.image, IMAGE_SIZES.HERO) }} 
+                        style={styles.heroImage}
+                        contentFit="cover"
+                        cachePolicy="disk"
+                        transition={300}
+                    />
                     <TouchableOpacity 
                         style={styles.backButtonAbsolute} 
                         onPress={() => router.back()}
@@ -120,7 +128,13 @@ export default function DealDetails() {
                         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hotelList}>
                             {deal.hotels.map((hotel, index) => (
                                 <View key={index} style={styles.hotelCard}>
-                                    <Image source={{ uri: hotel.image }} style={styles.hotelImage} />
+                                    <Image 
+                                        source={{ uri: optimizeUnsplashUrl(hotel.image, IMAGE_SIZES.CARD) }} 
+                                        style={styles.hotelImage}
+                                        contentFit="cover"
+                                        cachePolicy="disk"
+                                        transition={200}
+                                    />
                                     <View style={styles.hotelContent}>
                                         <Text style={styles.hotelName} numberOfLines={1}>{hotel.name}</Text>
                                         <View style={styles.ratingRow}>

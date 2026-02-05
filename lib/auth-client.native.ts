@@ -52,6 +52,7 @@ export interface AuthResponse<T = any> {
 export interface SessionData {
   session: AuthSession | null;
   user: AuthUser | null;
+  isNewUser?: boolean;
 }
 
 // Helper to safely access SecureStore - ONLY call after mount
@@ -674,7 +675,7 @@ const response = await fetch(`${CONVEX_URL}/api/action`, {
           const session = createSessionFromResponse(result.token, result.user);
           await storeSession(session, result.user);
 
-          return { data: { session, user: result.user }, error: null };
+          return { data: { session, user: result.user, isNewUser: result.isNewUser }, error: null };
         } catch (error: any) {
           console.error("[Auth] Sign-up error:", error);
           return { data: null, error: error as Error };

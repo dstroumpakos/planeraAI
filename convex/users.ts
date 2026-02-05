@@ -41,12 +41,14 @@ export const getPlan = authQuery({
             .unique();
 
         if (!userPlan) {
+            // Return default plan values - ensureUserPlan mutation will create the record
             return { 
                 plan: "free", 
                 tripsGenerated: 0,
-                tripCredits: 0,
+                tripCredits: 1,
                 subscriptionExpiresAt: null,
                 isSubscriptionActive: false,
+                _needsCreation: true,
             };
         }
 
@@ -59,6 +61,29 @@ export const getPlan = authQuery({
             tripCredits: userPlan.tripCredits ?? 0,
             isSubscriptionActive,
         };
+    },
+});
+
+// Mutation to create user plan if it doesn't exist
+export const ensureUserPlan = authMutation({
+    args: {
+        token: v.string(),
+    },
+    handler: async (ctx: any) => {
+        const existingPlan = await ctx.db
+            .query("userPlans")
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
+            .unique();
+
+        if (!existingPlan) {
+            await ctx.db.insert("userPlans", {
+                userId: ctx.user._id,
+                plan: "free",
+                tripsGenerated: 0,
+                tripCredits: 1, // Free tier gets 1 trip
+            });
+        }
+        return { success: true };
     },
 });
 

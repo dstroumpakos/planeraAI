@@ -14,9 +14,9 @@ import {
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useQuery, useMutation } from "convex/react";
+import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import { useToken } from "@/lib/useAuthenticatedMutation";
+import { useToken, useAuthenticatedMutation } from "@/lib/useAuthenticatedMutation";
 import { useTheme } from "@/lib/ThemeContext";
 import * as Haptics from "expo-haptics";
 import { Id } from "@/convex/_generated/dataModel";
@@ -51,7 +51,7 @@ export default function ShareInsightPage() {
     );
     
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const createInsight = useMutation((api as any).insights.create);
+    const createInsight = useAuthenticatedMutation((api as any).insights.create);
     
     const [step, setStep] = useState<"trip" | "category" | "content">("trip");
     const [selectedTrip, setSelectedTrip] = useState<CompletedTrip | null>(null);

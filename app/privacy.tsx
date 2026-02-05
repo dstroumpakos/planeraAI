@@ -47,10 +47,7 @@ export default function PrivacyPolicy() {
                     <Text style={styles.bullet}>• Feedback, reviews, or support messages</Text>
 
                     <Text style={styles.subtitle}>2.2 Automatically Collected Information</Text>
-                    <Text style={styles.text}>When you use the Service, we may automatically collect:</Text>
-                    <Text style={styles.bullet}>• Device information (device type, operating system, app version)</Text>
-                    <Text style={styles.bullet}>• Log data (IP address, access times, pages viewed)</Text>
-                    <Text style={styles.bullet}>• Usage data (features used, interactions, generated trips)</Text>
+                    <Text style={styles.text}>When you use the Service, we may automatically collect limited technical data such as crash logs and basic diagnostics to improve app stability and performance.</Text>
 
                     <Text style={styles.subtitle}>2.3 Third-Party Data</Text>
                     <Text style={styles.text}>Planera may receive limited data from third-party services (such as analytics, authentication, or payment providers), in accordance with their privacy policies.</Text>
@@ -91,7 +88,7 @@ export default function PrivacyPolicy() {
                     <Text style={styles.bullet}>• Provide the Service</Text>
                     <Text style={styles.bullet}>• Comply with legal obligations</Text>
                     <Text style={styles.bullet}>• Resolve disputes and enforce agreements</Text>
-                    <Text style={styles.text}>You may request deletion of your data at any time.</Text>
+                    <Text style={styles.text}>You may request deletion of your account and associated personal data by contacting us at privacy@planeraai.app.</Text>
                 </Section>
 
                 <Section title="8. Data Security">

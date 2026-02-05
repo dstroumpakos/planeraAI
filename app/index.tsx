@@ -89,8 +89,13 @@ export default function Index() {
                     } else {
                         Alert.alert("Error", result.error.message || "Sign up failed");
                     }
+                } else {
+                    // Sign-up successful - redirect to onboarding after brief delay
+                    console.log("[Index] Email Sign-Up successful, redirecting to onboarding...");
+                    setTimeout(() => {
+                        router.replace("/onboarding");
+                    }, 1000);
                 }
-                // Success: session storage triggers auth provider -> isAuthenticated becomes true
             } else {
                 const result = await authClient.signIn.email({ email, password });
                 if (result.error) {
@@ -103,8 +108,13 @@ export default function Index() {
                     } else {
                         Alert.alert("Error", result.error.message || "Sign in failed");
                     }
+                } else {
+                    // Sign-in successful - redirect after brief delay to let auth state update
+                    console.log("[Index] Email Sign-In successful, redirecting...");
+                    setTimeout(() => {
+                        router.replace("/(tabs)");
+                    }, 1000);
                 }
-                // Success: session storage triggers auth provider -> isAuthenticated becomes true
             }
         } catch (error: any) {
             Alert.alert("Error", error.message || "Authentication failed");

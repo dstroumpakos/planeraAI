@@ -1,6 +1,8 @@
 import React from "react";
-import { View, Text, StyleSheet, Pressable, Linking, Image } from "react-native";
+import { View, Text, StyleSheet, Pressable, Linking } from "react-native";
+import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
+import { optimizeUnsplashUrl, IMAGE_SIZES } from "@/lib/imageUtils";
 
 interface ImageWithAttributionProps {
   imageUrl: string;
@@ -10,6 +12,10 @@ interface ImageWithAttributionProps {
   onDownload?: () => void;
   onImagePress?: () => void;
   position?: "top" | "bottom";
+  /** Blur hash for placeholder */
+  blurHash?: string | null;
+  /** Image size preset */
+  size?: keyof typeof IMAGE_SIZES;
 }
 
 export function ImageWithAttribution({
@@ -20,7 +26,11 @@ export function ImageWithAttribution({
   onDownload,
   onImagePress,
   position = "bottom",
+  blurHash,
+  size = "HERO",
 }: ImageWithAttributionProps) {
+  // Optimize the Unsplash URL for faster loading
+  const optimizedUrl = optimizeUnsplashUrl(imageUrl, IMAGE_SIZES[size]);
   const handlePhotographerPress = async () => {
     if (!photographerUrl) return;
     try {
@@ -46,7 +56,15 @@ export function ImageWithAttribution({
 
   return (
     <View style={styles.container}>
-      <Image source={{ uri: imageUrl }} style={styles.image} />
+      <Image 
+        source={{ uri: optimizedUrl }} 
+        style={styles.image}
+        contentFit="cover"
+        cachePolicy="disk"
+        transition={300}
+        placeholder={blurHash ? { blurhash: blurHash } : undefined}
+        placeholderContentFit="cover"
+      />
 
       <Pressable
         style={[

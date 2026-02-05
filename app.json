@@ -8,20 +8,35 @@
     "scheme": "myapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FAF9F6"
+    },
     "ios": {
       "supportsTablet": true,
       "newArchEnabled": true,
       "bundleIdentifier": "com.dstroump.planeraaitravelplanner",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
+      },
+      "splash": {
+        "image": "./assets/images/splash-icon.png",
+        "resizeMode": "contain",
+        "backgroundColor": "#FAF9F6"
       }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/appicon-1024x1024-01-9h6cls.jpg",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#FAF9F6"
       },
-      "newArchEnabled": true
+      "newArchEnabled": true,
+      "splash": {
+        "image": "./assets/images/splash-icon.png",
+        "resizeMode": "contain",
+        "backgroundColor": "#FAF9F6"
+      }
     },
     "web": {
       "bundler": "metro",
@@ -36,7 +51,7 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#FAFAFA"
+          "backgroundColor": "#FAF9F6"
         }
       ],
       "expo-secure-store",

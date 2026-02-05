@@ -1221,8 +1221,8 @@ export default function Onboarding() {
               </View>
             </View>
             
-            {/* Flight Time Preference */}
-            <View style={styles.formSection}>
+            {/* Flight Time Preference - Hidden in V1 */}
+            {/* <View style={styles.formSection}>
               <Text style={styles.sectionLabel}>PREFERRED FLIGHT TIME</Text>
               {skippedProfile && (
                 <View style={styles.lockedNotice}>
@@ -1254,10 +1254,10 @@ export default function Onboarding() {
                   </TouchableOpacity>
                 ))}
               </View>
-            </View>
+            </View> */}
             
-            {/* Search Settings */}
-            <View style={styles.formSection}>
+            {/* Search Settings - Hidden in V1 */}
+            {/* <View style={styles.formSection}>
               <Text style={styles.sectionLabel}>DEFAULT SEARCH SETTINGS</Text>
               
               {skippedProfile && (
@@ -1313,7 +1313,7 @@ export default function Onboarding() {
                   />
                 </View>
               </View>
-            </View>
+            </View> */}
             
             <View style={{ height: 120 }} />
           </ScrollView>

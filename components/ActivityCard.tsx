@@ -1,5 +1,7 @@
-import { View, Text, StyleSheet, TouchableOpacity, Image, Linking } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Linking } from "react-native";
+import { Image } from "expo-image";
 import { Ionicons } from "@expo/vector-icons";
+import { optimizeUnsplashUrl, IMAGE_SIZES } from "@/lib/imageUtils";
 
 interface ActivityCardProps {
   activity: any;
@@ -7,6 +9,11 @@ interface ActivityCardProps {
 }
 
 export default function ActivityCard({ activity, destination }: ActivityCardProps) {
+  // Optimize image URL for thumbnails
+  const optimizedImageUrl = activity.image 
+    ? optimizeUnsplashUrl(activity.image, IMAGE_SIZES.THUMBNAIL)
+    : null;
+    
   return (
     <View style={styles.card}>
       <View style={styles.row}>
@@ -23,8 +30,14 @@ export default function ActivityCard({ activity, destination }: ActivityCardProp
             )}
           </View>
         </View>
-        {activity.image ? (
-          <Image source={{ uri: activity.image }} style={styles.activityThumbnail} />
+        {optimizedImageUrl ? (
+          <Image 
+            source={{ uri: optimizedImageUrl }} 
+            style={styles.activityThumbnail}
+            contentFit="cover"
+            cachePolicy="disk"
+            transition={200}
+          />
         ) : (
           <View style={styles.activityThumbnailPlaceholder}>
             <Ionicons name="image-outline" size={24} color="#94A3B8" />

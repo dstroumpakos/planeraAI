@@ -247,7 +247,7 @@ export default function CreateTripScreen() {
         }
 
         if (!formData.skipFlights && !formData.origin) {
-            Alert.alert("Error", "Please enter an origin city or enable 'Skip Flights'");
+            Alert.alert("Error", "Please enter an origin city");
             return;
         }
 
