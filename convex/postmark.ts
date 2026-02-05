@@ -459,3 +459,68 @@ export const testReceiptEmail = action({
     };
   },
 });
+
+/**
+ * Send welcome email to new users using Postmark template
+ */
+export const sendWelcomeEmail = internalAction({
+  args: {
+    to: v.string(),
+    name: v.string(),
+  },
+  returns: v.object({
+    success: v.boolean(),
+    messageId: v.optional(v.string()),
+    error: v.optional(v.string()),
+  }),
+  handler: async (ctx, args) => {
+    const apiToken = process.env.POSTMARK_SERVER_TOKEN;
+
+    if (!apiToken) {
+      console.error("❌ [POSTMARK] POSTMARK_SERVER_TOKEN not set, skipping welcome email");
+      return { success: false, error: "Email service not configured" };
+    }
+
+    try {
+      console.log(`📧 [POSTMARK] Sending welcome email to ${args.to} using template: welcome`);
+
+      const payload = {
+        From: SENDER_EMAIL,
+        To: args.to,
+        TemplateAlias: "welcome",
+        TemplateModel: {
+          name: args.name,
+          product_name: "Planera",
+          product_url: "https://planeraai.app",
+        },
+        MessageStream: MESSAGE_STREAM,
+      };
+
+      console.log(`📧 [POSTMARK] Request payload:`, JSON.stringify(payload, null, 2));
+
+      const response = await fetch(POSTMARK_API_URL, {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "X-Postmark-Server-Token": apiToken,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        console.error(`❌ [POSTMARK] Welcome email failed:`, result);
+        return { success: false, error: result.Message || "Failed to send email" };
+      }
+
+      console.log(`✅ [POSTMARK] Welcome email sent to ${args.to} - MessageID: ${result.MessageID}`);
+      return { success: true, messageId: result.MessageID };
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      console.error("❌ [POSTMARK] Welcome email error:", errorMessage);
+      return { success: false, error: errorMessage };
+    }
+  },
+});

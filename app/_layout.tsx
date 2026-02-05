@@ -5,10 +5,14 @@ import { useEffect, useState, useRef } from "react";
 import { View, Text, StyleSheet, Platform } from "react-native";
 import { ConvexReactClient } from "convex/react";
 import { Stack } from "expo-router";
+import * as SplashScreen from "expo-splash-screen";
 import { ThemeProvider } from "@/lib/ThemeContext";
 import { ConvexNativeAuthProvider } from "@/lib/ConvexAuthProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { authClient } from "@/lib/auth-client";
+
+// Prevent splash screen from auto-hiding before app is ready
+SplashScreen.preventAutoHideAsync();
 
 // Environment validation - safe at module scope (just reads process.env)
 function validateEnvironment(): { valid: boolean; errors: string[] } {
@@ -54,7 +58,7 @@ const envStyles = StyleSheet.create({
         justifyContent: "center",
         alignItems: "center",
         padding: 24,
-        backgroundColor: "#FFF8E7",
+        backgroundColor: "#FAF9F6",
     },
     title: {
         fontSize: 24,
@@ -81,12 +85,10 @@ const envStyles = StyleSheet.create({
     },
 });
 
-// Loading screen component
+// Loading screen component - matches splash background to prevent flash
 function LoadingScreen() {
     return (
-        <View style={{ flex: 1, backgroundColor: "#FFF8E7", justifyContent: "center", alignItems: "center" }}>
-            <Text style={{ color: "#666", fontSize: 16 }}>Loading...</Text>
-        </View>
+        <View style={{ flex: 1, backgroundColor: "#FAF9F6" }} />
     );
 }
 
@@ -95,6 +97,7 @@ function AppContent() {
     const [envCheck, setEnvCheck] = useState<{ valid: boolean; errors: string[] } | null>(null);
     const [convex, setConvex] = useState<ConvexReactClient | null>(null);
     const [initError, setInitError] = useState<string | null>(null);
+    const [appReady, setAppReady] = useState(false);
     const initRef = useRef(false);
 
     useEffect(() => {
@@ -114,6 +117,7 @@ function AppContent() {
             if (__DEV__) {
                 console.error("[BOOT] Environment validation failed:", result.errors);
             }
+            setAppReady(true);
             return;
         }
 
@@ -141,9 +145,18 @@ function AppContent() {
             } catch (error) {
                 console.error("[BOOT] Failed to initialize auth client:", error);
                 setInitError("Auth initialization failed");
+            } finally {
+                setAppReady(true);
             }
         })();
     }, []);
+
+    // Hide splash screen once app is ready
+    useEffect(() => {
+        if (appReady) {
+            SplashScreen.hideAsync();
+        }
+    }, [appReady]);
 
     // Show loading while checking environment
     if (envCheck === null || (envCheck.valid && convex === null && !initError)) {

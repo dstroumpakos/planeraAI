@@ -332,7 +332,14 @@ export const generate = internalAction({
                     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
                     const budgetDisplay = typeof trip.budgetTotal === "number" ? `€${trip.budgetTotal}` : trip.budgetTotal;
                     const localExperiencesGuidance = generateLocalExperiencesGuidance(trip.localExperiences);
-                    const itineraryPrompt = `Create a detailed day-by-day itinerary for a trip to ${trip.destination} from ${new Date(trip.startDate).toDateString()} to ${new Date(trip.endDate).toDateString()}.
+                    
+                    // Calculate the number of days
+                    const tripDays = Math.ceil((trip.endDate - trip.startDate) / (24 * 60 * 60 * 1000));
+                    console.log(`📅 Generating itinerary for ${tripDays} days`);
+                    
+                    const itineraryPrompt = `Create a detailed day-by-day itinerary for a ${tripDays}-day trip to ${trip.destination} from ${new Date(trip.startDate).toDateString()} to ${new Date(trip.endDate).toDateString()}.
+
+**CRITICAL: You MUST generate exactly ${tripDays} days of itinerary. Do not skip any days.**
 
 Budget: ${budgetDisplay}
 Travelers: ${trip.travelerCount ?? trip.travelers ?? 1}
@@ -378,21 +385,50 @@ Include specific activities, restaurants, and attractions for each day. Format a
   ]
 }
 
+**REMINDER: Generate ALL ${tripDays} days from Day 1 to Day ${tripDays}. Each day should have 3-5 activities including meals.**
+
 Make sure prices are realistic for ${trip.destination}. Museums typically cost €10-25, skip-the-line adds €5-15. Tours cost €20-80. Restaurants show average meal cost per person.`;
+                    
+                    // For longer trips, we may need more tokens
+                    const maxTokens = Math.min(16000, Math.max(4000, tripDays * 800));
+                    
                     const completion = await openai.chat.completions.create({
                         messages: [
-                            { role: "system", content: "You are a travel itinerary planner. Return only valid JSON. Always include realistic prices and booking information for activities." },
+                            { role: "system", content: `You are a travel itinerary planner. Return only valid JSON. Always include realistic prices and booking information for activities. IMPORTANT: You must generate the complete itinerary for ALL ${tripDays} days requested.` },
                             { role: "user", content: itineraryPrompt },
                         ],
                         model: "gpt-4o",
                         response_format: { type: "json_object" },
+                        max_tokens: maxTokens,
                     });
 
                     const itineraryContent = completion.choices[0].message.content;
                     if (itineraryContent) {
                         const itineraryData = JSON.parse(itineraryContent);
                         dayByDayItinerary = itineraryData.dailyPlan || [];
-                        console.log(`✅ OpenAI generated ${dayByDayItinerary.length} days of itinerary`);
+                        console.log(`✅ OpenAI generated ${dayByDayItinerary.length} days of itinerary (requested ${tripDays})`);
+                        
+                        // Check if OpenAI generated enough days - if not, supplement with fallback
+                        if (dayByDayItinerary.length < tripDays) {
+                            console.warn(`⚠️ OpenAI only generated ${dayByDayItinerary.length}/${tripDays} days, supplementing with fallback`);
+                            const fallbackItinerary = generateBasicItinerary(trip, activities, restaurants);
+                            
+                            // Add missing days from fallback
+                            for (let i = dayByDayItinerary.length; i < tripDays; i++) {
+                                if (fallbackItinerary[i]) {
+                                    // Update the day number and date for the fallback day
+                                    const dayDate = new Date(trip.startDate + i * 24 * 60 * 60 * 1000);
+                                    const missingDay = {
+                                        ...fallbackItinerary[i],
+                                        day: i + 1,
+                                        date: dayDate.toISOString().split('T')[0],
+                                        title: `Day ${i + 1} in ${trip.destination}`,
+                                    };
+                                    dayByDayItinerary.push(missingDay);
+                                }
+                            }
+                            console.log(`✅ Supplemented to ${dayByDayItinerary.length} days`);
+                        }
                         
                         // Merge TripAdvisor data into restaurant activities
                         dayByDayItinerary = mergeRestaurantDataIntoItinerary(dayByDayItinerary, restaurants);

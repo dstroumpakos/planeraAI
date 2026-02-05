@@ -7,12 +7,12 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   TextInput,
-  Image,
   StatusBar,
 } from "react-native";
+import { Image } from "expo-image";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { useQuery, useAction } from "convex/react";
+import { useQuery, useAction, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Ionicons } from "@expo/vector-icons";
 import { useConvexAuth } from "@/lib/auth-components";
@@ -43,6 +43,16 @@ export default function HomeScreen() {
   const trips = useQuery(api.trips.list as any, { token: token || "skip" });
   const trendingDestinations = useQuery(api.trips.getTrendingDestinations);
   const getImages = useAction(api.images.getDestinationImages);
+  const ensureUserPlan = useMutation(api.users.ensureUserPlan as any);
+
+  // Ensure user plan exists when authenticated
+  useEffect(() => {
+    if (token && isAuthenticated) {
+      ensureUserPlan({ token }).catch((err: any) => {
+        console.error("[HomeScreen] Failed to ensure user plan:", err);
+      });
+    }
+  }, [token, isAuthenticated]);
 
   const getProfileImageUrl = useQuery(
     api.users.getProfileImageUrl as any,
@@ -156,6 +166,8 @@ export default function HomeScreen() {
                 <Image
                   source={{ uri: profileImageUrl }}
                   style={styles.profileImage}
+                  cachePolicy="disk"
+                  transition={200}
                 />
               ) : (
                 <Ionicons name="person-circle" size={48} color={colors.textMuted} />

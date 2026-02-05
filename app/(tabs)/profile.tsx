@@ -1,12 +1,12 @@
-import { View, Text, StyleSheet, TouchableOpacity, Alert, ScrollView, Modal, Image, Platform, StatusBar, TextInput, FlatList, ActivityIndicator, Linking } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Alert, ScrollView, Modal, Platform, StatusBar, TextInput, FlatList, ActivityIndicator, Linking } from "react-native";
+import { Image } from "expo-image";
 import { authClient } from "@/lib/auth-client";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useQuery, useMutation } from "convex/react";
+import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import { useToken } from "@/lib/useAuthenticatedMutation";
-import { useAuthenticatedMutation } from "@/lib/useAuthenticatedMutation";
+import { useToken, useAuthenticatedMutation } from "@/lib/useAuthenticatedMutation";
 import { useState } from "react";
 import * as ImagePicker from "expo-image-picker";
 import { useTheme } from "@/lib/ThemeContext";
@@ -50,10 +50,10 @@ export default function Profile() {
         userSettings?.profilePicture ? { storageId: userSettings.profilePicture, token: token || "skip" } : "skip"
     );
     
-    const generateUploadUrl = useMutation(api.users.generateUploadUrl);
-    const saveProfilePicture = useMutation(api.users.saveProfilePicture);
-    const createInsight = useMutation(api.insights.create);
-    const dismissTrip = useMutation(api.insights.dismissTrip);
+    const generateUploadUrl = useAuthenticatedMutation(api.users.generateUploadUrl as any);
+    const saveProfilePicture = useAuthenticatedMutation(api.users.saveProfilePicture as any);
+    const createInsight = useAuthenticatedMutation(api.insights.create as any);
+    const dismissTrip = useAuthenticatedMutation(api.insights.dismissTrip as any);
     
     const { isDarkMode, toggleDarkMode, colors } = useTheme();
     const [menuVisible, setMenuVisible] = useState(false);
@@ -374,6 +374,8 @@ export default function Profile() {
                                 <Image 
                                     source={{ uri: profileImageUrl }} 
                                     style={styles.avatarImage}
+                                    cachePolicy="disk"
+                                    transition={200}
                                 />
                             ) : (
                                 <View style={styles.avatar}>

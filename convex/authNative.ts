@@ -21,6 +21,7 @@ interface SignInResponse {
     image?: string;
   };
   error?: string;
+  isNewUser?: boolean;
 }
 
 // Interface for verified token claims
@@ -155,6 +156,7 @@ interface UpsertResult {
   userId: string;
   sessionId: string;
   token: string;
+  isNewUser: boolean;
   user: {
     id: string;
     email?: string;
@@ -420,6 +422,7 @@ export const signInWithEmail = action({
       })
     ),
     error: v.optional(v.string()),
+    isNewUser: v.optional(v.boolean()),
   }),
   handler: async (ctx, args): Promise<SignInResponse> => {
     console.log("[AuthNative] signInWithEmail called:", {
@@ -448,12 +451,28 @@ export const signInWithEmail = action({
       console.log("[AuthNative] Email sign-in successful:", {
         userId: result.userId,
         isSignUp: args.isSignUp,
+        isNewUser: result.isNewUser,
       });
+
+      // Send welcome email to new users
+      if (result.isNewUser && args.email) {
+        try {
+          await ctx.runAction(internal.postmark.sendWelcomeEmail, {
+            to: args.email.toLowerCase(),
+            name: args.name || "Traveler",
+          });
+          console.log("[AuthNative] Welcome email sent to:", args.email);
+        } catch (emailError) {
+          // Log but don't fail the signup if email fails
+          console.error("[AuthNative] Failed to send welcome email:", emailError);
+        }
+      }
 
       return {
         success: true,
         token: result.token,
         user: result.user,
+        isNewUser: result.isNewUser,
       };
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";

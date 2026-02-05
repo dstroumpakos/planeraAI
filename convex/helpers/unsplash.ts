@@ -46,6 +46,27 @@ function validateUnsplashKeys(): { accessKey: string; secretKey: string } {
   return { accessKey, secretKey };
 }
 
+/**
+ * Optimize an Unsplash URL for mobile by adding size/quality parameters
+ */
+function optimizeUnsplashUrl(url: string, width: number = 800, quality: number = 75): string {
+  if (!url || !url.includes('images.unsplash.com')) {
+    return url;
+  }
+  
+  try {
+    const urlObj = new URL(url);
+    urlObj.searchParams.set('w', width.toString());
+    urlObj.searchParams.set('q', quality.toString());
+    urlObj.searchParams.set('fm', 'jpg');
+    urlObj.searchParams.set('fit', 'crop');
+    urlObj.searchParams.set('auto', 'format,compress');
+    return urlObj.toString();
+  } catch {
+    return url;
+  }
+}
+
 export async function fetchUnsplashImage(query: string): Promise<UnsplashImage | null> {
   try {
     const { accessKey } = validateUnsplashKeys();
@@ -63,7 +84,7 @@ export async function fetchUnsplashImage(query: string): Promise<UnsplashImage |
 
     return {
       id: data.id,
-      url: data.urls.regular,
+      url: optimizeUnsplashUrl(data.urls.regular, 800, 75),
       description: data.description || data.alt_description,
       photographer: data.user.name,
       photographerUrl: data.user.links.html,

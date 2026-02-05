@@ -1,5 +1,6 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Image, Linking, Platform, Alert, Modal, TextInput, KeyboardAvoidingView, Keyboard, StatusBar } from "react-native";
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Linking, Platform, Alert, Modal, TextInput, KeyboardAvoidingView, Keyboard, StatusBar } from "react-native";
+import { Image } from "expo-image";
 import { useQuery, useMutation, useAction } from "convex/react";
 import { Id } from "@/convex/_generated/dataModel";
 import { api } from "@/convex/_generated/api";
@@ -13,6 +14,7 @@ import { ImageWithAttribution } from "@/components/ImageWithAttribution";
 import { useTheme } from "@/lib/ThemeContext";
 import { LinearGradient } from "expo-linear-gradient";
 import { useAuthenticatedMutation, useToken } from "@/lib/useAuthenticatedMutation";
+import { optimizeUnsplashUrl, IMAGE_SIZES } from "@/lib/imageUtils";
 
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Calendar } from 'react-native-calendars';
@@ -286,7 +288,7 @@ export default function TripDetails() {
     const [addingToCart, setAddingToCart] = useState<string | null>(null); // Track which item is being added
     const [selectedFlightIndex, setSelectedFlightIndex] = useState<number>(0);
     const [checkedBaggageSelected, setCheckedBaggageSelected] = useState<boolean>(false);
-    const [activeFilter, setActiveFilter] = useState<'all' | 'flights' | 'food' | 'sights' | 'stays' | 'transportation'>('all');
+    const [activeFilter, setActiveFilter] = useState<'all' | 'flights' | 'food' | 'sights' | 'stays' | 'transportation' | 'insights'>('all');
 
     useEffect(() => {
         if (trip) {
@@ -477,9 +479,11 @@ export default function TripDetails() {
                 {/* Background Image Slideshow */}
                 {currentImage ? (
                     <Image 
-                        source={{ uri: currentImage.url }} 
+                        source={{ uri: optimizeUnsplashUrl(currentImage.url, IMAGE_SIZES.HERO) }} 
                         style={styles.loadingBackgroundImage}
                         blurRadius={Platform.OS === 'ios' ? 1 : 0.5}
+                        cachePolicy="disk"
+                        transition={500}
                     />
                 ) : (
                     <View style={[styles.loadingBackgroundImage, { backgroundColor: '#1A1A1A' }]} />
@@ -1115,7 +1119,9 @@ export default function TripDetails() {
                     ) : (
                         <Image 
                             source={{ uri: `https://images.pexels.com/photos/1285625/pexels-photo-1285625.jpeg?auto=compress&cs=tinysrgb&w=800&h=600&fit=crop&q=80&query=${encodeURIComponent(trip.destination)}` }} 
-                            style={styles.mapImage} 
+                            style={styles.mapImage}
+                            cachePolicy="disk"
+                            transition={300}
                         />
                     )}
                     {/* Title Overlay on Image */}
@@ -1186,6 +1192,13 @@ export default function TripDetails() {
                     >
                         <Ionicons name="car" size={18} color={activeFilter === 'transportation' ? colors.card : colors.textMuted} />
                         <Text style={[styles.filterText, { color: colors.textMuted }, activeFilter === 'transportation' && { color: colors.card }]}>Transport</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                        style={[styles.filterChip, { backgroundColor: colors.card, borderColor: colors.border }, activeFilter === 'insights' && { backgroundColor: colors.text, borderColor: colors.text }]}
+                        onPress={() => setActiveFilter('insights')}
+                    >
+                        <Ionicons name="chatbubbles" size={18} color={activeFilter === 'insights' ? colors.card : colors.textMuted} />
+                        <Text style={[styles.filterText, { color: colors.textMuted }, activeFilter === 'insights' && { color: colors.card }]}>Insights</Text>
                     </TouchableOpacity>
                 </ScrollView>
 
@@ -1411,7 +1424,8 @@ export default function TripDetails() {
                                                         <Image 
                                                             source={{ uri: "https://files.readme.io/9f59534-Vector_1.png" }}
                                                             style={{ width: 72, height: 72 }}
-                                                            resizeMode="contain"
+                                                            contentFit="contain"
+                                                            cachePolicy="disk"
                                                         />
                                                     )}
                                                     <Text style={[styles.cardTitle, { color: colors.text }]}>{restaurant.name}</Text>
@@ -1667,54 +1681,72 @@ export default function TripDetails() {
                             )}
                         </View>
                     )}
-                </View>
-            </ScrollView>
 
-            {/* Traveler Insights Section */}
-            {insights && insights.length > 0 && (
-                <View style={styles.insightsSection}>
-                    <Text style={[styles.sectionTitle, { color: colors.text }]}>Traveler Insights</Text>
-                    <Text style={[styles.insightsSubtitle, { color: colors.textMuted }]}>Tips from travelers who visited {trip.destination}</Text>
-                    <ScrollView 
-                        horizontal 
-                        showsHorizontalScrollIndicator={false}
-                        style={styles.insightsScroll}
-                    >
-                        {insights.map((insight: any) => (
-                            <View key={insight._id} style={[styles.insightCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                                <View style={styles.insightHeader}>
-                                    <View style={[styles.insightCategoryBadge, { backgroundColor: isDarkMode ? 'rgba(255, 229, 0, 0.2)' : 'rgba(100, 116, 139, 0.1)' }]}>
-                                        <Ionicons 
-                                            name={
-                                                insight.category === 'food' ? 'restaurant' :
-                                                insight.category === 'transport' ? 'bus' :
-                                                insight.category === 'hidden_gem' ? 'diamond' :
-                                                insight.category === 'avoid' ? 'warning' :
-                                                'bulb'
-                                            }
-                                            size={14} 
-                                            color={colors.primary}
-                                        />
-                                        <Text style={[styles.insightCategoryText, { color: colors.textMuted }]}>
-                                            {insight.category.replace('_', ' ')}
+                    {/* Traveler Insights Section */}
+                    {activeFilter === 'insights' && (
+                        <View>
+                            <Text style={[styles.sectionTitle, { color: colors.text }]}>Traveler Insights</Text>
+                            <Text style={[styles.insightsSubtitle, { color: colors.textMuted, marginBottom: 16 }]}>
+                                Tips from travelers who visited {trip.destination}
+                            </Text>
+                            {insights && insights.length > 0 ? (
+                                insights.map((insight: any) => (
+                                    <View key={insight._id} style={[styles.card, { backgroundColor: colors.card, marginBottom: 12 }]}>
+                                        <View style={styles.insightHeader}>
+                                            <View style={[styles.insightCategoryBadge, { backgroundColor: isDarkMode ? 'rgba(255, 229, 0, 0.2)' : 'rgba(100, 116, 139, 0.1)' }]}>
+                                                <Ionicons 
+                                                    name={
+                                                        insight.category === 'food' ? 'restaurant' :
+                                                        insight.category === 'transport' ? 'bus' :
+                                                        insight.category === 'neighborhoods' ? 'map' :
+                                                        insight.category === 'timing' ? 'time' :
+                                                        insight.category === 'hidden_gem' ? 'diamond' :
+                                                        insight.category === 'avoid' ? 'warning' :
+                                                        'bulb'
+                                                    }
+                                                    size={16} 
+                                                    color={colors.primary}
+                                                />
+                                                <Text style={[styles.insightCategoryText, { color: colors.textMuted }]}>
+                                                    {insight.category.replace('_', ' ')}
+                                                </Text>
+                                            </View>
+                                            {insight.verified && (
+                                                <View style={[styles.verifiedBadge, { backgroundColor: 'rgba(34, 197, 94, 0.2)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }]}>
+                                                    <Ionicons name="checkmark-circle" size={12} color="#22C55E" />
+                                                    <Text style={{ fontSize: 11, color: '#22C55E', fontWeight: '600' }}>Verified</Text>
+                                                </View>
+                                            )}
+                                        </View>
+                                        <Text style={[styles.insightContent, { color: colors.text, marginTop: 12, marginBottom: 12, fontSize: 15, lineHeight: 22 }]}>
+                                            "{insight.content}"
+                                        </Text>
+                                        <View style={[styles.insightFooter, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.border }]}>
+                                            <Text style={[styles.insightDate, { color: colors.textMuted }]}>
+                                                Anonymous Traveler • {new Date(insight.createdAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+                                            </Text>
+                                            <View style={styles.insightLikes}>
+                                                <Ionicons name="heart" size={14} color="#F59E0B" />
+                                                <Text style={[styles.insightLikesText, { color: colors.textMuted }]}>{insight.likes}</Text>
+                                            </View>
+                                        </View>
+                                    </View>
+                                ))
+                            ) : (
+                                <View style={[styles.card, { backgroundColor: colors.card }]}>
+                                    <View style={styles.skippedSection}>
+                                        <Ionicons name="chatbubbles-outline" size={40} color={colors.textMuted} />
+                                        <Text style={[styles.skippedTitle, { color: colors.text }]}>No insights yet</Text>
+                                        <Text style={[styles.skippedText, { color: colors.textMuted }]}>
+                                            Be the first to share a tip about {trip.destination}! After your trip, you can share your experiences to help other travelers.
                                         </Text>
                                     </View>
-                                    <View style={styles.insightLikes}>
-                                        <Ionicons name="heart" size={14} color="#F59E0B" />
-                                        <Text style={[styles.insightLikesText, { color: colors.text }]}>{insight.likes}</Text>
-                                    </View>
                                 </View>
-                                <Text style={[styles.insightContent, { color: colors.text }]} numberOfLines={4}>
-                                    {insight.content}
-                                </Text>
-                                <Text style={[styles.insightDate, { color: colors.textMuted }]}>
-                                    {new Date(insight.createdAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
-                                </Text>
-                            </View>
-                        ))}
-                    </ScrollView>
+                            )}
+                        </View>
+                    )}
                 </View>
-            )}
+            </ScrollView>
 
             {/* Floating Action Bar */}
             <View style={styles.fabContainer}>
@@ -3124,6 +3156,9 @@ const styles = StyleSheet.create({
         paddingHorizontal: 8,
         paddingVertical: 4,
         borderRadius: 4,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
     },
     insightCategoryText: {
         fontSize: 11,
@@ -3146,10 +3181,37 @@ const styles = StyleSheet.create({
         color: "#1A1A1A",
         lineHeight: 18,
         marginVertical: 8,
+        fontStyle: 'italic',
     },
     insightDate: {
         fontSize: 11,
         color: "#94A3B8",
+    },
+    insightFooter: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginTop: 8,
+    },
+    verifiedBadge: {
+        padding: 4,
+        borderRadius: 4,
+    },
+    emptyInsights: {
+        alignItems: 'center',
+        paddingVertical: 24,
+        paddingHorizontal: 16,
+    },
+    emptyInsightsTitle: {
+        fontSize: 16,
+        fontWeight: '600',
+        marginTop: 12,
+        marginBottom: 8,
+    },
+    emptyInsightsText: {
+        fontSize: 14,
+        textAlign: 'center',
+        lineHeight: 20,
     },
     // FAB styles
     fabContainer: {

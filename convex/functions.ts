@@ -25,17 +25,22 @@ import { api } from "./_generated/api";
 // ---- Helpers ----
 
 async function validateTokenDirect(ctx: any, token: string): Promise<any> {
-  // Look up the session in the database
-  const sessions = await ctx.db
+  // Look up the session in the database using the index
+  const session = await ctx.db
     .query("sessions")
-    .filter((q: any) => q.eq(q.field("token"), token))
-    .collect();
+    .withIndex("by_token", (q: any) => q.eq("token", token))
+    .unique();
   
-  if (!sessions || sessions.length === 0) {
+  if (!session) {
+    console.log("[validateTokenDirect] Session not found for token");
     throw new ConvexError("Invalid session token");
   }
   
-  const session = sessions[0];
+  // Check if session is expired
+  if (session.expiresAt && session.expiresAt < Date.now()) {
+    console.log("[validateTokenDirect] Session expired");
+    throw new ConvexError("Session expired");
+  }
   
   // Get the user from userSettings using the string userId (not a Convex doc ID)
   const userSettings = await ctx.db
@@ -44,6 +49,7 @@ async function validateTokenDirect(ctx: any, token: string): Promise<any> {
     .unique();
   
   if (!userSettings) {
+    console.log("[validateTokenDirect] User not found for userId:", session.userId);
     throw new ConvexError("User not found");
   }
   
@@ -64,8 +70,14 @@ function getBearerTokenFromHeaders(ctx: any): string | null {
 // ---- AUTH QUERY ----
 // Simple wrapper that validates token before calling the actual query handler
 export const authQuery: any = (config: any) => {
+  // Merge token into args validator
+  const argsWithToken = {
+    ...config.args,
+    token: v.string(),
+  };
+  
   return query({
-    args: config.args,
+    args: argsWithToken,
     handler: async (ctx: any, args: any) => {
       const token = args?.token;
       console.log("[authQuery] Called with token:", token ? "PRESENT" : "MISSING");
@@ -84,7 +96,7 @@ export const authQuery: any = (config: any) => {
       
       // Validate token directly from database
       const user: any = await validateTokenDirect(ctx, token);
-      console.log("[authQuery] User authenticated:", user.id);
+      console.log("[authQuery] User authenticated:", user?.userId || user?._id);
       
       // Inject user into context for the handler
       ctx.user = user;
@@ -98,8 +110,14 @@ export const authQuery: any = (config: any) => {
 // ---- AUTH MUTATION ----
 // Simple wrapper that validates token before calling the actual mutation handler
 export const authMutation: any = (config: any) => {
+  // Merge token into args validator
+  const argsWithToken = {
+    ...config.args,
+    token: v.string(),
+  };
+  
   return mutation({
-    args: config.args,
+    args: argsWithToken,
     handler: async (ctx: any, args: any) => {
       const token = args?.token;
       console.log("[authMutation] Called with token:", token ? "PRESENT" : "MISSING");
@@ -118,7 +136,7 @@ export const authMutation: any = (config: any) => {
       
       // Validate token directly from database
       const user: any = await validateTokenDirect(ctx, token);
-      console.log("[authMutation] User authenticated:", user.id);
+      console.log("[authMutation] User authenticated:", user?.userId || user?._id);
       
       // Inject user into context for the handler
       ctx.user = user;

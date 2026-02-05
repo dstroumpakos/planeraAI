@@ -88,12 +88,12 @@ export const create = authMutation({
                 });
             }
         } else {
-            // New user - create plan with 1 trip used (free trial)
+            // New user - create plan and use the 1 free credit
             await ctx.db.insert("userPlans", {
                 userId: ctx.user._id,
                 plan: "free",
                 tripsGenerated: 1,
-                tripCredits: 0,
+                tripCredits: 0, // They used their 1 free credit
             });
         }
 

@@ -21,6 +21,27 @@ interface UnsplashImage {
   downloadLocation?: string;
 }
 
+/**
+ * Optimize an Unsplash URL for mobile by adding size/quality parameters
+ */
+function optimizeUnsplashUrl(url: string, width: number = 800, quality: number = 75): string {
+  if (!url || !url.includes('images.unsplash.com')) {
+    return url;
+  }
+  
+  try {
+    const urlObj = new URL(url);
+    urlObj.searchParams.set('w', width.toString());
+    urlObj.searchParams.set('q', quality.toString());
+    urlObj.searchParams.set('fm', 'jpg');
+    urlObj.searchParams.set('fit', 'crop');
+    urlObj.searchParams.set('auto', 'format,compress');
+    return urlObj.toString();
+  } catch {
+    return url;
+  }
+}
+
 async function fetchUnsplashImage(query: string): Promise<UnsplashImage | null> {
   try {
     const accessKey = process.env.UNSPLASH_ACCESS_KEY;
@@ -49,8 +70,9 @@ async function fetchUnsplashImage(query: string): Promise<UnsplashImage | null> 
     }
 
     const photo = data.results[0];
+    // Return optimized URL instead of raw regular URL
     return {
-      url: photo.urls.regular,
+      url: optimizeUnsplashUrl(photo.urls.regular, 800, 75),
       photographer: photo.user.name,
       attribution: photo.links.html,
       photographerUrl: photo.user.links.html,
@@ -119,7 +141,7 @@ export const getDestinationImages = action({
       }
 
       return data.results.map((photo: UnsplashPhoto) => ({
-        url: photo.urls.regular,
+        url: optimizeUnsplashUrl(photo.urls.regular, 800, 75),
         photographer: photo.user.name,
         attribution: photo.links.html,
         photographerUrl: photo.user.links.html,

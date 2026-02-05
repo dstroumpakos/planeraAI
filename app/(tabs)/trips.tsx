@@ -1,6 +1,6 @@
 import { Text, View, StyleSheet, TouchableOpacity, FlatList, ActivityIndicator, Alert, StatusBar } from "react-native";
-import { useQuery, useMutation } from "convex/react";
-import { useToken } from "@/lib/useAuthenticatedMutation";
+import { useQuery } from "convex/react";
+import { useToken, useAuthenticatedMutation } from "@/lib/useAuthenticatedMutation";
 import { api } from "@/convex/_generated/api";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -13,7 +13,7 @@ export default function TripsScreen() {
     const { token } = useToken();
     const { colors, isDarkMode } = useTheme();
     const trips = useQuery(api.trips.list as any, { token: token || "skip" });
-    const deleteTrip = useMutation(api.trips.deleteTrip);
+    const deleteTrip = useAuthenticatedMutation(api.trips.deleteTrip as any);
 
     const handleDelete = (tripId: Id<"trips">) => {
         Alert.alert(

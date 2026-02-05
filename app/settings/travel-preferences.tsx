@@ -223,8 +223,8 @@ export default function TravelPreferences() {
                     </View>
                 </View>
 
-                {/* Flight Preferences */}
-                <View style={styles.section}>
+                {/* Flight Preferences - Hidden in V1 */}
+                {/* <View style={styles.section}>
                     <Text style={styles.sectionTitle}>Preferred Flight Time</Text>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.optionsRow}>
                         {flightTimeOptions.map((option) => (
@@ -252,7 +252,7 @@ export default function TravelPreferences() {
                             </TouchableOpacity>
                         ))}
                     </ScrollView>
-                </View>
+                </View> */}
 
                 {/* Toggles - Hidden in V1 */}
                 {/* <View style={styles.section}>
