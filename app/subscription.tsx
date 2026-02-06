@@ -37,10 +37,36 @@ export default function SubscriptionScreen() {
     const [selectedPlan, setSelectedPlan] = useState<"yearly" | "monthly" | "single">("yearly");
     const [restoring, setRestoring] = useState(false);
 
+    // Helper to format price properly (fixes floating point issues)
+    const formatPrice = (price: string | number | undefined, fallback: string): string => {
+        if (!price) return fallback;
+        
+        // If it's already a properly formatted string with currency symbol, use it
+        if (typeof price === 'string') {
+            // Check if it has a currency symbol and doesn't have floating point issues
+            if (/^[€$£¥₹₽]/.test(price) && !price.includes('0000')) {
+                return price;
+            }
+            // Try to parse as number and reformat
+            const numValue = parseFloat(price.replace(/[^0-9.]/g, ''));
+            if (!isNaN(numValue)) {
+                const currency = price.match(/[€$£¥₹₽]/)?.[0] || '€';
+                return `${currency}${numValue.toFixed(2)}`;
+            }
+        }
+        
+        // If it's a number, format it
+        if (typeof price === 'number') {
+            return `€${price.toFixed(2)}`;
+        }
+        
+        return fallback;
+    };
+
     // Get dynamic prices from App Store (with fallbacks)
-    const yearlyPrice = yearlySubscription?.price || "€29.99";
-    const monthlyPrice = monthlySubscription?.price || "€4.99";
-    const singleTripPrice = singleTrip?.price || "€4.99";
+    const yearlyPrice = formatPrice(yearlySubscription?.price, "€29.99");
+    const monthlyPrice = formatPrice(monthlySubscription?.price, "€4.99");
+    const singleTripPrice = formatPrice(singleTrip?.price, "€4.99");
 
     const handlePurchase = async () => {
         if (!token) {

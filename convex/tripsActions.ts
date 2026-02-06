@@ -501,11 +501,11 @@ Include specific activities, restaurants, and attractions for each day. Format a
 Make sure prices are realistic for ${trip.destination}. Museums typically cost €10-25, skip-the-line adds €5-15. Tours cost €20-80. Restaurants show average meal cost per person.`;
                     
                     // For longer trips or trips with time constraints, we need more tokens
-                    // Base: 4000 tokens, +1000 per day, extra buffer for time-aware prompts
+                    // Base: 8000 tokens, +1500 per day, extra buffer for time-aware prompts
                     const hasTimeConstraints = arrivalTime || departureTime;
-                    const baseTokens = hasTimeConstraints ? 6000 : 4000;
-                    const tokensPerDay = hasTimeConstraints ? 1200 : 800;
-                    const maxTokens = Math.min(32000, Math.max(baseTokens, tripDays * tokensPerDay));
+                    const baseTokens = hasTimeConstraints ? 10000 : 8000;
+                    const tokensPerDay = hasTimeConstraints ? 1800 : 1500;
+                    const maxTokens = Math.min(64000, Math.max(baseTokens, tripDays * tokensPerDay));
                     
                     console.log(`📝 Using maxTokens: ${maxTokens} (days: ${tripDays}, timeConstraints: ${hasTimeConstraints})`);
                     

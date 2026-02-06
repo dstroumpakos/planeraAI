@@ -148,11 +148,36 @@ class IAPService {
             // Map subscriptions
             if (subscriptions) {
                 for (const sub of subscriptions) {
+                    // Log raw subscription data for debugging
+                    console.log('[IAP] Raw subscription data:', JSON.stringify(sub, null, 2));
+                    
+                    // Format price properly (fix floating point issues)
+                    let priceStr = (sub as any).localizedPrice || '';
+                    if (!priceStr || priceStr.includes('0000')) {
+                        const rawPrice = (sub as any).price;
+                        if (typeof rawPrice === 'number') {
+                            const currency = (sub as any).currency || '€';
+                            priceStr = `${currency}${rawPrice.toFixed(2)}`;
+                        } else if (typeof rawPrice === 'string' && rawPrice) {
+                            const numVal = parseFloat(rawPrice);
+                            if (!isNaN(numVal)) {
+                                const currency = (sub as any).currency || '€';
+                                priceStr = `${currency}${numVal.toFixed(2)}`;
+                            } else {
+                                priceStr = rawPrice;
+                            }
+                        } else {
+                            priceStr = '—';
+                        }
+                    }
+                    
+                    console.log('[IAP] Formatted price for', (sub as any).productId, ':', priceStr);
+                    
                     const product: IAPProduct = {
                         productId: (sub as any).productId || (sub as any).id || '',
                         title: (sub as any).title || (sub as any).name || '',
                         description: (sub as any).description || '',
-                        price: (sub as any).localizedPrice || (sub as any).price || '—',
+                        price: priceStr,
                         priceCurrencyCode: (sub as any).currency,
                         subscriptionPeriod: (sub as any).subscriptionPeriod,
                     };
@@ -164,11 +189,31 @@ class IAPService {
             // Map consumables
             if (consumables) {
                 for (const prod of consumables) {
+                    // Format price properly (fix floating point issues)
+                    let priceStr = (prod as any).localizedPrice || '';
+                    if (!priceStr || priceStr.includes('0000')) {
+                        const rawPrice = (prod as any).price;
+                        if (typeof rawPrice === 'number') {
+                            const currency = (prod as any).currency || '€';
+                            priceStr = `${currency}${rawPrice.toFixed(2)}`;
+                        } else if (typeof rawPrice === 'string' && rawPrice) {
+                            const numVal = parseFloat(rawPrice);
+                            if (!isNaN(numVal)) {
+                                const currency = (prod as any).currency || '€';
+                                priceStr = `${currency}${numVal.toFixed(2)}`;
+                            } else {
+                                priceStr = rawPrice;
+                            }
+                        } else {
+                            priceStr = '—';
+                        }
+                    }
+                    
                     const product: IAPProduct = {
                         productId: (prod as any).productId || (prod as any).id || '',
                         title: (prod as any).title || (prod as any).name || '',
                         description: (prod as any).description || '',
-                        price: (prod as any).localizedPrice || (prod as any).price || '—',
+                        price: priceStr,
                         priceCurrencyCode: (prod as any).currency,
                     };
                     this.products.set(product.productId, product);
