@@ -148,36 +148,26 @@ class IAPService {
             // Map subscriptions
             if (subscriptions) {
                 for (const sub of subscriptions) {
-                    // Log raw subscription data for debugging
-                    console.log('[IAP] Raw subscription data:', JSON.stringify(sub, null, 2));
+                    // Log FULL raw subscription data for debugging price issues
+                    console.log('[IAP] 🔍 Raw subscription data:', {
+                        productId: (sub as any).productId,
+                        localizedPrice: (sub as any).localizedPrice,
+                        price: (sub as any).price,
+                        currency: (sub as any).currency,
+                        raw: JSON.stringify(sub)
+                    });
                     
-                    // Format price properly (fix floating point issues)
-                    let priceStr = (sub as any).localizedPrice || '';
-                    if (!priceStr || priceStr.includes('0000')) {
-                        const rawPrice = (sub as any).price;
-                        if (typeof rawPrice === 'number') {
-                            const currency = (sub as any).currency || '€';
-                            priceStr = `${currency}${rawPrice.toFixed(2)}`;
-                        } else if (typeof rawPrice === 'string' && rawPrice) {
-                            const numVal = parseFloat(rawPrice);
-                            if (!isNaN(numVal)) {
-                                const currency = (sub as any).currency || '€';
-                                priceStr = `${currency}${numVal.toFixed(2)}`;
-                            } else {
-                                priceStr = rawPrice;
-                            }
-                        } else {
-                            priceStr = '—';
-                        }
-                    }
+                    // ALWAYS use localizedPrice from StoreKit - this is what Apple will charge
+                    // Never override or format this - it includes proper currency symbol and locale
+                    const localizedPrice = (sub as any).localizedPrice;
                     
-                    console.log('[IAP] Formatted price for', (sub as any).productId, ':', priceStr);
+                    console.log('[IAP] ✅ Using StoreKit localizedPrice for', (sub as any).productId, ':', localizedPrice);
                     
                     const product: IAPProduct = {
                         productId: (sub as any).productId || (sub as any).id || '',
                         title: (sub as any).title || (sub as any).name || '',
                         description: (sub as any).description || '',
-                        price: priceStr,
+                        price: localizedPrice || '', // Use ONLY StoreKit price, empty if not available
                         priceCurrencyCode: (sub as any).currency,
                         subscriptionPeriod: (sub as any).subscriptionPeriod,
                     };
@@ -189,31 +179,24 @@ class IAPService {
             // Map consumables
             if (consumables) {
                 for (const prod of consumables) {
-                    // Format price properly (fix floating point issues)
-                    let priceStr = (prod as any).localizedPrice || '';
-                    if (!priceStr || priceStr.includes('0000')) {
-                        const rawPrice = (prod as any).price;
-                        if (typeof rawPrice === 'number') {
-                            const currency = (prod as any).currency || '€';
-                            priceStr = `${currency}${rawPrice.toFixed(2)}`;
-                        } else if (typeof rawPrice === 'string' && rawPrice) {
-                            const numVal = parseFloat(rawPrice);
-                            if (!isNaN(numVal)) {
-                                const currency = (prod as any).currency || '€';
-                                priceStr = `${currency}${numVal.toFixed(2)}`;
-                            } else {
-                                priceStr = rawPrice;
-                            }
-                        } else {
-                            priceStr = '—';
-                        }
-                    }
+                    // Log FULL raw product data for debugging price issues
+                    console.log('[IAP] 🔍 Raw consumable data:', {
+                        productId: (prod as any).productId,
+                        localizedPrice: (prod as any).localizedPrice,
+                        price: (prod as any).price,
+                        currency: (prod as any).currency,
+                    });
+                    
+                    // ALWAYS use localizedPrice from StoreKit - this is what Apple will charge
+                    const localizedPrice = (prod as any).localizedPrice;
+                    
+                    console.log('[IAP] ✅ Using StoreKit localizedPrice for', (prod as any).productId, ':', localizedPrice);
                     
                     const product: IAPProduct = {
                         productId: (prod as any).productId || (prod as any).id || '',
                         title: (prod as any).title || (prod as any).name || '',
                         description: (prod as any).description || '',
-                        price: priceStr,
+                        price: localizedPrice || '', // Use ONLY StoreKit price, empty if not available
                         priceCurrencyCode: (prod as any).currency,
                     };
                     this.products.set(product.productId, product);

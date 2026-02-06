@@ -4,7 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useToken } from "@/lib/useAuthenticatedMutation";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useTheme } from "@/lib/ThemeContext";
 import { useIAP } from "@/lib/useIAP";
@@ -37,42 +37,50 @@ export default function SubscriptionScreen() {
     const [selectedPlan, setSelectedPlan] = useState<"yearly" | "monthly" | "single">("yearly");
     const [restoring, setRestoring] = useState(false);
 
-    // Helper to format price properly (fixes floating point issues)
-    const formatPrice = (price: string | number | undefined, fallback: string): string => {
-        if (!price) return fallback;
-        
-        // If it's already a properly formatted string with currency symbol, use it
-        if (typeof price === 'string') {
-            // Check if it has a currency symbol and doesn't have floating point issues
-            if (/^[€$£¥₹₽]/.test(price) && !price.includes('0000')) {
-                return price;
-            }
-            // Try to parse as number and reformat
-            const numValue = parseFloat(price.replace(/[^0-9.]/g, ''));
-            if (!isNaN(numValue)) {
-                const currency = price.match(/[€$£¥₹₽]/)?.[0] || '€';
-                return `${currency}${numValue.toFixed(2)}`;
-            }
-        }
-        
-        // If it's a number, format it
-        if (typeof price === 'number') {
-            return `€${price.toFixed(2)}`;
-        }
-        
-        return fallback;
-    };
+    // Log product data for debugging price mismatches
+    useEffect(() => {
+        console.log('[Subscription] 🔍 Product debug info:', {
+            yearlyLoaded: !!yearlySubscription,
+            yearlyProductId: yearlySubscription?.productId,
+            yearlyPrice: yearlySubscription?.price,
+            monthlyLoaded: !!monthlySubscription,
+            monthlyProductId: monthlySubscription?.productId,
+            monthlyPrice: monthlySubscription?.price,
+            singleLoaded: !!singleTrip,
+            singleProductId: singleTrip?.productId,
+            singlePrice: singleTrip?.price,
+        });
+    }, [yearlySubscription, monthlySubscription, singleTrip]);
 
-    // Get dynamic prices from App Store (with fallbacks)
-    const yearlyPrice = formatPrice(yearlySubscription?.price, "€29.99");
-    const monthlyPrice = formatPrice(monthlySubscription?.price, "€4.99");
-    const singleTripPrice = formatPrice(singleTrip?.price, "€4.99");
+    // Use ONLY StoreKit localizedPrice - no fallbacks, no formatting
+    // This ensures what we display matches what Apple will charge
+    const yearlyPrice = yearlySubscription?.price || null;
+    const monthlyPrice = monthlySubscription?.price || null;
+    const singleTripPrice = singleTrip?.price || null;
+    
+    // Check if products are loaded
+    const productsLoaded = yearlyPrice && monthlyPrice;
 
     const handlePurchase = async () => {
         if (!token) {
             Alert.alert("Error", "Please sign in to make a purchase");
             return;
         }
+
+        // Log the product being purchased vs what's displayed
+        const productToPurchase = selectedPlan === "yearly" ? yearlySubscription 
+                                : selectedPlan === "monthly" ? monthlySubscription 
+                                : singleTrip;
+        
+        console.log('[Subscription] 🛒 PURCHASE INITIATED:', {
+            selectedPlan,
+            displayedProductId: productToPurchase?.productId,
+            displayedPrice: productToPurchase?.price,
+            yearlyProductId: yearlySubscription?.productId,
+            yearlyPrice: yearlySubscription?.price,
+            monthlyProductId: monthlySubscription?.productId,
+            monthlyPrice: monthlySubscription?.price,
+        });
 
         setLoading(selectedPlan);
 
@@ -200,7 +208,7 @@ export default function SubscriptionScreen() {
                             </View>
                         </View>
                         <View style={styles.planPriceContainer}>
-                            <Text style={[styles.planPrice, { color: colors.text }]}>{yearlyPrice}</Text>
+                            <Text style={[styles.planPrice, { color: colors.text }]}>{yearlyPrice || "Loading..."}</Text>
                             <Text style={[styles.planPeriod, { color: colors.textMuted }]}>/year</Text>
                         </View>
                         <Text style={[styles.planBilled, { color: colors.textMuted }]}>Billed annually • Cancel anytime</Text>
@@ -238,7 +246,7 @@ export default function SubscriptionScreen() {
                             <Text style={[styles.planName, { color: colors.text }]}>Planera Pro - Monthly</Text>
                         </View>
                         <View style={styles.planPriceContainer}>
-                            <Text style={[styles.planPrice, { color: colors.text }]}>{monthlyPrice}</Text>
+                            <Text style={[styles.planPrice, { color: colors.text }]}>{monthlyPrice || "Loading..."}</Text>
                             <Text style={[styles.planPeriod, { color: colors.textMuted }]}>/mo</Text>
                         </View>
                         <Text style={[styles.planBilled, { color: colors.textMuted }]}>Billed monthly • Cancel anytime</Text>

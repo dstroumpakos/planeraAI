@@ -1366,8 +1366,62 @@ export default function TripDetails() {
                                 </View>
                             </View>
 
-                            {day.activities.map((activity: any, actIndex: number) => (
-                                <View key={actIndex} style={styles.timelineItem}>
+                            {day.activities.map((activity: any, actIndex: number) => {
+                                // Get previous activity for directions
+                                const prevActivity = actIndex > 0 ? day.activities[actIndex - 1] : null;
+                                
+                                // Build directions URL
+                                const getDirectionsUrl = () => {
+                                    const origin = prevActivity?.address || prevActivity?.title || '';
+                                    const destination = activity.address || activity.title || '';
+                                    const encodedOrigin = encodeURIComponent(origin);
+                                    const encodedDest = encodeURIComponent(destination);
+                                    
+                                    // Use Apple Maps on iOS, Google Maps on Android/web
+                                    if (Platform.OS === 'ios') {
+                                        return `maps://maps.apple.com/?saddr=${encodedOrigin}&daddr=${encodedDest}&dirflg=w`;
+                                    }
+                                    return `https://www.google.com/maps/dir/?api=1&origin=${encodedOrigin}&destination=${encodedDest}&travelmode=walking`;
+                                };
+                                
+                                return (
+                                <View key={actIndex}>
+                                    {/* Travel Segment - Show between activities */}
+                                    {actIndex > 0 && activity.travelFromPrevious && (
+                                        <View style={styles.travelSegment}>
+                                            <View style={styles.travelSegmentLeft}>
+                                                <View style={[styles.travelDottedLine, { borderColor: colors.border }]} />
+                                            </View>
+                                            <TouchableOpacity 
+                                                style={[styles.travelSegmentCard, { backgroundColor: isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)' }]}
+                                                onPress={() => Linking.openURL(getDirectionsUrl())}
+                                                activeOpacity={0.7}
+                                            >
+                                                <View style={styles.travelSegmentContent}>
+                                                    <Ionicons name="walk" size={16} color={colors.textMuted} />
+                                                    <Text style={[styles.travelSegmentText, { color: colors.textMuted }]}>
+                                                        {activity.travelFromPrevious.walkingMinutes} min walk
+                                                        {activity.travelFromPrevious.distanceKm && ` · ${activity.travelFromPrevious.distanceKm} km`}
+                                                    </Text>
+                                                    <View style={styles.travelDirectionsLink}>
+                                                        <View style={styles.directionsBetaBadge}>
+                                                            <Text style={styles.directionsBetaText}>Beta</Text>
+                                                        </View>
+                                                        <Text style={[styles.travelDirectionsText, { color: colors.primary }]}>Directions</Text>
+                                                        <Ionicons name="navigate" size={12} color={colors.primary} />
+                                                    </View>
+                                                </View>
+                                                {activity.travelFromPrevious.description && (
+                                                    <Text style={[styles.travelSegmentDesc, { color: colors.textMuted }]}>
+                                                        {activity.travelFromPrevious.description}
+                                                    </Text>
+                                                )}
+                                            </TouchableOpacity>
+                                        </View>
+                                    )}
+                                    
+                                    {/* Activity Item */}
+                                    <View style={styles.timelineItem}>
                                     <View style={styles.timelineLeft}>
                                         <View style={[styles.timelineIconContainer, { backgroundColor: activity.isLocalExperience ? colors.primary : colors.secondary }]}>
                                             <Ionicons 
@@ -1382,7 +1436,16 @@ export default function TripDetails() {
                                                 color={colors.text} 
                                             />
                                         </View>
-                                        <Text style={[styles.timelineTime, { color: colors.textMuted }]}>{activity.time}</Text>
+                                        <View style={styles.timelineTimeContainer}>
+                                            <Text style={[styles.timelineTime, { color: colors.textMuted }]}>
+                                                {activity.startTime || activity.time}
+                                            </Text>
+                                            {activity.endTime && (
+                                                <Text style={[styles.timelineTimeEnd, { color: colors.textMuted }]}>
+                                                    {activity.endTime}
+                                                </Text>
+                                            )}
+                                        </View>
                                         {actIndex < day.activities.length - 1 && <View style={[styles.timelineLine, { backgroundColor: colors.border }]} />}
                                     </View>
                                     <TouchableOpacity 
@@ -1538,7 +1601,9 @@ export default function TripDetails() {
                                         </View>
                                     </TouchableOpacity>
                                 </View>
-                            ))}
+                                </View>
+                                );
+                            })}
                         </View>
                     );
                 })}
@@ -2517,6 +2582,16 @@ const styles = StyleSheet.create({
         fontWeight: "600",
         color: "#8E8E93",
     },
+    timelineTimeContainer: {
+        alignItems: "center",
+        marginTop: 6,
+    },
+    timelineTimeEnd: {
+        fontSize: 10,
+        fontWeight: "500",
+        color: "#8E8E93",
+        marginTop: 2,
+    },
     timelineLine: {
         position: "absolute",
         top: 40,
@@ -2524,6 +2599,66 @@ const styles = StyleSheet.create({
         width: 2,
         backgroundColor: "#E2E8F0",
         zIndex: 0,
+    },
+    // Travel segment styles
+    travelSegment: {
+        flexDirection: "row",
+        gap: 16,
+        marginBottom: 16,
+        marginTop: -8,
+    },
+    travelSegmentLeft: {
+        alignItems: "center",
+        width: 48,
+        paddingVertical: 4,
+    },
+    travelDottedLine: {
+        flex: 1,
+        width: 2,
+        borderStyle: "dashed",
+        borderWidth: 1,
+        borderColor: "#E2E8F0",
+    },
+    travelSegmentCard: {
+        flex: 1,
+        borderRadius: 12,
+        paddingHorizontal: 14,
+        paddingVertical: 10,
+    },
+    travelSegmentContent: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+    },
+    travelSegmentText: {
+        fontSize: 13,
+        fontWeight: "500",
+    },
+    travelSegmentDesc: {
+        fontSize: 12,
+        marginTop: 4,
+        fontStyle: "italic",
+    },
+    travelDirectionsLink: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+        marginLeft: "auto",
+    },
+    travelDirectionsText: {
+        fontSize: 12,
+        fontWeight: "600",
+    },
+    directionsBetaBadge: {
+        backgroundColor: "#FFF3E0",
+        paddingHorizontal: 5,
+        paddingVertical: 2,
+        borderRadius: 4,
+    },
+    directionsBetaText: {
+        fontSize: 9,
+        fontWeight: "700",
+        color: "#FF9800",
     },
     timelineCard: {
         flex: 1,

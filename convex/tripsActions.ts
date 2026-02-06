@@ -461,7 +461,16 @@ IMPORTANT: For each activity, include:
 - Realistic entry prices in EUR
 - Whether "Skip the Line" tickets are available (for museums, attractions)
 - Skip the Line price (usually 5-15€ more than regular)
-- Duration of the activity
+- Duration of the activity in minutes
+- Start time and end time (24h format like "09:00", "11:30")
+- FULL ADDRESS: Include street name/number, neighborhood, and "${trip.destination}" (e.g., "Piazza del Duomo, 20121 Milan" or "Gothic Quarter, Barcelona"). This is CRITICAL for accurate map directions.
+
+**TIME-AWARE ITINERARY WITH TRAVEL SEGMENTS:**
+Between consecutive activities, include realistic travel time based on typical walking distance in ${trip.destination}. Consider:
+- City center attractions are usually 10-20 min walk apart
+- Activities in different neighborhoods may need 25-40 min walking
+- Museums/attractions typically need 1.5-3 hours each
+- Meals at restaurants typically last 45-90 minutes
 
 For local experiences (cooking classes, workshops, food tours, neighborhood walks, etc.):
 - Set "isLocalExperience": true
@@ -477,22 +486,38 @@ Include specific activities, restaurants, and attractions for each day. Format a
       "title": "Day 1 in ${trip.destination}",
       "activities": [
         {
-          "time": "09:00 AM",
+          "time": "09:00",
+          "startTime": "09:00",
+          "endTime": "11:00",
           "title": "Activity name",
           "description": "Brief description",
+          "address": "Street name, neighborhood or postal code, ${trip.destination}",
           "type": "attraction|museum|restaurant|tour|free|local-experience",
           "price": 25,
           "currency": "EUR",
           "skipTheLine": true,
           "skipTheLinePrice": 35,
-          "duration": "2-3 hours",
+          "durationMinutes": 120,
+          "duration": "2 hours",
           "tips": "Best to visit early morning",
-          "isLocalExperience": false
+          "isLocalExperience": false,
+          "travelFromPrevious": {
+            "walkingMinutes": 15,
+            "distanceKm": 1.2,
+            "description": "15 min walk through the Gothic Quarter"
+          }
         }
       ]
     }
   ]
 }
+
+**ACTIVITY TIMING RULES:**
+- First activity of each day: set "travelFromPrevious" to null
+- Subsequent activities: include realistic travel time from previous location
+- startTime of next activity = previous endTime + walking time
+- Ensure no time gaps or overlaps - schedule realistically
+- Allow 15-30 min buffer for transit between different areas
 
 **REMINDER: ${timeAwareGuidance.skipLastDay 
     ? `Generate Days 1-${effectiveTripDays} with activities. Day ${tripDays} is departure-only with no activities.` 
