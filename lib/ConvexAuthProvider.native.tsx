@@ -1,4 +1,4 @@
-import React, { ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import React, { ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { ConvexProviderWithAuth, ConvexReactClient } from "convex/react";
 import { authClient } from "./auth-client.native";
 
@@ -7,6 +7,26 @@ type UseAuthReturn = {
   isAuthenticated: boolean;
   fetchAccessToken: () => Promise<string | null>;
 };
+
+// Create a context for auth state that components can subscribe to
+type NativeAuthContextType = {
+  isLoading: boolean;
+  isAuthenticated: boolean;
+};
+
+const NativeAuthContext = createContext<NativeAuthContextType>({
+  isLoading: true,
+  isAuthenticated: false,
+});
+
+// Custom hook that components should use instead of Convex's useConvexAuth
+export function useNativeConvexAuth() {
+  const context = useContext(NativeAuthContext);
+  if (!context) {
+    throw new Error("useNativeConvexAuth must be used within ConvexNativeAuthProvider");
+  }
+  return context;
+}
 
 export const Authenticated = ({ children }: any) => <>{children}</>;
 export const Unauthenticated = ({ children }: any) => <>{children}</>;
@@ -31,6 +51,7 @@ export function ConvexNativeAuthProvider({
         await authClient.init();
         const res = await authClient.getSession();
         if (!mounted) return;
+        console.log("[ConvexAuth] Initial session check:", !!res?.data?.session);
         setHasSession(!!res?.data?.session);
       } catch {
         if (!mounted) return;
@@ -43,7 +64,9 @@ export function ConvexNativeAuthProvider({
 
     const unsubscribe = authClient.$store.listen((state: any) => {
       if (!mounted) return;
-      setHasSession(!!state?.session);
+      const newHasSession = !!state?.session;
+      console.log("[ConvexAuth] Auth state changed via listener:", newHasSession);
+      setHasSession(newHasSession);
       setIsLoading(false);
     });
 
@@ -74,9 +97,17 @@ export function ConvexNativeAuthProvider({
     };
   }, [isLoading, hasSession, fetchAccessToken]);
 
+  // Memoize context value to avoid unnecessary re-renders
+  const authContextValue = useMemo(() => ({
+    isLoading,
+    isAuthenticated: hasSession,
+  }), [isLoading, hasSession]);
+
   return (
-    <ConvexProviderWithAuth client={client} useAuth={useAuth}>
-      {children}
-    </ConvexProviderWithAuth>
+    <NativeAuthContext.Provider value={authContextValue}>
+      <ConvexProviderWithAuth client={client} useAuth={useAuth}>
+        {children}
+      </ConvexProviderWithAuth>
+    </NativeAuthContext.Provider>
   );
 }

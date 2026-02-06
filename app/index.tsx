@@ -109,9 +109,9 @@ export default function Index() {
                         Alert.alert("Error", result.error.message || "Sign in failed");
                     }
                 } else {
-                    // Sign-in successful - let AuthenticatedRedirect handle routing
-                    // It will check onboardingCompleted and redirect accordingly
-                    console.log("[Index] Email Sign-In successful, AuthenticatedRedirect will handle routing...");
+                    // Sign-in successful - AuthenticatedRedirect will check onboarding
+                    console.log("[Index] Email Sign-In successful, waiting for auth state update...");
+                    // Don't navigate - let AuthenticatedRedirect handle it
                 }
             }
         } catch (error: any) {
@@ -133,10 +133,11 @@ export default function Index() {
                 }
                 setOauthLoading(null);
             } else {
-                // Success - let AuthenticatedRedirect handle routing
-                // It will check onboardingCompleted and redirect accordingly
-                console.log("[Index] Google Sign-In successful, AuthenticatedRedirect will handle routing...");
-                setOauthLoading(null);
+                // Success - AuthenticatedRedirect will check onboarding and redirect
+                console.log("[Index] Google Sign-In successful, waiting for auth state update...");
+                setTimeout(() => {
+                    setOauthLoading(null);
+                }, 1000);
             }
         } catch (error: any) {
             Alert.alert("Error", error.message || "Google sign in failed");
@@ -162,13 +163,11 @@ export default function Index() {
                 }
                 setOauthLoading(null);
             } else {
-                // Success - let AuthenticatedRedirect handle routing
-                // It will check onboardingCompleted and redirect to /onboarding if not completed
-                console.log("[Index] Apple Sign-In successful, AuthenticatedRedirect will handle routing...");
-                // Wait briefly to ensure token is stored before auth state updates
-                setTimeout(() => {
-                    setOauthLoading(null);
-                }, 1000);
+                // Success - clear loading and let AuthenticatedRedirect handle navigation
+                // The component will re-render when isAuthenticated becomes true
+                console.log("[Index] Apple Sign-In successful!");
+                setOauthLoading(null);
+                // Force a small delay to ensure auth state updates, then the component will re-render
             }
         } catch (error: any) {
             Alert.alert("Error", error.message || "Apple sign in failed");

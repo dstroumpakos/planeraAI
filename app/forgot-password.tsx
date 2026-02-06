@@ -205,10 +205,18 @@ export default function ForgotPasswordScreen() {
                     [
                         {
                             text: "Sign In",
-                            onPress: () => router.replace("/"),
+                            onPress: () => {
+                                console.log("[ForgotPassword] Navigating to login screen...");
+                                router.replace("/");
+                            },
                         },
-                    ]
+                    ],
+                    { cancelable: false }
                 );
+                // Also navigate after a short delay as fallback
+                setTimeout(() => {
+                    router.replace("/");
+                }, 3000);
             } else {
                 setError(result.error || "Failed to reset password. Please try again.");
             }

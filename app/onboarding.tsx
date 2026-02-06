@@ -88,14 +88,14 @@ export default function Onboarding() {
   };
 
   const getStepNumber = (): number => {
-    switch (step) {
-      case "welcome": return 1;
-      case "traveler-choice": return 1;
-      case "my-profile": return 2;
-      case "add-travelers": return 2;
-      case "preferences": return skippedProfile ? 2 : 3;
-      default: return 1;
-    }
+    // Steps 1 and 2 are hidden due to disabled features
+    // Only preferences step is shown now
+    return 1;
+  };
+
+  const getTotalSteps = (): number => {
+    // Only preferences step is active
+    return 1;
   };
 
   const getCountryName = (code: string): string => {
@@ -303,9 +303,9 @@ export default function Onboarding() {
   // Progress indicator component
   const ProgressIndicator = () => (
     <View style={styles.progressContainer}>
-      <Text style={styles.progressText}>Step {getStepNumber()} of 3</Text>
+      <Text style={styles.progressText}>Step {getStepNumber()} of {getTotalSteps()}</Text>
       <View style={styles.progressBarContainer}>
-        {[1, 2, 3].map((num) => (
+        {Array.from({ length: getTotalSteps() }, (_, i) => i + 1).map((num) => (
           <View
             key={num}
             style={[
@@ -1112,9 +1112,8 @@ export default function Onboarding() {
           behavior={Platform.OS === "ios" ? "padding" : "height"}
         >
           <View style={styles.header}>
-            <TouchableOpacity style={styles.backButton} onPress={() => travelerChoice === "me-others" ? setStep("add-travelers") : setStep("my-profile")}>
-              <Ionicons name="arrow-back" size={24} color="#1A1A1A" />
-            </TouchableOpacity>
+            {/* Back button hidden - steps 1 and 2 disabled */}
+            <View style={{ width: 40 }} />
             <ProgressIndicator />
             <View style={{ width: 40 }} />
           </View>

@@ -1,4 +1,3 @@
 // Native-specific auth components
 
-export { Authenticated, Unauthenticated, AuthLoading } from "./ConvexAuthProvider.native";
-export { useConvexAuth } from "convex/react";
+export { Authenticated, Unauthenticated, AuthLoading, useNativeConvexAuth as useConvexAuth } from "./ConvexAuthProvider.native";
