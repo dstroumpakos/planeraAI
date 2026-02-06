@@ -109,11 +109,9 @@ export default function Index() {
                         Alert.alert("Error", result.error.message || "Sign in failed");
                     }
                 } else {
-                    // Sign-in successful - redirect after brief delay to let auth state update
-                    console.log("[Index] Email Sign-In successful, redirecting...");
-                    setTimeout(() => {
-                        router.replace("/(tabs)");
-                    }, 1000);
+                    // Sign-in successful - let AuthenticatedRedirect handle routing
+                    // It will check onboardingCompleted and redirect accordingly
+                    console.log("[Index] Email Sign-In successful, AuthenticatedRedirect will handle routing...");
                 }
             }
         } catch (error: any) {
@@ -135,11 +133,10 @@ export default function Index() {
                 }
                 setOauthLoading(null);
             } else {
-                // Success - navigate after a brief delay to let auth state update
-                console.log("[Index] Google Sign-In successful, redirecting...");
-                setTimeout(() => {
-                    router.replace("/(tabs)");
-                }, 2000);  // Increased to 2 seconds
+                // Success - let AuthenticatedRedirect handle routing
+                // It will check onboardingCompleted and redirect accordingly
+                console.log("[Index] Google Sign-In successful, AuthenticatedRedirect will handle routing...");
+                setOauthLoading(null);
             }
         } catch (error: any) {
             Alert.alert("Error", error.message || "Google sign in failed");
@@ -165,12 +162,13 @@ export default function Index() {
                 }
                 setOauthLoading(null);
             } else {
-                // Success - wait a bit longer to ensure token is stored
-                console.log("[Index] Apple Sign-In successful, waiting before redirecting...");
+                // Success - let AuthenticatedRedirect handle routing
+                // It will check onboardingCompleted and redirect to /onboarding if not completed
+                console.log("[Index] Apple Sign-In successful, AuthenticatedRedirect will handle routing...");
+                // Wait briefly to ensure token is stored before auth state updates
                 setTimeout(() => {
-                    console.log("[Index] Now redirecting to main app");
-                    router.replace("/(tabs)");
-                }, 2000);  // Increased to 2 seconds
+                    setOauthLoading(null);
+                }, 1000);
             }
         } catch (error: any) {
             Alert.alert("Error", error.message || "Apple sign in failed");
@@ -329,6 +327,16 @@ export default function Index() {
                             onChangeText={setPassword}
                             secureTextEntry
                         />
+                        
+                        {/* Forgot password link - only shown in Sign In mode */}
+                        {!isSignUp && (
+                            <TouchableOpacity 
+                                onPress={() => router.push("/forgot-password")}
+                                style={styles.forgotPassword}
+                            >
+                                <Text style={styles.forgotPasswordText}>Forgot password?</Text>
+                            </TouchableOpacity>
+                        )}
                         
                         <TouchableOpacity 
                             style={styles.primaryButton} 
@@ -797,6 +805,16 @@ const styles = StyleSheet.create({
     switchTextBold: {
         color: COLORS.text,
         fontWeight: "700",
+    },
+    forgotPassword: {
+        alignSelf: "flex-end",
+        marginBottom: 8,
+        marginTop: -8,
+    },
+    forgotPasswordText: {
+        fontSize: 14,
+        color: COLORS.primary,
+        fontWeight: "500",
     },
     backButton: {
         flexDirection: "row",

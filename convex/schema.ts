@@ -23,6 +23,13 @@ export default defineSchema({
         skipFlights: v.optional(v.boolean()),
         skipHotel: v.optional(v.boolean()),
         preferredFlightTime: v.optional(v.string()),
+        // Arrival/Departure times for time-aware itineraries (ISO datetime strings in destination timezone)
+        // When provided, affects itinerary generation:
+        // - First day starts from arrival time (not morning)
+        // - Last day ends ~3 hours before departure
+        // - Early morning departures (04:00-06:00) skip activities on that day
+        arrivalTime: v.optional(v.string()), // ISO datetime string, e.g., "2024-01-15T15:30:00"
+        departureTime: v.optional(v.string()), // ISO datetime string, e.g., "2024-01-22T18:00:00"
         // Selected traveler profiles for flight booking (disabled in V1)
         selectedTravelerIds: v.optional(v.array(v.id("travelers"))),
         status: v.union(
@@ -125,6 +132,10 @@ export default defineSchema({
         phone: v.optional(v.string()),
         dateOfBirth: v.optional(v.string()),
         profilePicture: v.optional(v.id("_storage")),
+        // Password hash for email/password users (stored as hex string from SHA-256)
+        passwordHash: v.optional(v.string()),
+        // Auth provider type: "email", "apple", "google", "anonymous"
+        authProvider: v.optional(v.string()),
         darkMode: v.optional(v.boolean()),
         homeAirport: v.optional(v.string()),
         defaultTravelers: v.optional(v.float64()),
@@ -539,6 +550,26 @@ export default defineSchema({
     })
         .index("by_token", ["token"])
         .index("by_user", ["userId"]),
+
+    // Password reset codes for email/password users
+    passwordResetCodes: defineTable({
+        // Email address (lowercase) for the reset request
+        email: v.string(),
+        // SHA-256 hash of the 6-digit code (never store raw code)
+        codeHash: v.string(),
+        // Expiration timestamp (10 minutes from creation)
+        expiresAt: v.float64(),
+        // Number of verification attempts (max 5)
+        attempts: v.float64(),
+        // Whether code has been used or invalidated
+        used: v.boolean(),
+        // Whether code has been verified (for session-based flow)
+        verified: v.boolean(),
+        // Creation timestamp
+        createdAt: v.float64(),
+    })
+        .index("by_email", ["email"])
+        .index("by_email_created", ["email", "createdAt"]),
 
     // V1: AI-generated Top 5 sights for destinations
     destinationSights: defineTable({

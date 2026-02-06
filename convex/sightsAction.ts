@@ -80,7 +80,7 @@ Return ONLY valid JSON in this exact format:
                     { role: "system", content: "You are a travel expert providing informational recommendations. Return only valid JSON." },
                     { role: "user", content: prompt },
                 ],
-                model: "gpt-4o",
+                model: "gpt-5.2",
                 response_format: { type: "json_object" },
             });
             

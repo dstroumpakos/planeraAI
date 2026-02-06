@@ -23,6 +23,9 @@ export const create = authMutation({
         skipFlights: v.optional(v.boolean()),
         skipHotel: v.optional(v.boolean()),
         preferredFlightTime: v.optional(v.string()),
+        // Arrival/Departure times (ISO datetime strings in destination timezone)
+        arrivalTime: v.optional(v.string()),
+        departureTime: v.optional(v.string()),
          // Disabled in V1 - traveler profiles not used
         selectedTravelerIds: v.optional(v.array(v.id("travelers"))),
     },
@@ -116,6 +119,9 @@ export const create = authMutation({
             skipFlights: args.skipFlights ?? false,
             skipHotel: args.skipHotel ?? false,
             preferredFlightTime: args.preferredFlightTime ?? "any",
+            // Arrival/Departure times for time-aware itineraries
+            arrivalTime: args.arrivalTime,
+            departureTime: args.departureTime,
             // V1: Disabled - not passing traveler profiles
             selectedTravelerIds: undefined,
         });
@@ -132,11 +138,33 @@ export const create = authMutation({
             ? `\nLocal Experiences requested: ${args.localExperiences.join(", ")}. Prioritize authentic, non-touristy options for these experiences.`
             : "";
 
+        // Build arrival/departure time info for the prompt
+        let arrivalDepartureInfo = "";
+        if (args.arrivalTime) {
+            const arrivalDate = new Date(args.arrivalTime);
+            const arrivalTimeStr = arrivalDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+            arrivalDepartureInfo += `\nArrival time at destination: ${arrivalTimeStr} local time on ${arrivalDate.toDateString()}.`;
+            arrivalDepartureInfo += " The first day's itinerary should start AFTER arrival - schedule light activities appropriate for the remaining time.";
+        }
+        if (args.departureTime) {
+            const departureDate = new Date(args.departureTime);
+            const departureHour = departureDate.getHours();
+            const departureTimeStr = departureDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+            arrivalDepartureInfo += `\nDeparture time from destination: ${departureTimeStr} local time on ${departureDate.toDateString()}.`;
+            
+            // Handle early morning departure edge case
+            if (departureHour >= 4 && departureHour <= 6) {
+                arrivalDepartureInfo += " IMPORTANT: This is an early morning departure - do NOT schedule any activities on the departure day. The previous day should end earlier (around 20:00-21:00) to allow time for rest and packing.";
+            } else {
+                arrivalDepartureInfo += " The last day's itinerary should end approximately 3 hours before departure to allow time for airport transfer and check-in.";
+            }
+        }
+
         const prompt = `Plan a trip to ${args.destination} for ${args.travelerCount} people.
         ${flightInfo}
         ${hotelInfo}
          Budget: €${args.budgetTotal} total (€${perPersonBudget} per person).
-        Dates: ${new Date(args.startDate).toDateString()} to ${new Date(args.endDate).toDateString()}.
+        Dates: ${new Date(args.startDate).toDateString()} to ${new Date(args.endDate).toDateString()}.${arrivalDepartureInfo}
         Interests: ${args.interests.join(", ")}.${localExperiencesInfo}`;
 
         // Schedule the generation action from tripsActions.ts
@@ -146,6 +174,8 @@ export const create = authMutation({
             skipFlights: args.skipFlights ?? false,
             skipHotel: args.skipHotel ?? false,
             preferredFlightTime: args.preferredFlightTime ?? "any",
+            arrivalTime: args.arrivalTime,
+            departureTime: args.departureTime,
         });
 
         return tripId;
@@ -177,6 +207,9 @@ export const getTripDetails = internalQuery({
             skipFlights: v.optional(v.boolean()),
             skipHotel: v.optional(v.boolean()),
             preferredFlightTime: v.optional(v.string()),
+            // Arrival/Departure times for time-aware itineraries
+            arrivalTime: v.optional(v.string()),
+            departureTime: v.optional(v.string()),
             selectedTravelerIds: v.optional(v.array(v.id("travelers"))),
             status: v.string(),
             itinerary: v.optional(v.any()),

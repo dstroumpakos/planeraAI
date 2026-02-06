@@ -71,6 +71,117 @@ Guidelines for local experiences:
 - Focus on atmosphere, authenticity, and local connection`;
 }
 
+// Helper function to generate time-aware itinerary guidance based on arrival/departure times
+function generateTimeAwareGuidance(
+    arrivalTime: string | undefined,
+    departureTime: string | undefined,
+    startDate: number,
+    endDate: number
+): { guidance: string; skipLastDay: boolean; firstDayStartTime: string | null; lastDayEndTime: string | null } {
+    let guidance = "";
+    let skipLastDay = false;
+    let firstDayStartTime: string | null = null;
+    let lastDayEndTime: string | null = null;
+    
+    if (arrivalTime) {
+        const arrival = new Date(arrivalTime);
+        const arrivalHour = arrival.getHours();
+        const arrivalMinutes = arrival.getMinutes();
+        firstDayStartTime = `${String(arrivalHour).padStart(2, '0')}:${String(arrivalMinutes).padStart(2, '0')}`;
+        
+        // Determine first day activity guidance based on arrival time
+        if (arrivalHour >= 20) {
+            // Late evening arrival - minimal activities
+            guidance += `
+**FIRST DAY (ARRIVAL DAY) CONSTRAINTS:**
+- Arrival time: ${arrival.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
+- This is a late evening arrival. Only schedule: check-in, light dinner nearby, or exploring the hotel area.
+- Do NOT schedule any attractions, tours, or intensive activities.
+- Start activities from Day 2 morning.
+`;
+        } else if (arrivalHour >= 15) {
+            // Afternoon arrival - light activities
+            guidance += `
+**FIRST DAY (ARRIVAL DAY) CONSTRAINTS:**
+- Arrival time: ${arrival.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
+- This is an afternoon arrival. Schedule light activities only AFTER ${arrival.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}.
+- Suitable activities: neighborhood walk, dinner, evening stroll, relaxed exploration.
+- Do NOT schedule intensive morning activities or tours that require early check-in.
+- First activity should start no earlier than 1 hour after arrival.
+`;
+        } else if (arrivalHour >= 12) {
+            // Mid-day arrival
+            guidance += `
+**FIRST DAY (ARRIVAL DAY) CONSTRAINTS:**
+- Arrival time: ${arrival.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
+- This is a mid-day arrival. Start activities AFTER ${arrival.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}.
+- You can schedule afternoon activities and dinner. No morning activities on Day 1.
+- First activity should be after check-in (allow 1-2 hours after arrival).
+`;
+        } else {
+            // Morning arrival - relatively full day
+            guidance += `
+**FIRST DAY (ARRIVAL DAY) CONSTRAINTS:**
+- Arrival time: ${arrival.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
+- This is a morning arrival. Schedule activities starting mid-morning (after check-in/luggage drop).
+- First activity should start no earlier than 2 hours after arrival.
+`;
+        }
+    }
+    
+    if (departureTime) {
+        const departure = new Date(departureTime);
+        const departureHour = departure.getHours();
+        
+        // Calculate end time (3 hours before departure for airport transfer)
+        const endHour = departureHour - 3;
+        
+        if (departureHour >= 4 && departureHour <= 6) {
+            // Very early morning departure - skip activities on last day entirely
+            skipLastDay = true;
+            guidance += `
+**LAST DAY (DEPARTURE DAY) CONSTRAINTS:**
+- Departure time: ${departure.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
+- IMPORTANT: This is an early morning departure. Do NOT schedule any activities on the departure day.
+- The traveler needs to rest and prepare the night before.
+- Make the PREVIOUS day (Day before departure) lighter - activities should end by 20:00-21:00.
+`;
+        } else if (departureHour <= 10) {
+            // Late morning departure - minimal morning activities
+            skipLastDay = true;
+            guidance += `
+**LAST DAY (DEPARTURE DAY) CONSTRAINTS:**
+- Departure time: ${departure.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
+- This is a mid-morning departure. Skip activities on departure day - only early breakfast if time permits.
+- All itinerary ends on the day before departure.
+`;
+        } else if (departureHour <= 14) {
+            // Early afternoon departure - very light morning only
+            lastDayEndTime = `${String(Math.max(7, endHour)).padStart(2, '0')}:00`;
+            guidance += `
+**LAST DAY (DEPARTURE DAY) CONSTRAINTS:**
+- Departure time: ${departure.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
+- Very limited time on departure day. Schedule only: breakfast and maybe a brief nearby activity.
+- All activities must end by ${departure.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }).replace(`:${String(departure.getMinutes()).padStart(2, '0')}`, ':00')} at the latest (3 hours before departure for airport transfer).
+- Keep packing and checkout time in mind.
+`;
+        } else {
+            // Afternoon/evening departure - partial day available
+            const safeEndHour = Math.max(9, endHour);
+            lastDayEndTime = `${String(safeEndHour).padStart(2, '0')}:00`;
+            guidance += `
+**LAST DAY (DEPARTURE DAY) CONSTRAINTS:**
+- Departure time: ${departure.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
+- Partial day available. Activities must end by ${safeEndHour}:00 (3 hours before departure).
+- Schedule lighter activities: breakfast, nearby sights, final shopping.
+- Account for checkout time (usually 11:00-12:00) - may need luggage storage.
+`;
+        }
+    }
+    
+    return { guidance, skipLastDay, firstDayStartTime, lastDayEndTime };
+}
+
 export const generate = internalAction({
     args: { 
         tripId: v.id("trips"), 
@@ -78,10 +189,13 @@ export const generate = internalAction({
         skipFlights: v.optional(v.boolean()),
         skipHotel: v.optional(v.boolean()),
         preferredFlightTime: v.optional(v.string()),
+        // Arrival/Departure times for time-aware itineraries
+        arrivalTime: v.optional(v.string()),
+        departureTime: v.optional(v.string()),
     },
     returns: v.null(),
     handler: async (ctx, args) => {
-        const { tripId, skipFlights, skipHotel, preferredFlightTime } = args;
+        const { tripId, skipFlights, skipHotel, preferredFlightTime, arrivalTime, departureTime } = args;
 
         console.log("=".repeat(80));
         console.log("🚀 TRIP GENERATION STARTED");
@@ -91,6 +205,8 @@ export const generate = internalAction({
         console.log("Skip Flights:", skipFlights ? "Yes" : "No");
         console.log("Skip Hotel:", skipHotel ? "Yes" : "No");
         console.log("Preferred Flight Time:", preferredFlightTime || "any");
+        console.log("Arrival Time:", arrivalTime || "Not specified");
+        console.log("Departure Time:", departureTime || "Not specified");
 
         // Get trip details
         const trip = await ctx.runQuery(internal.trips.getTripDetails, { tripId });
@@ -158,26 +274,25 @@ export const generate = internalAction({
         console.log("=".repeat(80));
 
         try {
-            let flights = null;
-            let hotels;
-            // These must use 'let' because the linter incorrectly suggests const 
-            // but they're declared here and assigned later in the try block
-            // eslint-disable-next-line prefer-const
-            let activities;
-            // eslint-disable-next-line prefer-const
-            let restaurants;
+            // ===== PARALLEL DATA FETCHING =====
+            // Run all independent API calls simultaneously for faster performance
+            console.log("🚀 Starting parallel data fetching...");
+            const startTime = Date.now();
 
-            // 1. Fetch flights (with fallback) - SKIP if user already has flights
-            if (skipFlights) {
-                console.log("✈️ Skipping flight search - user already has flights booked");
-                flights = {
-                    skipped: true,
-                    message: "You indicated you already have flights booked",
-                    dataSource: "user-provided",
-                };
-            } else {
+            // Define async functions for each data source
+            const fetchFlightsAsync = async () => {
+                if (skipFlights) {
+                    console.log("✈️ Skipping flight search - user already has flights booked");
+                    return {
+                        skipped: true,
+                        message: "You indicated you already have flights booked",
+                        dataSource: "user-provided",
+                    };
+                }
+                
                 console.log("✈️ Fetching flights...");
                 console.log("  - Preferred time:", preferredFlightTime || "any");
+                
                 if (hasDuffelKey) {
                     try {
                         const originCode = extractIATACode(origin);
@@ -186,17 +301,12 @@ export const generate = internalAction({
                         const returnDate = new Date(trip.endDate).toISOString().split('T')[0];
 
                         console.log(`🔍 Searching flights via Duffel: ${originCode} -> ${destCode}`);
-                        console.log(`   Origin input: "${origin}", Destination input: "${trip.destination}"`);
-                       console.log(`   Departure: ${departureDate}, Return: ${returnDate}, Adults: ${trip.travelerCount ?? trip.travelers ?? 1}`);
                         
-                        // Validate IATA codes before calling Duffel
                         if (!originCode || !destCode) {
-                            console.warn(`⚠️ Invalid IATA codes - Origin: "${originCode}", Dest: "${destCode}". Falling back to AI flights.`);
                             throw new Error("Invalid IATA codes");
                         }
                         
                         if (originCode === destCode) {
-                            console.warn(`⚠️ Origin and destination are the same (${originCode}). Falling back to AI flights.`);
                             throw new Error("Origin and destination are the same");
                         }
                         
@@ -211,115 +321,97 @@ export const generate = internalAction({
 
                         if (!offers || offers.length === 0) {
                             console.warn("⚠️ No flights found via Duffel");
-                            flights = await generateRealisticFlights(
-                                origin,
-                                originCode,
-                                trip.destination,
-                                destCode,
-                                new Date(trip.startDate).toISOString().split('T')[0],
-                                new Date(trip.endDate).toISOString().split('T')[0],
-                                travelerCount,
-                                preferredFlightTime || "any"
+                            return await generateRealisticFlights(
+                                origin, originCode, trip.destination, destCode,
+                                departureDate, returnDate, travelerCount, preferredFlightTime || "any"
                             );
-                        } else {
-                            // Define interface for flight option
-                            interface FlightOption {
-                                id: string;
-                                pricePerPerson: number;
-                                currency: string;
-                                outbound: {
-                                    airline: string;
-                                    departure: string;
-                                    arrival: string;
-                                };
-                                return?: {
-                                    airline: string;
-                                };
-                                isBestPrice?: boolean;
-                            }
-                            
-                            // Transform Duffel offers to our format
-                            const flightOptions: FlightOption[] = offers.slice(0, 5).map((offer: unknown) =>
-                                duffel.transformOfferToFlightOption(offer as Parameters<typeof duffel.transformOfferToFlightOption>[0])
-                            );
-
-                            // Sort by price and mark best price
-                            flightOptions.sort((a, b) => a.pricePerPerson - b.pricePerPerson);
-                            if (flightOptions.length > 0) {
-                                flightOptions[0].isBestPrice = true;
-                            }
-
-                            console.log(`✅ Duffel returned ${flightOptions.length} flight options`);
-                            console.log(`   Best price: €${flightOptions[0]?.pricePerPerson || 'N/A'}`);
-                            console.log(`   Sample flight: ${flightOptions[0]?.outbound?.airline} - ${flightOptions[0]?.outbound?.departure} to ${flightOptions[0]?.outbound?.arrival}`);
-
-                            flights = {
-                                options: flightOptions,
-                                bestPrice: flightOptions[0]?.pricePerPerson || 0,
-                                preferredTime: preferredFlightTime || "any",
-                                dataSource: "duffel",
-                                offerRequestId,
-                            };
                         }
+                        
+                        interface FlightOption {
+                            id: string;
+                            pricePerPerson: number;
+                            currency: string;
+                            outbound: { airline: string; departure: string; arrival: string; };
+                            return?: { airline: string; };
+                            isBestPrice?: boolean;
+                        }
+                        
+                        const flightOptions: FlightOption[] = offers.slice(0, 5).map((offer: unknown) =>
+                            duffel.transformOfferToFlightOption(offer as Parameters<typeof duffel.transformOfferToFlightOption>[0])
+                        );
+                        flightOptions.sort((a, b) => a.pricePerPerson - b.pricePerPerson);
+                        if (flightOptions.length > 0) flightOptions[0].isBestPrice = true;
+
+                        console.log(`✅ Duffel returned ${flightOptions.length} flight options`);
+                        return {
+                            options: flightOptions,
+                            bestPrice: flightOptions[0]?.pricePerPerson || 0,
+                            preferredTime: preferredFlightTime || "any",
+                            dataSource: "duffel",
+                            offerRequestId,
+                        };
                     } catch (error) {
                         console.error("❌ Duffel flights failed:", error);
                         const originCode = extractIATACode(origin);
                         const destCode = extractIATACode(trip.destination);
-                        flights = await generateRealisticFlights(
-                            origin,
-                            originCode,
-                            trip.destination,
-                            destCode,
+                        return await generateRealisticFlights(
+                            origin, originCode, trip.destination, destCode,
                             new Date(trip.startDate).toISOString().split('T')[0],
                             new Date(trip.endDate).toISOString().split('T')[0],
-                            travelerCount,
-                            preferredFlightTime || "any"
+                            travelerCount, preferredFlightTime || "any"
                         );
                     }
                 } else {
                     const originCode = extractIATACode(origin);
                     const destCode = extractIATACode(trip.destination);
-                    flights = await generateRealisticFlights(
-                        origin,
-                        originCode,
-                        trip.destination,
-                        destCode,
+                    return await generateRealisticFlights(
+                        origin, originCode, trip.destination, destCode,
                         new Date(trip.startDate).toISOString().split('T')[0],
                         new Date(trip.endDate).toISOString().split('T')[0],
-                        travelerCount,
-                        preferredFlightTime || "any"
+                        travelerCount, preferredFlightTime || "any"
                     );
                 }
-                console.log("✅ Flights ready:", flights.dataSource);
-            }
+            };
 
-            // 2. Fetch hotels (with fallback)
-            console.log("🏨 Fetching hotels...");
-            if (skipHotel) {
-                console.log("✈️ Skipping hotel search - user already has accommodation booked");
-                hotels = {
-                    skipped: true,
-                    message: "You indicated you already have accommodation booked",
-                    dataSource: "user-provided",
-                };
-            } else {
-                // Currently using fallback hotel data
-                // TODO: Integrate with Duffel Hotels API when available
-                hotels = getFallbackHotels(trip.destination);
-            }
-            console.log(`✅ Hotels ready: ${typeof hotels === 'object' && 'skipped' in hotels ? "Skipped" : (Array.isArray(hotels) ? hotels.length + " options" : "Unknown")}`);
+            const fetchHotelsAsync = async () => {
+                console.log("🏨 Fetching hotels...");
+                if (skipHotel) {
+                    console.log("🏨 Skipping hotel search - user already has accommodation booked");
+                    return {
+                        skipped: true,
+                        message: "You indicated you already have accommodation booked",
+                        dataSource: "user-provided",
+                    };
+                }
+                return getFallbackHotels(trip.destination);
+            };
 
-            // 3. Fetch activities (with fallback)
-            console.log("🎯 Fetching activities...");
-            activities = await searchActivities(trip.destination); // eslint-disable-line prefer-const
-            console.log(`✅ Activities ready: ${activities.length} options`);
+            const fetchActivitiesAsync = async () => {
+                console.log("🎯 Fetching activities...");
+                return await searchActivities(trip.destination);
+            };
 
-            // 4. Fetch restaurants (with fallback)
-            console.log("🍽️ Fetching restaurants...");
-            restaurants = await searchRestaurants(trip.destination); // eslint-disable-line prefer-const
-            console.log(`✅ Restaurants ready: ${restaurants.length} options`);
+            const fetchRestaurantsAsync = async () => {
+                console.log("🍽️ Fetching restaurants...");
+                return await searchRestaurants(trip.destination);
+            };
 
-            // 5. Generate transportation options
+            // Run all fetches in parallel
+            const [flights, hotels, activities, restaurants] = await Promise.all([
+                fetchFlightsAsync(),
+                fetchHotelsAsync(),
+                fetchActivitiesAsync(),
+                fetchRestaurantsAsync(),
+            ]);
+
+            const fetchTime = Date.now() - startTime;
+            console.log(`✅ All data fetched in ${fetchTime}ms (parallel)`);
+            console.log(`   - Flights: ${'dataSource' in flights ? flights.dataSource : 'ready'}`);
+            console.log(`   - Hotels: ${typeof hotels === 'object' && 'skipped' in hotels ? "Skipped" : (Array.isArray(hotels) ? hotels.length + " options" : "Unknown")}`);
+            console.log(`   - Activities: ${activities.length} options`);
+            console.log(`   - Restaurants: ${restaurants.length} options`);
+
+            // 5. Generate transportation options (sync, fast)
             console.log("🚗 Generating transportation options...");
             const transportation = generateTransportationOptions(trip.destination, origin, trip.travelerCount ?? trip.travelers ?? 1);
             console.log(`✅ Transportation ready: ${transportation.length} options`);
@@ -337,9 +429,25 @@ export const generate = internalAction({
                     const tripDays = Math.ceil((trip.endDate - trip.startDate) / (24 * 60 * 60 * 1000));
                     console.log(`📅 Generating itinerary for ${tripDays} days`);
                     
+                    // Generate time-aware guidance based on arrival/departure times
+                    const timeAwareGuidance = generateTimeAwareGuidance(
+                        arrivalTime,
+                        departureTime,
+                        trip.startDate,
+                        trip.endDate
+                    );
+                    
+                    console.log(`⏰ Time-aware guidance: skipLastDay=${timeAwareGuidance.skipLastDay}, firstDayStart=${timeAwareGuidance.firstDayStartTime}, lastDayEnd=${timeAwareGuidance.lastDayEndTime}`);
+                    
+                    // Adjust the effective trip days if we need to skip the last day
+                    const effectiveTripDays = timeAwareGuidance.skipLastDay ? tripDays - 1 : tripDays;
+                    const daysInstructions = timeAwareGuidance.skipLastDay 
+                        ? `Generate ${effectiveTripDays} days of activities (Days 1-${effectiveTripDays}). Day ${tripDays} is departure day with no scheduled activities.`
+                        : `Generate exactly ${tripDays} days of itinerary. Do not skip any days.`;
+                    
                     const itineraryPrompt = `Create a detailed day-by-day itinerary for a ${tripDays}-day trip to ${trip.destination} from ${new Date(trip.startDate).toDateString()} to ${new Date(trip.endDate).toDateString()}.
 
-**CRITICAL: You MUST generate exactly ${tripDays} days of itinerary. Do not skip any days.**
+**CRITICAL: ${daysInstructions}**
 
 Budget: ${budgetDisplay}
 Travelers: ${trip.travelerCount ?? trip.travelers ?? 1}
@@ -347,6 +455,7 @@ Interests: ${trip.interests.join(", ")}
 
 ${generateTravelStyleGuidance(trip.interests)}
 ${localExperiencesGuidance}
+${timeAwareGuidance.guidance}
 
 IMPORTANT: For each activity, include:
 - Realistic entry prices in EUR
@@ -385,23 +494,43 @@ Include specific activities, restaurants, and attractions for each day. Format a
   ]
 }
 
-**REMINDER: Generate ALL ${tripDays} days from Day 1 to Day ${tripDays}. Each day should have 3-5 activities including meals.**
+**REMINDER: ${timeAwareGuidance.skipLastDay 
+    ? `Generate Days 1-${effectiveTripDays} with activities. Day ${tripDays} is departure-only with no activities.` 
+    : `Generate ALL ${tripDays} days from Day 1 to Day ${tripDays}.`} Each full day should have 3-5 activities including meals. Partial days (arrival/departure) should have fewer activities appropriate for the available time.**
 
 Make sure prices are realistic for ${trip.destination}. Museums typically cost €10-25, skip-the-line adds €5-15. Tours cost €20-80. Restaurants show average meal cost per person.`;
                     
-                    // For longer trips, we may need more tokens
-                    const maxTokens = Math.min(16000, Math.max(4000, tripDays * 800));
+                    // For longer trips or trips with time constraints, we need more tokens
+                    // Base: 4000 tokens, +1000 per day, extra buffer for time-aware prompts
+                    const hasTimeConstraints = arrivalTime || departureTime;
+                    const baseTokens = hasTimeConstraints ? 6000 : 4000;
+                    const tokensPerDay = hasTimeConstraints ? 1200 : 800;
+                    const maxTokens = Math.min(32000, Math.max(baseTokens, tripDays * tokensPerDay));
+                    
+                    console.log(`📝 Using maxTokens: ${maxTokens} (days: ${tripDays}, timeConstraints: ${hasTimeConstraints})`);
+                    
+                    // Build system prompt with time-awareness
+                    const systemPrompt = timeAwareGuidance.skipLastDay
+                        ? `You are a travel itinerary planner. Return only valid JSON. Always include realistic prices and booking information for activities. IMPORTANT: Generate ${effectiveTripDays} days of activities (Days 1-${effectiveTripDays}). Day ${tripDays} is departure day with no activities. Respect arrival and departure time constraints.`
+                        : `You are a travel itinerary planner. Return only valid JSON. Always include realistic prices and booking information for activities. IMPORTANT: You must generate the complete itinerary for ALL ${tripDays} days requested. If arrival/departure times are specified, adjust activities accordingly - fewer activities on partial days.`;
                     
                     const completion = await openai.chat.completions.create({
                         messages: [
-                            { role: "system", content: `You are a travel itinerary planner. Return only valid JSON. Always include realistic prices and booking information for activities. IMPORTANT: You must generate the complete itinerary for ALL ${tripDays} days requested.` },
+                            { role: "system", content: systemPrompt },
                             { role: "user", content: itineraryPrompt },
                         ],
-                        model: "gpt-4o",
+                        model: "gpt-5.2",
                         response_format: { type: "json_object" },
-                        max_tokens: maxTokens,
+                        max_completion_tokens: maxTokens,
                     });
 
+                    console.log("🔍 OpenAI response:", JSON.stringify(completion.choices[0], null, 2));
+                    
+                    // Check if response was truncated
+                    if (completion.choices[0].finish_reason === "length") {
+                        console.warn("⚠️ OpenAI response was truncated due to length limit");
+                    }
+                    
                     const itineraryContent = completion.choices[0].message.content;
                     if (itineraryContent) {
                         const itineraryData = JSON.parse(itineraryContent);

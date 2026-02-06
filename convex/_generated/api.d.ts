@@ -28,6 +28,8 @@ import type * as functions from "../functions.js";
 import type * as helpers_unsplash from "../helpers/unsplash.js";
 import type * as images from "../images.js";
 import type * as insights from "../insights.js";
+import type * as passwordReset from "../passwordReset.js";
+import type * as passwordResetDb from "../passwordResetDb.js";
 import type * as postmark from "../postmark.js";
 import type * as sights from "../sights.js";
 import type * as sightsAction from "../sightsAction.js";
@@ -63,6 +65,8 @@ declare const fullApi: ApiFromModules<{
   "helpers/unsplash": typeof helpers_unsplash;
   images: typeof images;
   insights: typeof insights;
+  passwordReset: typeof passwordReset;
+  passwordResetDb: typeof passwordResetDb;
   postmark: typeof postmark;
   sights: typeof sights;
   sightsAction: typeof sightsAction;

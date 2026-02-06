@@ -1,12 +1,13 @@
 import { useState } from "react";
 import React from "react";
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Modal, Image, StatusBar } from "react-native";
+import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Modal, Image, StatusBar, Platform } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Calendar, DateData } from 'react-native-calendars';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { INTERESTS } from "@/lib/data";
 import { useTheme } from "@/lib/ThemeContext";
 import { useAuthenticatedMutation, useToken } from "@/lib/useAuthenticatedMutation";
@@ -95,6 +96,11 @@ export default function CreateTripScreen() {
     const [selectingDate, setSelectingDate] = useState<'start' | 'end'>('start');
     const [showLoadingScreen, setShowLoadingScreen] = useState(false);
     const [showErrorScreen, setShowErrorScreen] = useState(false);
+    
+    // Time picker state for arrival/departure times
+    const [showTimePicker, setShowTimePicker] = useState(false);
+    const [selectingTime, setSelectingTime] = useState<'arrival' | 'departure'>('arrival');
+    const [tempTime, setTempTime] = useState(new Date());
 
     const [errorMessage, setErrorMessage] = useState("");
     const [showDestinationSuggestions, setShowDestinationSuggestions] = useState(false);
@@ -114,6 +120,9 @@ export default function CreateTripScreen() {
         skipFlights: false,
         skipHotel: false,
         preferredFlightTime: "any" as "any" | "morning" | "afternoon" | "evening" | "night",
+        // Arrival/Departure times (optional, ISO string in destination timezone)
+        arrivalTime: null as string | null,
+        departureTime: null as string | null,
     });
 
         // V1: Compute per-person budget on the fly
@@ -178,6 +187,73 @@ export default function CreateTripScreen() {
     const formatDateForCalendar = (timestamp: number) => {
         const date = new Date(timestamp);
         return date.toISOString().split('T')[0];
+    };
+
+    // Format time for display (e.g., "3:30 PM")
+    const formatTime = (isoString: string | null) => {
+        if (!isoString) return "Not set";
+        const date = new Date(isoString);
+        return date.toLocaleTimeString('en-US', { 
+            hour: 'numeric', 
+            minute: '2-digit', 
+            hour12: true 
+        });
+    };
+
+    // Handle time picker change
+    const handleTimeChange = (event: any, selectedDate?: Date) => {
+        if (Platform.OS === 'android') {
+            setShowTimePicker(false);
+        }
+        
+        if (selectedDate) {
+            setTempTime(selectedDate);
+            
+            if (Platform.OS === 'android') {
+                // On Android, apply immediately when picker closes
+                applySelectedTime(selectedDate);
+            }
+        }
+    };
+
+    // Apply selected time to form data
+    const applySelectedTime = (time: Date) => {
+        // Combine the appropriate date with the selected time
+        const baseTimestamp = selectingTime === 'arrival' ? formData.startDate : formData.endDate;
+        const baseDate = new Date(baseTimestamp);
+        
+        // Create ISO string with the base date and selected time
+        const combined = new Date(
+            baseDate.getFullYear(),
+            baseDate.getMonth(),
+            baseDate.getDate(),
+            time.getHours(),
+            time.getMinutes(),
+            0, 0
+        );
+        
+        const isoString = combined.toISOString();
+        
+        if (selectingTime === 'arrival') {
+            setFormData({ ...formData, arrivalTime: isoString });
+        } else {
+            setFormData({ ...formData, departureTime: isoString });
+        }
+    };
+
+    // Confirm time selection (iOS)
+    const confirmTimeSelection = () => {
+        applySelectedTime(tempTime);
+        setShowTimePicker(false);
+    };
+
+    // Clear time selection
+    const clearTime = (type: 'arrival' | 'departure') => {
+        if (type === 'arrival') {
+            setFormData({ ...formData, arrivalTime: null });
+        } else {
+            setFormData({ ...formData, departureTime: null });
+        }
     };
 
     const getMarkedDates = () => {
@@ -280,7 +356,9 @@ export default function CreateTripScreen() {
                 skipFlights: formData.skipFlights,
                 skipHotel: formData.skipHotel,
                 preferredFlightTime: formData.preferredFlightTime,
-                 // V1: Traveler profiles disabled
+                // Arrival/Departure times for time-aware itineraries
+                arrivalTime: formData.arrivalTime || undefined,
+                departureTime: formData.departureTime || undefined,
             });
             
             router.push(`/trip/${tripId}`);
@@ -389,8 +467,7 @@ export default function CreateTripScreen() {
                                     placeholder="Where from?"
                                     placeholderTextColor={colors.textMuted}
                                     value={formData.origin}
-                                    editable={false}
-                                    selectTextOnFocus={false}
+                                    onChangeText={(text) => setFormData({ ...formData, origin: text })}
                                 />
                             </View>
                         </View>
@@ -487,6 +564,98 @@ export default function CreateTripScreen() {
                             </View>
                         </TouchableOpacity>
                     </View>
+                </View>
+
+                {/* Flight Times Section (Optional) - Affects itinerary timing */}
+                <View style={[styles.card, { backgroundColor: colors.card }]}>
+                    <View style={styles.sectionHeaderRow}>
+                        <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>FLIGHT TIMES</Text>
+                        <View style={[styles.optionalBadge, { backgroundColor: colors.secondary }]}>
+                            <Text style={[styles.optionalText, { color: colors.textMuted }]}>OPTIONAL</Text>
+                        </View>
+                    </View>
+                    <Text style={[styles.sectionHelpText, { color: colors.textSecondary }]}>
+                        Add your flight times to get a time-aware itinerary. Activities will be scheduled around your arrival and departure.
+                    </Text>
+                    
+                    <View style={[styles.datesContainer, { backgroundColor: colors.secondary, marginTop: 12 }]}>
+                        {/* Arrival Time */}
+                        <TouchableOpacity 
+                            style={styles.dateInputButton}
+                            onPress={() => {
+                                setSelectingTime('arrival');
+                                // Initialize temp time based on existing arrival time or default to 3:00 PM
+                                const defaultTime = formData.arrivalTime 
+                                    ? new Date(formData.arrivalTime) 
+                                    : new Date(new Date().setHours(15, 0, 0, 0));
+                                setTempTime(defaultTime);
+                                setShowTimePicker(true);
+                            }}
+                        >
+                            <Text style={[styles.dateLabel, { color: colors.textMuted }]}>ARRIVAL AT DESTINATION</Text>
+                            <View style={styles.dateValueContainer}>
+                                <Ionicons name="airplane" size={20} color={colors.text} style={{ transform: [{ rotate: '45deg' }] }} />
+                                <Text style={[styles.dateValueText, { color: formData.arrivalTime ? colors.text : colors.textMuted }]}>
+                                    {formData.arrivalTime ? formatTime(formData.arrivalTime) : "Tap to set"}
+                                </Text>
+                                {formData.arrivalTime && (
+                                    <TouchableOpacity 
+                                        onPress={(e) => { e.stopPropagation(); clearTime('arrival'); }}
+                                        style={styles.clearTimeButton}
+                                    >
+                                        <Ionicons name="close-circle" size={18} color={colors.textMuted} />
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+                        </TouchableOpacity>
+                        
+                        <View style={[styles.dateSeparator, { backgroundColor: colors.border }]} />
+
+                        {/* Departure Time */}
+                        <TouchableOpacity 
+                            style={styles.dateInputButton}
+                            onPress={() => {
+                                setSelectingTime('departure');
+                                // Initialize temp time based on existing departure time or default to 6:00 PM
+                                const defaultTime = formData.departureTime 
+                                    ? new Date(formData.departureTime) 
+                                    : new Date(new Date().setHours(18, 0, 0, 0));
+                                setTempTime(defaultTime);
+                                setShowTimePicker(true);
+                            }}
+                        >
+                            <Text style={[styles.dateLabel, { color: colors.textMuted }]}>DEPARTURE FROM DESTINATION</Text>
+                            <View style={styles.dateValueContainer}>
+                                <Ionicons name="airplane" size={20} color={colors.text} style={{ transform: [{ rotate: '-45deg' }] }} />
+                                <Text style={[styles.dateValueText, { color: formData.departureTime ? colors.text : colors.textMuted }]}>
+                                    {formData.departureTime ? formatTime(formData.departureTime) : "Tap to set"}
+                                </Text>
+                                {formData.departureTime && (
+                                    <TouchableOpacity 
+                                        onPress={(e) => { e.stopPropagation(); clearTime('departure'); }}
+                                        style={styles.clearTimeButton}
+                                    >
+                                        <Ionicons name="close-circle" size={18} color={colors.textMuted} />
+                                    </TouchableOpacity>
+                                )}
+                            </View>
+                        </TouchableOpacity>
+                    </View>
+                    
+                    {/* Help text explaining the impact */}
+                    {(formData.arrivalTime || formData.departureTime) && (
+                        <View style={[styles.timeImpactInfo, { backgroundColor: colors.secondary, marginTop: 12 }]}>
+                            <Ionicons name="information-circle-outline" size={18} color={colors.primary} />
+                            <Text style={[styles.timeImpactText, { color: colors.textSecondary }]}>
+                                {formData.arrivalTime && !formData.departureTime && 
+                                    "Your first day's activities will start after your arrival time."}
+                                {!formData.arrivalTime && formData.departureTime && 
+                                    "Your last day's activities will end 3 hours before your departure."}
+                                {formData.arrivalTime && formData.departureTime && 
+                                    "Your itinerary will be adjusted to fit your travel schedule."}
+                            </Text>
+                        </View>
+                    )}
                 </View>
 
   {/* Who's Going Section - V1: Simple Traveler Count (Profiles Disabled) */}
@@ -687,6 +856,61 @@ export default function CreateTripScreen() {
                         </View>
                     </View>
                 </Modal>
+
+                {/* Time Picker Modal for Arrival/Departure times */}
+                {Platform.OS === 'ios' ? (
+                    <Modal
+                        visible={showTimePicker}
+                        animationType="slide"
+                        transparent={true}
+                        onRequestClose={() => setShowTimePicker(false)}
+                    >
+                        <View style={styles.modalOverlay}>
+                            <View style={[styles.calendarModal, { backgroundColor: colors.card }]}>
+                                <View style={[styles.calendarHeader, { borderBottomColor: colors.border }]}>
+                                    <TouchableOpacity onPress={() => setShowTimePicker(false)}>
+                                        <Text style={[styles.cancelButtonText, { color: colors.error }]}>Cancel</Text>
+                                    </TouchableOpacity>
+                                    <Text style={[styles.calendarTitle, { color: colors.text }]}>
+                                        {selectingTime === 'arrival' ? 'Arrival Time' : 'Departure Time'}
+                                    </Text>
+                                    <TouchableOpacity onPress={confirmTimeSelection}>
+                                        <Text style={[styles.doneButtonText, { color: colors.primary }]}>Done</Text>
+                                    </TouchableOpacity>
+                                </View>
+                                <View style={styles.timePickerContainer}>
+                                    <Text style={[styles.timePickerLabel, { color: colors.textMuted }]}>
+                                        {selectingTime === 'arrival' 
+                                            ? 'What time will you arrive at your destination?' 
+                                            : 'What time is your departure flight?'}
+                                    </Text>
+                                    <DateTimePicker
+                                        value={tempTime}
+                                        mode="time"
+                                        display="spinner"
+                                        onChange={handleTimeChange}
+                                        textColor={colors.text}
+                                        style={{ height: 200 }}
+                                    />
+                                    <Text style={[styles.timePickerHint, { color: colors.textSecondary }]}>
+                                        {selectingTime === 'arrival' 
+                                            ? 'Your first day activities will be scheduled after this time.' 
+                                            : 'Your last day will end ~3 hours before this time.'}
+                                    </Text>
+                                </View>
+                            </View>
+                        </View>
+                    </Modal>
+                ) : (
+                    showTimePicker && (
+                        <DateTimePicker
+                            value={tempTime}
+                            mode="time"
+                            display="default"
+                            onChange={handleTimeChange}
+                        />
+                    )
+                )}
             </ScrollView>
         </SafeAreaView>
         </>
@@ -788,6 +1012,60 @@ const styles = StyleSheet.create({
         letterSpacing: 1,
         marginBottom: 12,
         textTransform: "uppercase",
+    },
+    sectionHelpText: {
+        fontSize: 13,
+        color: "#9B9B9B",
+        lineHeight: 18,
+    },
+    optionalBadge: {
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 4,
+    },
+    optionalText: {
+        fontSize: 9,
+        fontWeight: "700",
+        letterSpacing: 0.5,
+    },
+    clearTimeButton: {
+        marginLeft: 8,
+        padding: 2,
+    },
+    timeImpactInfo: {
+        flexDirection: "row",
+        alignItems: "flex-start",
+        gap: 8,
+        padding: 12,
+        borderRadius: 8,
+    },
+    timeImpactText: {
+        flex: 1,
+        fontSize: 13,
+        lineHeight: 18,
+    },
+    timePickerContainer: {
+        padding: 20,
+        alignItems: "center",
+    },
+    timePickerLabel: {
+        fontSize: 15,
+        textAlign: "center",
+        marginBottom: 16,
+    },
+    timePickerHint: {
+        fontSize: 13,
+        textAlign: "center",
+        marginTop: 16,
+        paddingHorizontal: 20,
+    },
+    cancelButtonText: {
+        fontSize: 16,
+        fontWeight: "500",
+    },
+    doneButtonText: {
+        fontSize: 16,
+        fontWeight: "600",
     },
     locationSection: {
         gap: 12,

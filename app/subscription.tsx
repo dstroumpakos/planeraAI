@@ -170,7 +170,7 @@ export default function SubscriptionScreen() {
                         <View>
                             <Text style={[styles.planName, { color: colors.text }]}>Planera Pro – Yearly</Text>
                             <View style={[styles.saveBadge, { backgroundColor: colors.primary }]}>
-                                <Text style={[styles.saveText, { color: colors.text }]}>SAVE 40%</Text>
+                                <Text style={[styles.saveText, { color: colors.text }]}>SAVE 50%</Text>
                             </View>
                         </View>
                         <View style={styles.planPriceContainer}>

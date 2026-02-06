@@ -1157,12 +1157,14 @@ export default function TripDetails() {
                         style={[styles.filterChip, { backgroundColor: colors.card, borderColor: colors.border }, activeFilter === 'all' && { backgroundColor: colors.text, borderColor: colors.text }]}
                         onPress={() => setActiveFilter('all')}
                     >
-                        <Text style={[styles.filterText, { color: colors.textMuted }, activeFilter === 'all' && { color: colors.card }]}>All</Text>
+                        <Ionicons name="calendar" size={18} color={activeFilter === 'all' ? colors.card : colors.textMuted} />
+                        <Text style={[styles.filterText, { color: colors.textMuted }, activeFilter === 'all' && { color: colors.card }]}>Itinerary</Text>
                     </TouchableOpacity>
                     <TouchableOpacity 
                         style={[styles.filterChip, { backgroundColor: colors.card, borderColor: colors.border }, activeFilter === 'flights' && { backgroundColor: colors.text, borderColor: colors.text }]}
                         onPress={() => setActiveFilter('flights')}
                     >
+                        <Ionicons name="airplane" size={18} color={activeFilter === 'flights' ? colors.card : colors.textMuted} />
                         <Text style={[styles.filterText, { color: colors.textMuted }, activeFilter === 'flights' && { color: colors.card }]}>Flights</Text>
                     </TouchableOpacity>
                     <TouchableOpacity 
@@ -1204,15 +1206,39 @@ export default function TripDetails() {
 
                 {/* Content based on active filter */}
                 <View style={styles.itineraryContainer}>
-                    {activeFilter === 'all' && trip.itinerary?.dayByDayItinerary?.map((day: any, index: number) => (
+                    {activeFilter === 'all' && trip.itinerary?.dayByDayItinerary?.map((day: any, index: number) => {
+                    // Calculate energy level based on number of activities
+                    const activityCount = day.activities?.length || 0;
+                    let energyLevel = 'LOW ENERGY';
+                    let energyColor = '#4CAF50'; // green
+                    if (activityCount >= 5) {
+                        energyLevel = 'HIGH ENERGY';
+                        energyColor = '#EF4444'; // red for high energy
+                    } else if (activityCount >= 3) {
+                        energyLevel = 'MEDIUM ENERGY';
+                        energyColor = '#FF9800'; // orange
+                    }
+                    
+                    // Calculate the date for this day
+                    const dayDate = new Date(trip.startDate + (index * 24 * 60 * 60 * 1000));
+                    const formattedDate = dayDate.toLocaleDateString('en-US', { 
+                        weekday: 'short', 
+                        month: 'short', 
+                        day: 'numeric' 
+                    });
+                    
+                    return (
                         <View key={index} style={styles.daySection}>
                             <View style={styles.dayHeader}>
-                                <View>
-                                    <Text style={[styles.dayTitle, { color: colors.text }]}>Day {day.day}</Text>
+                                <View style={styles.dayHeaderLeft}>
+                                    <View style={styles.dayTitleRow}>
+                                        <Text style={[styles.dayTitle, { color: colors.text }]}>Day {day.day}</Text>
+                                        <Text style={[styles.dayDate, { color: colors.textMuted }]}> · {formattedDate}</Text>
+                                    </View>
                                     <Text style={[styles.daySubtitle, { color: colors.textMuted }]}>{day.title || `Explore ${trip.destination}`}</Text>
                                 </View>
-                                <View style={[styles.energyBadge, { backgroundColor: isDarkMode ? 'rgba(255, 229, 0, 0.2)' : 'rgba(249, 245, 6, 0.2)' }]}>
-                                    <Text style={[styles.energyText, { color: colors.primary }]}>HIGH ENERGY</Text>
+                                <View style={[styles.energyBadge, { backgroundColor: isDarkMode ? `${energyColor}33` : `${energyColor}22` }]}>
+                                    <Text style={[styles.energyText, { color: energyColor }]}>{energyLevel}</Text>
                                 </View>
                             </View>
 
@@ -1367,7 +1393,7 @@ export default function TripDetails() {
                                                         </View>
                                                     )}
                                                 </View>
-                                                <Text style={[styles.activityDesc, { color: colors.textMuted }]} numberOfLines={2}>{activity.description}</Text>
+                                                <Text style={[styles.activityDesc, { color: colors.text }]}>{activity.description}</Text>
                                                 <View style={styles.activityMeta}>
                                                     <View style={[styles.metaBadge, { backgroundColor: colors.secondary }]}>
                                                         <Text style={[styles.metaText, { color: colors.text }]}>{activity.type || 'Activity'}</Text>
@@ -1390,7 +1416,8 @@ export default function TripDetails() {
                                 </View>
                             ))}
                         </View>
-                    ))}
+                    );
+                })}
 
                     {activeFilter === 'food' && (
                         <View>
@@ -2110,25 +2137,43 @@ const styles = StyleSheet.create({
         justifyContent: "space-between",
         alignItems: "center",
         marginBottom: 16,
+        gap: 12,
+    },
+    dayHeaderLeft: {
+        flex: 1,
+        flexShrink: 1,
+    },
+    dayTitleRow: {
+        flexDirection: "row",
+        alignItems: "baseline",
+        flexWrap: "wrap",
     },
     dayTitle: {
         fontSize: 24,
         fontWeight: "700",
         color: "#1A1A1A",
     },
-    daySubtitle: {
+    dayDate: {
         fontSize: 14,
         fontWeight: "500",
         color: "#64748B",
     },
+    daySubtitle: {
+        fontSize: 14,
+        fontWeight: "500",
+        color: "#64748B",
+        marginTop: 2,
+    },
     energyBadge: {
         backgroundColor: "rgba(249, 245, 6, 0.2)",
         paddingHorizontal: 12,
-        paddingVertical: 4,
+        paddingVertical: 6,
         borderRadius: 12,
+        flexShrink: 0,
+        alignSelf: "flex-start",
     },
     energyText: {
-        fontSize: 10,
+        fontSize: 11,
         fontWeight: "700",
         color: "#1A1A1A",
         letterSpacing: 0.5,
