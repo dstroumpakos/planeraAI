@@ -44,6 +44,12 @@ export default function Profile() {
         token ? { token } : "skip"
     );
     
+    // Check if user is admin
+    const isAdmin = useQuery(
+        (api as any).admin.isAdmin,
+        token ? { token } : "skip"
+    );
+    
     // Get profile image URL if profilePicture storage ID exists
     const profileImageUrl = useQuery(
         api.users.getProfileImageUrl as any,
@@ -495,6 +501,28 @@ export default function Profile() {
                             <Ionicons name="arrow-forward" size={18} color={colors.text} />
                         </View>
                     </TouchableOpacity>
+                )}
+
+                {/* Admin Section - Only visible to admins */}
+                {isAdmin && (
+                    <>
+                        <Text style={styles.sectionTitle}>ADMIN</Text>
+                        <TouchableOpacity 
+                            style={[styles.insightsCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+                            onPress={() => router.push("/admin" as any)}
+                        >
+                            <View style={[styles.insightsIconContainer, { backgroundColor: 'rgba(99, 102, 241, 0.2)' }]}>
+                                <Ionicons name="shield" size={24} color="#4F46E5" />
+                            </View>
+                            <View style={styles.insightsTextContainer}>
+                                <Text style={[styles.insightsTitle, { color: colors.text }]}>Admin Dashboard</Text>
+                                <Text style={[styles.insightsSubtitle, { color: colors.textMuted }]}>
+                                    Moderate content and manage users
+                                </Text>
+                            </View>
+                            <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+                        </TouchableOpacity>
+                    </>
                 )}
 
                 {/* Account Settings */}

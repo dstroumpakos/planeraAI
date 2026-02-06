@@ -181,6 +181,14 @@ export default defineSchema({
             v.literal("rejected"),
             v.literal("flagged")
         )),
+        // Admin moderation fields
+        rejectReason: v.optional(v.string()),
+        featured: v.optional(v.boolean()),
+        reportsCount: v.optional(v.float64()),
+        approvedAt: v.optional(v.float64()),
+        rejectedAt: v.optional(v.float64()),
+        approvedBy: v.optional(v.string()),
+        rejectedBy: v.optional(v.string()),
         image: v.optional(v.object({
             url: v.string(),
             photographer: v.optional(v.string()),
@@ -192,6 +200,16 @@ export default defineSchema({
         .index("by_destination", ["destinationId"])
         .index("by_user", ["userId"])
         .index("by_moderation_status", ["moderationStatus"]),
+
+    // Track who liked which insight (to prevent double-liking and show like status)
+    insightLikes: defineTable({
+        userId: v.string(),
+        insightId: v.id("insights"),
+        likedAt: v.float64(),
+    })
+        .index("by_user", ["userId"])
+        .index("by_insight", ["insightId"])
+        .index("by_user_and_insight", ["userId", "insightId"]),
 
     dismissedTrips: defineTable({
         userId: v.string(),
@@ -514,6 +532,10 @@ export default defineSchema({
       email: v.string(),
       name: v.optional(v.string()),
       pictureUrl: v.optional(v.string()),
+      // Admin & moderation fields
+      isAdmin: v.optional(v.boolean()),
+      isBanned: v.optional(v.boolean()),
+      isShadowBanned: v.optional(v.boolean()),
       // Travel preferences
       homeAirport: v.optional(v.string()),
       defaultBudget: v.optional(v.number()), // Deprecated, but keeping for schema compatibility if needed

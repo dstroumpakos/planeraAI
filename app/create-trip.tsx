@@ -96,6 +96,7 @@ export default function CreateTripScreen() {
     const [selectingDate, setSelectingDate] = useState<'start' | 'end'>('start');
     const [showLoadingScreen, setShowLoadingScreen] = useState(false);
     const [showErrorScreen, setShowErrorScreen] = useState(false);
+    const [isCreditsError, setIsCreditsError] = useState(false);
     
     // Time picker state for arrival/departure times
     const [showTimePicker, setShowTimePicker] = useState(false);
@@ -375,7 +376,17 @@ export default function CreateTripScreen() {
             // Clean up Convex error prefix if present
             const cleanMessage = errorMsg.replace("Uncaught Error: ", "").replace("Error: ", "");
             
-            setErrorMessage(cleanMessage);
+            // Check if this is a credits/plan error
+            const isNoCredits = cleanMessage.toLowerCase().includes("credit") || 
+                               cleanMessage.toLowerCase().includes("subscribe") ||
+                               cleanMessage.toLowerCase().includes("premium") ||
+                               cleanMessage.toLowerCase().includes("purchase");
+            
+            setIsCreditsError(isNoCredits);
+            setErrorMessage(isNoCredits 
+                ? "You've used all your trip credits. Get more credits or upgrade to Premium for unlimited trips."
+                : cleanMessage
+            );
             setLoading(false);
             setShowLoadingScreen(false);
             setShowErrorScreen(true);
@@ -413,18 +424,52 @@ export default function CreateTripScreen() {
         return (
             <SafeAreaView style={[styles.errorContainer, { backgroundColor: colors.background }]}>
                 <View style={styles.errorContent}>
-                    <Ionicons name="alert-circle" size={64} color={colors.error} style={{ marginBottom: 24 }} />
-                    <Text style={[styles.errorTitle, { color: colors.text }]}>Trip Generation Failed</Text>
+                    <Ionicons 
+                        name={isCreditsError ? "wallet" : "alert-circle"} 
+                        size={64} 
+                        color={isCreditsError ? colors.primary : colors.error} 
+                        style={{ marginBottom: 24 }} 
+                    />
+                    <Text style={[styles.errorTitle, { color: colors.text }]}>
+                        {isCreditsError ? "No Trip Credits" : "Trip Generation Failed"}
+                    </Text>
                     <Text style={[styles.errorMessage, { color: colors.textMuted }]}>{errorMessage}</Text>
-                    <TouchableOpacity 
-                        style={[styles.errorButton, { backgroundColor: colors.text }]}
-                        onPress={() => {
-                            setShowErrorScreen(false);
-                            setErrorMessage("");
-                        }}
-                    >
-                        <Text style={[styles.errorButtonText, { color: colors.background }]}>Go Back</Text>
-                    </TouchableOpacity>
+                    
+                    {isCreditsError ? (
+                        <>
+                            <TouchableOpacity 
+                                style={[styles.errorButton, { backgroundColor: colors.primary }]}
+                                onPress={() => {
+                                    setShowErrorScreen(false);
+                                    setErrorMessage("");
+                                    setIsCreditsError(false);
+                                    router.push("/subscription");
+                                }}
+                            >
+                                <Text style={[styles.errorButtonText, { color: "#1A1A1A" }]}>Get More Trips</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity 
+                                style={[styles.errorButtonSecondary, { borderColor: colors.border }]}
+                                onPress={() => {
+                                    setShowErrorScreen(false);
+                                    setErrorMessage("");
+                                    setIsCreditsError(false);
+                                }}
+                            >
+                                <Text style={[styles.errorButtonSecondaryText, { color: colors.text }]}>Go Back</Text>
+                            </TouchableOpacity>
+                        </>
+                    ) : (
+                        <TouchableOpacity 
+                            style={[styles.errorButton, { backgroundColor: colors.text }]}
+                            onPress={() => {
+                                setShowErrorScreen(false);
+                                setErrorMessage("");
+                            }}
+                        >
+                            <Text style={[styles.errorButtonText, { color: colors.background }]}>Go Back</Text>
+                        </TouchableOpacity>
+                    )}
                 </View>
             </SafeAreaView>
         );
@@ -1470,6 +1515,20 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: "600",
         color: "white",
+    },
+    errorButtonSecondary: {
+        paddingVertical: 14,
+        paddingHorizontal: 32,
+        backgroundColor: "transparent",
+        borderRadius: 12,
+        minWidth: 200,
+        alignItems: "center",
+        borderWidth: 1,
+        marginTop: 12,
+    },
+    errorButtonSecondaryText: {
+        fontSize: 16,
+        fontWeight: "600",
     },
     // Traveler selection styles
     sectionHeaderRow: {

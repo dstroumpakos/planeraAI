@@ -417,10 +417,23 @@ export const update = authMutation({
         budget: v.optional(v.union(v.number(), v.string())),
         travelers: v.optional(v.number()),
         interests: v.optional(v.array(v.string())),
+        // New fields for edit parity with create-trip
+        localExperiences: v.optional(v.array(v.string())),
+        arrivalTime: v.optional(v.string()),
+        departureTime: v.optional(v.string()),
+        budgetTotal: v.optional(v.number()),
+        travelerCount: v.optional(v.number()),
     },
     handler: async (ctx: any, args: any) => {
-        const { tripId, ...updates } = args;
-        await ctx.db.patch(tripId, updates);
+        const { tripId, token, ...updates } = args;
+        // Remove undefined values
+        const cleanUpdates: Record<string, any> = {};
+        for (const [key, value] of Object.entries(updates)) {
+            if (value !== undefined) {
+                cleanUpdates[key] = value;
+            }
+        }
+        await ctx.db.patch(tripId, cleanUpdates);
     },
 });
 
@@ -435,12 +448,39 @@ export const regenerate = authMutation({
 
         await ctx.db.patch(args.tripId, { status: "generating" });
 
-        const prompt = `Plan a trip to ${trip.destination} from ${trip.origin} for ${trip.travelers} people.
-        Budget: ${trip.budget}.
-        Dates: ${new Date(trip.startDate).toDateString()} to ${new Date(trip.endDate).toDateString()}.
-        Interests: ${trip.interests.join(", ")}.`;
+        // Use the newer field names with fallbacks for backward compatibility
+        const travelerCount = trip.travelerCount ?? trip.travelers ?? 1;
+        const budget = trip.budgetTotal ?? trip.budget ?? "moderate";
+        const origin = trip.origin || "Not specified";
+        
+        // Build arrival/departure info string
+        let arrivalDepartureInfo = "";
+        if (trip.arrivalTime) {
+            const arrivalDate = new Date(trip.arrivalTime);
+            arrivalDepartureInfo += ` Arrival time at destination: ${arrivalDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}.`;
+        }
+        if (trip.departureTime) {
+            const departureDate = new Date(trip.departureTime);
+            arrivalDepartureInfo += ` Departure time: ${departureDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}.`;
+        }
+        
+        // Build local experiences info
+        let localExperiencesInfo = "";
+        if (trip.localExperiences && trip.localExperiences.length > 0) {
+            localExperiencesInfo = ` Local experiences wanted: ${trip.localExperiences.join(", ")}.`;
+        }
 
-        await ctx.scheduler.runAfter(0, internal.tripsActions.generate, { tripId: args.tripId, prompt });
+        const prompt = `Plan a trip to ${trip.destination} from ${origin} for ${travelerCount} people.
+        Budget: €${budget}.
+        Dates: ${new Date(trip.startDate).toDateString()} to ${new Date(trip.endDate).toDateString()}.${arrivalDepartureInfo}
+        Interests: ${trip.interests.join(", ")}.${localExperiencesInfo}`;
+
+        await ctx.scheduler.runAfter(0, internal.tripsActions.generate, { 
+            tripId: args.tripId, 
+            prompt,
+            arrivalTime: trip.arrivalTime,
+            departureTime: trip.departureTime,
+        });
     },
 });
 

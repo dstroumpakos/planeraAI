@@ -184,9 +184,80 @@ export const like = authMutation({
             throw new Error("Insight not found");
         }
 
+        // Check if already liked
+        const existingLike = await ctx.db
+            .query("insightLikes")
+            .withIndex("by_user_and_insight", (q: any) => 
+                q.eq("userId", ctx.user.userId).eq("insightId", args.insightId)
+            )
+            .first();
+        
+        if (existingLike) {
+            // Already liked, just return
+            return;
+        }
+
+        // Create like record
+        await ctx.db.insert("insightLikes", {
+            userId: ctx.user.userId,
+            insightId: args.insightId,
+            likedAt: Date.now(),
+        });
+
+        // Increment like count
         await ctx.db.patch(args.insightId, {
             likes: insight.likes + 1,
         });
+    },
+});
+
+export const unlike = authMutation({
+    args: {
+        insightId: v.id("insights"),
+    },
+    handler: async (ctx: any, args: any) => {
+        const insight = await ctx.db.get(args.insightId);
+        if (!insight) {
+            throw new Error("Insight not found");
+        }
+
+        // Find existing like
+        const existingLike = await ctx.db
+            .query("insightLikes")
+            .withIndex("by_user_and_insight", (q: any) => 
+                q.eq("userId", ctx.user.userId).eq("insightId", args.insightId)
+            )
+            .first();
+        
+        if (!existingLike) {
+            // Not liked, just return
+            return;
+        }
+
+        // Delete like record
+        await ctx.db.delete(existingLike._id);
+
+        // Decrement like count
+        await ctx.db.patch(args.insightId, {
+            likes: Math.max(0, insight.likes - 1),
+        });
+    },
+});
+
+// Get IDs of insights the current user has liked
+export const getMyLikedInsightIds = authQuery({
+    args: {},
+    handler: async (ctx: any, args: any) => {
+        if (!ctx.user) {
+            return [];
+        }
+
+        const likes = await ctx.db
+            .query("insightLikes")
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
+            .collect();
+
+        return likes.map((like: any) => like.insightId);
     },
 });
 

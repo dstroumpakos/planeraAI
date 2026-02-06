@@ -15,10 +15,23 @@ import { useTheme } from "@/lib/ThemeContext";
 import { LinearGradient } from "expo-linear-gradient";
 import { useAuthenticatedMutation, useToken } from "@/lib/useAuthenticatedMutation";
 import { optimizeUnsplashUrl, IMAGE_SIZES } from "@/lib/imageUtils";
+import * as Haptics from "expo-haptics";
 
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Calendar } from 'react-native-calendars';
 import { INTERESTS } from "@/lib/data";
+
+// Local Experiences categories (same as create-trip)
+const LOCAL_EXPERIENCES = [
+    { id: "local-food", label: "Local food & street food", icon: "restaurant" as const },
+    { id: "markets", label: "Traditional markets", icon: "storefront" as const },
+    { id: "hidden-gems", label: "Hidden gems", icon: "compass" as const },
+    { id: "workshops", label: "Cultural workshops", icon: "color-palette" as const },
+    { id: "nature", label: "Nature & outdoor spots", icon: "leaf" as const },
+    { id: "nightlife", label: "Nightlife & local bars", icon: "wine" as const },
+    { id: "neighborhoods", label: "Neighborhood walks", icon: "walk" as const },
+    { id: "festivals", label: "Festivals & seasonal events", icon: "calendar" as const },
+];
 
 // Cart item type for local state
 interface CartItem {
@@ -249,8 +262,13 @@ export default function TripDetails() {
     // @ts-ignore
     const regenerateTrip = useAuthenticatedMutation(api.trips.regenerate as any);
     // @ts-ignore
+    const likeInsight = useAuthenticatedMutation(api.insights.like as any);
+    // @ts-ignore
+    const unlikeInsight = useAuthenticatedMutation(api.insights.unlike as any);
+    // @ts-ignore
     const trackClick = useMutation(api.bookings.trackClick);
     const insights = useQuery(api.insights.getDestinationInsights, trip ? { destination: trip.destination } : "skip");
+    const myLikedInsightIds = useQuery((api as any).insights.getMyLikedInsightIds, token ? { token } : "skip");
     const { image: destinationImage } = useDestinationImage(trip?.destination);
     const getDestinationImages = useAction(api.images.getDestinationImages);
      
@@ -278,10 +296,28 @@ export default function TripDetails() {
         budget: 0,
         travelers: 1,
         interests: [] as string[],
+        localExperiences: [] as string[],
+        arrivalTime: null as string | null,
+        departureTime: null as string | null,
     });
     const [showCalendar, setShowCalendar] = useState(false);
     const [selectingDate, setSelectingDate] = useState<'start' | 'end'>('start');
     const [regenerationCount, setRegenerationCount] = useState(0);
+    
+    // Time picker state for edit modal
+    const [showTimePicker, setShowTimePicker] = useState(false);
+    const [selectingTime, setSelectingTime] = useState<'arrival' | 'departure'>('arrival');
+    const [tempTime, setTempTime] = useState(new Date());
+    
+    // Track liked insights to prevent double-liking
+    const [likedInsights, setLikedInsights] = useState<Set<string>>(new Set());
+    
+    // Initialize liked insights from server data
+    useEffect(() => {
+        if (myLikedInsightIds && myLikedInsightIds.length > 0) {
+            setLikedInsights(new Set(myLikedInsightIds));
+        }
+    }, [myLikedInsightIds]);
 
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [datePickerMode, setDatePickerMode] = useState<'start' | 'end'>('start');
@@ -306,6 +342,10 @@ export default function TripDetails() {
                 };
                 budgetValue = budgetMap[trip.budget] || 2000;
             }
+            // Use budgetTotal if available (V1 field)
+            if (trip.budgetTotal) {
+                budgetValue = trip.budgetTotal;
+            }
             
             setEditForm({
                 destination: trip.destination,
@@ -313,8 +353,11 @@ export default function TripDetails() {
                 startDate: trip.startDate,
                 endDate: trip.endDate,
                 budget: budgetValue,
-                travelers: trip.travelers || 1,
+                travelers: trip.travelerCount || trip.travelers || 1,
                 interests: Array.isArray(trip.interests) ? trip.interests : [],
+                localExperiences: Array.isArray(trip.localExperiences) ? trip.localExperiences : [],
+                arrivalTime: trip.arrivalTime || null,
+                departureTime: trip.departureTime || null,
             });
         }
     }, [trip]);
@@ -322,8 +365,9 @@ export default function TripDetails() {
     const handleSaveAndRegenerate = async () => {
         if (!trip) return;
         
-        if (regenerationCount >= 1) {
-            Alert.alert("Limit Reached", "You can only regenerate your trip once.");
+        // Only apply regeneration limit to free users (those without active subscription)
+        if (!trip.isSubscriptionActive && regenerationCount >= 1) {
+            Alert.alert("Limit Reached", "Free users can only regenerate their trip once. Upgrade to premium for unlimited regenerations.");
             return;
         }
         
@@ -334,8 +378,13 @@ export default function TripDetails() {
             startDate: editForm.startDate,
             endDate: editForm.endDate,
             budget: editForm.budget,
+            budgetTotal: editForm.budget,
             travelers: editForm.travelers,
+            travelerCount: editForm.travelers,
             interests: editForm.interests,
+            localExperiences: editForm.localExperiences,
+            arrivalTime: editForm.arrivalTime || undefined,
+            departureTime: editForm.departureTime || undefined,
         });
         await regenerateTrip({ tripId: trip._id });
         setRegenerationCount(regenerationCount + 1);
@@ -375,6 +424,81 @@ export default function TripDetails() {
             }));
         }
         setShowCalendar(false);
+    };
+
+    const toggleLocalExperience = (experienceId: string) => {
+        if (editForm.localExperiences.includes(experienceId)) {
+            setEditForm({ ...editForm, localExperiences: editForm.localExperiences.filter((e) => e !== experienceId) });
+        } else {
+            setEditForm({ ...editForm, localExperiences: [...editForm.localExperiences, experienceId] });
+        }
+    };
+
+    // Format time for display (e.g., "3:30 PM")
+    const formatTime = (isoString: string | null) => {
+        if (!isoString) return "Not set";
+        const date = new Date(isoString);
+        return date.toLocaleTimeString('en-US', { 
+            hour: 'numeric', 
+            minute: '2-digit', 
+            hour12: true 
+        });
+    };
+
+    // Handle time picker change
+    const handleTimeChange = (event: any, selectedDate?: Date) => {
+        if (Platform.OS === 'android') {
+            setShowTimePicker(false);
+        }
+        
+        if (selectedDate) {
+            setTempTime(selectedDate);
+            
+            if (Platform.OS === 'android') {
+                // On Android, apply immediately when picker closes
+                applySelectedTime(selectedDate);
+            }
+        }
+    };
+
+    // Apply selected time to form data
+    const applySelectedTime = (time: Date) => {
+        // Combine the appropriate date with the selected time
+        const baseTimestamp = selectingTime === 'arrival' ? editForm.startDate : editForm.endDate;
+        const baseDate = new Date(baseTimestamp);
+        
+        // Create ISO string with the base date and selected time
+        const combined = new Date(
+            baseDate.getFullYear(),
+            baseDate.getMonth(),
+            baseDate.getDate(),
+            time.getHours(),
+            time.getMinutes(),
+            0, 0
+        );
+        
+        const isoString = combined.toISOString();
+        
+        if (selectingTime === 'arrival') {
+            setEditForm({ ...editForm, arrivalTime: isoString });
+        } else {
+            setEditForm({ ...editForm, departureTime: isoString });
+        }
+    };
+
+    // Confirm time selection (iOS)
+    const confirmTimeSelection = () => {
+        applySelectedTime(tempTime);
+        setShowTimePicker(false);
+    };
+
+    // Clear time selection
+    const clearTime = (type: 'arrival' | 'departure') => {
+        if (type === 'arrival') {
+            setEditForm({ ...editForm, arrivalTime: null });
+        } else {
+            setEditForm({ ...editForm, departureTime: null });
+        }
     };
 
     const getMarkedDates = () => {
@@ -1752,10 +1876,40 @@ export default function TripDetails() {
                                             <Text style={[styles.insightDate, { color: colors.textMuted }]}>
                                                 Anonymous Traveler • {new Date(insight.createdAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
                                             </Text>
-                                            <View style={styles.insightLikes}>
-                                                <Ionicons name="heart" size={14} color="#F59E0B" />
-                                                <Text style={[styles.insightLikesText, { color: colors.textMuted }]}>{insight.likes}</Text>
-                                            </View>
+                                            <TouchableOpacity 
+                                                style={[styles.insightLikes, { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 16, backgroundColor: likedInsights.has(insight._id) ? 'rgba(245, 158, 11, 0.15)' : 'transparent' }]}
+                                                onPress={async () => {
+                                                    try {
+                                                        if (Platform.OS !== 'web') {
+                                                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                                        }
+                                                        if (likedInsights.has(insight._id)) {
+                                                            // Unlike
+                                                            await unlikeInsight({ insightId: insight._id });
+                                                            setLikedInsights(prev => {
+                                                                const newSet = new Set(prev);
+                                                                newSet.delete(insight._id);
+                                                                return newSet;
+                                                            });
+                                                        } else {
+                                                            // Like
+                                                            await likeInsight({ insightId: insight._id });
+                                                            setLikedInsights(prev => new Set([...prev, insight._id]));
+                                                        }
+                                                    } catch (error) {
+                                                        console.error('Failed to toggle like:', error);
+                                                    }
+                                                }}
+                                            >
+                                                <Ionicons 
+                                                    name={likedInsights.has(insight._id) ? "heart" : "heart-outline"} 
+                                                    size={16} 
+                                                    color={likedInsights.has(insight._id) ? "#F59E0B" : colors.textMuted} 
+                                                />
+                                                <Text style={[styles.insightLikesText, { color: likedInsights.has(insight._id) ? "#F59E0B" : colors.textMuted }]}>
+                                                    {insight.likes}
+                                                </Text>
+                                            </TouchableOpacity>
                                         </View>
                                     </View>
                                 ))
@@ -1787,24 +1941,23 @@ export default function TripDetails() {
             <Modal 
                 visible={isEditing} 
                 animationType="slide" 
-                transparent={false}
+                presentationStyle="pageSheet"
                 onRequestClose={() => setIsEditing(false)}
             >
-                <KeyboardAvoidingView 
-                    behavior={Platform.OS === "ios" ? "padding" : "height"}
-                    style={[styles.modalContainer, { backgroundColor: colors.background }]}
-                    keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
-                >
-                    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
-                        <View style={[styles.modalHeader, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
-                            <TouchableOpacity onPress={() => setIsEditing(false)}>
-                                <Ionicons name="chevron-back" size={24} color={colors.text} />
-                            </TouchableOpacity>
-                            <Text style={[styles.modalTitle, { color: colors.text }]}>Edit Trip</Text>
-                            <View style={{ width: 24 }} />
-                        </View>
-                        
-                        <ScrollView contentContainerStyle={[styles.modalContent, { backgroundColor: colors.background }]}>
+                <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+                    <View style={[styles.modalHeader, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
+                        <TouchableOpacity onPress={() => setIsEditing(false)}>
+                            <Ionicons name="chevron-back" size={24} color={colors.text} />
+                        </TouchableOpacity>
+                        <Text style={[styles.modalTitle, { color: colors.text }]}>Edit Trip</Text>
+                        <View style={{ width: 24 }} />
+                    </View>
+                    
+                    <KeyboardAvoidingView 
+                        behavior={Platform.OS === "ios" ? "padding" : "height"}
+                        style={{ flex: 1 }}
+                    >
+                        <ScrollView contentContainerStyle={[styles.modalContent, { backgroundColor: colors.background }]} keyboardShouldPersistTaps="handled">
                             {/* Trip Basics Section */}
                             <View style={styles.sectionContainer}>
                                 <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>Trip Basics</Text>
@@ -1815,6 +1968,17 @@ export default function TripDetails() {
                                         <Text style={[styles.lockedInputText, { color: colors.textMuted }]}>{editForm.destination}</Text>
                                         <Ionicons name="lock-closed" size={16} color={colors.textMuted} />
                                     </View>
+                                </View>
+
+                                <View style={[styles.card, styles.inputGroup, { backgroundColor: colors.card }]}>
+                                    <Text style={[styles.label, { color: colors.text }]}>Origin</Text>
+                                    <TextInput
+                                        style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
+                                        value={editForm.origin}
+                                        onChangeText={(text) => setEditForm(prev => ({ ...prev, origin: text }))}
+                                        placeholder="Your departure city"
+                                        placeholderTextColor={colors.textMuted}
+                                    />
                                 </View>
 
                                 <View style={[styles.card, styles.inputGroup, { backgroundColor: colors.card }]}>
@@ -1847,6 +2011,63 @@ export default function TripDetails() {
                                             <View style={styles.dateValueContainer}>
                                                 <Ionicons name="calendar-outline" size={20} color={colors.text} />
                                                 <Text style={[styles.dateValueText, { color: colors.text }]}>{formatDate(editForm.endDate)}</Text>
+                                            </View>
+                                        </TouchableOpacity>
+                                    </View>
+                                </View>
+
+                                {/* Flight Times Section (Optional) */}
+                                <View style={[styles.card, styles.inputGroup, { backgroundColor: colors.card }]}>
+                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                        <Text style={[styles.label, { color: colors.text, marginBottom: 0 }]}>Flight Times</Text>
+                                        <View style={{ backgroundColor: colors.secondary, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 }}>
+                                            <Text style={{ fontSize: 10, color: colors.textMuted }}>OPTIONAL</Text>
+                                        </View>
+                                    </View>
+                                    <View style={styles.datesContainer}>
+                                        <TouchableOpacity 
+                                            style={[styles.dateInputButton, { backgroundColor: colors.card, borderColor: colors.border }]}
+                                            onPress={() => {
+                                                setSelectingTime('arrival');
+                                                const defaultTime = editForm.arrivalTime ? new Date(editForm.arrivalTime) : new Date(new Date().setHours(15, 0, 0, 0));
+                                                setTempTime(defaultTime);
+                                                setShowTimePicker(true);
+                                            }}
+                                        >
+                                            <Text style={[styles.dateLabel, { color: colors.textMuted }]}>ARRIVAL</Text>
+                                            <View style={styles.dateValueContainer}>
+                                                <Ionicons name="airplane" size={20} color={colors.text} style={{ transform: [{ rotate: '45deg' }] }} />
+                                                <Text style={[styles.dateValueText, { color: editForm.arrivalTime ? colors.text : colors.textMuted }]}>
+                                                    {editForm.arrivalTime ? formatTime(editForm.arrivalTime) : "Not set"}
+                                                </Text>
+                                                {editForm.arrivalTime && (
+                                                    <TouchableOpacity onPress={() => clearTime('arrival')}>
+                                                        <Ionicons name="close-circle" size={18} color={colors.textMuted} />
+                                                    </TouchableOpacity>
+                                                )}
+                                            </View>
+                                        </TouchableOpacity>
+                                        <View style={[styles.dateSeparator, { backgroundColor: colors.border }]} />
+                                        <TouchableOpacity 
+                                            style={[styles.dateInputButton, { backgroundColor: colors.card, borderColor: colors.border }]}
+                                            onPress={() => {
+                                                setSelectingTime('departure');
+                                                const defaultTime = editForm.departureTime ? new Date(editForm.departureTime) : new Date(new Date().setHours(18, 0, 0, 0));
+                                                setTempTime(defaultTime);
+                                                setShowTimePicker(true);
+                                            }}
+                                        >
+                                            <Text style={[styles.dateLabel, { color: colors.textMuted }]}>DEPARTURE</Text>
+                                            <View style={styles.dateValueContainer}>
+                                                <Ionicons name="airplane" size={20} color={colors.text} style={{ transform: [{ rotate: '-45deg' }] }} />
+                                                <Text style={[styles.dateValueText, { color: editForm.departureTime ? colors.text : colors.textMuted }]}>
+                                                    {editForm.departureTime ? formatTime(editForm.departureTime) : "Not set"}
+                                                </Text>
+                                                {editForm.departureTime && (
+                                                    <TouchableOpacity onPress={() => clearTime('departure')}>
+                                                        <Ionicons name="close-circle" size={18} color={colors.textMuted} />
+                                                    </TouchableOpacity>
+                                                )}
                                             </View>
                                         </TouchableOpacity>
                                     </View>
@@ -1923,17 +2144,25 @@ export default function TripDetails() {
 
                                 <View style={[styles.card, styles.inputGroup, { backgroundColor: colors.card }]}>
                                     <Text style={[styles.label, { color: colors.text }]}>Travelers</Text>
-                                    <TextInput
-                                        style={[styles.input, { backgroundColor: colors.card, borderColor: colors.border, color: colors.text }]}
-                                        value={editForm.travelers.toString()}
-                                        onChangeText={(text) => {
-                                            const numValue = parseInt(text) || 1;
-                                            setEditForm(prev => ({ ...prev, travelers: numValue }));
-                                        }}
-                                        keyboardType="number-pad"
-                                        placeholder="Number of travelers"
-                                        placeholderTextColor={colors.textMuted}
-                                    />
+                                    <View style={{ backgroundColor: colors.secondary, borderRadius: 12, padding: 12 }}>
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
+                                            <TouchableOpacity 
+                                                style={{ width: 44, height: 44, backgroundColor: colors.card, borderRadius: 22, alignItems: 'center', justifyContent: 'center' }}
+                                                onPress={() => setEditForm(prev => ({ ...prev, travelers: Math.max(1, prev.travelers - 1) }))}
+                                                disabled={editForm.travelers <= 1}
+                                            >
+                                                <Ionicons name="remove" size={24} color={editForm.travelers <= 1 ? colors.textMuted : colors.text} />
+                                            </TouchableOpacity>
+                                            <Text style={{ fontSize: 24, fontWeight: '700', color: colors.text, minWidth: 40, textAlign: 'center' }}>{editForm.travelers}</Text>
+                                            <TouchableOpacity 
+                                                style={{ width: 44, height: 44, backgroundColor: colors.card, borderRadius: 22, alignItems: 'center', justifyContent: 'center' }}
+                                                onPress={() => setEditForm(prev => ({ ...prev, travelers: Math.min(12, prev.travelers + 1) }))}
+                                                disabled={editForm.travelers >= 12}
+                                            >
+                                                <Ionicons name="add" size={24} color={editForm.travelers >= 12 ? colors.textMuted : colors.text} />
+                                            </TouchableOpacity>
+                                        </View>
+                                    </View>
                                 </View>
                             </View>
 
@@ -1983,6 +2212,40 @@ export default function TripDetails() {
                                 </View>
                             </View>
 
+                            {/* Local Experiences Section */}
+                            <View style={styles.sectionContainer}>
+                                <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>Local Experiences (Optional)</Text>
+                                
+                                <View style={[styles.card, styles.inputGroup, { backgroundColor: colors.card }]}>
+                                    <View style={styles.interestsContainer}>
+                                        {LOCAL_EXPERIENCES.map((experience) => (
+                                            <TouchableOpacity
+                                                key={experience.id}
+                                                style={[
+                                                    styles.interestTag,
+                                                    { backgroundColor: colors.secondary, borderColor: colors.border },
+                                                    editForm.localExperiences.includes(experience.id) && { backgroundColor: colors.primary, borderColor: colors.primary },
+                                                ]}
+                                                onPress={() => toggleLocalExperience(experience.id)}
+                                            >
+                                                <Ionicons 
+                                                    name={experience.icon}
+                                                    size={18} 
+                                                    color={editForm.localExperiences.includes(experience.id) ? colors.text : colors.textMuted}
+                                                />
+                                                <Text style={[
+                                                    styles.interestTagText,
+                                                    { color: colors.textMuted },
+                                                    editForm.localExperiences.includes(experience.id) && { color: colors.text },
+                                                ]}>
+                                                    {experience.label}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        ))}
+                                    </View>
+                                </View>
+                            </View>
+
                             <TouchableOpacity 
                                 style={[styles.saveButton, styles.card, { backgroundColor: colors.primary }]}
                                 onPress={handleSaveAndRegenerate}
@@ -1991,9 +2254,59 @@ export default function TripDetails() {
                                 <Text style={[styles.saveButtonText, { color: colors.text }]}>Save & Regenerate</Text>
                             </TouchableOpacity>
                             <View style={{ height: 40 }} />
+
+                            {/* Time Picker Modal */}
+                            {Platform.OS === 'ios' ? (
+                                <Modal
+                                    visible={showTimePicker}
+                                    animationType="slide"
+                                    transparent={true}
+                                    onRequestClose={() => setShowTimePicker(false)}
+                                >
+                                    <View style={styles.calendarModalContainer}>
+                                        <View style={[styles.calendarModal, { backgroundColor: colors.card }]}>
+                                            <View style={[styles.calendarHeader, { borderBottomColor: colors.border }]}>
+                                                <TouchableOpacity onPress={() => setShowTimePicker(false)}>
+                                                    <Text style={{ color: colors.error, fontSize: 16 }}>Cancel</Text>
+                                                </TouchableOpacity>
+                                                <Text style={[styles.calendarHeaderTitle, { color: colors.text }]}>
+                                                    {selectingTime === 'arrival' ? 'Arrival Time' : 'Departure Time'}
+                                                </Text>
+                                                <TouchableOpacity onPress={confirmTimeSelection}>
+                                                    <Text style={{ color: colors.primary, fontSize: 16, fontWeight: '600' }}>Done</Text>
+                                                </TouchableOpacity>
+                                            </View>
+                                            <View style={{ padding: 16, alignItems: 'center' }}>
+                                                <Text style={{ color: colors.textMuted, marginBottom: 16, textAlign: 'center' }}>
+                                                    {selectingTime === 'arrival' 
+                                                        ? 'What time will you arrive at your destination?' 
+                                                        : 'What time is your departure flight?'}
+                                                </Text>
+                                                <DateTimePicker
+                                                    value={tempTime}
+                                                    mode="time"
+                                                    display="spinner"
+                                                    onChange={handleTimeChange}
+                                                    textColor={colors.text}
+                                                    style={{ height: 200 }}
+                                                />
+                                            </View>
+                                        </View>
+                                    </View>
+                                </Modal>
+                            ) : (
+                                showTimePicker && (
+                                    <DateTimePicker
+                                        value={tempTime}
+                                        mode="time"
+                                        display="default"
+                                        onChange={handleTimeChange}
+                                    />
+                                )
+                            )}
                         </ScrollView>
-                    </SafeAreaView>
-                </KeyboardAvoidingView>
+                    </KeyboardAvoidingView>
+                </SafeAreaView>
             </Modal>
         </View>
     );
@@ -2259,15 +2572,18 @@ const styles = StyleSheet.create({
         gap: 8,
     },
     metaBadge: {
-         flexDirection: "row",
+        flexDirection: "row",
         alignItems: "center",
         gap: 4,
         paddingHorizontal: 8,
         paddingVertical: 4,
         borderRadius: 6,
+        flexShrink: 1,
+        maxWidth: "100%",
     },
     metaText: {
-          fontSize: 11,
+        fontSize: 11,
+        flexShrink: 1,
     },
    loadingContainer: {
         flex: 1,
@@ -3106,7 +3422,8 @@ const styles = StyleSheet.create({
     sightMeta: {
         flexDirection: "row",
         alignItems: "center",
-        gap: 12,
+        flexWrap: "wrap",
+        gap: 8,
         marginTop: 8,
     },
     amenitiesContainer: {
