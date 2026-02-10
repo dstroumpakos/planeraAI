@@ -52,7 +52,7 @@ export default function SubscriptionScreen() {
         });
     }, [yearlySubscription, monthlySubscription, singleTrip]);
 
-    // Use ONLY StoreKit localizedPrice - no fallbacks, no formatting
+    // Use ONLY StoreKit displayPrice - no fallbacks, no formatting
     // This ensures what we display matches what Apple will charge
     const yearlyPrice = yearlySubscription?.price || null;
     const monthlyPrice = monthlySubscription?.price || null;
@@ -285,7 +285,7 @@ export default function SubscriptionScreen() {
                             <Text style={[styles.planSubtext, { color: colors.textMuted }]}>One-time purchase</Text>
                         </View>
                         <View style={styles.planPriceContainer}>
-                            <Text style={[styles.planPrice, { color: colors.text }]}>{singleTripPrice}</Text>
+                            <Text style={[styles.planPrice, { color: colors.text }]}>{singleTripPrice || "Loading..."}</Text>
                             <Text style={[styles.planPeriod, { color: colors.textMuted }]}>/trip</Text>
                         </View>
                         <View style={styles.featuresList}>

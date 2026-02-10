@@ -17,6 +17,20 @@ import { useAuthenticatedMutation, useToken } from "@/lib/useAuthenticatedMutati
 import { optimizeUnsplashUrl, IMAGE_SIZES } from "@/lib/imageUtils";
 import * as Haptics from "expo-haptics";
 
+// Sanitize location titles for maps deep links by stripping descriptions, ratings, etc.
+const cleanLocationTitle = (title: string): string => {
+    if (!title) return '';
+    // Strip anything after – (en-dash), — (em-dash), or - (hyphen with spaces around it)
+    let cleaned = title.split(/\s*[–—]\s*/)[0];
+    // Strip anything after ( or :
+    cleaned = cleaned.split(/\s*[(:]/)[0];
+    // Remove star ratings like "★ 4.5" or "⭐ 4.8/5" or "4.5 stars"
+    cleaned = cleaned.replace(/[★⭐]\s*[\d.]+(\/\d+)?/g, '').replace(/[\d.]+\s*stars?/gi, '');
+    // Remove trailing punctuation and whitespace
+    cleaned = cleaned.replace(/[\s,.!;]+$/, '').trim();
+    return cleaned || title;
+};
+
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Calendar } from 'react-native-calendars';
 import { INTERESTS } from "@/lib/data";
@@ -284,6 +298,12 @@ export default function TripDetails() {
     const [currentImageIndex, setCurrentImageIndex] = useState(0);
     const progressInterval = useRef<ReturnType<typeof setInterval> | null>(null);
     const imageInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+    const [loadingMessageIndex, setLoadingMessageIndex] = useState(0);
+    const loadingMessages = [
+        "Finding hidden gems and local favorites...",
+        "Building the best flow between locations...",
+        "Optimizing your daily schedule for the best experience.",
+    ];
 
     const [selectedHotelIndex, setSelectedHotelIndex] = useState<number | null>(null);
     const [accommodationType, setAccommodationType] = useState<'all' | 'hotel' | 'airbnb'>('all');
@@ -579,6 +599,16 @@ export default function TripDetails() {
         }
     }, [loadingImages.length]);
 
+    // Rotate loading subtitle messages
+    useEffect(() => {
+        if (trip?.status === "generating") {
+            const msgInterval = setInterval(() => {
+                setLoadingMessageIndex(prev => (prev + 1) % loadingMessages.length);
+            }, 4000);
+            return () => clearInterval(msgInterval);
+        }
+    }, [trip?.status]);
+
     if (trip === undefined) {
         return (
             <View style={[styles.center, { backgroundColor: colors.background }]}>
@@ -651,9 +681,9 @@ export default function TripDetails() {
                         </View>
                         
                         {/* Status Text */}
-                        <Text style={styles.loadingTitle}>Creating your perfect trip</Text>
+                        <Text style={styles.loadingTitle}>Your AI is designing your personalized trip</Text>
                         <Text style={styles.loadingSubtitle}>
-                            Building your itinerary...
+                            {loadingMessages[loadingMessageIndex]}
                         </Text>
                         
                         {/* Progress Bar */}
@@ -673,32 +703,42 @@ export default function TripDetails() {
                         <View style={styles.loadingSteps}>
                             <View style={styles.loadingStep}>
                                 <Ionicons 
-                                    name={loadingProgress > 33 ? "checkmark-circle" : "ellipse-outline"} 
+                                    name={loadingProgress > 15 ? "checkmark-circle" : "ellipse-outline"} 
                                     size={20} 
-                                    color={loadingProgress > 33 ? "#10B981" : "rgba(255,255,255,0.5)"} 
+                                    color={loadingProgress > 15 ? "#10B981" : "rgba(255,255,255,0.5)"} 
                                 />
-                                <Text style={[styles.loadingStepText, loadingProgress > 33 && styles.loadingStepComplete]}>
-                                    Creating itinerary
+                                <Text style={[styles.loadingStepText, loadingProgress > 15 && styles.loadingStepComplete]}>
+                                    Analyzing your travel preferences
                                 </Text>
                             </View>
                             <View style={styles.loadingStep}>
                                 <Ionicons 
-                                    name={loadingProgress > 66 ? "checkmark-circle" : "ellipse-outline"} 
+                                    name={loadingProgress > 35 ? "checkmark-circle" : "ellipse-outline"} 
                                     size={20} 
-                                    color={loadingProgress > 66 ? "#10B981" : "rgba(255,255,255,0.5)"} 
+                                    color={loadingProgress > 35 ? "#10B981" : "rgba(255,255,255,0.5)"} 
                                 />
-                                <Text style={[styles.loadingStepText, loadingProgress > 66 && styles.loadingStepComplete]}>
-                                    Adding activities
+                                <Text style={[styles.loadingStepText, loadingProgress > 35 && styles.loadingStepComplete]}>
+                                    Selecting top sights and experiences
                                 </Text>
                             </View>
                             <View style={styles.loadingStep}>
                                 <Ionicons 
-                                    name={loadingProgress > 70 ? "checkmark-circle" : "ellipse-outline"} 
+                                    name={loadingProgress > 55 ? "checkmark-circle" : "ellipse-outline"} 
                                     size={20} 
-                                    color={loadingProgress > 70 ? "#10B981" : "rgba(255,255,255,0.5)"} 
+                                    color={loadingProgress > 55 ? "#10B981" : "rgba(255,255,255,0.5)"} 
                                 />
-                                <Text style={[styles.loadingStepText, loadingProgress > 70 && styles.loadingStepComplete]}>
-                                    Curating activities
+                                <Text style={[styles.loadingStepText, loadingProgress > 55 && styles.loadingStepComplete]}>
+                                    Planning your day-by-day schedule
+                                </Text>
+                            </View>
+                            <View style={styles.loadingStep}>
+                                <Ionicons 
+                                    name={loadingProgress > 75 ? "checkmark-circle" : "ellipse-outline"} 
+                                    size={20} 
+                                    color={loadingProgress > 75 ? "#10B981" : "rgba(255,255,255,0.5)"} 
+                                />
+                                <Text style={[styles.loadingStepText, loadingProgress > 75 && styles.loadingStepComplete]}>
+                                    Optimizing routes between locations
                                 </Text>
                             </View>
                             <View style={styles.loadingStep}>
@@ -708,10 +748,15 @@ export default function TripDetails() {
                                     color={loadingProgress > 90 ? "#10B981" : "rgba(255,255,255,0.5)"} 
                                 />
                                 <Text style={[styles.loadingStepText, loadingProgress > 90 && styles.loadingStepComplete]}>
-                                    Building your itinerary
+                                    Finalizing your smart itinerary
                                 </Text>
                             </View>
                         </View>
+                        
+                        {/* Helper Text */}
+                        <Text style={styles.loadingHelperText}>
+                            This usually takes about 1–2 minutes.
+                        </Text>
                     </View>
                     
                     {/* Photo Attribution */}
@@ -1372,8 +1417,8 @@ export default function TripDetails() {
                                 
                                 // Build directions URL
                                 const getDirectionsUrl = () => {
-                                    const origin = prevActivity?.address || prevActivity?.title || '';
-                                    const destination = activity.address || activity.title || '';
+                                    const origin = cleanLocationTitle(prevActivity?.address || prevActivity?.title || '');
+                                    const destination = cleanLocationTitle(activity.address || activity.title || '');
                                     const encodedOrigin = encodeURIComponent(origin);
                                     const encodedDest = encodeURIComponent(destination);
                                     
@@ -1479,7 +1524,7 @@ export default function TripDetails() {
                                                 return activityTitle;
                                             };
                                             
-                                            const venue = extractVenue(activity.title || '');
+                                            const venue = cleanLocationTitle(extractVenue(activity.title || ''));
                                             const searchQuery = encodeURIComponent(`${venue} ${trip.destination}`);
                                             
                                             // Helper function to open maps
@@ -1620,7 +1665,7 @@ export default function TripDetails() {
                                             Linking.openURL(restaurant.tripAdvisorUrl);
                                         } else {
                                             // Fallback to maps search
-                                            const searchQuery = encodeURIComponent(`${restaurant.name} ${trip.destination}`);
+                                            const searchQuery = encodeURIComponent(`${cleanLocationTitle(restaurant.name)} ${trip.destination}`);
                                             if (Platform.OS === 'ios') {
                                                 const appleMapsURL = `maps://maps.apple.com/?q=${searchQuery}`;
                                                 Linking.openURL(appleMapsURL).catch(() => {
@@ -2837,6 +2882,12 @@ const styles = StyleSheet.create({
     },
     loadingStepComplete: {
         color: "#10B981",
+    },
+    loadingHelperText: {
+        color: "rgba(255,255,255,0.5)",
+        fontSize: 13,
+        textAlign: "center",
+        marginTop: 16,
     },
     loadingAttribution: {
         marginTop: 20,

@@ -71,6 +71,129 @@ Guidelines for local experiences:
 - Focus on atmosphere, authenticity, and local connection`;
 }
 
+// Helper function to generate budget-aware guidance for OpenAI prompt
+function generateBudgetGuidance(
+    budgetTotal: number | undefined,
+    travelerCount: number,
+    tripDays: number,
+    destination: string
+): { budgetTier: string; guidance: string; dailyBudgetPerPerson: number } {
+    // Fallback to moderate if no budget provided
+    if (!budgetTotal || budgetTotal <= 0) {
+        return {
+            budgetTier: "moderate",
+            dailyBudgetPerPerson: 0,
+            guidance: `
+**BUDGET GUIDANCE (Moderate assumed — no budget specified):**
+No specific budget was provided. Assume a MODERATE budget and provide balanced recommendations.
+- Suggest 2–3 activities per day mixing paid attractions with free experiences
+- Include standard ticketed museums, popular sights, and mid-range dining
+- Recommend public transport primarily, walking when practical
+- Include some special experiences (a food tour, a guided walk) balanced with self-guided exploration
+Note: Budget was not specified by the traveler, so assume moderate spending (~€100/person/day).`,
+        };
+    }
+
+    const perPersonBudget = Math.round(budgetTotal / travelerCount);
+    const dailyBudgetPerPerson = Math.round(perPersonBudget / Math.max(tripDays, 1));
+
+    // Classify budget tier based on daily per-person spending
+    // Low: ≤ €60 | Moderate: €60–€150 | High: €150–€300 | Premium: > €300
+    let budgetTier: string;
+    let guidance: string;
+
+    if (dailyBudgetPerPerson > 300) {
+        budgetTier = "premium";
+        guidance = `
+**BUDGET GUIDANCE (PREMIUM — €${dailyBudgetPerPerson}/person/day):**
+Total trip budget: €${budgetTotal} for ${travelerCount} traveler${travelerCount > 1 ? "s" : ""} over ${tripDays} days (€${perPersonBudget} per person total).
+
+This is a premium-tier trip. Curate 5 total items per day (3–4 experiences + 1–2 meals) focused on comfort and exclusivity:
+- Include exclusive or VIP activities: private tours, skip-the-line VIP access, private cooking classes with chefs, sunset yacht rides, helicopter tours, wine estate visits
+- Recommend fine dining: Michelin-mentioned restaurants, tasting menus, rooftop dining, chef's table experiences
+- Prioritize time-efficient routing: private transfers, taxis, minimal transit waste
+- Still weave in 1–2 authentic local experiences per day — luxury should not mean tourist traps
+- Suggest premium accommodation-adjacent activities (spa, concierge-arranged tours)
+- Avoid over-scheduling: quality over quantity, allow breathing room between experiences
+- Estimated daily spending: ~€${Math.round(dailyBudgetPerPerson * 0.35)} activities, ~€${Math.round(dailyBudgetPerPerson * 0.45)} dining, ~€${Math.round(dailyBudgetPerPerson * 0.20)} transport/misc`;
+    } else if (dailyBudgetPerPerson >= 150) {
+        budgetTier = "high";
+        guidance = `
+**BUDGET GUIDANCE (HIGH — €${dailyBudgetPerPerson}/person/day):**
+Total trip budget: €${budgetTotal} for ${travelerCount} traveler${travelerCount > 1 ? "s" : ""} over ${tripDays} days (€${perPersonBudget} per person total).
+
+This is a high-budget trip. Suggest 4 total items per day (3 activities + 1 meal) with quality emphasis:
+- Include guided tours, unique cultural experiences, and higher-quality venues
+- Recommend skip-the-line tickets for popular attractions
+- Suggest a mix of upscale restaurants and well-regarded local eateries
+- Optimize convenience: shorter transit routes, occasional taxi/rideshare where sensible
+- Include unique splurge-worthy activities (cooking class, evening cruise, exclusive tasting) — at least one per day
+- Reduce excessive walking between distant points; cluster activities geographically
+- Estimated daily spending: ~€${Math.round(dailyBudgetPerPerson * 0.35)} activities, ~€${Math.round(dailyBudgetPerPerson * 0.43)} dining, ~€${Math.round(dailyBudgetPerPerson * 0.22)} transport/misc`;
+    } else if (dailyBudgetPerPerson > 60) {
+        budgetTier = "moderate";
+        guidance = `
+**BUDGET GUIDANCE (MODERATE — €${dailyBudgetPerPerson}/person/day):**
+Total trip budget: €${budgetTotal} for ${travelerCount} traveler${travelerCount > 1 ? "s" : ""} over ${tripDays} days (€${perPersonBudget} per person total).
+
+This is a moderate-budget trip. STRICTLY limit to 3 total items per day (2 activities + 1 meal OR 1 activity + 2 meals):
+- Mix paid attractions (museums, monuments) with free experiences (parks, viewpoints, neighborhoods)
+- Include standard ticketed museums, popular sights, and mid-range dining
+- Recommend popular restaurants with good value, local eateries, and some street food
+- Use public transport primarily, walking when practical
+- Include some special experiences (a food tour, a guided walking tour) but balance with self-guided exploration
+- Do NOT exceed 3 items per full day — quality over quantity
+- Estimated daily spending: ~€${Math.round(dailyBudgetPerPerson * 0.35)} activities, ~€${Math.round(dailyBudgetPerPerson * 0.40)} dining, ~€${Math.round(dailyBudgetPerPerson * 0.25)} transport/misc`;
+    } else {
+        budgetTier = "low";
+        guidance = `
+**BUDGET GUIDANCE (LOW — €${dailyBudgetPerPerson}/person/day):**
+Total trip budget: €${budgetTotal} for ${travelerCount} traveler${travelerCount > 1 ? "s" : ""} over ${tripDays} days (€${perPersonBudget} per person total).
+
+This is a low-budget trip. STRICTLY limit to 2 total items per day (1 activity + 1 meal OR 2 free activities). Focus on maximizing free value:
+- Prioritize FREE attractions: free museum days, parks, public squares, street art, viewpoints, beach walks, public landmarks, neighborhood strolls
+- Recommend affordable food: street food, local markets, bakeries, supermarkets, affordable cafes
+- Use public transport or walking exclusively — no taxis
+- Suggest free walking tours (tip-based), self-guided routes, and open-air attractions
+- Limit paid attractions to at most 2 per day; prefer those under €15 per person
+- Avoid expensive tours or premium experiences entirely
+- Mention discount passes, free entry hours, or youth/student discounts where available
+- Pack days efficiently to minimize transport costs
+- Estimated daily spending: ~€${Math.round(dailyBudgetPerPerson * 0.30)} activities, ~€${Math.round(dailyBudgetPerPerson * 0.45)} dining, ~€${Math.round(dailyBudgetPerPerson * 0.25)} transport/misc`;
+    }
+
+    // Add group-size guidance
+    if (travelerCount >= 5) {
+        guidance += `
+
+**GROUP SIZE ADJUSTMENTS (${travelerCount} travelers):**
+- Large group: prefer activities that accommodate groups well (walking tours, outdoor experiences, group dining)
+- Avoid overly crowded small venues; suggest open/spacious alternatives
+- Consider group discounts where available
+- Plan slightly fewer activities per day to account for group coordination time
+- Restaurant recommendations should seat large parties — suggest reservations`;
+    } else if (travelerCount >= 3) {
+        guidance += `
+
+**GROUP SIZE ADJUSTMENTS (${travelerCount} travelers):**
+- Small group: balanced activity density
+- Recommend restaurants that handle groups of ${travelerCount} easily
+- Shared transport (e.g., single taxi/rideshare) may be cost-effective vs individual tickets`;
+    }
+    // Solo or couple (1-2) don't need special group guidance
+
+    // Add universal rules
+    guidance += `
+
+**GENERAL ITINERARY RULES:**
+- Always keep the itinerary geographically logical — cluster nearby activities together
+- Distribute spending realistically across days (avoid front-loading or back-loading costs)
+- Even with a high budget, do NOT over-schedule — leave breathing room
+- Adjust activity types for the group size of ${travelerCount} traveler${travelerCount > 1 ? "s" : ""}`;
+
+    return { budgetTier, dailyBudgetPerPerson, guidance };
+}
+
 // Helper function to generate time-aware itinerary guidance based on arrival/departure times
 function generateTimeAwareGuidance(
     arrivalTime: string | undefined,
@@ -422,12 +545,21 @@ export const generate = internalAction({
             if (hasOpenAIKey) {
                 try {
                     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-                    const budgetDisplay = typeof trip.budgetTotal === "number" ? `€${trip.budgetTotal}` : trip.budgetTotal;
                     const localExperiencesGuidance = generateLocalExperiencesGuidance(trip.localExperiences);
                     
                     // Calculate the number of days
                     const tripDays = Math.ceil((trip.endDate - trip.startDate) / (24 * 60 * 60 * 1000));
                     console.log(`📅 Generating itinerary for ${tripDays} days`);
+                    
+                    // Generate budget-aware guidance
+                    const effectiveTravelerCount = trip.travelerCount ?? trip.travelers ?? 1;
+                    const budgetGuidance = generateBudgetGuidance(
+                        trip.budgetTotal ?? (typeof trip.budget === "number" ? trip.budget : undefined),
+                        effectiveTravelerCount,
+                        tripDays,
+                        trip.destination
+                    );
+                    console.log(`💰 Budget tier: ${budgetGuidance.budgetTier}, daily per person: €${budgetGuidance.dailyBudgetPerPerson}`);
                     
                     // Generate time-aware guidance based on arrival/departure times
                     const timeAwareGuidance = generateTimeAwareGuidance(
@@ -444,22 +576,32 @@ export const generate = internalAction({
                     const daysInstructions = timeAwareGuidance.skipLastDay 
                         ? `Generate ${effectiveTripDays} days of activities (Days 1-${effectiveTripDays}). Day ${tripDays} is departure day with no scheduled activities.`
                         : `Generate exactly ${tripDays} days of itinerary. Do not skip any days.`;
+
+                    // Build budget display for prompt header
+                    const budgetTotal = trip.budgetTotal ?? (typeof trip.budget === "number" ? trip.budget : null);
+                    const perPersonBudget = budgetTotal ? Math.round(budgetTotal / effectiveTravelerCount) : null;
+                    const budgetHeader = budgetTotal
+                        ? `Total Budget: €${budgetTotal} (€${perPersonBudget} per person, €${budgetGuidance.dailyBudgetPerPerson}/person/day)`
+                        : `Budget: Not specified (assume moderate)`;
                     
                     const itineraryPrompt = `Create a detailed day-by-day itinerary for a ${tripDays}-day trip to ${trip.destination} from ${new Date(trip.startDate).toDateString()} to ${new Date(trip.endDate).toDateString()}.
 
 **CRITICAL: ${daysInstructions}**
 
-Budget: ${budgetDisplay}
-Travelers: ${trip.travelerCount ?? trip.travelers ?? 1}
+${budgetHeader}
+Travelers: ${effectiveTravelerCount}
+Budget Tier: ${budgetGuidance.budgetTier.toUpperCase()}
 Interests: ${trip.interests.join(", ")}
+
+${budgetGuidance.guidance}
 
 ${generateTravelStyleGuidance(trip.interests)}
 ${localExperiencesGuidance}
 ${timeAwareGuidance.guidance}
 
 IMPORTANT: For each activity, include:
-- Realistic entry prices in EUR
-- Whether "Skip the Line" tickets are available (for museums, attractions)
+- Realistic entry prices in EUR that RESPECT the budget tier (${budgetGuidance.budgetTier})
+- Whether "Skip the Line" tickets are available (for museums, attractions)${budgetGuidance.budgetTier === "low" ? " — only suggest if affordable within budget" : budgetGuidance.budgetTier === "moderate" ? " — suggest for popular attractions only" : ""}
 - Skip the Line price (usually 5-15€ more than regular)
 - Duration of the activity in minutes
 - Start time and end time (24h format like "09:00", "11:30")
@@ -521,23 +663,33 @@ Include specific activities, restaurants, and attractions for each day. Format a
 
 **REMINDER: ${timeAwareGuidance.skipLastDay 
     ? `Generate Days 1-${effectiveTripDays} with activities. Day ${tripDays} is departure-only with no activities.` 
-    : `Generate ALL ${tripDays} days from Day 1 to Day ${tripDays}.`} Each full day should have 3-5 activities including meals. Partial days (arrival/departure) should have fewer activities appropriate for the available time.**
+    : `Generate ALL ${tripDays} days from Day 1 to Day ${tripDays}.`} Each full day MUST have EXACTLY ${budgetGuidance.budgetTier === 'low' ? '2' : budgetGuidance.budgetTier === 'moderate' ? '3' : budgetGuidance.budgetTier === 'high' ? '4' : '5'} total items (activities + meals combined). Do NOT exceed this number. Partial days (arrival/departure) should have fewer items.**
 
-Make sure prices are realistic for ${trip.destination}. Museums typically cost €10-25, skip-the-line adds €5-15. Tours cost €20-80. Restaurants show average meal cost per person.`;
+**BUDGET COMPLIANCE:** This is a ${budgetGuidance.budgetTier.toUpperCase()} budget trip (€${budgetGuidance.dailyBudgetPerPerson}/person/day). ${budgetGuidance.budgetTier === 'low' ? 'HARD LIMIT: 2 items per day (activities + meals). Maximum 1 paid activity. Prioritize free attractions and affordable food.' : budgetGuidance.budgetTier === 'moderate' ? 'HARD LIMIT: 3 items per day (activities + meals). Do NOT add more than 3. Balance quality and value at around €' + budgetGuidance.dailyBudgetPerPerson + ' per person daily.' : budgetGuidance.budgetTier === 'high' ? 'Target 4 items per day (activities + meals). Include guided tours and unique experiences. Daily spend up to €' + budgetGuidance.dailyBudgetPerPerson + ' per person.' : 'Target 5 curated items per day (activities + meals). Include exclusive activities and fine dining. Daily spend up to €' + budgetGuidance.dailyBudgetPerPerson + ' per person.'}
+
+Make sure prices are realistic for ${trip.destination} and aligned with the ${budgetGuidance.budgetTier.toUpperCase()} budget tier. Distribute spending evenly across days. Museums typically cost €10-25, skip-the-line adds €5-15. Tours cost €20-80. Restaurants show average meal cost per person.`;
                     
                     // For longer trips or trips with time constraints, we need more tokens
-                    // Base: 8000 tokens, +1500 per day, extra buffer for time-aware prompts
+                    // Base: 16000 tokens, +2500 per day, extra buffer for time-aware prompts
                     const hasTimeConstraints = arrivalTime || departureTime;
-                    const baseTokens = hasTimeConstraints ? 10000 : 8000;
-                    const tokensPerDay = hasTimeConstraints ? 1800 : 1500;
-                    const maxTokens = Math.min(64000, Math.max(baseTokens, tripDays * tokensPerDay));
+                    const baseTokens = hasTimeConstraints ? 20000 : 16000;
+                    const tokensPerDay = hasTimeConstraints ? 3000 : 2500;
+                    const maxTokens = Math.min(100000, Math.max(baseTokens, tripDays * tokensPerDay));
                     
                     console.log(`📝 Using maxTokens: ${maxTokens} (days: ${tripDays}, timeConstraints: ${hasTimeConstraints})`);
                     
-                    // Build system prompt with time-awareness
+                    // Build system prompt with time-awareness and budget awareness
+                    const budgetSystemNote = budgetGuidance.budgetTier === 'low'
+                        ? ' Prioritize free and budget-friendly options. Maximum 2 paid activities per day. Avoid expensive tours or premium experiences.'
+                        : budgetGuidance.budgetTier === 'moderate'
+                        ? ' Provide balanced recommendations with good value experiences. STRICTLY 3 total items per day (2 activities + 1 meal). Do not exceed 3.'
+                        : budgetGuidance.budgetTier === 'high'
+                        ? ' Include guided tours, unique experiences, and higher-quality venues. Suggest 3-4 activities per day with convenience optimization.'
+                        : ' Curate 4-5 premium experiences per day. Include exclusive activities, fine dining, and time-efficient routing. Focus on comfort and quality.';
+                    
                     const systemPrompt = timeAwareGuidance.skipLastDay
-                        ? `You are a travel itinerary planner. Return only valid JSON. Always include realistic prices and booking information for activities. IMPORTANT: Generate ${effectiveTripDays} days of activities (Days 1-${effectiveTripDays}). Day ${tripDays} is departure day with no activities. Respect arrival and departure time constraints.`
-                        : `You are a travel itinerary planner. Return only valid JSON. Always include realistic prices and booking information for activities. IMPORTANT: You must generate the complete itinerary for ALL ${tripDays} days requested. If arrival/departure times are specified, adjust activities accordingly - fewer activities on partial days.`;
+                        ? `You are a travel itinerary planner. Return only valid JSON. Always include realistic prices and booking information for activities. IMPORTANT: Generate ${effectiveTripDays} days of activities (Days 1-${effectiveTripDays}). Day ${tripDays} is departure day with no activities. Respect arrival and departure time constraints.${budgetSystemNote} The traveler's budget tier is ${budgetGuidance.budgetTier.toUpperCase()} (€${budgetGuidance.dailyBudgetPerPerson}/person/day). All recommendations must respect this budget.`
+                        : `You are a travel itinerary planner. Return only valid JSON. Always include realistic prices and booking information for activities. IMPORTANT: You must generate the complete itinerary for ALL ${tripDays} days requested. If arrival/departure times are specified, adjust activities accordingly - fewer activities on partial days.${budgetSystemNote} The traveler's budget tier is ${budgetGuidance.budgetTier.toUpperCase()} (€${budgetGuidance.dailyBudgetPerPerson}/person/day). All recommendations must respect this budget.`;
                     
                     const completion = await openai.chat.completions.create({
                         messages: [
@@ -1257,7 +1409,7 @@ async function searchRestaurants(destination: string) {
         
         // Get details for each restaurant to get the web_url
         const restaurantsWithDetails = await Promise.all(
-            searchData.data.slice(0, 5).map(async (item: any) => {
+            searchData.data.slice(0, 20).map(async (item: any) => {
                 try {
                     // Fetch details for each restaurant to get the web_url
                     const detailsUrl = `https://api.content.tripadvisor.com/api/v1/location/${item.location_id}/details?key=${tripadvisorKey}&language=en`;
@@ -1322,32 +1474,92 @@ function getFallbackRestaurants(destination: string) {
     
     const fallbackByCity: Record<string, RestaurantData[]> = {
         "paris": [
-            { name: "Le Comptoir du Panthéon", cuisine: "French", priceRange: "€€€", rating: 4.7, reviewCount: 2340, address: "10 Rue Soufflot", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187147-Paris", dataSource: "fallback" },
-            { name: "Chez Janou", cuisine: "Provençal", priceRange: "€€", rating: 4.5, reviewCount: 4560, address: "2 Rue Roger Verlomme", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187147-Paris", dataSource: "fallback" },
-            { name: "Pink Mamma", cuisine: "Italian", priceRange: "€€", rating: 4.6, reviewCount: 8920, address: "20bis Rue de Douai", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187147-Paris", dataSource: "fallback" },
-            { name: "Bouillon Chartier", cuisine: "French", priceRange: "€", rating: 4.3, reviewCount: 12340, address: "7 Rue du Faubourg Montmartre", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187147-Paris", dataSource: "fallback" },
-            { name: "Le Bouillon Pigalle", cuisine: "French Bistro", priceRange: "€€", rating: 4.4, reviewCount: 5670, address: "22 Boulevard de Clichy", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187147-Paris", dataSource: "fallback" },
+            { name: "Le Comptoir du Panthéon", cuisine: "French", priceRange: "€€€", rating: 4.7, reviewCount: 2340, address: "10 Rue Soufflot, 5th Arr.", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187147-Paris", dataSource: "fallback" },
+            { name: "Chez Janou", cuisine: "Provençal", priceRange: "€€", rating: 4.5, reviewCount: 4560, address: "2 Rue Roger Verlomme, 3rd Arr.", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187147-Paris", dataSource: "fallback" },
+            { name: "Pink Mamma", cuisine: "Italian", priceRange: "€€", rating: 4.6, reviewCount: 8920, address: "20bis Rue de Douai, 9th Arr.", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187147-Paris", dataSource: "fallback" },
+            { name: "Bouillon Chartier", cuisine: "French", priceRange: "€", rating: 4.3, reviewCount: 12340, address: "7 Rue du Faubourg Montmartre, 9th Arr.", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187147-Paris", dataSource: "fallback" },
+            { name: "Le Bouillon Pigalle", cuisine: "French Bistro", priceRange: "€€", rating: 4.4, reviewCount: 5670, address: "22 Boulevard de Clichy, 18th Arr.", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187147-Paris", dataSource: "fallback" },
+            { name: "Le Relais de l'Entrecôte", cuisine: "French Steakhouse", priceRange: "€€", rating: 4.5, reviewCount: 7890, address: "15 Rue Marbeuf, 8th Arr.", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187147-Paris", dataSource: "fallback" },
+            { name: "Breizh Café", cuisine: "Crêperie", priceRange: "€€", rating: 4.6, reviewCount: 3450, address: "109 Rue Vieille du Temple, 3rd Arr.", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187147-Paris", dataSource: "fallback" },
+            { name: "Le Petit Cler", cuisine: "French Bistro", priceRange: "€€", rating: 4.7, reviewCount: 2180, address: "29 Rue Cler, 7th Arr.", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187147-Paris", dataSource: "fallback" },
+            { name: "L'As du Fallafel", cuisine: "Middle Eastern", priceRange: "€", rating: 4.4, reviewCount: 9870, address: "34 Rue des Rosiers, 4th Arr.", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187147-Paris", dataSource: "fallback" },
+            { name: "Café de Flore", cuisine: "French Café", priceRange: "€€€", rating: 4.3, reviewCount: 11200, address: "172 Boulevard Saint-Germain, 6th Arr.", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187147-Paris", dataSource: "fallback" },
+            { name: "Le Bouillon Racine", cuisine: "French", priceRange: "€€", rating: 4.5, reviewCount: 4320, address: "3 Rue Racine, 6th Arr.", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187147-Paris", dataSource: "fallback" },
+            { name: "Frenchie", cuisine: "Modern French", priceRange: "€€€€", rating: 4.8, reviewCount: 3890, address: "5 Rue du Nil, 2nd Arr.", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187147-Paris", dataSource: "fallback" },
+            { name: "Chez l'Ami Jean", cuisine: "Basque", priceRange: "€€€", rating: 4.6, reviewCount: 2650, address: "27 Rue Malar, 7th Arr.", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187147-Paris", dataSource: "fallback" },
+            { name: "Le Cinq", cuisine: "Haute Cuisine", priceRange: "€€€€", rating: 4.9, reviewCount: 1890, address: "31 Avenue George V, 8th Arr.", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187147-Paris", dataSource: "fallback" },
+            { name: "Au Pied de Cochon", cuisine: "French Brasserie", priceRange: "€€€", rating: 4.2, reviewCount: 6540, address: "6 Rue Coquillière, 1st Arr.", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187147-Paris", dataSource: "fallback" },
+            { name: "Clover Grill", cuisine: "Grilled Meats", priceRange: "€€€", rating: 4.5, reviewCount: 1560, address: "6 Rue Bailleul, 1st Arr.", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187147-Paris", dataSource: "fallback" },
+            { name: "Le Baratin", cuisine: "French Wine Bar", priceRange: "€€", rating: 4.6, reviewCount: 1230, address: "3 Rue Jouye-Rouve, 20th Arr.", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187147-Paris", dataSource: "fallback" },
+            { name: "Holybelly", cuisine: "Brunch & Coffee", priceRange: "€€", rating: 4.5, reviewCount: 3780, address: "19 Rue Lucien Sampaix, 10th Arr.", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187147-Paris", dataSource: "fallback" },
+            { name: "Le Train Bleu", cuisine: "French Brasserie", priceRange: "€€€", rating: 4.4, reviewCount: 5430, address: "Gare de Lyon, 12th Arr.", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187147-Paris", dataSource: "fallback" },
+            { name: "Septime", cuisine: "Modern French", priceRange: "€€€€", rating: 4.8, reviewCount: 2890, address: "80 Rue de Charonne, 11th Arr.", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187147-Paris", dataSource: "fallback" },
         ],
         "rome": [
-            { name: "Roscioli Salumeria con Cucina", cuisine: "Italian", priceRange: "€€€", rating: 4.8, reviewCount: 3450, address: "Via dei Giubbonari 21", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187791-Rome", dataSource: "fallback" },
-            { name: "Pizzarium", cuisine: "Pizza", priceRange: "€", rating: 4.7, reviewCount: 6780, address: "Via della Meloria 43", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187791-Rome", dataSource: "fallback" },
-            { name: "Da Enzo al 29", cuisine: "Roman", priceRange: "€€", rating: 4.6, reviewCount: 5230, address: "Salita dei Crescenzi 31", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187791-Rome", dataSource: "fallback" },
-            { name: "Armando al Pantheon", cuisine: "Italian", priceRange: "€€€", rating: 4.5, reviewCount: 4120, address: "Salita dei Vascellari 29", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187791-Rome", dataSource: "fallback" },
-            { name: "Supplì Roma", cuisine: "Roman Street Food", priceRange: "€", rating: 4.4, reviewCount: 2890, address: "Via di San Francesco a Ripa 137", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187791-Rome", dataSource: "fallback" },
+            { name: "Roscioli Salumeria con Cucina", cuisine: "Italian", priceRange: "€€€", rating: 4.8, reviewCount: 3450, address: "Via dei Giubbonari 21, Centro Storico", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187791-Rome", dataSource: "fallback" },
+            { name: "Pizzarium", cuisine: "Pizza", priceRange: "€", rating: 4.7, reviewCount: 6780, address: "Via della Meloria 43, Prati", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187791-Rome", dataSource: "fallback" },
+            { name: "Da Enzo al 29", cuisine: "Roman", priceRange: "€€", rating: 4.6, reviewCount: 5230, address: "Via dei Vascellari 29, Trastevere", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187791-Rome", dataSource: "fallback" },
+            { name: "Armando al Pantheon", cuisine: "Italian", priceRange: "€€€", rating: 4.5, reviewCount: 4120, address: "Salita dei Crescenzi 31, Centro Storico", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187791-Rome", dataSource: "fallback" },
+            { name: "Supplì Roma", cuisine: "Roman Street Food", priceRange: "€", rating: 4.4, reviewCount: 2890, address: "Via di San Francesco a Ripa 137, Trastevere", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187791-Rome", dataSource: "fallback" },
+            { name: "Tonnarello", cuisine: "Roman", priceRange: "€€", rating: 4.3, reviewCount: 7650, address: "Via della Paglia 1, Trastevere", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187791-Rome", dataSource: "fallback" },
+            { name: "La Pergola", cuisine: "Haute Cuisine", priceRange: "€€€€", rating: 4.9, reviewCount: 1890, address: "Via Alberto Cadlolo 101, Monte Mario", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187791-Rome", dataSource: "fallback" },
+            { name: "Cacio e Pepe", cuisine: "Roman Pasta", priceRange: "€€", rating: 4.5, reviewCount: 3240, address: "Via Giuseppe Avezzana 11, Prati", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187791-Rome", dataSource: "fallback" },
+            { name: "Antico Forno Roscioli", cuisine: "Bakery & Pizza", priceRange: "€", rating: 4.6, reviewCount: 4560, address: "Via dei Chiavari 34, Centro Storico", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187791-Rome", dataSource: "fallback" },
+            { name: "Trattoria Da Teo", cuisine: "Roman", priceRange: "€€", rating: 4.5, reviewCount: 2780, address: "Piazza dei Ponziani 7, Trastevere", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187791-Rome", dataSource: "fallback" },
+            { name: "Il Pagliaccio", cuisine: "Modern Italian", priceRange: "€€€€", rating: 4.8, reviewCount: 1340, address: "Via dei Banchi Vecchi 129a, Centro Storico", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187791-Rome", dataSource: "fallback" },
+            { name: "Dar Filettaro a Santa Barbara", cuisine: "Roman Street Food", priceRange: "€", rating: 4.3, reviewCount: 3890, address: "Largo dei Librari 88, Centro Storico", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187791-Rome", dataSource: "fallback" },
+            { name: "Osteria Fernanda", cuisine: "Modern Roman", priceRange: "€€€", rating: 4.7, reviewCount: 1650, address: "Via Crescenzo del Monte 18, Trastevere", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187791-Rome", dataSource: "fallback" },
+            { name: "Felice a Testaccio", cuisine: "Roman", priceRange: "€€", rating: 4.5, reviewCount: 4320, address: "Via Mastro Giorgio 29, Testaccio", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187791-Rome", dataSource: "fallback" },
+            { name: "Grazia & Graziella", cuisine: "Italian", priceRange: "€€", rating: 4.4, reviewCount: 2560, address: "Largo M.D. Fumasoni Biondi 5, Trastevere", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187791-Rome", dataSource: "fallback" },
+            { name: "Trapizzino", cuisine: "Street Food", priceRange: "€", rating: 4.5, reviewCount: 3120, address: "Via Giovanni Branca 88, Testaccio", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187791-Rome", dataSource: "fallback" },
+            { name: "Emma Pizzeria", cuisine: "Pizza", priceRange: "€€", rating: 4.4, reviewCount: 5670, address: "Via del Monte della Farina 28, Centro Storico", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187791-Rome", dataSource: "fallback" },
+            { name: "Ristorante Aroma", cuisine: "Fine Dining", priceRange: "€€€€", rating: 4.8, reviewCount: 2340, address: "Via Labicana 125, Colosseo", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187791-Rome", dataSource: "fallback" },
+            { name: "Primo al Pigneto", cuisine: "Modern Roman", priceRange: "€€€", rating: 4.6, reviewCount: 1890, address: "Via del Pigneto 46, Pigneto", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187791-Rome", dataSource: "fallback" },
+            { name: "Gelateria Giolitti", cuisine: "Gelato & Café", priceRange: "€", rating: 4.3, reviewCount: 8760, address: "Via degli Uffici del Vicario 40, Centro Storico", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187791-Rome", dataSource: "fallback" },
         ],
         "barcelona": [
-            { name: "Cal Pep", cuisine: "Catalan", priceRange: "€€€", rating: 4.6, reviewCount: 4560, address: "Plaça de les Olles 8", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187497-Barcelona", dataSource: "fallback" },
-            { name: "Cervecería Catalana", cuisine: "Tapas", priceRange: "€€", rating: 4.5, reviewCount: 9870, address: "Carrer de Mallorca 236", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187497-Barcelona", dataSource: "fallback" },
-            { name: "La Pepita", cuisine: "Spanish", priceRange: "€€", rating: 4.7, reviewCount: 3210, address: "Carrer de Còrsega 343", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187497-Barcelona", dataSource: "fallback" },
-            { name: "El Xampanyet", cuisine: "Catalan Tapas", priceRange: "€", rating: 4.4, reviewCount: 5430, address: "Carrer de Montcada 22", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187497-Barcelona", dataSource: "fallback" },
-            { name: "Can Culleretes", cuisine: "Catalan", priceRange: "€€", rating: 4.3, reviewCount: 2890, address: "Carrer d'en Quintana 5", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187497-Barcelona", dataSource: "fallback" },
+            { name: "Cal Pep", cuisine: "Catalan", priceRange: "€€€", rating: 4.6, reviewCount: 4560, address: "Plaça de les Olles 8, El Born", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187497-Barcelona", dataSource: "fallback" },
+            { name: "Cervecería Catalana", cuisine: "Tapas", priceRange: "€€", rating: 4.5, reviewCount: 9870, address: "Carrer de Mallorca 236, Eixample", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187497-Barcelona", dataSource: "fallback" },
+            { name: "La Pepita", cuisine: "Spanish", priceRange: "€€", rating: 4.7, reviewCount: 3210, address: "Carrer de Còrsega 343, Gràcia", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187497-Barcelona", dataSource: "fallback" },
+            { name: "El Xampanyet", cuisine: "Catalan Tapas", priceRange: "€", rating: 4.4, reviewCount: 5430, address: "Carrer de Montcada 22, El Born", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187497-Barcelona", dataSource: "fallback" },
+            { name: "Can Culleretes", cuisine: "Catalan", priceRange: "€€", rating: 4.3, reviewCount: 2890, address: "Carrer d'en Quintana 5, Barri Gòtic", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187497-Barcelona", dataSource: "fallback" },
+            { name: "Tickets Bar", cuisine: "Tapas & Molecular", priceRange: "€€€€", rating: 4.8, reviewCount: 4560, address: "Avinguda del Paral·lel 164, Sant Antoni", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187497-Barcelona", dataSource: "fallback" },
+            { name: "Bar Mut", cuisine: "Mediterranean", priceRange: "€€€", rating: 4.5, reviewCount: 2340, address: "Carrer de Pau Claris 192, Eixample", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187497-Barcelona", dataSource: "fallback" },
+            { name: "La Boqueria Market Stalls", cuisine: "Market Food", priceRange: "€", rating: 4.4, reviewCount: 15600, address: "La Rambla 91, Raval", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187497-Barcelona", dataSource: "fallback" },
+            { name: "Can Paixano (La Xampanyeria)", cuisine: "Tapas & Cava", priceRange: "€", rating: 4.3, reviewCount: 6780, address: "Carrer de la Reina Cristina 7, Barceloneta", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187497-Barcelona", dataSource: "fallback" },
+            { name: "Quimet & Quimet", cuisine: "Tapas & Montaditos", priceRange: "€€", rating: 4.7, reviewCount: 3450, address: "Carrer del Poeta Cabanyes 25, Poble Sec", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187497-Barcelona", dataSource: "fallback" },
+            { name: "Bodega 1900", cuisine: "Vermouth & Tapas", priceRange: "€€€", rating: 4.6, reviewCount: 2120, address: "Carrer de Tamarit 91, Sant Antoni", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187497-Barcelona", dataSource: "fallback" },
+            { name: "La Mar Salada", cuisine: "Seafood", priceRange: "€€", rating: 4.4, reviewCount: 3890, address: "Passeig de Joan de Borbó 58, Barceloneta", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187497-Barcelona", dataSource: "fallback" },
+            { name: "Flax & Kale", cuisine: "Healthy & Flexitarian", priceRange: "€€", rating: 4.5, reviewCount: 5670, address: "Carrer dels Tallers 74b, Raval", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187497-Barcelona", dataSource: "fallback" },
+            { name: "Federal Café", cuisine: "Brunch & Coffee", priceRange: "€€", rating: 4.4, reviewCount: 2340, address: "Carrer del Parlament 39, Sant Antoni", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187497-Barcelona", dataSource: "fallback" },
+            { name: "Els Quatre Gats", cuisine: "Catalan", priceRange: "€€€", rating: 4.2, reviewCount: 7890, address: "Carrer de Montsió 3, Barri Gòtic", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187497-Barcelona", dataSource: "fallback" },
+            { name: "Can Solé", cuisine: "Seafood", priceRange: "€€€", rating: 4.5, reviewCount: 3210, address: "Carrer de Sant Carles 4, Barceloneta", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187497-Barcelona", dataSource: "fallback" },
+            { name: "Granja Viader", cuisine: "Traditional Café", priceRange: "€", rating: 4.3, reviewCount: 2560, address: "Carrer d'en Xuclà 4, Raval", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187497-Barcelona", dataSource: "fallback" },
+            { name: "Disfrutar", cuisine: "Avant-Garde", priceRange: "€€€€", rating: 4.9, reviewCount: 2890, address: "Carrer de Villarroel 163, Eixample", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187497-Barcelona", dataSource: "fallback" },
+            { name: "Bar Cañete", cuisine: "Spanish Tapas", priceRange: "€€€", rating: 4.6, reviewCount: 4120, address: "Carrer de la Unió 17, Raval", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187497-Barcelona", dataSource: "fallback" },
+            { name: "La Vinatería del Call", cuisine: "Catalan Wine Bar", priceRange: "€€", rating: 4.5, reviewCount: 3780, address: "Carrer de Sant Domènec del Call 9, Barri Gòtic", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g187497-Barcelona", dataSource: "fallback" },
         ],
         "marrakech": [
-            { name: "Dar Moha", cuisine: "Moroccan", priceRange: "€€€", rating: 4.8, reviewCount: 2890, address: "81 Rue Dar el Bacha", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g143998-Marrakech", dataSource: "fallback" },
-            { name: "Riad Karmela", cuisine: "Moroccan", priceRange: "€€", rating: 4.6, reviewCount: 1560, address: "Medina", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g143998-Marrakech", dataSource: "fallback" },
-            { name: "Café de la Paz", cuisine: "Moroccan", priceRange: "€", rating: 4.5, reviewCount: 3210, address: "Jemaa el-Fnaa", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g143998-Marrakech", dataSource: "fallback" },
-            { name: "Tagine Palace", cuisine: "Moroccan", priceRange: "€€", rating: 4.4, reviewCount: 2340, address: "Atlas Mountains View", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g143998-Marrakech", dataSource: "fallback" },
-            { name: "Souk Market Eats", cuisine: "Street Food", priceRange: "€", rating: 4.3, reviewCount: 4560, address: "Souk Medina", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g143998-Marrakech", dataSource: "fallback" },
+            { name: "Dar Moha", cuisine: "Moroccan Fine Dining", priceRange: "€€€", rating: 4.8, reviewCount: 2890, address: "81 Rue Dar el Bacha, Medina", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g143998-Marrakech", dataSource: "fallback" },
+            { name: "Riad Karmela", cuisine: "Moroccan", priceRange: "€€", rating: 4.6, reviewCount: 1560, address: "Derb Lalla Azzouna, Medina", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g143998-Marrakech", dataSource: "fallback" },
+            { name: "Café des Épices", cuisine: "Moroccan Café", priceRange: "€", rating: 4.5, reviewCount: 3210, address: "Rahba Lakdima, Medina", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g143998-Marrakech", dataSource: "fallback" },
+            { name: "Le Jardin", cuisine: "Moroccan-Mediterranean", priceRange: "€€€", rating: 4.7, reviewCount: 2340, address: "32 Souk Sidi Abdelaziz, Medina", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g143998-Marrakech", dataSource: "fallback" },
+            { name: "Jemaa el-Fnaa Food Stalls", cuisine: "Street Food", priceRange: "€", rating: 4.3, reviewCount: 4560, address: "Place Jemaa el-Fnaa, Medina", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g143998-Marrakech", dataSource: "fallback" },
+            { name: "Al Fassia", cuisine: "Traditional Moroccan", priceRange: "€€€", rating: 4.6, reviewCount: 3120, address: "232 Avenue Mohammed V, Guéliz", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g143998-Marrakech", dataSource: "fallback" },
+            { name: "Nomad", cuisine: "Modern Moroccan", priceRange: "€€€", rating: 4.5, reviewCount: 4890, address: "1 Derb Aarjane, Rahba Lakdima, Medina", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g143998-Marrakech", dataSource: "fallback" },
+            { name: "La Maison Arabe", cuisine: "Moroccan Fine Dining", priceRange: "€€€€", rating: 4.8, reviewCount: 1890, address: "1 Derb Assehbe, Bab Doukkala, Medina", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g143998-Marrakech", dataSource: "fallback" },
+            { name: "Chez Chegrouni", cuisine: "Moroccan", priceRange: "€", rating: 4.2, reviewCount: 5670, address: "Jemaa el-Fnaa, Medina", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g143998-Marrakech", dataSource: "fallback" },
+            { name: "BKLYN", cuisine: "Burgers & Brunch", priceRange: "€€", rating: 4.4, reviewCount: 1230, address: "Rue Oum Er Rabia, Guéliz", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g143998-Marrakech", dataSource: "fallback" },
+            { name: "Amal Women's Training Center", cuisine: "Moroccan", priceRange: "€", rating: 4.7, reviewCount: 2340, address: "Rue Allal Ben Ahmed, Guéliz", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g143998-Marrakech", dataSource: "fallback" },
+            { name: "Le Trou au Mur", cuisine: "Moroccan Fusion", priceRange: "€€€", rating: 4.5, reviewCount: 1780, address: "21 Rue Mouassine, Medina", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g143998-Marrakech", dataSource: "fallback" },
+            { name: "Terrasse des Épices", cuisine: "Moroccan Rooftop", priceRange: "€€", rating: 4.4, reviewCount: 3560, address: "15 Souk Cherifia, Sidi Abdelaziz, Medina", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g143998-Marrakech", dataSource: "fallback" },
+            { name: "Pepe Nero", cuisine: "Italian-Moroccan", priceRange: "€€€", rating: 4.6, reviewCount: 2890, address: "17 Derb Cherkaoui, Douar Graoua, Medina", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g143998-Marrakech", dataSource: "fallback" },
+            { name: "Kui-Zin", cuisine: "Moroccan Street Food", priceRange: "€", rating: 4.3, reviewCount: 1450, address: "9 Rue Jbel Lakhdar, Medina", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g143998-Marrakech", dataSource: "fallback" },
+            { name: "La Famille", cuisine: "Vegetarian Moroccan", priceRange: "€€", rating: 4.5, reviewCount: 1890, address: "42 Rue Riad Zitoun el Jdid, Medina", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g143998-Marrakech", dataSource: "fallback" },
+            { name: "Dar Yacout", cuisine: "Moroccan Fine Dining", priceRange: "€€€€", rating: 4.7, reviewCount: 2560, address: "79 Sidi Ahmed Soussi, Bab Doukkala, Medina", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g143998-Marrakech", dataSource: "fallback" },
+            { name: "Café Clock", cuisine: "Moroccan-International", priceRange: "€€", rating: 4.4, reviewCount: 4120, address: "224 Derb Chtouka, Kasbah, Medina", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g143998-Marrakech", dataSource: "fallback" },
+            { name: "Henna Café", cuisine: "Moroccan Café", priceRange: "€", rating: 4.3, reviewCount: 1340, address: "93 Arset Aouzal, Medina", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g143998-Marrakech", dataSource: "fallback" },
+            { name: "Le Salama", cuisine: "Moroccan Rooftop", priceRange: "€€€", rating: 4.5, reviewCount: 3670, address: "40 Rue des Banques, Jemaa el-Fnaa, Medina", tripAdvisorUrl: "https://www.tripadvisor.com/Restaurant_Review-g143998-Marrakech", dataSource: "fallback" },
         ],
     };
     
@@ -1358,17 +1570,37 @@ function getFallbackRestaurants(destination: string) {
         }
     }
     
-    // Generic fallback - 5 restaurants for any destination
-    const cuisines = ["Local", "Traditional", "International", "Street Food", "Fine Dining"];
-    const areas = ["City Center", "Old Town", "Downtown", "Market Square", "Waterfront"];
-    const priceRanges = ["€", "€€", "€€", "€€€", "€€€€"];
+    // Generic fallback - 20 restaurants for any destination
+    const restaurantTypes = [
+        { cuisine: "Local Traditional", priceRange: "€€", ratingBase: 4.5 },
+        { cuisine: "Street Food", priceRange: "€", ratingBase: 4.3 },
+        { cuisine: "Fine Dining", priceRange: "€€€€", ratingBase: 4.8 },
+        { cuisine: "Seafood", priceRange: "€€€", ratingBase: 4.5 },
+        { cuisine: "International", priceRange: "€€", ratingBase: 4.2 },
+        { cuisine: "Café & Brunch", priceRange: "€", ratingBase: 4.4 },
+        { cuisine: "Mediterranean", priceRange: "€€€", ratingBase: 4.6 },
+        { cuisine: "Vegetarian", priceRange: "€€", ratingBase: 4.3 },
+        { cuisine: "Steakhouse", priceRange: "€€€", ratingBase: 4.4 },
+        { cuisine: "Asian Fusion", priceRange: "€€", ratingBase: 4.5 },
+        { cuisine: "Bakery & Pastry", priceRange: "€", ratingBase: 4.6 },
+        { cuisine: "Wine Bar & Tapas", priceRange: "€€€", ratingBase: 4.5 },
+        { cuisine: "Pizza", priceRange: "€", ratingBase: 4.4 },
+        { cuisine: "Rooftop Dining", priceRange: "€€€€", ratingBase: 4.7 },
+        { cuisine: "Bistro", priceRange: "€€", ratingBase: 4.3 },
+        { cuisine: "Modern Cuisine", priceRange: "€€€", ratingBase: 4.6 },
+        { cuisine: "Market Food", priceRange: "€", ratingBase: 4.2 },
+        { cuisine: "BBQ & Grill", priceRange: "€€", ratingBase: 4.4 },
+        { cuisine: "Traditional Home Cooking", priceRange: "€€", ratingBase: 4.5 },
+        { cuisine: "Dessert & Gelato", priceRange: "€", ratingBase: 4.3 },
+    ];
+    const areas = ["City Center", "Old Town", "Downtown", "Market District", "Waterfront", "Arts Quarter", "Historic Quarter", "Harbor Area", "Main Square", "University Area", "Garden District", "Riverside", "Station Area", "Cultural Quarter", "Shopping District", "Beachfront", "Hill District", "Palace Quarter", "Park Area", "Lakeside"];
     
-    return cuisines.map((cuisine, index) => ({
-        name: `${cuisine} ${areas[index]} Restaurant`,
-        cuisine: cuisine,
-        priceRange: priceRanges[index],
-        rating: 4.2 + (index * 0.1),
-        reviewCount: 250 + (index * 100),
+    return restaurantTypes.map((type, index) => ({
+        name: `${type.cuisine} ${areas[index]} Restaurant`,
+        cuisine: type.cuisine,
+        priceRange: type.priceRange,
+        rating: type.ratingBase,
+        reviewCount: 200 + (index * 80),
         address: areas[index],
         tripAdvisorUrl: `https://www.tripadvisor.com/Restaurants-${encodeURIComponent(destination)}`,
         dataSource: "fallback",

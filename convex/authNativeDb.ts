@@ -1,4 +1,4 @@
-import { internalMutation } from "./_generated/server";
+import { internalMutation, internalQuery } from "./_generated/server";
 import { v } from "convex/values";
 
 // Result type for upsertUserAndCreateSession
@@ -148,5 +148,29 @@ export const upsertUserAndCreateSession = internalMutation({
     });
     
     return result;
+  },
+});
+
+// Internal query to look up a session by its token
+export const getSessionByToken = internalQuery({
+  args: { token: v.string() },
+  handler: async (ctx, args) => {
+    const session = await ctx.db
+      .query("sessions")
+      .withIndex("by_token", (q) => q.eq("token", args.token))
+      .unique();
+    return session;
+  },
+});
+
+// Internal query to look up user settings by userId
+export const getUserSettings = internalQuery({
+  args: { userId: v.string() },
+  handler: async (ctx, args) => {
+    const settings = await ctx.db
+      .query("userSettings")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .unique();
+    return settings;
   },
 });

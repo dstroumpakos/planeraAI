@@ -719,6 +719,17 @@ const response = await fetch(`${CONVEX_URL}/api/action`, {
     return { data: { session: null, user: null }, error: null };
   }
 
+  // Load locally stored session as fallback
+  let storedSessionData: SessionData | null = null;
+  try {
+    const stored = await getSecureItem(getSessionKey());
+    if (stored) {
+      storedSessionData = JSON.parse(stored);
+    }
+  } catch (e) {
+    console.warn("[Auth] Failed to parse stored session for fallback:", e);
+  }
+
   try {
     const response = await fetch(`${CONVEX_URL}/api/action`, {
       method: "POST",
@@ -734,34 +745,68 @@ const response = await fetch(`${CONVEX_URL}/api/action`, {
     console.log("[Auth] validateSession body:", rawText.substring(0, 500));
 
     if (!response.ok) {
+      // Server error — don't clear session, use stored data
+      console.warn("[Auth] validateSession HTTP error, using stored session");
+      if (storedSessionData?.session) {
+        return { data: storedSessionData, error: null };
+      }
       await clearSession();
       return { data: { session: null, user: null }, error: new Error(rawText) };
     }
 
     const parsed = rawText ? JSON.parse(rawText) : null;
 
-if (parsed?.status === "error") {
-  await clearSession();
-  return { data: { session: null, user: null }, error: new Error(parsed.errorMessage || "Server Error") };
-}
+    if (parsed?.status === "error") {
+      // Server returned an explicit error — don't clear session, use stored data
+      console.warn("[Auth] validateSession server error, using stored session");
+      if (storedSessionData?.session) {
+        return { data: storedSessionData, error: null };
+      }
+      await clearSession();
+      return { data: { session: null, user: null }, error: new Error(parsed.errorMessage || "Server Error") };
+    }
 
-const result = parsed?.value !== undefined ? parsed.value : parsed;
+    const result = parsed?.value !== undefined ? parsed.value : parsed;
 
-
-    // Expecting something like: { success: true, user: {...} }
-    if (!result?.success || !result?.user) {
+    // Session is explicitly invalid (e.g. expired or token not found)
+    if (result?.success === false) {
+      console.log("[Auth] validateSession: session invalid, clearing");
       await clearSession();
       return { data: { session: null, user: null }, error: null };
     }
 
-    // Rebuild a local session object (token is your stored session token)
-    const session = createSessionFromResponse(token, result.user);
-    await storeSession(session, result.user);
+    // Session is valid — rebuild local session
+    if (result?.success) {
+      // Use server user data if available, otherwise fall back to stored data
+      const user = result.user || storedSessionData?.user;
+      if (user) {
+        const session = createSessionFromResponse(token, user);
+        await storeSession(session, user);
+        return { data: { session, user }, error: null };
+      }
 
-    return { data: { session, user: result.user }, error: null };
-  } catch (e: any) {
-    console.warn("[Auth] validateSession fetch failed:", e);
+      // No user data anywhere but token is valid — keep stored session
+      if (storedSessionData?.session) {
+        console.log("[Auth] validateSession: success but no user, using stored session");
+        return { data: storedSessionData, error: null };
+      }
+    }
+
+    // Fallback: if we have stored session data, trust it
+    if (storedSessionData?.session) {
+      return { data: storedSessionData, error: null };
+    }
+
     await clearSession();
+    return { data: { session: null, user: null }, error: null };
+  } catch (e: any) {
+    // Network error (offline, timeout, etc.) — DON'T clear session
+    console.warn("[Auth] validateSession fetch failed (offline?):", e.message);
+    if (storedSessionData?.session) {
+      console.log("[Auth] Using stored session as fallback (offline mode)");
+      return { data: storedSessionData, error: null };
+    }
+    // No stored session either — nothing we can do
     return { data: { session: null, user: null }, error: e };
   }
 },

@@ -150,24 +150,24 @@ class IAPService {
                 for (const sub of subscriptions) {
                     // Log FULL raw subscription data for debugging price issues
                     console.log('[IAP] 🔍 Raw subscription data:', {
-                        productId: (sub as any).productId,
-                        localizedPrice: (sub as any).localizedPrice,
+                        productId: (sub as any).productId || (sub as any).id,
+                        displayPrice: (sub as any).displayPrice,
                         price: (sub as any).price,
                         currency: (sub as any).currency,
                         raw: JSON.stringify(sub)
                     });
                     
-                    // ALWAYS use localizedPrice from StoreKit - this is what Apple will charge
+                    // ALWAYS use displayPrice from StoreKit - this is what Apple will charge
                     // Never override or format this - it includes proper currency symbol and locale
-                    const localizedPrice = (sub as any).localizedPrice;
+                    const displayPrice = (sub as any).displayPrice;
                     
-                    console.log('[IAP] ✅ Using StoreKit localizedPrice for', (sub as any).productId, ':', localizedPrice);
+                    console.log('[IAP] ✅ Using StoreKit displayPrice for', (sub as any).productId || (sub as any).id, ':', displayPrice);
                     
                     const product: IAPProduct = {
                         productId: (sub as any).productId || (sub as any).id || '',
-                        title: (sub as any).title || (sub as any).name || '',
+                        title: (sub as any).title || (sub as any).displayName || (sub as any).name || '',
                         description: (sub as any).description || '',
-                        price: localizedPrice || '', // Use ONLY StoreKit price, empty if not available
+                        price: displayPrice || '', // Use ONLY StoreKit price, empty if not available
                         priceCurrencyCode: (sub as any).currency,
                         subscriptionPeriod: (sub as any).subscriptionPeriod,
                     };
@@ -181,22 +181,22 @@ class IAPService {
                 for (const prod of consumables) {
                     // Log FULL raw product data for debugging price issues
                     console.log('[IAP] 🔍 Raw consumable data:', {
-                        productId: (prod as any).productId,
-                        localizedPrice: (prod as any).localizedPrice,
+                        productId: (prod as any).productId || (prod as any).id,
+                        displayPrice: (prod as any).displayPrice,
                         price: (prod as any).price,
                         currency: (prod as any).currency,
                     });
                     
-                    // ALWAYS use localizedPrice from StoreKit - this is what Apple will charge
-                    const localizedPrice = (prod as any).localizedPrice;
+                    // ALWAYS use displayPrice from StoreKit - this is what Apple will charge
+                    const displayPrice = (prod as any).displayPrice;
                     
-                    console.log('[IAP] ✅ Using StoreKit localizedPrice for', (prod as any).productId, ':', localizedPrice);
+                    console.log('[IAP] ✅ Using StoreKit displayPrice for', (prod as any).productId || (prod as any).id, ':', displayPrice);
                     
                     const product: IAPProduct = {
                         productId: (prod as any).productId || (prod as any).id || '',
-                        title: (prod as any).title || (prod as any).name || '',
+                        title: (prod as any).title || (prod as any).displayName || (prod as any).name || '',
                         description: (prod as any).description || '',
-                        price: localizedPrice || '', // Use ONLY StoreKit price, empty if not available
+                        price: displayPrice || '', // Use ONLY StoreKit price, empty if not available
                         priceCurrencyCode: (prod as any).currency,
                     };
                     this.products.set(product.productId, product);

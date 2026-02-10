@@ -129,6 +129,17 @@ export default function CreateTripScreen() {
         // V1: Compute per-person budget on the fly
     const perPersonBudget = Math.round(formData.budgetTotal / formData.travelerCount);
 
+    // Compute trip days and budget tier for display
+    const tripDays = Math.max(1, Math.ceil((formData.endDate - formData.startDate) / (24 * 60 * 60 * 1000)));
+    const dailyBudgetPerPerson = Math.round(perPersonBudget / tripDays);
+    const budgetTier = dailyBudgetPerPerson > 300
+        ? { label: 'Premium', icon: 'diamond' as const, color: '#9B59B6', description: '4–5 curated experiences/day • Fine dining • Exclusive activities' }
+        : dailyBudgetPerPerson >= 150
+        ? { label: 'High', icon: 'star' as const, color: '#E67E22', description: '3–4 activities/day • Guided tours • Quality venues' }
+        : dailyBudgetPerPerson > 60
+        ? { label: 'Moderate', icon: 'thumbs-up' as const, color: '#3498DB', description: '2–3 activities/day • Mix of paid & free • Mid-range dining' }
+        : { label: 'Budget', icon: 'wallet' as const, color: '#27AE60', description: 'Max 2 paid activities/day • Free attractions • Affordable food' };
+
 
     // Apply user preferences when loaded
     React.useEffect(() => {
@@ -413,9 +424,9 @@ export default function CreateTripScreen() {
         return (
             <SafeAreaView style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
                 <ActivityIndicator size="large" color={colors.primary} style={{ marginBottom: 24 }} />
-                <Text style={[styles.loadingTitle, { color: colors.text }]}>Generating your trip...</Text>
+                <Text style={[styles.loadingTitle, { color: colors.text }]}>Your AI is designing your personalized trip</Text>
                 <Text style={[styles.loadingDestination, { color: colors.primary }]}>{formData.destination}</Text>
-                <Text style={[styles.loadingSubtitle, { color: colors.textMuted }]}>This usually takes a few seconds.</Text>
+                <Text style={[styles.loadingSubtitle, { color: colors.textMuted }]}>We're analyzing your preferences, budget, and destination to build the best possible itinerary.</Text>
             </SafeAreaView>
         );
     }
@@ -757,6 +768,18 @@ export default function CreateTripScreen() {
                         <Text style={[styles.perPersonBudgetText, { color: colors.text }]}>
                             Estimated budget per person: <Text style={{ fontWeight: '700', color: colors.primary }}>€{perPersonBudget}</Text>
                         </Text>
+                    </View>
+
+                    {/* Budget Tier Indicator */}
+                    <View style={[styles.budgetTierContainer, { backgroundColor: colors.secondary, marginTop: 8 }]}>
+                        <View style={[styles.budgetTierBadge, { backgroundColor: budgetTier.color + '20' }]}>
+                            <Ionicons name={budgetTier.icon} size={16} color={budgetTier.color} />
+                            <Text style={[styles.budgetTierLabel, { color: budgetTier.color }]}>{budgetTier.label}</Text>
+                        </View>
+                        <View style={styles.budgetTierInfo}>
+                            <Text style={[styles.budgetTierDaily, { color: colors.text }]}>€{dailyBudgetPerPerson}<Text style={{ color: colors.textMuted, fontSize: 12 }}>/person/day</Text></Text>
+                            <Text style={[styles.budgetTierDescription, { color: colors.textMuted }]}>{budgetTier.description}</Text>
+                        </View>
                     </View>
                 </View>
 
@@ -1338,6 +1361,40 @@ const styles = StyleSheet.create({
     perPersonBudgetText: {
         fontSize: 14,
         fontWeight: '500',
+    },
+    budgetTierContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        paddingVertical: 12,
+        paddingHorizontal: 16,
+        borderRadius: 12,
+    },
+    budgetTierBadge: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 8,
+    },
+    budgetTierLabel: {
+        fontSize: 13,
+        fontWeight: '700',
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    budgetTierInfo: {
+        flex: 1,
+        gap: 2,
+    },
+    budgetTierDaily: {
+        fontSize: 15,
+        fontWeight: '600',
+    },
+    budgetTierDescription: {
+        fontSize: 12,
+        fontWeight: '400',
     },
     interestsContainer: {
         flexDirection: "row",

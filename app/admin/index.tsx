@@ -80,6 +80,38 @@ export default function AdminDashboard() {
                     {/* Quick Stats */}
                     <View style={styles.statsGrid}>
                         <View style={[styles.statCard, { backgroundColor: colors.card }]}>
+                            <View style={[styles.statIconContainer, { backgroundColor: isDarkMode ? 'rgba(99, 102, 241, 0.2)' : '#E0E7FF' }]}>
+                                <Ionicons name="people" size={24} color="#4F46E5" />
+                            </View>
+                            <Text style={[styles.statValue, { color: colors.text }]}>{stats.totalUsersCount}</Text>
+                            <Text style={[styles.statLabel, { color: colors.textMuted }]}>Total Users</Text>
+                        </View>
+                        
+                        <View style={[styles.statCard, { backgroundColor: colors.card }]}>
+                            <View style={[styles.statIconContainer, { backgroundColor: isDarkMode ? 'rgba(16, 185, 129, 0.2)' : '#D1FAE5' }]}>
+                                <Ionicons name="diamond" size={24} color="#059669" />
+                            </View>
+                            <Text style={[styles.statValue, { color: colors.text }]}>{stats.premiumUsersCount}</Text>
+                            <Text style={[styles.statLabel, { color: colors.textMuted }]}>Premium Users</Text>
+                        </View>
+
+                        <View style={[styles.statCard, { backgroundColor: colors.card }]}>
+                            <View style={[styles.statIconContainer, { backgroundColor: isDarkMode ? 'rgba(59, 130, 246, 0.2)' : '#DBEAFE' }]}>
+                                <Ionicons name="airplane" size={24} color="#2563EB" />
+                            </View>
+                            <Text style={[styles.statValue, { color: colors.text }]}>{stats.totalTripsCount}</Text>
+                            <Text style={[styles.statLabel, { color: colors.textMuted }]}>Total Trips</Text>
+                        </View>
+                        
+                        <View style={[styles.statCard, { backgroundColor: colors.card }]}>
+                            <View style={[styles.statIconContainer, { backgroundColor: isDarkMode ? 'rgba(16, 185, 129, 0.2)' : '#D1FAE5' }]}>
+                                <Ionicons name="checkmark-circle" size={24} color="#059669" />
+                            </View>
+                            <Text style={[styles.statValue, { color: colors.text }]}>{stats.completedTripsCount}</Text>
+                            <Text style={[styles.statLabel, { color: colors.textMuted }]}>Generated Trips</Text>
+                        </View>
+
+                        <View style={[styles.statCard, { backgroundColor: colors.card }]}>
                             <View style={[styles.statIconContainer, { backgroundColor: isDarkMode ? 'rgba(251, 191, 36, 0.2)' : '#FEF3C7' }]}>
                                 <Ionicons name="time" size={24} color="#D97706" />
                             </View>
@@ -96,19 +128,19 @@ export default function AdminDashboard() {
                         </View>
                         
                         <View style={[styles.statCard, { backgroundColor: colors.card }]}>
-                            <View style={[styles.statIconContainer, { backgroundColor: isDarkMode ? 'rgba(16, 185, 129, 0.2)' : '#D1FAE5' }]}>
-                                <Ionicons name="checkmark-circle" size={24} color="#059669" />
+                            <View style={[styles.statIconContainer, { backgroundColor: isDarkMode ? 'rgba(139, 92, 246, 0.2)' : '#EDE9FE' }]}>
+                                <Ionicons name="chatbubbles" size={24} color="#7C3AED" />
                             </View>
-                            <Text style={[styles.statValue, { color: colors.text }]}>{stats.approvedInsightsCount}</Text>
-                            <Text style={[styles.statLabel, { color: colors.textMuted }]}>Approved</Text>
+                            <Text style={[styles.statValue, { color: colors.text }]}>{stats.totalInsightsCount}</Text>
+                            <Text style={[styles.statLabel, { color: colors.textMuted }]}>Total Insights</Text>
                         </View>
                         
                         <View style={[styles.statCard, { backgroundColor: colors.card }]}>
-                            <View style={[styles.statIconContainer, { backgroundColor: isDarkMode ? 'rgba(99, 102, 241, 0.2)' : '#E0E7FF' }]}>
-                                <Ionicons name="people" size={24} color="#4F46E5" />
+                            <View style={[styles.statIconContainer, { backgroundColor: isDarkMode ? 'rgba(20, 184, 166, 0.2)' : '#CCFBF1' }]}>
+                                <Ionicons name="pulse" size={24} color="#0D9488" />
                             </View>
-                            <Text style={[styles.statValue, { color: colors.text }]}>{stats.totalUsersCount}</Text>
-                            <Text style={[styles.statLabel, { color: colors.textMuted }]}>Total Users</Text>
+                            <Text style={[styles.statValue, { color: colors.text }]}>{stats.activeSessionsCount}</Text>
+                            <Text style={[styles.statLabel, { color: colors.textMuted }]}>Active Sessions</Text>
                         </View>
                     </View>
 
@@ -141,17 +173,17 @@ export default function AdminDashboard() {
                             <View style={styles.menuTextContainer}>
                                 <Text style={[styles.menuTitle, { color: colors.text }]}>Manage Users</Text>
                                 <Text style={[styles.menuSubtitle, { color: colors.textMuted }]}>
-                                    {stats.totalUsersCount} total users
+                                    {stats.totalUsersCount} total users · {stats.premiumUsersCount} premium
                                 </Text>
                             </View>
                             <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
                         </TouchableOpacity>
                     </View>
 
-                    {/* Top Destinations */}
+                    {/* Top Destinations by Insights */}
                     {stats.topDestinations && stats.topDestinations.length > 0 && (
                         <>
-                            <Text style={[styles.sectionTitle, { color: colors.text }]}>Top Destinations</Text>
+                            <Text style={[styles.sectionTitle, { color: colors.text }]}>Top Destinations (Insights)</Text>
                             <View style={[styles.listContainer, { backgroundColor: colors.card }]}>
                                 {stats.topDestinations.map((item: any, index: number) => (
                                     <View 
@@ -167,6 +199,31 @@ export default function AdminDashboard() {
                                         </View>
                                         <Text style={[styles.listItemTitle, { color: colors.text }]}>{item.destination}</Text>
                                         <Text style={[styles.listItemValue, { color: colors.textMuted }]}>{item.count} insights</Text>
+                                    </View>
+                                ))}
+                            </View>
+                        </>
+                    )}
+
+                    {/* Top Destinations by Trips */}
+                    {stats.topTripDestinations && stats.topTripDestinations.length > 0 && (
+                        <>
+                            <Text style={[styles.sectionTitle, { color: colors.text }]}>Top Destinations (Trips)</Text>
+                            <View style={[styles.listContainer, { backgroundColor: colors.card }]}>
+                                {stats.topTripDestinations.map((item: any, index: number) => (
+                                    <View 
+                                        key={item.destination} 
+                                        style={[
+                                            styles.listItem, 
+                                            { borderBottomColor: colors.border },
+                                            index === stats.topTripDestinations.length - 1 && { borderBottomWidth: 0 }
+                                        ]}
+                                    >
+                                        <View style={[styles.rankBadge, { backgroundColor: '#2563EB' }]}>
+                                            <Text style={styles.rankText}>{index + 1}</Text>
+                                        </View>
+                                        <Text style={[styles.listItemTitle, { color: colors.text }]}>{item.destination}</Text>
+                                        <Text style={[styles.listItemValue, { color: colors.textMuted }]}>{item.count} trips</Text>
                                     </View>
                                 ))}
                             </View>

@@ -137,6 +137,130 @@ ${forecast}
 Use this real data to answer the user's weather question.`;
 }
 
+// ===== RESTAURANT API INTEGRATION =====
+// Using TripAdvisor Content API v1
+
+interface RestaurantData {
+    name: string;
+    cuisine: string;
+    priceRange: string;
+    rating: number;
+    reviewCount: number;
+    address: string;
+    tripAdvisorUrl: string;
+}
+
+// Detect if the user is asking about restaurants and extract the city
+function detectRestaurantQuery(message: string): string | null {
+    const restaurantKeywords = /restaurant|restaurants|food|eat|eating|dining|dinner|lunch|breakfast|brunch|cuisine|where to eat|best food|local food|street food|foodie|gastronomy|culinary/i;
+    if (!restaurantKeywords.test(message)) {
+        return null;
+    }
+
+    const patterns = [
+        /(?:restaurant|restaurants|food|eat|eating|dining|dinner|lunch|breakfast|brunch|cuisine) (?:in|for|at|near) ([A-Za-zÀ-ÿ\s]+?)(?:\?|$|,| in | for | this | today | tonight)/i,
+        /(?:in|for|at|near) ([A-Za-zÀ-ÿ\s]+?) (?:restaurant|restaurants|food|eat|dining|cuisine)/i,
+        /([A-Za-zÀ-ÿ\s]+?) (?:restaurant|restaurants|food|dining|cuisine)/i,
+        /where (?:to|can I|should I|do you) eat (?:in|at|near) ([A-Za-zÀ-ÿ\s]+)/i,
+        /best (?:food|restaurant|restaurants|dining|places to eat) (?:in|at|near) ([A-Za-zÀ-ÿ\s]+)/i,
+        /(?:visiting|going to|traveling to|trip to) ([A-Za-zÀ-ÿ\s]+).*(?:restaurant|food|eat|dining)/i,
+        /(?:recommend|suggest).*(?:restaurant|food|eat|dining|place).*(?:in|at|near) ([A-Za-zÀ-ÿ\s]+)/i,
+        /what.*eat (?:in|at|near) ([A-Za-zÀ-ÿ\s]+)/i,
+    ];
+
+    for (const pattern of patterns) {
+        const match = message.match(pattern);
+        if (match && match[1]) {
+            return match[1].trim();
+        }
+    }
+
+    return null;
+}
+
+async function searchRestaurantsForAtlas(destination: string): Promise<RestaurantData[]> {
+    const tripadvisorKey = process.env.TRIPADVISOR_API_KEY;
+
+    if (!tripadvisorKey) {
+        console.log(`[Atlas] TripAdvisor API key not configured`);
+        return [];
+    }
+
+    try {
+        const searchUrl = `https://api.content.tripadvisor.com/api/v1/location/search?key=${tripadvisorKey}&searchQuery=${encodeURIComponent("restaurants " + destination)}&category=restaurants&language=en`;
+
+        const searchResponse = await fetch(searchUrl, {
+            method: "GET",
+            headers: { "Accept": "application/json" },
+        });
+
+        if (!searchResponse.ok) {
+            console.error(`[Atlas] TripAdvisor search failed: ${searchResponse.status}`);
+            return [];
+        }
+
+        const searchData = await searchResponse.json() as any;
+
+        if (!searchData.data || searchData.data.length === 0) {
+            return [];
+        }
+
+        // Get details for top 5 restaurants
+        const restaurants = await Promise.all(
+            searchData.data.slice(0, 5).map(async (item: any) => {
+                try {
+                    const detailsUrl = `https://api.content.tripadvisor.com/api/v1/location/${item.location_id}/details?key=${tripadvisorKey}&language=en`;
+                    const detailsResponse = await fetch(detailsUrl, {
+                        method: "GET",
+                        headers: { "Accept": "application/json" },
+                    });
+
+                    if (detailsResponse.ok) {
+                        const details = await detailsResponse.json() as any;
+                        return {
+                            name: details.name || item.name || "Restaurant",
+                            cuisine: details.cuisine?.map((c: any) => c.localized_name || c.name).join(", ") || "Various",
+                            priceRange: details.price_level || "€€",
+                            rating: parseFloat(details.rating) || 4.0,
+                            reviewCount: parseInt(details.num_reviews) || 0,
+                            address: details.address_obj?.address_string || destination,
+                            tripAdvisorUrl: details.web_url || `https://www.tripadvisor.com`,
+                        };
+                    }
+                } catch (e) {
+                    console.log(`[Atlas] Could not fetch details for ${item.name}`);
+                }
+                return {
+                    name: item.name || "Restaurant",
+                    cuisine: "Various",
+                    priceRange: "€€",
+                    rating: 4.0,
+                    reviewCount: 0,
+                    address: item.address_obj?.address_string || destination,
+                    tripAdvisorUrl: `https://www.tripadvisor.com`,
+                };
+            })
+        );
+
+        return restaurants;
+    } catch (error) {
+        console.error("[Atlas] TripAdvisor API error:", error);
+        return [];
+    }
+}
+
+function formatRestaurantsForAI(restaurants: RestaurantData[], city: string): string {
+    const list = restaurants
+        .map((r, i) => `  ${i + 1}. ${r.name} — ${r.cuisine} | ${r.priceRange} | Rating: ${r.rating}/5 (${r.reviewCount} reviews) | ${r.address}`)
+        .join("\n");
+
+    return `
+REAL-TIME RESTAURANT DATA for ${city} (from TripAdvisor):
+${list}
+
+Use this real data to recommend restaurants. Present them in a friendly format with name, cuisine type, price range, and rating. Briefly describe why each is worth visiting. You MUST include the <RESTAURANT_JSON> block at the end with the data.`;
+}
+
 // Detect if the user is asking about weather and extract the city
 function detectWeatherQuery(message: string): string | null {
     const weatherKeywords = /weather|temperature|forecast|hot|cold|rain|snow|sunny|cloudy|climate|degrees|celsius|fahrenheit/i;
@@ -172,6 +296,7 @@ Your role is to provide factual, helpful travel information ONLY. You are knowle
 
 YOU CAN HELP WITH:
 - Weather information (current conditions, seasonal patterns, best time to visit)
+- Restaurant recommendations (real-time data from TripAdvisor when available)
 - Visa requirements and entry rules for different nationalities
 - Passport validity requirements
 - Currency information and payment methods accepted
@@ -216,6 +341,22 @@ Format:
 }
 </WEATHER_JSON>
 
+IMPORTANT: When you have real-time restaurant data, you MUST include a hidden JSON block at the end of your response for the UI to render restaurant cards.
+Format:
+<RESTAURANT_JSON>
+[
+  {
+    "name": "Restaurant Name",
+    "cuisine": "Italian, Mediterranean",
+    "priceRange": "€€",
+    "rating": 4.5,
+    "reviewCount": 1234,
+    "address": "123 Main St, City",
+    "tripAdvisorUrl": "https://www.tripadvisor.com/..."
+  }
+]
+</RESTAURANT_JSON>
+
 Keep responses concise and helpful. Use bullet points for lists. Be warm but professional.`;
 
 export const chat = action({
@@ -245,26 +386,43 @@ export const chat = action({
         // Get the latest user message
         const latestMessage = args.messages[args.messages.length - 1];
         let weatherContext = "";
+        let restaurantContext = "";
 
-        // Check if the user is asking about weather
+        // Check if the user is asking about weather or restaurants
         if (latestMessage && latestMessage.role === "user") {
-            const city = detectWeatherQuery(latestMessage.content);
-            if (city) {
-                console.log(`[Atlas] Detected weather query for city: ${city}`);
-                const weatherData = await getWeatherData(city);
+            const weatherCity = detectWeatherQuery(latestMessage.content);
+            if (weatherCity) {
+                console.log(`[Atlas] Detected weather query for city: ${weatherCity}`);
+                const weatherData = await getWeatherData(weatherCity);
                 if (weatherData) {
                     weatherContext = formatWeatherForAI(weatherData);
                     console.log(`[Atlas] Got weather data for ${weatherData.location}`);
                 } else {
-                    console.log(`[Atlas] Could not get weather data for ${city}`);
+                    console.log(`[Atlas] Could not get weather data for ${weatherCity}`);
+                }
+            }
+
+            const restaurantCity = detectRestaurantQuery(latestMessage.content);
+            if (restaurantCity) {
+                console.log(`[Atlas] Detected restaurant query for city: ${restaurantCity}`);
+                const restaurants = await searchRestaurantsForAtlas(restaurantCity);
+                if (restaurants.length > 0) {
+                    restaurantContext = formatRestaurantsForAI(restaurants, restaurantCity);
+                    console.log(`[Atlas] Got ${restaurants.length} restaurants for ${restaurantCity}`);
+                } else {
+                    console.log(`[Atlas] Could not get restaurant data for ${restaurantCity}`);
                 }
             }
         }
 
-        // Build the system prompt with weather context if available
-        const systemPrompt = weatherContext 
-            ? `${ATLAS_SYSTEM_PROMPT}\n\n${weatherContext}`
-            : ATLAS_SYSTEM_PROMPT;
+        // Build the system prompt with weather/restaurant context if available
+        let systemPrompt = ATLAS_SYSTEM_PROMPT;
+        if (weatherContext) {
+            systemPrompt += `\n\n${weatherContext}`;
+        }
+        if (restaurantContext) {
+            systemPrompt += `\n\n${restaurantContext}`;
+        }
 
         const apiMessages = [
             { role: "system", content: systemPrompt },

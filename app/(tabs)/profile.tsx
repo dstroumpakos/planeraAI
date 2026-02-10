@@ -165,6 +165,9 @@ export default function Profile() {
     const user = session?.user;
     const tripCount = trips?.length || 0;
     const completedTripsCount = trips?.filter((t: any) => t.status === "completed").length || 0;
+    const now = Date.now();
+    const pastTripsCount = trips?.filter((t: any) => t.endDate < now).length || 0;
+    const upcomingTripsCount = tripCount - pastTripsCount;
     const isPremium = userPlan?.plan === "premium";
 
     const handleSaveName = async () => {
@@ -244,7 +247,7 @@ export default function Profile() {
         // },
         {
             title: "Saved Trips",
-            subtitle: `${completedTripsCount} upcoming, ${tripCount - completedTripsCount} past`,
+            subtitle: `${upcomingTripsCount} upcoming, ${pastTripsCount} past`,
             icon: "bookmark-outline",
             iconBg: isDarkMode ? "#3D3D00" : "#FFF8E1",
             iconColor: colors.primary,

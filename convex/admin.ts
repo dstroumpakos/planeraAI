@@ -114,11 +114,22 @@ export const getStats = query({
         // Get all insights for stats
         const allInsights = await ctx.db.query("insights").collect();
         
-        // Get all users
-        const allUsers = await ctx.db.query("users").collect();
+        // Get all REAL users from userSettings (this is where sign-ups are stored)
+        const allUserSettings = await ctx.db.query("userSettings").collect();
         
         // Get all trips
         const allTrips = await ctx.db.query("trips").collect();
+        
+        // Get all user plans for premium count
+        const allPlans = await ctx.db.query("userPlans").collect();
+        const premiumUsersCount = allPlans.filter((p: any) => p.plan === "premium").length;
+        
+        // Get active sessions (not expired)
+        const allSessions = await ctx.db.query("sessions").collect();
+        const activeSessions = allSessions.filter((s: any) => s.expiresAt > Date.now());
+        
+        // Completed trips
+        const completedTrips = allTrips.filter((t: any) => t.status === "completed");
         
         // Top destinations by insights
         const destinationCounts: Record<string, number> = {};
@@ -127,6 +138,19 @@ export const getStats = query({
                 destinationCounts[insight.destination] = (destinationCounts[insight.destination] || 0) + 1;
             }
         });
+        
+        // Top destinations by trips
+        const tripDestinationCounts: Record<string, number> = {};
+        allTrips.forEach((trip: any) => {
+            if (trip.destination) {
+                tripDestinationCounts[trip.destination] = (tripDestinationCounts[trip.destination] || 0) + 1;
+            }
+        });
+        
+        const topTripDestinations = Object.entries(tripDestinationCounts)
+            .sort(([, a], [, b]) => b - a)
+            .slice(0, 5)
+            .map(([destination, count]) => ({ destination, count }));
         
         const topDestinations = Object.entries(destinationCounts)
             .sort(([, a], [, b]) => b - a)
@@ -176,9 +200,13 @@ export const getStats = query({
             flaggedInsightsCount: flaggedInsights.length,
             totalInsightsCount: allInsights.length,
             approvedInsightsCount: allInsights.filter((i: any) => i.moderationStatus === "approved").length,
-            totalUsersCount: allUsers.length,
+            totalUsersCount: allUserSettings.length,
+            premiumUsersCount,
+            activeSessionsCount: activeSessions.length,
             totalTripsCount: allTrips.length,
+            completedTripsCount: completedTrips.length,
             topDestinations,
+            topTripDestinations,
             mostLikedInsights,
             mostActiveUsers,
         };

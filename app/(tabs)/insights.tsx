@@ -88,6 +88,21 @@ const extractWeatherJson = (content: string): { weatherData: any; cleanContent: 
     return { weatherData: null, cleanContent: content };
 };
 
+// Helper to detect restaurant JSON block
+const extractRestaurantJson = (content: string): { restaurantData: any[] | null; cleanContent: string } => {
+    const jsonMatch = content.match(/<RESTAURANT_JSON>([\s\S]*?)<\/RESTAURANT_JSON>/);
+    if (jsonMatch && jsonMatch[1]) {
+        try {
+            const restaurantData = JSON.parse(jsonMatch[1]);
+            const cleanContent = content.replace(/<RESTAURANT_JSON>[\s\S]*?<\/RESTAURANT_JSON>/, '').trim();
+            return { restaurantData: Array.isArray(restaurantData) ? restaurantData : null, cleanContent };
+        } catch (e) {
+            console.error("Failed to parse restaurant JSON:", e);
+        }
+    }
+    return { restaurantData: null, cleanContent: content };
+};
+
 // Helper to extract weather info from text (fallback)
 const detectWeatherInResponse = (text: string) => {
     // Simple regex to find temperature patterns like "24°C" or "75°F"
@@ -195,9 +210,154 @@ const WeatherCard = ({ data }: { data: any }) => {
     );
 };
 
+// Restaurant Card Component
+const RestaurantCard = ({ restaurants, colors, isDarkMode }: { restaurants: any[]; colors: any; isDarkMode: boolean }) => {
+    const getRatingStars = (rating: number) => {
+        const full = Math.floor(rating);
+        const half = rating % 1 >= 0.3;
+        const stars: React.ReactNode[] = [];
+        for (let i = 0; i < full; i++) {
+            stars.push(<Ionicons key={`f${i}`} name="star" size={12} color="#FF8C00" />);
+        }
+        if (half) {
+            stars.push(<Ionicons key="h" name="star-half" size={12} color="#FF8C00" />);
+        }
+        return stars;
+    };
+
+    return (
+        <View style={restaurantStyles.container}>
+            <View style={restaurantStyles.header}>
+                <Ionicons name="restaurant" size={20} color={colors.primary} />
+                <Text style={[restaurantStyles.headerText, { color: colors.text }]}>
+                    Top Restaurant Picks
+                </Text>
+                <View style={[restaurantStyles.badge, { backgroundColor: isDarkMode ? 'rgba(255,229,0,0.2)' : '#FFF3CD' }]}>
+                    <Text style={[restaurantStyles.badgeText, { color: colors.primary }]}>TripAdvisor</Text>
+                </View>
+            </View>
+            {restaurants.map((r: any, i: number) => (
+                <View
+                    key={i}
+                    style={[
+                        restaurantStyles.card,
+                        { backgroundColor: isDarkMode ? 'rgba(255,255,255,0.06)' : '#F8F9FA', borderColor: isDarkMode ? 'rgba(255,255,255,0.08)' : '#E9ECEF' },
+                    ]}
+                >
+                    <View style={restaurantStyles.cardTop}>
+                        <View style={{ flex: 1 }}>
+                            <Text style={[restaurantStyles.name, { color: colors.text }]} numberOfLines={1}>
+                                {r.name}
+                            </Text>
+                            <Text style={[restaurantStyles.cuisine, { color: colors.textMuted }]} numberOfLines={1}>
+                                {r.cuisine}
+                            </Text>
+                        </View>
+                        <View style={[restaurantStyles.priceBadge, { backgroundColor: isDarkMode ? 'rgba(255,229,0,0.15)' : '#FFF8E1' }]}>
+                            <Text style={[restaurantStyles.priceText, { color: colors.primary }]}>{r.priceRange}</Text>
+                        </View>
+                    </View>
+                    <View style={restaurantStyles.cardBottom}>
+                        <View style={restaurantStyles.ratingRow}>
+                            <View style={{ flexDirection: 'row', gap: 1 }}>{getRatingStars(r.rating)}</View>
+                            <Text style={[restaurantStyles.ratingNum, { color: colors.textMuted }]}>
+                                {r.rating} ({r.reviewCount.toLocaleString()})
+                            </Text>
+                        </View>
+                        <View style={restaurantStyles.addressRow}>
+                            <Ionicons name="location-outline" size={12} color={colors.textMuted} />
+                            <Text style={[restaurantStyles.address, { color: colors.textMuted }]} numberOfLines={1}>
+                                {r.address}
+                            </Text>
+                        </View>
+                    </View>
+                </View>
+            ))}
+        </View>
+    );
+};
+
+const restaurantStyles = StyleSheet.create({
+    container: {
+        marginBottom: 16,
+    },
+    header: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        marginBottom: 12,
+    },
+    headerText: {
+        fontSize: 16,
+        fontWeight: '700',
+        flex: 1,
+    },
+    badge: {
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 10,
+    },
+    badgeText: {
+        fontSize: 11,
+        fontWeight: '700',
+    },
+    card: {
+        borderRadius: 12,
+        padding: 14,
+        marginBottom: 8,
+        borderWidth: 1,
+    },
+    cardTop: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
+        marginBottom: 8,
+    },
+    name: {
+        fontSize: 15,
+        fontWeight: '600',
+    },
+    cuisine: {
+        fontSize: 13,
+        marginTop: 2,
+    },
+    priceBadge: {
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 8,
+        marginLeft: 8,
+    },
+    priceText: {
+        fontSize: 12,
+        fontWeight: '700',
+    },
+    cardBottom: {
+        gap: 6,
+    },
+    ratingRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
+    ratingNum: {
+        fontSize: 12,
+        fontWeight: '500',
+    },
+    addressRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+    },
+    address: {
+        fontSize: 12,
+        flex: 1,
+    },
+});
+
 // Parse and format message content with rich formatting
 const FormattedMessage = ({ content, colors, isDarkMode }: { content: string; colors: any; isDarkMode: boolean }) => {
-    const { weatherData, cleanContent } = extractWeatherJson(content);
+    const { weatherData, cleanContent: afterWeather } = extractWeatherJson(content);
+    const { restaurantData, cleanContent } = extractRestaurantJson(afterWeather);
     
     // Split content into sections
     const lines = cleanContent.split('\n');
@@ -303,11 +463,15 @@ const FormattedMessage = ({ content, colors, isDarkMode }: { content: string; co
     
     flushSection();
 
-    // If weather data JSON detected, render the new card
-    if (weatherData) {
+    // Check if we have any special cards to render
+    const hasWeather = !!weatherData;
+    const hasRestaurants = restaurantData && restaurantData.length > 0;
+
+    if (hasWeather || hasRestaurants) {
         return (
             <View>
-                <WeatherCard data={weatherData} />
+                {hasWeather && <WeatherCard data={weatherData} />}
+                {hasRestaurants && <RestaurantCard restaurants={restaurantData!} colors={colors} isDarkMode={isDarkMode} />}
                 {elements}
             </View>
         );
@@ -513,10 +677,10 @@ const formatStyles = StyleSheet.create({
 const EXAMPLE_PROMPTS = [
     { text: "Do I need a visa for Japan?", icon: "document-text" as const },
     { text: "Weather in Rome right now", icon: "partly-sunny" as const },
+    { text: "Best restaurants in Paris", icon: "restaurant" as const },
     { text: "Is cash needed in South Korea?", icon: "cash" as const },
     { text: "Vaccines needed for Thailand", icon: "medkit" as const },
     { text: "Best time to visit Bali?", icon: "calendar" as const },
-    { text: "Tipping customs in the USA", icon: "restaurant" as const },
 ];
 
 export default function AtlasScreen() {
