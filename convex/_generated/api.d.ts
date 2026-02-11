@@ -26,6 +26,7 @@ import type * as flights_duffel from "../flights/duffel.js";
 import type * as flights_duffelExtras from "../flights/duffelExtras.js";
 import type * as flights_fallback from "../flights/fallback.js";
 import type * as functions from "../functions.js";
+import type * as helpers_subscription from "../helpers/subscription.js";
 import type * as helpers_unsplash from "../helpers/unsplash.js";
 import type * as images from "../images.js";
 import type * as insights from "../insights.js";
@@ -64,6 +65,7 @@ declare const fullApi: ApiFromModules<{
   "flights/duffelExtras": typeof flights_duffelExtras;
   "flights/fallback": typeof flights_fallback;
   functions: typeof functions;
+  "helpers/subscription": typeof helpers_subscription;
   "helpers/unsplash": typeof helpers_unsplash;
   images: typeof images;
   insights: typeof insights;

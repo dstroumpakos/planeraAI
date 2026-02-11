@@ -129,6 +129,11 @@ export default function AdminUsersList() {
                                             <Ionicons name="heart" size={12} color={colors.textMuted} />
                                             <Text style={[styles.statText, { color: colors.textMuted }]}>{user.totalLikes}</Text>
                                         </View>
+                                        {user.plan === 'premium' && (
+                                            <View style={[styles.badge, { backgroundColor: 'rgba(16, 185, 129, 0.2)' }]}>
+                                                <Text style={[styles.badgeText, { color: '#059669' }]}>Premium</Text>
+                                            </View>
+                                        )}
                                     </View>
                                 </View>
 

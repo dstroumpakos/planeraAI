@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { authMutation, authQuery } from "./functions";
 import { internalMutation, internalQuery, query } from "./_generated/server";
 import { internal } from "./_generated/api";
+import { isSubscriptionActiveWithGrace } from "./helpers/subscription";
 
 export const create = authMutation({
     args: {
@@ -58,22 +59,24 @@ export const create = authMutation({
             .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
             .unique();
 
-        // Check permissions
-        const isSubscriptionActive = userPlan?.plan === "premium" && 
-            userPlan?.subscriptionExpiresAt && 
-            userPlan.subscriptionExpiresAt > Date.now();
+        // Check permissions (includes 16-day Apple billing grace period)
+        const subscriptionStatus = isSubscriptionActiveWithGrace(
+            userPlan?.plan,
+            userPlan?.subscriptionExpiresAt,
+        );
+        const isSubActive = subscriptionStatus.active;
         
         const tripCredits = userPlan?.tripCredits ?? 0;
         const tripsGenerated = userPlan?.tripsGenerated ?? 0;
         const hasFreeTrial = tripsGenerated < 1;
 
-        if (!isSubscriptionActive && tripCredits <= 0 && !hasFreeTrial) {
+        if (!isSubActive && tripCredits <= 0 && !hasFreeTrial) {
             throw new Error("No trip credits available. Please purchase a trip pack or subscribe to Premium.");
         }
 
         // Deduct credit or use free trial
         if (userPlan) {
-            if (isSubscriptionActive) {
+            if (isSubActive) {
                 // Premium users just increment stats
                 await ctx.db.patch(userPlan._id, { 
                     tripsGenerated: tripsGenerated + 1,
@@ -380,12 +383,12 @@ export const get = authQuery({
             .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
             .unique();
 
-      // Check if user has full access
-        const isSubscriptionActive = Boolean(
-            userPlan?.plan === "premium" && 
-            userPlan?.subscriptionExpiresAt && 
-           userPlan.subscriptionExpiresAt > Date.now()
+      // Check if user has full access (includes 16-day Apple billing grace period)
+        const subscriptionStatus = isSubscriptionActiveWithGrace(
+            userPlan?.plan,
+            userPlan?.subscriptionExpiresAt,
         );
+        const isSubscriptionActive = subscriptionStatus.active;
         
         const tripCredits = userPlan?.tripCredits ?? 0;
         const tripsGenerated = userPlan?.tripsGenerated ?? 0;

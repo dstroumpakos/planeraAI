@@ -448,6 +448,12 @@ export const listUsers = query({
                     .withIndex("by_user", (q: any) => q.eq("userId", settings.userId))
                     .collect();
                 
+                // Get user plan
+                const userPlan = await ctx.db
+                    .query("userPlans")
+                    .withIndex("by_user", (q: any) => q.eq("userId", settings.userId))
+                    .first();
+                
                 return {
                     _id: user?._id,
                     settingsId: settings._id,
@@ -461,6 +467,8 @@ export const listUsers = query({
                     insightsCount: insights.length,
                     approvedInsightsCount: insights.filter((i: any) => i.moderationStatus === "approved").length,
                     totalLikes: insights.reduce((sum: number, i: any) => sum + (i.likes || 0), 0),
+                    plan: userPlan?.plan || "free",
+                    createdAt: settings._creationTime,
                 };
             })
         );
@@ -514,17 +522,42 @@ export const getUser = query({
             .withIndex("by_user", (q: any) => q.eq("userId", args.targetUserId))
             .first();
         
+        // Get last active session
+        const sessions = await ctx.db
+            .query("sessions")
+            .withIndex("by_user", (q: any) => q.eq("userId", args.targetUserId))
+            .collect();
+        const activeSessions = sessions.filter((s: any) => s.expiresAt > Date.now());
+        const lastSession = sessions.sort((a: any, b: any) => (b._creationTime || 0) - (a._creationTime || 0))[0];
+        
+        // Get trip destinations
+        const tripDestinations = trips.map((t: any) => ({
+            destination: t.destination,
+            startDate: t.startDate,
+            endDate: t.endDate,
+            status: t.status,
+        }));
+        
+        // Past vs upcoming trips
+        const now = Date.now();
+        const pastTripsCount = trips.filter((t: any) => t.endDate < now).length;
+        const upcomingTripsCount = trips.length - pastTripsCount;
+        
         return {
             _id: user?._id,
             settingsId: settings._id,
             userId: args.targetUserId,
             name: settings.name || "Unknown",
             email: settings.email || "Unknown",
+            authProvider: settings.authProvider || "unknown",
             isAdmin: user?.isAdmin || false,
             isBanned: user?.isBanned || false,
             isShadowBanned: user?.isShadowBanned || false,
             tripsCount: trips.length,
+            pastTripsCount,
+            upcomingTripsCount,
             completedTripsCount: trips.filter((t: any) => t.status === "completed").length,
+            tripDestinations,
             insights: insights.map((i: any) => ({
                 _id: i._id,
                 destination: i.destination,
@@ -541,7 +574,12 @@ export const getUser = query({
                 : 0,
             totalLikes: insights.reduce((sum: number, i: any) => sum + (i.likes || 0), 0),
             plan: userPlan?.plan || "free",
-            subscriptionType: userPlan?.subscriptionType,
+            subscriptionType: userPlan?.subscriptionType || null,
+            subscriptionExpiresAt: userPlan?.subscriptionExpiresAt || null,
+            tripCredits: userPlan?.tripCredits || 0,
+            tripsGenerated: userPlan?.tripsGenerated || 0,
+            activeSessionsCount: activeSessions.length,
+            lastActiveAt: lastSession?._creationTime || null,
             createdAt: settings._creationTime,
         };
     },
@@ -657,5 +695,148 @@ export const setUserAdmin = mutation({
                 isAdmin: args.isAdmin,
             });
         }
+    },
+});
+
+// ===========================================
+// USER DETAILS MANAGEMENT
+// ===========================================
+
+export const updateUserDetails = mutation({
+    args: {
+        token: v.string(),
+        targetUserId: v.string(),
+        name: v.optional(v.string()),
+        email: v.optional(v.string()),
+    },
+    handler: async (ctx, args) => {
+        const userId = await getUserIdFromToken(ctx, args.token);
+        if (!userId) throw new Error("Unauthorized");
+        await assertAdmin(ctx, userId);
+
+        const settings = await ctx.db
+            .query("userSettings")
+            .withIndex("by_user", (q: any) => q.eq("userId", args.targetUserId))
+            .first();
+
+        if (!settings) throw new Error("User not found");
+
+        const updates: any = {};
+        if (args.name !== undefined) updates.name = args.name;
+        if (args.email !== undefined) updates.email = args.email;
+
+        if (Object.keys(updates).length > 0) {
+            await ctx.db.patch(settings._id, updates);
+        }
+
+        // Also update users table if it exists
+        if (args.email !== undefined || args.name !== undefined) {
+            const oldEmail = settings.email;
+            if (oldEmail) {
+                const user = await ctx.db
+                    .query("users")
+                    .withIndex("by_email", (q: any) => q.eq("email", oldEmail.toLowerCase()))
+                    .first();
+                if (user) {
+                    const userUpdates: any = {};
+                    if (args.name !== undefined) userUpdates.name = args.name;
+                    if (args.email !== undefined) userUpdates.email = args.email.toLowerCase();
+                    await ctx.db.patch(user._id, userUpdates);
+                }
+            }
+        }
+    },
+});
+
+export const updateUserPlan = mutation({
+    args: {
+        token: v.string(),
+        targetUserId: v.string(),
+        plan: v.union(v.literal("free"), v.literal("premium")),
+        subscriptionType: v.optional(v.union(v.literal("monthly"), v.literal("yearly"))),
+        subscriptionExpiresAt: v.optional(v.float64()),
+    },
+    handler: async (ctx, args) => {
+        const userId = await getUserIdFromToken(ctx, args.token);
+        if (!userId) throw new Error("Unauthorized");
+        await assertAdmin(ctx, userId);
+
+        const userPlan = await ctx.db
+            .query("userPlans")
+            .withIndex("by_user", (q: any) => q.eq("userId", args.targetUserId))
+            .first();
+
+        const planData: any = {
+            plan: args.plan,
+        };
+        if (args.subscriptionType !== undefined) planData.subscriptionType = args.subscriptionType;
+        if (args.subscriptionExpiresAt !== undefined) planData.subscriptionExpiresAt = args.subscriptionExpiresAt;
+
+        if (userPlan) {
+            await ctx.db.patch(userPlan._id, planData);
+        } else {
+            await ctx.db.insert("userPlans", {
+                userId: args.targetUserId,
+                plan: args.plan,
+                tripsGenerated: 0,
+                tripCredits: args.plan === "premium" ? 999 : 3,
+                ...planData,
+            });
+        }
+    },
+});
+
+export const adjustTripCredits = mutation({
+    args: {
+        token: v.string(),
+        targetUserId: v.string(),
+        credits: v.float64(),
+        resetGenerated: v.optional(v.boolean()),
+    },
+    handler: async (ctx, args) => {
+        const userId = await getUserIdFromToken(ctx, args.token);
+        if (!userId) throw new Error("Unauthorized");
+        await assertAdmin(ctx, userId);
+
+        const userPlan = await ctx.db
+            .query("userPlans")
+            .withIndex("by_user", (q: any) => q.eq("userId", args.targetUserId))
+            .first();
+
+        if (userPlan) {
+            const updates: any = { tripCredits: args.credits };
+            if (args.resetGenerated) updates.tripsGenerated = 0;
+            await ctx.db.patch(userPlan._id, updates);
+        } else {
+            await ctx.db.insert("userPlans", {
+                userId: args.targetUserId,
+                plan: "free",
+                tripsGenerated: 0,
+                tripCredits: args.credits,
+            });
+        }
+    },
+});
+
+export const deleteUserSessions = mutation({
+    args: {
+        token: v.string(),
+        targetUserId: v.string(),
+    },
+    handler: async (ctx, args) => {
+        const userId = await getUserIdFromToken(ctx, args.token);
+        if (!userId) throw new Error("Unauthorized");
+        await assertAdmin(ctx, userId);
+
+        const sessions = await ctx.db
+            .query("sessions")
+            .withIndex("by_user", (q: any) => q.eq("userId", args.targetUserId))
+            .collect();
+
+        for (const session of sessions) {
+            await ctx.db.delete(session._id);
+        }
+
+        return { deleted: sessions.length };
     },
 });

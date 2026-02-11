@@ -9,7 +9,7 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/images/splash-icon.png",
+      "image": "./assets/images/appicon-1024x1024-01-9h6cls.jpg",
       "resizeMode": "contain",
       "backgroundColor": "#FAF9F6"
     },
@@ -21,7 +21,7 @@
         "ITSAppUsesNonExemptEncryption": false
       },
       "splash": {
-        "image": "./assets/images/splash-icon.png",
+        "image": "./assets/images/appicon-1024x1024-01-9h6cls.jpg",
         "resizeMode": "contain",
         "backgroundColor": "#FAF9F6"
       }
@@ -33,7 +33,7 @@
       },
       "newArchEnabled": true,
       "splash": {
-        "image": "./assets/images/splash-icon.png",
+        "image": "./assets/images/appicon-1024x1024-01-9h6cls.jpg",
         "resizeMode": "contain",
         "backgroundColor": "#FAF9F6"
       }
@@ -48,7 +48,7 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
+          "image": "./assets/images/appicon-1024x1024-01-9h6cls.jpg",
           "imageWidth": 200,
           "resizeMode": "contain",
           "backgroundColor": "#FAF9F6"
