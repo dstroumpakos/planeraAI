@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { query } from "./_generated/server";
 import { authMutation, authQuery } from "./functions";
+import { isSubscriptionActiveWithGrace, BILLING_GRACE_PERIOD_MS } from "./helpers/subscription";
 
 // Simple token validation query for actions
 export const validateToken = query({
@@ -52,14 +53,17 @@ export const getPlan = authQuery({
             };
         }
 
-        const isSubscriptionActive = userPlan.plan === "premium" && 
-            userPlan.subscriptionExpiresAt && 
-            userPlan.subscriptionExpiresAt > Date.now();
+        const subscriptionStatus = isSubscriptionActiveWithGrace(
+            userPlan.plan,
+            userPlan.subscriptionExpiresAt,
+        );
 
         return {
             ...userPlan,
             tripCredits: userPlan.tripCredits ?? 0,
-            isSubscriptionActive,
+            isSubscriptionActive: subscriptionStatus.active,
+            inBillingGracePeriod: subscriptionStatus.inGracePeriod,
+            gracePeriodEndsAt: subscriptionStatus.gracePeriodEndsAt,
         };
     },
 });
@@ -170,12 +174,13 @@ export const canGenerateTrip = authQuery({
             return { canGenerate: true, reason: "free_trial" };
         }
 
-        // Premium subscribers with active subscription
-        const isSubscriptionActive = userPlan.plan === "premium" && 
-            userPlan.subscriptionExpiresAt && 
-            userPlan.subscriptionExpiresAt > Date.now();
+        // Premium subscribers with active subscription (includes 16-day billing grace period)
+        const subscriptionStatus = isSubscriptionActiveWithGrace(
+            userPlan.plan,
+            userPlan.subscriptionExpiresAt,
+        );
 
-        if (isSubscriptionActive) {
+        if (subscriptionStatus.active) {
             return { canGenerate: true, reason: "premium" };
         }
 
@@ -216,12 +221,13 @@ export const useTripCredit = authMutation({
             return;
         }
 
-        // Premium subscribers don't use credits
-        const isSubscriptionActive = userPlan.plan === "premium" && 
-            userPlan.subscriptionExpiresAt && 
-            userPlan.subscriptionExpiresAt > Date.now();
+        // Premium subscribers don't use credits (includes 16-day billing grace period)
+        const subscriptionStatus = isSubscriptionActiveWithGrace(
+            userPlan.plan,
+            userPlan.subscriptionExpiresAt,
+        );
 
-        if (isSubscriptionActive) {
+        if (subscriptionStatus.active) {
             // Just increment trips generated for stats
             await ctx.db.patch(userPlan._id, { 
                 tripsGenerated: userPlan.tripsGenerated + 1,
@@ -887,12 +893,13 @@ export const checkEntitlements = authQuery({
             };
         }
 
-        // Check subscription status
-        const isSubscriptionActive = userPlan.plan === "premium" && 
-            userPlan.subscriptionExpiresAt && 
-            userPlan.subscriptionExpiresAt > Date.now();
+        // Check subscription status (includes 16-day Apple billing grace period)
+        const subscriptionStatus = isSubscriptionActiveWithGrace(
+            userPlan.plan,
+            userPlan.subscriptionExpiresAt,
+        );
 
-        if (isSubscriptionActive) {
+        if (subscriptionStatus.active) {
             return {
                 canGenerate: true,
                 reason: "subscription",
@@ -901,6 +908,8 @@ export const checkEntitlements = authQuery({
                 expiresAt: userPlan.subscriptionExpiresAt,
                 tripCredits: userPlan.tripCredits ?? 0,
                 tripsGenerated: userPlan.tripsGenerated ?? 0,
+                inBillingGracePeriod: subscriptionStatus.inGracePeriod,
+                gracePeriodEndsAt: subscriptionStatus.gracePeriodEndsAt,
             };
         }
 

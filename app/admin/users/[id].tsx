@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import {
     View,
     Text,
@@ -9,6 +9,8 @@ import {
     Platform,
     StatusBar,
     Alert,
+    TextInput,
+    Modal,
 } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -25,6 +27,13 @@ export default function AdminUserDetail() {
     const { token } = useToken();
     const { colors, isDarkMode } = useTheme();
     
+    // Editing state
+    const [editingField, setEditingField] = useState<string | null>(null);
+    const [editName, setEditName] = useState("");
+    const [editEmail, setEditEmail] = useState("");
+    const [editCredits, setEditCredits] = useState("");
+    const [showPlanModal, setShowPlanModal] = useState(false);
+    
     const user = useQuery(
         (api as any).admin.getUser,
         token && id ? { token, targetUserId: id as string } : "skip"
@@ -33,6 +42,19 @@ export default function AdminUserDetail() {
     const banUser = useAuthenticatedMutation((api as any).admin.banUser);
     const shadowBanUser = useAuthenticatedMutation((api as any).admin.shadowBanUser);
     const setUserAdmin = useAuthenticatedMutation((api as any).admin.setUserAdmin);
+    const updateUserDetails = useAuthenticatedMutation((api as any).admin.updateUserDetails);
+    const updateUserPlan = useAuthenticatedMutation((api as any).admin.updateUserPlan);
+    const adjustTripCredits = useAuthenticatedMutation((api as any).admin.adjustTripCredits);
+    const deleteUserSessions = useAuthenticatedMutation((api as any).admin.deleteUserSessions);
+
+    // Sync edit fields when user data loads
+    useEffect(() => {
+        if (user) {
+            setEditName(user.name || "");
+            setEditEmail(user.email || "");
+            setEditCredits(String(user.tripCredits || 0));
+        }
+    }, [user?.name, user?.email, user?.tripCredits]);
 
     const handleToggleBan = () => {
         const action = user.isBanned ? "unban" : "ban";
@@ -94,6 +116,99 @@ export default function AdminUserDetail() {
         );
     };
 
+    const handleSaveField = async (field: string) => {
+        if (Platform.OS !== 'web') {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        }
+        try {
+            if (field === "name") {
+                await updateUserDetails({ targetUserId: id as string, name: editName.trim() });
+            } else if (field === "email") {
+                await updateUserDetails({ targetUserId: id as string, email: editEmail.trim() });
+            } else if (field === "credits") {
+                const credits = parseInt(editCredits, 10);
+                if (isNaN(credits) || credits < 0) {
+                    Alert.alert("Invalid", "Please enter a valid number");
+                    return;
+                }
+                await adjustTripCredits({ targetUserId: id as string, credits });
+            }
+            setEditingField(null);
+        } catch (error) {
+            Alert.alert("Error", `Failed to update ${field}`);
+        }
+    };
+
+    const handleChangePlan = async (plan: "free" | "premium") => {
+        if (Platform.OS !== 'web') {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        }
+        try {
+            const planArgs: any = { targetUserId: id as string, plan };
+            if (plan === "premium") {
+                // Default 1 year subscription
+                planArgs.subscriptionType = "yearly";
+                planArgs.subscriptionExpiresAt = Date.now() + 365 * 24 * 60 * 60 * 1000;
+            }
+            await updateUserPlan(planArgs);
+            setShowPlanModal(false);
+        } catch (error) {
+            Alert.alert("Error", "Failed to update plan");
+        }
+    };
+
+    const handleResetTrips = () => {
+        Alert.alert(
+            "Reset Trip Counter",
+            "This will reset the trips generated count to 0. Continue?",
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Reset",
+                    onPress: async () => {
+                        if (Platform.OS !== 'web') {
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                        }
+                        try {
+                            await adjustTripCredits({ 
+                                targetUserId: id as string, 
+                                credits: user.tripCredits || 0, 
+                                resetGenerated: true 
+                            });
+                        } catch (error) {
+                            Alert.alert("Error", "Failed to reset trip counter");
+                        }
+                    },
+                },
+            ]
+        );
+    };
+
+    const handleClearSessions = () => {
+        Alert.alert(
+            "Clear All Sessions",
+            "This will log the user out of all devices. Continue?",
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Clear",
+                    style: "destructive",
+                    onPress: async () => {
+                        if (Platform.OS !== 'web') {
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                        }
+                        try {
+                            const result = await deleteUserSessions({ targetUserId: id as string });
+                            Alert.alert("Done", `Cleared ${(result as any)?.deleted || 0} sessions`);
+                        } catch (error) {
+                            Alert.alert("Error", "Failed to clear sessions");
+                        }
+                    },
+                },
+            ]
+        );
+    };
+
     if (!user) {
         return (
             <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -125,8 +240,58 @@ export default function AdminUserDetail() {
                                 {(user.name || user.email || "?")[0].toUpperCase()}
                             </Text>
                         </View>
-                        <Text style={[styles.userName, { color: colors.text }]}>{user.name || "Unknown"}</Text>
-                        <Text style={[styles.userEmail, { color: colors.textMuted }]}>{user.email}</Text>
+                        
+                        {/* Editable Name */}
+                        {editingField === "name" ? (
+                            <View style={styles.editRow}>
+                                <TextInput
+                                    style={[styles.editInput, { color: colors.text, borderColor: colors.primary, backgroundColor: isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)' }]}
+                                    value={editName}
+                                    onChangeText={setEditName}
+                                    autoFocus
+                                    placeholder="Enter name"
+                                    placeholderTextColor={colors.textMuted}
+                                />
+                                <TouchableOpacity onPress={() => handleSaveField("name")} style={[styles.editBtn, { backgroundColor: colors.primary }]}>
+                                    <Ionicons name="checkmark" size={18} color="#1A1A1A" />
+                                </TouchableOpacity>
+                                <TouchableOpacity onPress={() => { setEditingField(null); setEditName(user.name || ""); }} style={[styles.editBtn, { backgroundColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }]}>
+                                    <Ionicons name="close" size={18} color={colors.textMuted} />
+                                </TouchableOpacity>
+                            </View>
+                        ) : (
+                            <TouchableOpacity onPress={() => setEditingField("name")} style={styles.editableRow}>
+                                <Text style={[styles.userName, { color: colors.text }]}>{user.name || "Unknown"}</Text>
+                                <Ionicons name="pencil" size={14} color={colors.textMuted} style={{ marginLeft: 6 }} />
+                            </TouchableOpacity>
+                        )}
+                        
+                        {/* Editable Email */}
+                        {editingField === "email" ? (
+                            <View style={[styles.editRow, { marginTop: 4 }]}>
+                                <TextInput
+                                    style={[styles.editInput, { color: colors.text, borderColor: colors.primary, backgroundColor: isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)' }]}
+                                    value={editEmail}
+                                    onChangeText={setEditEmail}
+                                    autoFocus
+                                    keyboardType="email-address"
+                                    autoCapitalize="none"
+                                    placeholder="Enter email"
+                                    placeholderTextColor={colors.textMuted}
+                                />
+                                <TouchableOpacity onPress={() => handleSaveField("email")} style={[styles.editBtn, { backgroundColor: colors.primary }]}>
+                                    <Ionicons name="checkmark" size={18} color="#1A1A1A" />
+                                </TouchableOpacity>
+                                <TouchableOpacity onPress={() => { setEditingField(null); setEditEmail(user.email || ""); }} style={[styles.editBtn, { backgroundColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }]}>
+                                    <Ionicons name="close" size={18} color={colors.textMuted} />
+                                </TouchableOpacity>
+                            </View>
+                        ) : (
+                            <TouchableOpacity onPress={() => setEditingField("email")} style={styles.editableRow}>
+                                <Text style={[styles.userEmail, { color: colors.textMuted }]}>{user.email}</Text>
+                                <Ionicons name="pencil" size={12} color={colors.textMuted} style={{ marginLeft: 6 }} />
+                            </TouchableOpacity>
+                        )}
                         
                         <View style={styles.badgesRow}>
                             {user.isAdmin && (
@@ -171,7 +336,17 @@ export default function AdminUserDetail() {
                         <View style={[styles.statCard, { backgroundColor: colors.card }]}>
                             <Ionicons name="airplane" size={24} color={colors.primary} />
                             <Text style={[styles.statValue, { color: colors.text }]}>{user.tripsCount}</Text>
-                            <Text style={[styles.statLabel, { color: colors.textMuted }]}>Trips</Text>
+                            <Text style={[styles.statLabel, { color: colors.textMuted }]}>Total Trips</Text>
+                        </View>
+                        <View style={[styles.statCard, { backgroundColor: colors.card }]}>
+                            <Ionicons name="arrow-up-circle" size={24} color="#2563EB" />
+                            <Text style={[styles.statValue, { color: colors.text }]}>{user.upcomingTripsCount}</Text>
+                            <Text style={[styles.statLabel, { color: colors.textMuted }]}>Upcoming</Text>
+                        </View>
+                        <View style={[styles.statCard, { backgroundColor: colors.card }]}>
+                            <Ionicons name="checkmark-done-circle" size={24} color="#059669" />
+                            <Text style={[styles.statValue, { color: colors.text }]}>{user.pastTripsCount}</Text>
+                            <Text style={[styles.statLabel, { color: colors.textMuted }]}>Past Trips</Text>
                         </View>
                         <View style={[styles.statCard, { backgroundColor: colors.card }]}>
                             <Ionicons name="chatbubbles" size={24} color={colors.primary} />
@@ -189,6 +364,149 @@ export default function AdminUserDetail() {
                             <Text style={[styles.statLabel, { color: colors.textMuted }]}>Approved</Text>
                         </View>
                     </View>
+
+                    {/* Account Details */}
+                    <View style={[styles.card, { backgroundColor: colors.card }]}>
+                        <Text style={[styles.cardTitle, { color: colors.textMuted }]}>ACCOUNT DETAILS</Text>
+                        <View style={styles.breakdownRow}>
+                            <Text style={[styles.breakdownLabel, { color: colors.text }]}>Member Since</Text>
+                            <Text style={[styles.breakdownValue, { color: colors.text }]}>
+                                {user.createdAt ? new Date(user.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "Unknown"}
+                            </Text>
+                        </View>
+                        <View style={styles.breakdownRow}>
+                            <Text style={[styles.breakdownLabel, { color: colors.text }]}>Last Active</Text>
+                            <Text style={[styles.breakdownValue, { color: colors.text }]}>
+                                {user.lastActiveAt ? new Date(user.lastActiveAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "Never"}
+                            </Text>
+                        </View>
+                        <View style={styles.breakdownRow}>
+                            <Text style={[styles.breakdownLabel, { color: colors.text }]}>Auth Provider</Text>
+                            <Text style={[styles.breakdownValue, { color: colors.text }]}>
+                                {(user.authProvider || "unknown").charAt(0).toUpperCase() + (user.authProvider || "unknown").slice(1)}
+                            </Text>
+                        </View>
+                        <View style={styles.breakdownRow}>
+                            <Text style={[styles.breakdownLabel, { color: colors.text }]}>Active Sessions</Text>
+                            <Text style={[styles.breakdownValue, { color: colors.text }]}>{user.activeSessionsCount}</Text>
+                        </View>
+                    </View>
+
+                    {/* Plan & Subscription */}
+                    <View style={[styles.card, { backgroundColor: colors.card }]}>
+                        <View style={styles.cardTitleRow}>
+                            <Text style={[styles.cardTitle, { color: colors.textMuted }]}>PLAN & SUBSCRIPTION</Text>
+                            <TouchableOpacity onPress={() => setShowPlanModal(true)} style={[styles.editSmallBtn, { backgroundColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }]}>
+                                <Ionicons name="pencil" size={12} color={colors.textMuted} />
+                                <Text style={[styles.editSmallBtnText, { color: colors.textMuted }]}>Change</Text>
+                            </TouchableOpacity>
+                        </View>
+                        <View style={styles.breakdownRow}>
+                            <Text style={[styles.breakdownLabel, { color: colors.text }]}>Plan</Text>
+                            <TouchableOpacity onPress={() => setShowPlanModal(true)}>
+                                <View style={[styles.statusBadge, { 
+                                    backgroundColor: user.plan === 'premium' ? 'rgba(16, 185, 129, 0.2)' : isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' 
+                                }]}>
+                                    <Text style={[styles.statusText, { 
+                                        color: user.plan === 'premium' ? '#059669' : colors.textMuted 
+                                    }]}>
+                                        {user.plan === 'premium' ? 'Premium' : 'Free'}
+                                    </Text>
+                                </View>
+                            </TouchableOpacity>
+                        </View>
+                        {user.subscriptionType && (
+                            <View style={styles.breakdownRow}>
+                                <Text style={[styles.breakdownLabel, { color: colors.text }]}>Billing</Text>
+                                <Text style={[styles.breakdownValue, { color: colors.text }]}>
+                                    {user.subscriptionType === 'yearly' ? 'Yearly' : 'Monthly'}
+                                </Text>
+                            </View>
+                        )}
+                        {user.subscriptionExpiresAt && (
+                            <View style={styles.breakdownRow}>
+                                <Text style={[styles.breakdownLabel, { color: colors.text }]}>Expires</Text>
+                                <Text style={[styles.breakdownValue, { 
+                                    color: user.subscriptionExpiresAt < Date.now() 
+                                        ? (user.subscriptionExpiresAt + (16 * 24 * 60 * 60 * 1000) > Date.now() ? '#D97706' : '#DC2626')
+                                        : colors.text 
+                                }]}>
+                                    {new Date(user.subscriptionExpiresAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                                    {user.subscriptionExpiresAt < Date.now() 
+                                        ? (user.subscriptionExpiresAt + (16 * 24 * 60 * 60 * 1000) > Date.now() ? ' (Grace Period)' : ' (Expired)')
+                                        : ''}
+                                </Text>
+                            </View>
+                        )}
+                        <View style={styles.breakdownRow}>
+                            <Text style={[styles.breakdownLabel, { color: colors.text }]}>Trips Generated</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                <Text style={[styles.breakdownValue, { color: colors.text }]}>{user.tripsGenerated}</Text>
+                                <TouchableOpacity onPress={handleResetTrips} style={[styles.miniBtn, { backgroundColor: 'rgba(239, 68, 68, 0.1)' }]}>
+                                    <Text style={{ fontSize: 11, color: '#DC2626', fontWeight: '600' }}>Reset</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                        <View style={styles.breakdownRow}>
+                            <Text style={[styles.breakdownLabel, { color: colors.text }]}>Trip Credits</Text>
+                            {editingField === "credits" ? (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                    <TextInput
+                                        style={[styles.editInputSmall, { color: colors.text, borderColor: colors.primary, backgroundColor: isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)' }]}
+                                        value={editCredits}
+                                        onChangeText={setEditCredits}
+                                        autoFocus
+                                        keyboardType="number-pad"
+                                    />
+                                    <TouchableOpacity onPress={() => handleSaveField("credits")} style={[styles.editBtnSmall, { backgroundColor: colors.primary }]}>
+                                        <Ionicons name="checkmark" size={14} color="#1A1A1A" />
+                                    </TouchableOpacity>
+                                    <TouchableOpacity onPress={() => { setEditingField(null); setEditCredits(String(user.tripCredits || 0)); }} style={[styles.editBtnSmall, { backgroundColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }]}>
+                                        <Ionicons name="close" size={14} color={colors.textMuted} />
+                                    </TouchableOpacity>
+                                </View>
+                            ) : (
+                                <TouchableOpacity onPress={() => setEditingField("credits")} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                    <Text style={[styles.breakdownValue, { color: colors.text }]}>{user.tripCredits}</Text>
+                                    <Ionicons name="pencil" size={12} color={colors.textMuted} />
+                                </TouchableOpacity>
+                            )}
+                        </View>
+                    </View>
+
+                    {/* Trip Destinations */}
+                    {user.tripDestinations && user.tripDestinations.length > 0 && (
+                        <View style={[styles.card, { backgroundColor: colors.card }]}>
+                            <Text style={[styles.cardTitle, { color: colors.textMuted }]}>TRIP DESTINATIONS</Text>
+                            {user.tripDestinations.slice(0, 10).map((trip: any, index: number) => (
+                                <View 
+                                    key={index}
+                                    style={[
+                                        styles.breakdownRow,
+                                        index === Math.min(9, user.tripDestinations.length - 1) && { borderBottomWidth: 0 }
+                                    ]}
+                                >
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                                        <Ionicons name="location" size={16} color={colors.primary} />
+                                        <Text style={[styles.breakdownLabel, { color: colors.text }]} numberOfLines={1}>
+                                            {trip.destination}
+                                        </Text>
+                                    </View>
+                                    <View style={[styles.statusBadge, { 
+                                        backgroundColor: trip.endDate < Date.now()
+                                            ? 'rgba(16, 185, 129, 0.2)'
+                                            : 'rgba(37, 99, 235, 0.2)'
+                                    }]}>
+                                        <Text style={[styles.statusText, { 
+                                            color: trip.endDate < Date.now() ? '#059669' : '#2563EB'
+                                        }]}>
+                                            {trip.endDate < Date.now() ? 'Past' : 'Upcoming'}
+                                        </Text>
+                                    </View>
+                                </View>
+                            ))}
+                        </View>
+                    )}
 
                     {/* Insights Breakdown */}
                     <View style={[styles.card, { backgroundColor: colors.card }]}>
@@ -311,7 +629,7 @@ export default function AdminUserDetail() {
                         </TouchableOpacity>
 
                         <TouchableOpacity 
-                            style={[styles.actionItem, { borderBottomWidth: 0 }]}
+                            style={[styles.actionItem, { borderBottomColor: colors.border }]}
                             onPress={handleToggleAdmin}
                         >
                             <View style={[styles.actionIconContainer, { 
@@ -336,10 +654,88 @@ export default function AdminUserDetail() {
                                 </Text>
                             </View>
                         </TouchableOpacity>
+
+                        <TouchableOpacity 
+                            style={[styles.actionItem, { borderBottomWidth: 0 }]}
+                            onPress={handleClearSessions}
+                        >
+                            <View style={[styles.actionIconContainer, { 
+                                backgroundColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)'
+                            }]}>
+                                <Ionicons name="log-out" size={20} color={colors.textMuted} />
+                            </View>
+                            <View style={styles.actionTextContainer}>
+                                <Text style={[styles.actionTitle, { color: colors.text }]}>
+                                    Clear All Sessions
+                                </Text>
+                                <Text style={[styles.actionSubtitle, { color: colors.textMuted }]}>
+                                    Log user out of all devices ({user.activeSessionsCount} active)
+                                </Text>
+                            </View>
+                        </TouchableOpacity>
+                    </View>
+
+                    {/* User ID */}
+                    <View style={[styles.card, { backgroundColor: colors.card, marginBottom: 20 }]}>
+                        <Text style={[styles.cardTitle, { color: colors.textMuted }]}>USER ID</Text>
+                        <Text style={[styles.userIdText, { color: colors.textMuted }]} selectable>{user.userId}</Text>
                     </View>
 
                     <View style={{ height: 40 }} />
                 </ScrollView>
+
+                {/* Plan Change Modal */}
+                <Modal visible={showPlanModal} transparent animationType="fade">
+                    <View style={styles.modalOverlay}>
+                        <View style={[styles.modalContent, { backgroundColor: colors.card }]}>
+                            <Text style={[styles.modalTitle, { color: colors.text }]}>Change User Plan</Text>
+                            <Text style={[styles.modalSubtitle, { color: colors.textMuted }]}>
+                                Current: {user.plan === 'premium' ? 'Premium' : 'Free'}
+                            </Text>
+                            
+                            <TouchableOpacity
+                                style={[styles.planOption, { 
+                                    borderColor: user.plan === 'free' ? colors.primary : colors.border,
+                                    backgroundColor: user.plan === 'free' ? (isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.02)') : 'transparent',
+                                }]}
+                                onPress={() => handleChangePlan("free")}
+                            >
+                                <View style={[styles.planIconContainer, { backgroundColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }]}>
+                                    <Ionicons name="person" size={24} color={colors.textMuted} />
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={[styles.planName, { color: colors.text }]}>Free Plan</Text>
+                                    <Text style={[styles.planDesc, { color: colors.textMuted }]}>Limited trips, basic features</Text>
+                                </View>
+                                {user.plan === 'free' && <Ionicons name="checkmark-circle" size={22} color={colors.primary} />}
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                style={[styles.planOption, { 
+                                    borderColor: user.plan === 'premium' ? '#059669' : colors.border,
+                                    backgroundColor: user.plan === 'premium' ? 'rgba(16, 185, 129, 0.05)' : 'transparent',
+                                }]}
+                                onPress={() => handleChangePlan("premium")}
+                            >
+                                <View style={[styles.planIconContainer, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
+                                    <Ionicons name="diamond" size={24} color="#059669" />
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={[styles.planName, { color: colors.text }]}>Premium Plan</Text>
+                                    <Text style={[styles.planDesc, { color: colors.textMuted }]}>Unlimited trips, 1 year subscription</Text>
+                                </View>
+                                {user.plan === 'premium' && <Ionicons name="checkmark-circle" size={22} color="#059669" />}
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                style={[styles.modalCancelBtn, { backgroundColor: isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)' }]}
+                                onPress={() => setShowPlanModal(false)}
+                            >
+                                <Text style={[styles.modalCancelText, { color: colors.text }]}>Cancel</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </Modal>
             </SafeAreaView>
         </>
     );
@@ -402,6 +798,135 @@ const styles = StyleSheet.create({
         fontSize: 15,
         marginTop: 4,
     },
+    editableRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    editRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        width: "100%",
+        paddingHorizontal: 8,
+    },
+    editInput: {
+        flex: 1,
+        fontSize: 16,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 8,
+        borderWidth: 1.5,
+    },
+    editInputSmall: {
+        width: 80,
+        fontSize: 15,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 6,
+        borderWidth: 1.5,
+        textAlign: "center",
+    },
+    editBtn: {
+        width: 34,
+        height: 34,
+        borderRadius: 17,
+        justifyContent: "center",
+        alignItems: "center",
+    },
+    editBtnSmall: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        justifyContent: "center",
+        alignItems: "center",
+    },
+    editSmallBtn: {
+        flexDirection: "row",
+        alignItems: "center",
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 6,
+        gap: 4,
+    },
+    editSmallBtnText: {
+        fontSize: 11,
+        fontWeight: "600",
+    },
+    cardTitleRow: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        marginBottom: 12,
+    },
+    miniBtn: {
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 4,
+    },
+    userIdText: {
+        fontSize: 12,
+        fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    },
+    // Modal styles
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: "rgba(0,0,0,0.5)",
+        justifyContent: "center",
+        alignItems: "center",
+        padding: 24,
+    },
+    modalContent: {
+        width: "100%",
+        maxWidth: 400,
+        borderRadius: 16,
+        padding: 24,
+    },
+    modalTitle: {
+        fontSize: 20,
+        fontWeight: "700",
+        textAlign: "center",
+    },
+    modalSubtitle: {
+        fontSize: 14,
+        textAlign: "center",
+        marginTop: 4,
+        marginBottom: 20,
+    },
+    planOption: {
+        flexDirection: "row",
+        alignItems: "center",
+        padding: 16,
+        borderRadius: 12,
+        borderWidth: 1.5,
+        marginBottom: 12,
+        gap: 12,
+    },
+    planIconContainer: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        justifyContent: "center",
+        alignItems: "center",
+    },
+    planName: {
+        fontSize: 16,
+        fontWeight: "600",
+    },
+    planDesc: {
+        fontSize: 13,
+        marginTop: 2,
+    },
+    modalCancelBtn: {
+        paddingVertical: 14,
+        borderRadius: 12,
+        alignItems: "center",
+        marginTop: 4,
+    },
+    modalCancelText: {
+        fontSize: 16,
+        fontWeight: "600",
+    },
     badgesRow: {
         flexDirection: "row",
         flexWrap: "wrap",
@@ -428,16 +953,16 @@ const styles = StyleSheet.create({
         gap: 8,
     },
     statCard: {
-        width: "48%",
-        padding: 16,
+        width: "31%",
+        padding: 12,
         borderRadius: 12,
         alignItems: "center",
         marginBottom: 4,
     },
     statValue: {
-        fontSize: 24,
+        fontSize: 20,
         fontWeight: "700",
-        marginTop: 8,
+        marginTop: 6,
     },
     statLabel: {
         fontSize: 13,
