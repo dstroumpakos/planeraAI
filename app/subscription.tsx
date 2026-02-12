@@ -211,7 +211,7 @@ export default function SubscriptionScreen() {
                             <Text style={[styles.planPrice, { color: colors.text }]}>{yearlyPrice || "Loading..."}</Text>
                             <Text style={[styles.planPeriod, { color: colors.textMuted }]}>/year</Text>
                         </View>
-                        <Text style={[styles.planBilled, { color: colors.textMuted }]}>Billed annually • Cancel anytime</Text>
+                        <Text style={[styles.planBilled, { color: colors.textMuted }]}>Billed annually • <Text style={{ color: '#DC2626' }}>Cancel anytime</Text></Text>
                         <View style={styles.featuresList}>
                             <View style={styles.featureItem}>
                                 <Ionicons name="checkmark-circle" size={20} color="#4CAF50" />
@@ -249,7 +249,7 @@ export default function SubscriptionScreen() {
                             <Text style={[styles.planPrice, { color: colors.text }]}>{monthlyPrice || "Loading..."}</Text>
                             <Text style={[styles.planPeriod, { color: colors.textMuted }]}>/mo</Text>
                         </View>
-                        <Text style={[styles.planBilled, { color: colors.textMuted }]}>Billed monthly • Cancel anytime</Text>
+                        <Text style={[styles.planBilled, { color: colors.textMuted }]}>Billed monthly • <Text style={{ color: '#DC2626' }}>Cancel anytime</Text></Text>
                         <View style={styles.featuresList}>
                             <View style={styles.featureItem}>
                                 <Ionicons name="checkmark-circle" size={20} color="#4CAF50" />
