@@ -142,25 +142,20 @@ export const create = authMutation({
             : "";
 
         // Build arrival/departure time info for the prompt
+        // NOTE: Detailed time-aware constraints (3h buffer, activity restrictions) are handled in tripsActions.ts generateTimeAwareGuidance()
+        // Keep this section minimal to avoid conflicting instructions
         let arrivalDepartureInfo = "";
         if (args.arrivalTime) {
             const arrivalDate = new Date(args.arrivalTime);
-            const arrivalTimeStr = arrivalDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
-            arrivalDepartureInfo += `\nArrival time at destination: ${arrivalTimeStr} local time on ${arrivalDate.toDateString()}.`;
-            arrivalDepartureInfo += " The first day's itinerary should start AFTER arrival - schedule light activities appropriate for the remaining time.";
+            const arrivalHours = String(arrivalDate.getUTCHours()).padStart(2, '0');
+            const arrivalMins = String(arrivalDate.getUTCMinutes()).padStart(2, '0');
+            arrivalDepartureInfo += `\nAirport arrival time: ${arrivalHours}:${arrivalMins} on ${arrivalDate.toUTCString().split(' ').slice(0, 4).join(' ')}. Detailed arrival day constraints provided separately.`;
         }
         if (args.departureTime) {
             const departureDate = new Date(args.departureTime);
-            const departureHour = departureDate.getHours();
-            const departureTimeStr = departureDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
-            arrivalDepartureInfo += `\nDeparture time from destination: ${departureTimeStr} local time on ${departureDate.toDateString()}.`;
-            
-            // Handle early morning departure edge case
-            if (departureHour >= 4 && departureHour <= 6) {
-                arrivalDepartureInfo += " IMPORTANT: This is an early morning departure - do NOT schedule any activities on the departure day. The previous day should end earlier (around 20:00-21:00) to allow time for rest and packing.";
-            } else {
-                arrivalDepartureInfo += " The last day's itinerary should end approximately 3 hours before departure to allow time for airport transfer and check-in.";
-            }
+            const depHours = String(departureDate.getUTCHours()).padStart(2, '0');
+            const depMins = String(departureDate.getUTCMinutes()).padStart(2, '0');
+            arrivalDepartureInfo += `\nDeparture time: ${depHours}:${depMins} on ${departureDate.toUTCString().split(' ').slice(0, 4).join(' ')}. Detailed departure day constraints provided separately.`;
         }
 
         const prompt = `Plan a trip to ${args.destination} for ${args.travelerCount} people.
@@ -457,14 +452,19 @@ export const regenerate = authMutation({
         const origin = trip.origin || "Not specified";
         
         // Build arrival/departure info string
+        // NOTE: Detailed time-aware constraints (3h buffer, activity restrictions) are handled in tripsActions.ts generateTimeAwareGuidance()
         let arrivalDepartureInfo = "";
         if (trip.arrivalTime) {
             const arrivalDate = new Date(trip.arrivalTime);
-            arrivalDepartureInfo += ` Arrival time at destination: ${arrivalDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}.`;
+            const arrivalHours = String(arrivalDate.getUTCHours()).padStart(2, '0');
+            const arrivalMins = String(arrivalDate.getUTCMinutes()).padStart(2, '0');
+            arrivalDepartureInfo += ` Airport arrival: ${arrivalHours}:${arrivalMins}. Detailed arrival constraints provided separately.`;
         }
         if (trip.departureTime) {
             const departureDate = new Date(trip.departureTime);
-            arrivalDepartureInfo += ` Departure time: ${departureDate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}.`;
+            const depHours = String(departureDate.getUTCHours()).padStart(2, '0');
+            const depMins = String(departureDate.getUTCMinutes()).padStart(2, '0');
+            arrivalDepartureInfo += ` Departure: ${depHours}:${depMins}. Detailed departure constraints provided separately.`;
         }
         
         // Build local experiences info
