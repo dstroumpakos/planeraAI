@@ -208,7 +208,8 @@ export default function CreateTripScreen() {
         return date.toLocaleTimeString('en-US', { 
             hour: 'numeric', 
             minute: '2-digit', 
-            hour12: true 
+            hour12: true,
+            timeZone: 'UTC'
         });
     };
 
@@ -234,15 +235,16 @@ export default function CreateTripScreen() {
         const baseTimestamp = selectingTime === 'arrival' ? formData.startDate : formData.endDate;
         const baseDate = new Date(baseTimestamp);
         
-        // Create ISO string with the base date and selected time
-        const combined = new Date(
+        // Use Date.UTC so the ISO string preserves the user's intended local hours
+        // This ensures the server reads the same hours the user picked (timezone-neutral)
+        const combined = new Date(Date.UTC(
             baseDate.getFullYear(),
             baseDate.getMonth(),
             baseDate.getDate(),
             time.getHours(),
             time.getMinutes(),
             0, 0
-        );
+        ));
         
         const isoString = combined.toISOString();
         
@@ -777,7 +779,7 @@ export default function CreateTripScreen() {
                             <Text style={[styles.budgetTierLabel, { color: budgetTier.color }]}>{budgetTier.label}</Text>
                         </View>
                         <View style={styles.budgetTierInfo}>
-                            <Text style={[styles.budgetTierDaily, { color: colors.text }]}>€{dailyBudgetPerPerson}<Text style={{ color: colors.textMuted, fontSize: 12 }}>/person/day</Text></Text>
+                            <Text style={[styles.budgetTierDaily, { color: colors.text }]}>~€{dailyBudgetPerPerson}<Text style={{ color: colors.textMuted, fontSize: 12 }}>/person/day</Text></Text>
                             <Text style={[styles.budgetTierDescription, { color: colors.textMuted }]}>{budgetTier.description}</Text>
                         </View>
                     </View>

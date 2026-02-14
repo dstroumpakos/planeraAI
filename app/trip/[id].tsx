@@ -461,7 +461,8 @@ export default function TripDetails() {
         return date.toLocaleTimeString('en-US', { 
             hour: 'numeric', 
             minute: '2-digit', 
-            hour12: true 
+            hour12: true,
+            timeZone: 'UTC'
         });
     };
 
@@ -487,15 +488,16 @@ export default function TripDetails() {
         const baseTimestamp = selectingTime === 'arrival' ? editForm.startDate : editForm.endDate;
         const baseDate = new Date(baseTimestamp);
         
-        // Create ISO string with the base date and selected time
-        const combined = new Date(
+        // Use Date.UTC so the ISO string preserves the user's intended local hours
+        // This ensures the server reads the same hours the user picked (timezone-neutral)
+        const combined = new Date(Date.UTC(
             baseDate.getFullYear(),
             baseDate.getMonth(),
             baseDate.getDate(),
             time.getHours(),
             time.getMinutes(),
             0, 0
-        );
+        ));
         
         const isoString = combined.toISOString();
         
@@ -1341,7 +1343,7 @@ export default function TripDetails() {
                         onPress={() => setActiveFilter('food')}
                     >
                         <Ionicons name="restaurant" size={18} color={activeFilter === 'food' ? colors.card : colors.textMuted} />
-                        <Text style={[styles.filterText, { color: colors.textMuted }, activeFilter === 'food' && { color: colors.card }]}>Food</Text>
+                        <Text style={[styles.filterText, { color: colors.textMuted }, activeFilter === 'food' && { color: colors.card }]}>Culinary</Text>
                     </TouchableOpacity>
                     <TouchableOpacity 
                         style={[styles.filterChip, { backgroundColor: colors.card, borderColor: colors.border }, activeFilter === 'sights' && { backgroundColor: colors.text, borderColor: colors.text }]}
@@ -1472,7 +1474,11 @@ export default function TripDetails() {
                                             <Ionicons 
                                                 name={
                                                     activity.isLocalExperience ? 'star' :
-                                                    activity.type === 'restaurant' ? 'restaurant' :
+                                                    activity.type === 'restaurant' ? (
+                                                        activity.culinaryType === 'cafe' || activity.culinaryType === 'bakery' ? 'cafe' :
+                                                        activity.culinaryType === 'bar' ? 'wine' :
+                                                        'restaurant'
+                                                    ) :
                                                     activity.type === 'museum' ? 'easel' :
                                                     activity.type === 'attraction' ? 'ticket' :
                                                     'location'
@@ -1626,10 +1632,17 @@ export default function TripDetails() {
                                                     )}
                                                 </View>
                                                 <Text style={[styles.activityDesc, { color: colors.text }]}>{activity.description}</Text>
+                                                {/* Culinary insight for restaurant activities */}
+                                                {activity.type === 'restaurant' && activity.whyThisFits && (
+                                                    <Text style={{ fontSize: 12, color: colors.textMuted, fontStyle: 'italic', marginBottom: 4 }}>"{activity.whyThisFits}"</Text>
+                                                )}
                                                 <View style={styles.activityMeta}>
                                                     <View style={[styles.metaBadge, { backgroundColor: colors.secondary }]}>
-                                                        <Text style={[styles.metaText, { color: colors.text }]}>{activity.type || 'Activity'}</Text>
+                                                        <Text style={[styles.metaText, { color: colors.text }]}>{activity.culinaryType || activity.type || 'Activity'}</Text>
                                                     </View>
+                                                    {activity.type === 'restaurant' && activity.priceRange && (
+                                                        <Text style={{ fontSize: 12, fontWeight: '600', color: colors.textMuted }}>{activity.priceRange}</Text>
+                                                    )}
                                                     <View style={styles.metaDuration}>
                                                         <Ionicons name="time-outline" size={12} color={colors.textMuted} />
                                                         <Text style={[styles.metaDurationText, { color: colors.textMuted }]}>{activity.duration || '1h'}</Text>
@@ -1655,57 +1668,179 @@ export default function TripDetails() {
 
                     {activeFilter === 'food' && (
                         <View>
-                            <Text style={[styles.sectionTitle, { color: colors.text }]}>Top Restaurants</Text>
-                            {trip.itinerary?.restaurants?.map((restaurant: any, index: number) => (
-                                <TouchableOpacity 
-                                    key={index} 
-                                    style={[styles.card, { backgroundColor: colors.card }]}
-                                    onPress={() => {
-                                        if (restaurant.tripAdvisorUrl) {
-                                            Linking.openURL(restaurant.tripAdvisorUrl);
+                            {(() => {
+                                // Extract all culinary activities from the daily itinerary, grouped by day
+                                const days = trip.itinerary?.dayByDayItinerary || [];
+                                const culinaryByDay: { day: number; date: string; title: string; moments: { morning: any[]; midday: any[]; evening: any[] } }[] = [];
+
+                                for (let idx = 0; idx < days.length; idx++) {
+                                    const day = days[idx];
+                                    const foodActivities = (day.activities || []).filter((a: any) =>
+                                        a.type === 'restaurant' || a.type === 'meal' ||
+                                        a.culinaryMoment || a.culinaryType ||
+                                        a.title?.toLowerCase().includes('lunch') ||
+                                        a.title?.toLowerCase().includes('dinner') ||
+                                        a.title?.toLowerCase().includes('breakfast') ||
+                                        a.title?.toLowerCase().includes('café') ||
+                                        a.title?.toLowerCase().includes('cafe') ||
+                                        a.title?.toLowerCase().includes('bakery') ||
+                                        a.title?.toLowerCase().includes('coffee') ||
+                                        a.title?.toLowerCase().includes('brunch')
+                                    );
+
+                                    if (foodActivities.length === 0) continue;
+
+                                    const moments = { morning: [] as any[], midday: [] as any[], evening: [] as any[] };
+
+                                    for (const act of foodActivities) {
+                                        // Determine moment from culinaryMoment field or infer from time/type
+                                        let moment: 'morning' | 'midday' | 'evening' = 'midday';
+                                        if (act.culinaryMoment === 'morning' || act.culinaryType === 'cafe' || act.culinaryType === 'bakery') {
+                                            moment = 'morning';
+                                        } else if (act.culinaryMoment === 'evening' || act.culinaryType === 'dinner' || act.culinaryType === 'bar') {
+                                            moment = 'evening';
+                                        } else if (act.culinaryMoment === 'midday' || act.culinaryType === 'lunch') {
+                                            moment = 'midday';
                                         } else {
-                                            // Fallback to maps search
-                                            const searchQuery = encodeURIComponent(`${cleanLocationTitle(restaurant.name)} ${trip.destination}`);
-                                            if (Platform.OS === 'ios') {
-                                                const appleMapsURL = `maps://maps.apple.com/?q=${searchQuery}`;
-                                                Linking.openURL(appleMapsURL).catch(() => {
-                                                    Linking.openURL(`https://www.google.com/maps/search/${searchQuery}`);
-                                                });
-                                            } else {
-                                                Linking.openURL(`https://www.google.com/maps/search/${searchQuery}`);
-                                            }
+                                            // Infer from start time
+                                            const hour = parseInt(act.startTime || act.time || '12', 10);
+                                            if (hour < 11) moment = 'morning';
+                                            else if (hour >= 18) moment = 'evening';
+                                            else moment = 'midday';
                                         }
-                                    }}
-                                >
-                                    <View style={styles.row}>
-                                        <View style={styles.flightInfo}>
-                                            <View style={styles.restaurantHeader}>
-                                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
-                                                    {restaurant.tripAdvisorUrl && (
-                                                        <Image 
-                                                            source={{ uri: "https://files.readme.io/9f59534-Vector_1.png" }}
-                                                            style={{ width: 72, height: 72 }}
-                                                            contentFit="contain"
-                                                            cachePolicy="disk"
-                                                        />
-                                                    )}
-                                                    <Text style={[styles.cardTitle, { color: colors.text }]}>{restaurant.name}</Text>
-                                                </View>
-                                                <Ionicons name="open-outline" size={20} color={colors.primary} />
-                                            </View>
-                                            <Text style={[styles.cardSubtitle, { color: colors.textMuted }]}>{restaurant.cuisine} • {restaurant.priceRange}</Text>
-                                            <View style={styles.ratingContainer}>
-                                                <Ionicons name="star" size={14} color="#F59E0B" />
-                                                <Text style={[styles.ratingText, { color: colors.text }]}>{restaurant.rating} ({restaurant.reviewCount} reviews)</Text>
-                                            </View>
-                                            <Text style={[styles.addressText, { color: colors.textMuted }]}>{restaurant.address}</Text>
+                                        moments[moment].push(act);
+                                    }
+
+                                    const dayDate = new Date(trip.startDate + (idx * 24 * 60 * 60 * 1000));
+                                    const formattedDate = dayDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+
+                                    culinaryByDay.push({
+                                        day: day.day || idx + 1,
+                                        date: formattedDate,
+                                        title: day.title || `Day ${idx + 1}`,
+                                        moments,
+                                    });
+                                }
+
+                                if (culinaryByDay.length === 0) {
+                                    return <Text style={[styles.emptyText, { color: colors.textMuted }]}>No culinary experiences found.</Text>;
+                                }
+
+                                const momentConfig = {
+                                    morning: { emoji: '☕', label: 'Bakery & Coffee', color: '#D97706' },
+                                    midday: { emoji: '🥪', label: 'Lunch', color: '#059669' },
+                                    evening: { emoji: '🍽️', label: 'Dinner', color: '#7C3AED' },
+                                };
+
+                                return culinaryByDay.map((dayData, dayIdx) => (
+                                    <View key={dayIdx} style={{ marginBottom: 24 }}>
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 }}>
+                                            <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>Day {dayData.day}</Text>
+                                            <Text style={{ fontSize: 13, color: colors.textMuted }}>{dayData.date}</Text>
                                         </View>
+
+                                        {(['morning', 'midday', 'evening'] as const).map((moment) => {
+                                            const items = dayData.moments[moment];
+                                            if (items.length === 0) return null;
+                                            const cfg = momentConfig[moment];
+
+                                            return (
+                                                <View key={moment} style={{ marginBottom: 16 }}>
+                                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                                                        <Text style={{ fontSize: 16 }}>{cfg.emoji}</Text>
+                                                        <Text style={{ fontSize: 14, fontWeight: '600', color: cfg.color }}>{cfg.label}</Text>
+                                                    </View>
+
+                                                    {items.map((act: any, actIdx: number) => (
+                                                        <TouchableOpacity
+                                                            key={actIdx}
+                                                            style={[styles.card, { backgroundColor: colors.card, marginBottom: 8 }]}
+                                                            onPress={() => {
+                                                                const searchQuery = encodeURIComponent(`${cleanLocationTitle(act.title || '')} ${trip.destination}`);
+                                                                if (Platform.OS === 'ios') {
+                                                                    const appleMapsURL = `maps://maps.apple.com/?q=${searchQuery}`;
+                                                                    Linking.openURL(appleMapsURL).catch(() => {
+                                                                        Linking.openURL(`https://www.google.com/maps/search/${searchQuery}`);
+                                                                    });
+                                                                } else {
+                                                                    Linking.openURL(`https://www.google.com/maps/search/${searchQuery}`);
+                                                                }
+                                                            }}
+                                                        >
+                                                            <View style={{ gap: 6 }}>
+                                                                {/* Header row */}
+                                                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                                                    <View style={{ flex: 1 }}>
+                                                                        <Text style={[styles.cardTitle, { color: colors.text }]}>{act.title}</Text>
+                                                                    </View>
+                                                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                                                        {act.priceRange && (
+                                                                            <Text style={{ fontSize: 13, fontWeight: '600', color: cfg.color }}>{act.priceRange}</Text>
+                                                                        )}
+                                                                        <Ionicons name="open-outline" size={16} color={colors.primary} />
+                                                                    </View>
+                                                                </View>
+
+                                                                {/* Why this fits */}
+                                                                {act.whyThisFits && (
+                                                                    <Text style={{ fontSize: 13, color: colors.textMuted, fontStyle: 'italic', lineHeight: 18 }}>
+                                                                        "{act.whyThisFits}"
+                                                                    </Text>
+                                                                )}
+
+                                                                {/* Meta row */}
+                                                                <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 2 }}>
+                                                                    {act.culinaryType && (
+                                                                        <View style={[styles.metaBadge, { backgroundColor: `${cfg.color}18` }]}>
+                                                                            <Text style={{ fontSize: 11, fontWeight: '500', color: cfg.color, textTransform: 'capitalize' }}>{act.culinaryType}</Text>
+                                                                        </View>
+                                                                    )}
+                                                                    {act.duration && (
+                                                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                                                                            <Ionicons name="time-outline" size={12} color={colors.textMuted} />
+                                                                            <Text style={{ fontSize: 11, color: colors.textMuted }}>{act.duration}</Text>
+                                                                        </View>
+                                                                    )}
+                                                                    {act.walkability && (
+                                                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+                                                                            <Ionicons name="walk" size={12} color={colors.textMuted} />
+                                                                            <Text style={{ fontSize: 11, color: colors.textMuted, textTransform: 'capitalize' }}>{act.walkability.replace('-', ' ')}</Text>
+                                                                        </View>
+                                                                    )}
+                                                                    {(act.startTime || act.time) && (
+                                                                        <Text style={{ fontSize: 11, color: colors.textMuted }}>{act.startTime || act.time}</Text>
+                                                                    )}
+                                                                </View>
+
+                                                                {/* Tags */}
+                                                                {act.culinaryTags && act.culinaryTags.length > 0 && (
+                                                                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 2 }}>
+                                                                        {act.culinaryTags.slice(0, 4).map((tag: string, tagIdx: number) => (
+                                                                            <View key={tagIdx} style={{ backgroundColor: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.04)', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 }}>
+                                                                                <Text style={{ fontSize: 10, color: colors.textMuted, textTransform: 'capitalize' }}>{tag}</Text>
+                                                                            </View>
+                                                                        ))}
+                                                                    </View>
+                                                                )}
+
+                                                                {/* Description fallback for non-enriched data */}
+                                                                {!act.whyThisFits && act.description && (
+                                                                    <Text style={{ fontSize: 12, color: colors.textMuted, lineHeight: 17 }} numberOfLines={2}>{act.description}</Text>
+                                                                )}
+
+                                                                {/* Address */}
+                                                                {act.address && (
+                                                                    <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }} numberOfLines={1}>📍 {act.address}</Text>
+                                                                )}
+                                                            </View>
+                                                        </TouchableOpacity>
+                                                    ))}
+                                                </View>
+                                            );
+                                        })}
                                     </View>
-                                </TouchableOpacity>
-                            ))}
-                            {(!trip.itinerary?.restaurants || trip.itinerary.restaurants.length === 0) && (
-                                <Text style={[styles.emptyText, { color: colors.textMuted }]}>No restaurants found.</Text>
-                            )}
+                                ));
+                            })()}
                         </View>
                     )}
 

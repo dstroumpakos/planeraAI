@@ -108,7 +108,7 @@ Note: Budget was not specified by the traveler, so assume moderate spending (~�
 **BUDGET GUIDANCE (PREMIUM — €${dailyBudgetPerPerson}/person/day):**
 Total trip budget: €${budgetTotal} for ${travelerCount} traveler${travelerCount > 1 ? "s" : ""} over ${tripDays} days (€${perPersonBudget} per person total).
 
-This is a premium-tier trip. Curate 5 total items per day (3–4 experiences + 1–2 meals) focused on comfort and exclusivity:
+This is a premium-tier trip. Curate 5–6 total items per day (3–4 experiences + 1–2 dining) focused on comfort and exclusivity:
 - Include exclusive or VIP activities: private tours, skip-the-line VIP access, private cooking classes with chefs, sunset yacht rides, helicopter tours, wine estate visits
 - Recommend fine dining: Michelin-mentioned restaurants, tasting menus, rooftop dining, chef's table experiences
 - Prioritize time-efficient routing: private transfers, taxis, minimal transit waste
@@ -122,7 +122,7 @@ This is a premium-tier trip. Curate 5 total items per day (3–4 experiences + 1
 **BUDGET GUIDANCE (HIGH — €${dailyBudgetPerPerson}/person/day):**
 Total trip budget: €${budgetTotal} for ${travelerCount} traveler${travelerCount > 1 ? "s" : ""} over ${tripDays} days (€${perPersonBudget} per person total).
 
-This is a high-budget trip. Suggest 4 total items per day (3 activities + 1 meal) with quality emphasis:
+This is a high-budget trip. Suggest 4–5 total items per day (3 activities + 1 dinner) with quality emphasis:
 - Include guided tours, unique cultural experiences, and higher-quality venues
 - Recommend skip-the-line tickets for popular attractions
 - Suggest a mix of upscale restaurants and well-regarded local eateries
@@ -136,7 +136,7 @@ This is a high-budget trip. Suggest 4 total items per day (3 activities + 1 meal
 **BUDGET GUIDANCE (MODERATE — €${dailyBudgetPerPerson}/person/day):**
 Total trip budget: €${budgetTotal} for ${travelerCount} traveler${travelerCount > 1 ? "s" : ""} over ${tripDays} days (€${perPersonBudget} per person total).
 
-This is a moderate-budget trip. STRICTLY limit to 3 total items per day (2 activities + 1 meal OR 1 activity + 2 meals):
+This is a moderate-budget trip. STRICTLY limit to 3 total items per day (2 activities + 1 dinner):
 - Mix paid attractions (museums, monuments) with free experiences (parks, viewpoints, neighborhoods)
 - Include standard ticketed museums, popular sights, and mid-range dining
 - Recommend popular restaurants with good value, local eateries, and some street food
@@ -150,7 +150,7 @@ This is a moderate-budget trip. STRICTLY limit to 3 total items per day (2 activ
 **BUDGET GUIDANCE (LOW — €${dailyBudgetPerPerson}/person/day):**
 Total trip budget: €${budgetTotal} for ${travelerCount} traveler${travelerCount > 1 ? "s" : ""} over ${tripDays} days (€${perPersonBudget} per person total).
 
-This is a low-budget trip. STRICTLY limit to 2 total items per day (1 activity + 1 meal OR 2 free activities). Focus on maximizing free value:
+This is a low-budget trip. STRICTLY limit to 2 total items per day (1 activity + 1 dinner). Focus on maximizing free value:
 - Prioritize FREE attractions: free museum days, parks, public squares, street art, viewpoints, beach walks, public landmarks, neighborhood strolls
 - Recommend affordable food: street food, local markets, bakeries, supermarkets, affordable cafes
 - Use public transport or walking exclusively — no taxis
@@ -208,53 +208,71 @@ function generateTimeAwareGuidance(
     
     if (arrivalTime) {
         const arrival = new Date(arrivalTime);
-        const arrivalHour = arrival.getHours();
-        const arrivalMinutes = arrival.getMinutes();
-        firstDayStartTime = `${String(arrivalHour).padStart(2, '0')}:${String(arrivalMinutes).padStart(2, '0')}`;
+        const arrivalHour = arrival.getUTCHours();
+        const arrivalMinutes = arrival.getUTCMinutes();
+        const arrivalTimeDisplay = `${String(arrivalHour).padStart(2, '0')}:${String(arrivalMinutes).padStart(2, '0')}`;
         
         // Determine first day activity guidance based on arrival time
         if (arrivalHour >= 20) {
-            // Late evening arrival - minimal activities
+            // Late evening arrival - no real activities possible
+            firstDayStartTime = `${String(Math.min(arrivalHour + 2, 22)).padStart(2, '0')}:00`;
             guidance += `
-**FIRST DAY (ARRIVAL DAY) CONSTRAINTS:**
-- Arrival time: ${arrival.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
-- This is a late evening arrival. Only schedule: check-in, light dinner nearby, or exploring the hotel area.
-- Do NOT schedule any attractions, tours, or intensive activities.
-- Start activities from Day 2 morning.
+**FIRST DAY (ARRIVAL DAY) — HARD CONSTRAINTS (DO NOT VIOLATE):**
+- Airport arrival: ${arrivalTimeDisplay}
+- This is a LATE EVENING arrival. After airport transfer + hotel check-in, there is almost no time left.
+- ONLY schedule: a light dinner nearby the hotel OR a short evening stroll. Maximum 1 item on Day 1.
+- ABSOLUTELY NO attractions, tours, museums, local experiences, cooking classes, food tours, workshops, cafés, or bakeries on Day 1.
+- Day 1 is arrival only. Real activities start Day 2 morning.
 `;
         } else if (arrivalHour >= 15) {
-            // Afternoon arrival - light activities
+            // Afternoon arrival - very light activities only
+            const earliestActivityHour = Math.min(arrivalHour + 3, 21);
+            const earliestTime = `${String(earliestActivityHour).padStart(2, '0')}:00`;
+            firstDayStartTime = earliestTime;
             guidance += `
-**FIRST DAY (ARRIVAL DAY) CONSTRAINTS:**
-- Arrival time: ${arrival.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
-- This is an afternoon arrival. Schedule light activities only AFTER ${arrival.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}.
-- Suitable activities: neighborhood walk, dinner, evening stroll, relaxed exploration.
-- Do NOT schedule intensive morning activities or tours that require early check-in.
-- First activity should start no earlier than 1 hour after arrival.
+**FIRST DAY (ARRIVAL DAY) — HARD CONSTRAINTS (DO NOT VIOLATE):**
+- Airport arrival: ${arrivalTimeDisplay}
+- After airport transfer (1-2h) + hotel check-in + freshening up = traveler is NOT free until ${earliestTime}.
+- ⛔ Day 1 first activity startTime MUST be "${earliestTime}" or later. Any activity before ${earliestTime} is INVALID.
+- ⛔ NO cafés, bakeries, museums, tours, attractions, local experiences, cooking classes, food tours, or workshops on Day 1.
+- ✅ ONLY allowed: dinner at a nearby restaurant, a relaxed evening stroll. Maximum 1-2 light items.
+- Day 1 is a partial arrival day. Full activity days start from Day 2.
 `;
         } else if (arrivalHour >= 12) {
             // Mid-day arrival
+            const earliestActivityHour = Math.min(arrivalHour + 3, 20);
+            const earliestTime = `${String(earliestActivityHour).padStart(2, '0')}:00`;
+            firstDayStartTime = earliestTime;
             guidance += `
-**FIRST DAY (ARRIVAL DAY) CONSTRAINTS:**
-- Arrival time: ${arrival.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
-- This is a mid-day arrival. Start activities AFTER ${arrival.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}.
-- You can schedule afternoon activities and dinner. No morning activities on Day 1.
-- First activity should be after check-in (allow 1-2 hours after arrival).
+**FIRST DAY (ARRIVAL DAY) — HARD CONSTRAINTS (DO NOT VIOLATE):**
+- Airport arrival: ${arrivalTimeDisplay}
+- After airport transfer (1-2h) + hotel check-in + freshening up = traveler is NOT free until ${earliestTime}.
+- ⛔ Day 1 first activity startTime MUST be "${earliestTime}" or later. Any activity before ${earliestTime} is INVALID.
+- ⛔ NO morning cafés/bakeries on Day 1. NO local experiences (cooking classes, food tours, workshops) on Day 1.
+- ✅ You may schedule 1-2 light afternoon activities and dinner. Keep it relaxed.
+- Day 1 is a partial arrival day. Full activity days start from Day 2.
 `;
         } else {
-            // Morning arrival - relatively full day
+            // Morning arrival - relatively full day but still need transit + check-in
+            const earliestActivityHour = arrivalHour + 3;
+            const earliestTime = `${String(earliestActivityHour).padStart(2, '0')}:00`;
+            firstDayStartTime = earliestTime;
             guidance += `
-**FIRST DAY (ARRIVAL DAY) CONSTRAINTS:**
-- Arrival time: ${arrival.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
-- This is a morning arrival. Schedule activities starting mid-morning (after check-in/luggage drop).
-- First activity should start no earlier than 2 hours after arrival.
+**FIRST DAY (ARRIVAL DAY) — HARD CONSTRAINTS (DO NOT VIOLATE):**
+- Airport arrival: ${arrivalTimeDisplay}
+- After airport transfer (1-2h) + hotel check-in = traveler is NOT free until ${earliestTime}.
+- ⛔ Day 1 first activity startTime MUST be "${earliestTime}" or later. Any activity before ${earliestTime} is INVALID.
+- ⛔ NO local experiences (cooking classes, food tours, workshops) on Day 1.
+- Schedule a lighter day with fewer activities than normal full days.
+- Day 1 is a partial arrival day.
 `;
         }
     }
     
     if (departureTime) {
         const departure = new Date(departureTime);
-        const departureHour = departure.getHours();
+        const departureHour = departure.getUTCHours();
+        const departureTimeDisplay = `${String(departureHour).padStart(2, '0')}:${String(departure.getUTCMinutes()).padStart(2, '0')}`;
         
         // Calculate end time (3 hours before departure for airport transfer)
         const endHour = departureHour - 3;
@@ -264,7 +282,7 @@ function generateTimeAwareGuidance(
             skipLastDay = true;
             guidance += `
 **LAST DAY (DEPARTURE DAY) CONSTRAINTS:**
-- Departure time: ${departure.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
+- Departure time: ${departureTimeDisplay}
 - IMPORTANT: This is an early morning departure. Do NOT schedule any activities on the departure day.
 - The traveler needs to rest and prepare the night before.
 - Make the PREVIOUS day (Day before departure) lighter - activities should end by 20:00-21:00.
@@ -274,7 +292,7 @@ function generateTimeAwareGuidance(
             skipLastDay = true;
             guidance += `
 **LAST DAY (DEPARTURE DAY) CONSTRAINTS:**
-- Departure time: ${departure.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
+- Departure time: ${departureTimeDisplay}
 - This is a mid-morning departure. Skip activities on departure day - only early breakfast if time permits.
 - All itinerary ends on the day before departure.
 `;
@@ -283,9 +301,9 @@ function generateTimeAwareGuidance(
             lastDayEndTime = `${String(Math.max(7, endHour)).padStart(2, '0')}:00`;
             guidance += `
 **LAST DAY (DEPARTURE DAY) CONSTRAINTS:**
-- Departure time: ${departure.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
+- Departure time: ${departureTimeDisplay}
 - Very limited time on departure day. Schedule only: breakfast and maybe a brief nearby activity.
-- All activities must end by ${departure.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }).replace(`:${String(departure.getMinutes()).padStart(2, '0')}`, ':00')} at the latest (3 hours before departure for airport transfer).
+- All activities must end by ${String(Math.max(7, endHour)).padStart(2, '0')}:00 at the latest (3 hours before departure for airport transfer).
 - Keep packing and checkout time in mind.
 `;
         } else {
@@ -294,7 +312,7 @@ function generateTimeAwareGuidance(
             lastDayEndTime = `${String(safeEndHour).padStart(2, '0')}:00`;
             guidance += `
 **LAST DAY (DEPARTURE DAY) CONSTRAINTS:**
-- Departure time: ${departure.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}
+- Departure time: ${departureTimeDisplay}
 - Partial day available. Activities must end by ${safeEndHour}:00 (3 hours before departure).
 - Schedule lighter activities: breakfast, nearby sights, final shopping.
 - Account for checkout time (usually 11:00-12:00) - may need luggage storage.
@@ -584,9 +602,17 @@ export const generate = internalAction({
                         ? `Total Budget: €${budgetTotal} (€${perPersonBudget} per person, €${budgetGuidance.dailyBudgetPerPerson}/person/day)`
                         : `Budget: Not specified (assume moderate)`;
                     
+                    // Check if the traveler selected Culinary/Food interest
+                    const hasCulinaryInterest = trip.interests.some((i: string) => i === 'Food' || i === 'Culinary');
+
+                    // Build arrival day hard constraint for the prompt header
+                    const arrivalDayHardConstraint = timeAwareGuidance.firstDayStartTime 
+                        ? `\n\n**⛔ ARRIVAL DAY HARD RULE: Day 1 first activity startTime must be "${timeAwareGuidance.firstDayStartTime}" or later. The traveler arrives at the airport and needs ~3 hours (transfer + check-in) before being available. Any Day 1 activity before "${timeAwareGuidance.firstDayStartTime}" will be REJECTED.**`
+                        : '';
+
                     const itineraryPrompt = `Create a detailed day-by-day itinerary for a ${tripDays}-day trip to ${trip.destination} from ${new Date(trip.startDate).toDateString()} to ${new Date(trip.endDate).toDateString()}.
 
-**CRITICAL: ${daysInstructions}**
+**CRITICAL: ${daysInstructions}**${arrivalDayHardConstraint}
 
 ${budgetHeader}
 Travelers: ${effectiveTravelerCount}
@@ -606,6 +632,30 @@ IMPORTANT: For each activity, include:
 - Duration of the activity in minutes
 - Start time and end time (24h format like "09:00", "11:30")
 - FULL ADDRESS: Include street name/number, neighborhood, and "${trip.destination}" (e.g., "Piazza del Duomo, 20121 Milan" or "Gothic Quarter, Barcelona"). This is CRITICAL for accurate map directions.
+
+**CULINARY EXPERIENCE RULES (CRITICAL):**
+Food recommendations are NOT a separate list — they are embedded as activities with type "restaurant" in the daily timeline.
+Each food activity MUST include these additional culinary fields:
+- "culinaryMoment": "morning" | "midday" | "evening" — when this meal fits the day
+- "culinaryType": "cafe" | "bakery" | "lunch" | "dinner" | "bar" | "street-food" — specific food category
+- "whyThisFits": A short 1-sentence insider explanation of why this spot fits at this point in the day (e.g., "Perfect espresso stop after a museum morning" or "Locals come here after work for aperitivo")
+- "priceRange": "€" | "€€" | "€€€" — relative cost indicator
+- "walkability": "nearby" | "short-walk" | "transit-needed" — how far from previous activity
+- "culinaryTags": array of tags like ["local", "casual", "fine-dining", "quick-bite", "scenic", "historic", "market", "family-friendly", "vegetarian-friendly"]
+
+Culinary placement rules:
+1. Morning (before 11:00) → Cafés, bakeries, breakfast spots. ${hasCulinaryInterest ? 'ALWAYS include at least one morning food stop per full day. This is a quick 20-30 min stop and counts toward the daily item total. Set culinaryType to "cafe" or "bakery".' : 'Only include if it fits the flow naturally. Not required.'}
+2. Midday (12:00–14:30) → Lunch spots. 1 curated option. Should match the neighborhood you're already in.
+3. Evening (19:00–22:00) → Dinner restaurants. 1 curated option. Can be more experiential. ${budgetGuidance.budgetTier === 'low' || budgetGuidance.budgetTier === 'moderate' ? 'For low and moderate budgets, ALWAYS include a dinner as the evening food moment so travelers have something planned for the evening.' : ''}
+4. NEVER place fine dining right after a heavy activity block unless it's evening
+5. After high-energy activities → suggest casual/quick food, not a sit-down restaurant
+6. Avoid repeating similar cuisines on the same day
+7. Prefer walkable spots near the day's other activities
+8. ${hasCulinaryInterest ? 'Morning cafés/bakeries should ALWAYS be included — they set the tone for the day. Only skip on departure days.' : 'Morning cafés/bakeries are optional — include only when it makes sense for the day.'}
+9. Food is part of the day's story, not a checklist — make it feel curated and intentional
+10. Tone: confident, local insider feel. Short explanations. No marketing language.
+${hasCulinaryInterest ? '11. IMPORTANT: Every full activity day MUST have a morning café/bakery as the FIRST activity of the day. This is non-negotiable. Even on budget trips, a morning coffee stop is essential for the travel experience.' : ''}
+12. OPENING HOURS ACCURACY (CRITICAL): Only recommend cafés and bakeries for the morning that are KNOWN to open early (before 8:30 AM). Many bakeries and cafés in European cities open at 7:00–8:00 AM — only suggest those. NEVER recommend a place for a morning stop if it typically opens after 10:00 AM. If you are unsure about opening hours, recommend well-known chain cafés or traditional bakeries that reliably open early. For dinner spots, only recommend restaurants that serve dinner (open after 18:00/19:00). Always match the recommendation to the actual operating hours of that type of venue in ${trip.destination}.
 
 **TIME-AWARE ITINERARY WITH TRAVEL SEGMENTS:**
 Between consecutive activities, include realistic travel time based on typical walking distance in ${trip.destination}. Consider:
@@ -647,7 +697,39 @@ Include specific activities, restaurants, and attractions for each day. Format a
             "walkingMinutes": 15,
             "distanceKm": 1.2,
             "description": "15 min walk through the Gothic Quarter"
-          }
+          },
+          "culinaryMoment": null,
+          "culinaryType": null,
+          "whyThisFits": null,
+          "priceRange": null,
+          "walkability": null,
+          "culinaryTags": null
+        },
+        {
+          "time": "12:30",
+          "startTime": "12:30",
+          "endTime": "13:30",
+          "title": "Restaurant name",
+          "description": "Brief description of the food spot",
+          "address": "Street name, neighborhood, ${trip.destination}",
+          "type": "restaurant",
+          "price": 18,
+          "currency": "EUR",
+          "durationMinutes": 60,
+          "duration": "1 hour",
+          "tips": "Try their house special",
+          "isLocalExperience": false,
+          "travelFromPrevious": {
+            "walkingMinutes": 8,
+            "distanceKm": 0.6,
+            "description": "Short walk down the main boulevard"
+          },
+          "culinaryMoment": "midday",
+          "culinaryType": "lunch",
+          "whyThisFits": "Refuel with local comfort food after a morning of exploring",
+          "priceRange": "€€",
+          "walkability": "nearby",
+          "culinaryTags": ["local", "casual", "quick-bite"]
         }
       ]
     }
@@ -663,9 +745,29 @@ Include specific activities, restaurants, and attractions for each day. Format a
 
 **REMINDER: ${timeAwareGuidance.skipLastDay 
     ? `Generate Days 1-${effectiveTripDays} with activities. Day ${tripDays} is departure-only with no activities.` 
-    : `Generate ALL ${tripDays} days from Day 1 to Day ${tripDays}.`} Each full day MUST have EXACTLY ${budgetGuidance.budgetTier === 'low' ? '2' : budgetGuidance.budgetTier === 'moderate' ? '3' : budgetGuidance.budgetTier === 'high' ? '4' : '5'} total items (activities + meals combined). Do NOT exceed this number. Partial days (arrival/departure) should have fewer items.**
+    : `Generate ALL ${tripDays} days from Day 1 to Day ${tripDays}.`}${timeAwareGuidance.firstDayStartTime ? ` Day 1 is an ARRIVAL day — first activity must start at "${timeAwareGuidance.firstDayStartTime}" or later, with FEWER items than a full day. Do NOT put a morning café/bakery on Day 1 unless the buffered start time is before 10:00.` : ''} Each full day (NOT arrival/departure days) MUST have EXACTLY ${
+        hasCulinaryInterest 
+            ? (budgetGuidance.budgetTier === 'low' ? '3' : budgetGuidance.budgetTier === 'moderate' ? '4' : budgetGuidance.budgetTier === 'high' ? '5' : '6')
+            : (budgetGuidance.budgetTier === 'low' ? '2' : budgetGuidance.budgetTier === 'moderate' ? '3' : budgetGuidance.budgetTier === 'high' ? '4' : '5')
+    } total items (${hasCulinaryInterest ? '1 morning café/bakery + ' : ''}activities + dinner). ${hasCulinaryInterest ? 'On FULL days (not arrival/departure), the first item must be a café or bakery. On arrival day, skip the morning café. ' : ''}Do NOT exceed this number. Arrival day and departure day are PARTIAL days and should have FEWER items (1-2 max).**
 
-**BUDGET COMPLIANCE:** This is a ${budgetGuidance.budgetTier.toUpperCase()} budget trip (€${budgetGuidance.dailyBudgetPerPerson}/person/day). ${budgetGuidance.budgetTier === 'low' ? 'HARD LIMIT: 2 items per day (activities + meals). Maximum 1 paid activity. Prioritize free attractions and affordable food.' : budgetGuidance.budgetTier === 'moderate' ? 'HARD LIMIT: 3 items per day (activities + meals). Do NOT add more than 3. Balance quality and value at around €' + budgetGuidance.dailyBudgetPerPerson + ' per person daily.' : budgetGuidance.budgetTier === 'high' ? 'Target 4 items per day (activities + meals). Include guided tours and unique experiences. Daily spend up to €' + budgetGuidance.dailyBudgetPerPerson + ' per person.' : 'Target 5 curated items per day (activities + meals). Include exclusive activities and fine dining. Daily spend up to €' + budgetGuidance.dailyBudgetPerPerson + ' per person.'}
+**BUDGET COMPLIANCE:** This is a ${budgetGuidance.budgetTier.toUpperCase()} budget trip (€${budgetGuidance.dailyBudgetPerPerson}/person/day). ${
+    budgetGuidance.budgetTier === 'low' 
+        ? (hasCulinaryInterest 
+            ? 'HARD LIMIT: 3 items per day (1 morning café + 1 activity + 1 dinner). The morning café is a quick €3-5 coffee/pastry — always include it. Maximum 1 paid activity. Prioritize free attractions and affordable food.' 
+            : 'HARD LIMIT: 2 items per day (1 activity + 1 dinner). Maximum 1 paid activity. ALWAYS include a dinner restaurant in the evening. Prioritize free attractions and affordable food.')
+    : budgetGuidance.budgetTier === 'moderate' 
+        ? (hasCulinaryInterest 
+            ? 'HARD LIMIT: 4 items per day (1 morning café/bakery + 2 activities + 1 dinner). The morning café is a quick €4-8 stop — always include it. Do NOT add more than 4 total. Balance quality and value at around €' + budgetGuidance.dailyBudgetPerPerson + ' per person daily.'
+            : 'HARD LIMIT: 3 items per day (2 activities + 1 dinner). ALWAYS include a dinner restaurant in the evening. Do NOT add more than 3 total. Balance quality and value at around €' + budgetGuidance.dailyBudgetPerPerson + ' per person daily.')
+    : budgetGuidance.budgetTier === 'high' 
+        ? (hasCulinaryInterest 
+            ? 'Target 5 items per day (1 morning café/bakery + 3 activities + 1 dinner). Include guided tours and unique experiences. Daily spend up to €' + budgetGuidance.dailyBudgetPerPerson + ' per person.'
+            : 'Target 4 items per day (3 activities + 1 dinner). Include guided tours and unique experiences. Daily spend up to €' + budgetGuidance.dailyBudgetPerPerson + ' per person.')
+    : (hasCulinaryInterest 
+        ? 'Target 6 curated items per day (1 morning café/bakery + 3-4 activities + 1-2 dining experiences). Include exclusive activities and fine dining. Daily spend up to €' + budgetGuidance.dailyBudgetPerPerson + ' per person.'
+        : 'Target 5 curated items per day (3-4 activities + 1-2 dining experiences). Include exclusive activities and fine dining. Daily spend up to €' + budgetGuidance.dailyBudgetPerPerson + ' per person.')
+    }
 
 Make sure prices are realistic for ${trip.destination} and aligned with the ${budgetGuidance.budgetTier.toUpperCase()} budget tier. Distribute spending evenly across days. Museums typically cost €10-25, skip-the-line adds €5-15. Tours cost €20-80. Restaurants show average meal cost per person.`;
                     
@@ -680,12 +782,12 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                     
                     // Build system prompt with time-awareness and budget awareness
                     const budgetSystemNote = budgetGuidance.budgetTier === 'low'
-                        ? ' Prioritize free and budget-friendly options. Maximum 2 paid activities per day. Avoid expensive tours or premium experiences.'
+                        ? ` Prioritize free and budget-friendly options.${hasCulinaryInterest ? ' Always start each day with a morning café/bakery.' : ''} Maximum 1 paid activity per day. ALWAYS include a dinner in the evening. Avoid expensive tours or premium experiences.`
                         : budgetGuidance.budgetTier === 'moderate'
-                        ? ' Provide balanced recommendations with good value experiences. STRICTLY 3 total items per day (2 activities + 1 meal). Do not exceed 3.'
+                        ? ` Provide balanced recommendations with good value experiences.${hasCulinaryInterest ? ' Always start each day with a morning café/bakery.' : ''} STRICTLY ${hasCulinaryInterest ? '4' : '3'} total items per day (${hasCulinaryInterest ? '1 café + ' : ''}2 activities + 1 dinner). ALWAYS include a dinner in the evening. Do not exceed ${hasCulinaryInterest ? '4' : '3'}.`
                         : budgetGuidance.budgetTier === 'high'
-                        ? ' Include guided tours, unique experiences, and higher-quality venues. Suggest 3-4 activities per day with convenience optimization.'
-                        : ' Curate 4-5 premium experiences per day. Include exclusive activities, fine dining, and time-efficient routing. Focus on comfort and quality.';
+                        ? ` Include guided tours, unique experiences, and higher-quality venues.${hasCulinaryInterest ? ' Always start each day with a morning café/bakery.' : ''} Suggest ${hasCulinaryInterest ? '5' : '4'} items per day with convenience optimization.`
+                        : ` Curate ${hasCulinaryInterest ? '6' : '5'} premium items per day (${hasCulinaryInterest ? '1 morning café + ' : ''}3-4 experiences + 1-2 dining).${hasCulinaryInterest ? ' Always start each day with a curated morning café/bakery.' : ''} Include exclusive activities, fine dining, and time-efficient routing. Focus on comfort and quality.`;
                     
                     const systemPrompt = timeAwareGuidance.skipLastDay
                         ? `You are a travel itinerary planner. Return only valid JSON. Always include realistic prices and booking information for activities. IMPORTANT: Generate ${effectiveTripDays} days of activities (Days 1-${effectiveTripDays}). Day ${tripDays} is departure day with no activities. Respect arrival and departure time constraints.${budgetSystemNote} The traveler's budget tier is ${budgetGuidance.budgetTier.toUpperCase()} (€${budgetGuidance.dailyBudgetPerPerson}/person/day). All recommendations must respect this budget.`
@@ -738,6 +840,26 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                         
                         // Merge TripAdvisor data into restaurant activities
                         dayByDayItinerary = mergeRestaurantDataIntoItinerary(dayByDayItinerary, restaurants);
+                        
+                        // POST-PROCESSING: Enforce arrival day buffer
+                        // Even if the AI ignores the prompt, we fix Day 1 activities that start too early
+                        if (timeAwareGuidance.firstDayStartTime && dayByDayItinerary.length > 0) {
+                            const bufferTime = timeAwareGuidance.firstDayStartTime; // e.g., "18:00"
+                            const day1 = dayByDayItinerary[0];
+                            if (day1 && day1.activities) {
+                                const originalCount = day1.activities.length;
+                                day1.activities = day1.activities.filter((activity: any) => {
+                                    const actStartTime = activity.startTime || activity.time;
+                                    if (!actStartTime) return true;
+                                    // Compare time strings "HH:MM" — remove activities before the buffer
+                                    return actStartTime >= bufferTime;
+                                });
+                                const removed = originalCount - day1.activities.length;
+                                if (removed > 0) {
+                                    console.log(`🛡️ Arrival buffer enforced: removed ${removed} Day 1 activities before ${bufferTime}`);
+                                }
+                            }
+                        }
                     } else {
                         console.warn("⚠️ OpenAI returned empty content, using fallback");
                         dayByDayItinerary = generateBasicItinerary(trip, activities, restaurants);
@@ -1809,6 +1931,12 @@ interface ItineraryActivity {
     cuisine?: string | null;
     priceRange?: string | null;
     address?: string | null;
+    // Culinary experience fields
+    culinaryMoment?: string | null;
+    culinaryType?: string | null;
+    whyThisFits?: string | null;
+    walkability?: string | null;
+    culinaryTags?: string[] | null;
 }
 
 interface RestaurantInfo {
@@ -1901,6 +2029,12 @@ function mergeRestaurantDataIntoItinerary(dayByDayItinerary: ItineraryDay[], res
                         title: matchedRestaurant.name || activity.title,
                         // Update description to include cuisine info
                         description: activity.description || `${matchedRestaurant.cuisine || "Local"} cuisine - ${matchedRestaurant.priceRange || "€€"}`,
+                        // Preserve culinary fields from AI generation
+                        culinaryMoment: activity.culinaryMoment || null,
+                        culinaryType: activity.culinaryType || null,
+                        whyThisFits: activity.whyThisFits || null,
+                        walkability: activity.walkability || null,
+                        culinaryTags: activity.culinaryTags || null,
                     };
                     mergedCount++;
                 }
@@ -1917,17 +2051,42 @@ interface TripData {
     destination: string;
     startDate: number;
     endDate: number;
+    interests?: string[];
 }
 
 function generateBasicItinerary(trip: TripData, activities: Array<{ title?: string }>, restaurants: RestaurantInfo[]) {
     const days = Math.ceil((trip.endDate - trip.startDate) / (24 * 60 * 60 * 1000));
     const dailyPlan = [];
+    const hasCulinary = (trip.interests || []).some(i => i === 'Food' || i === 'Culinary');
     
     // Get destination-specific activities with prices
     const destActivities = getActivitiesWithPrices(trip.destination);
     
     for (let i = 0; i < days; i++) {
         const dayActivities: ItineraryActivity[] = [];
+        
+        // Morning café/bakery — only if Culinary interest selected
+        if (hasCulinary) {
+            dayActivities.push({
+                time: "8:30 AM",
+                title: `Morning Coffee & Pastry`,
+                description: `Start the day at a local café in ${trip.destination}`,
+                type: "restaurant",
+                price: 5,
+                currency: "EUR",
+                skipTheLine: false,
+                skipTheLinePrice: null,
+                duration: "30 min",
+                bookingUrl: null,
+                tips: "Ask the barista for their specialty",
+                culinaryMoment: "morning",
+                culinaryType: "cafe",
+                whyThisFits: "Ease into the day like a local with coffee and a fresh pastry",
+                priceRange: "€",
+                walkability: "nearby",
+                culinaryTags: ["local", "casual", "quick-bite"],
+            });
+        }
         
         // Morning activity
         const morningActivity = destActivities[i % destActivities.length];
@@ -1959,6 +2118,12 @@ function generateBasicItinerary(trip: TripData, activities: Array<{ title?: stri
             duration: "1-1.5 hours",
             bookingUrl: null,
             tips: "Reservations recommended",
+            culinaryMoment: "midday",
+            culinaryType: "lunch",
+            whyThisFits: "A solid midday stop to refuel after the morning",
+            priceRange: lunchRestaurant?.priceRange || "€€",
+            walkability: "nearby",
+            culinaryTags: ["local", "casual"],
         };
         
         // Add TripAdvisor data if available
@@ -2004,6 +2169,12 @@ function generateBasicItinerary(trip: TripData, activities: Array<{ title?: stri
             duration: "2 hours",
             bookingUrl: null,
             tips: "Try local specialties",
+            culinaryMoment: "evening",
+            culinaryType: "dinner",
+            whyThisFits: "Wind down the day with a proper dinner",
+            priceRange: dinnerRestaurant?.priceRange || "€€",
+            walkability: "short-walk",
+            culinaryTags: ["local", "casual"],
         };
         
         // Add TripAdvisor data if available
