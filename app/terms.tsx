@@ -23,14 +23,19 @@ export default function TermsScreen() {
                 <TouchableOpacity onPress={() => router.back()}>
                     <Ionicons name="arrow-back" size={24} color={COLORS.text} />
                 </TouchableOpacity>
-                <Text style={styles.headerTitle}>Terms & Conditions</Text>
+                <Text style={styles.headerTitle}>Terms of Use (EULA)</Text>
                 <View style={{ width: 24 }} />
             </View>
 
             <ScrollView style={styles.content} contentContainerStyle={styles.scrollContent}>
                 <Text style={styles.lastUpdated}>Last updated: January 2026</Text>
 
-                <Text style={styles.sectionTitle}>Planera – Terms & Conditions</Text>
+                <Text style={styles.sectionTitle}>Planera – Terms of Use (EULA)
+</Text>
+
+                <Text style={styles.paragraph}>
+                    These Terms constitute the Terms of Use (End User License Agreement – EULA) for the Planera iOS mobile application.
+                </Text>
 
                 <Text style={styles.paragraph}>
                     Welcome to <Text style={styles.bold}>Planera</Text>. These Terms & Conditions ("Terms") govern your access to and use of the Planera mobile application, website, and related services (collectively, the "Service"). By accessing or using Planera, you agree to be bound by these Terms. If you do not agree, please do not use the Service.

@@ -372,7 +372,7 @@ export default function FlightReviewScreen() {
         <View style={styles.termsNotice}>
           <Text style={styles.termsText}>
             By completing this booking, you agree to the airline's terms and conditions
-            and Planera's terms of service.
+            and Planera's Terms of Use (EULA).
           </Text>
         </View>
 

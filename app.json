@@ -18,7 +18,8 @@
       "newArchEnabled": true,
       "bundleIdentifier": "com.dstroump.planeraaitravelplanner",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSPhotoLibraryUsageDescription": "Planera needs access to your photo library so you can select a photo for your profile."
       },
       "splash": {
         "image": "./assets/images/appicon-1024x1024-01-9h6cls.jpg",

@@ -948,3 +948,108 @@ export const checkEntitlements = authQuery({
         };
     },
 });
+
+// ---- DELETE ACCOUNT ----
+// Permanently deletes user account and all associated data
+export const deleteAccount = authMutation({
+    args: {
+        token: v.string(),
+    },
+    handler: async (ctx: any) => {
+        const userId = ctx.user._id; // userSettings doc ID used across tables
+        const userIdString = ctx.user.userId; // original auth userId string (used in sessions)
+
+        console.log("[deleteAccount] Starting account deletion for userId:", userId);
+
+        // Helper to delete all docs matching a query
+        const deleteAll = async (tableName: string, indexName: string, indexValue: string) => {
+            const docs = await ctx.db
+                .query(tableName)
+                .withIndex(indexName, (q: any) => q.eq("userId", indexValue))
+                .collect();
+            for (const doc of docs) {
+                await ctx.db.delete(doc._id);
+            }
+            return docs.length;
+        };
+
+        // 1. Delete trips
+        const tripsDeleted = await deleteAll("trips", "by_user", userId);
+        console.log(`[deleteAccount] Deleted ${tripsDeleted} trips`);
+
+        // 2. Delete userPlans
+        const plansDeleted = await deleteAll("userPlans", "by_user", userId);
+        // Also try with auth userId string in case of legacy records
+        const plansDeletedLegacy = await deleteAll("userPlans", "by_user", userIdString);
+        console.log(`[deleteAccount] Deleted ${plansDeleted + plansDeletedLegacy} userPlans`);
+
+        // 3. Delete bookings
+        const bookingsDeleted = await deleteAll("bookings", "by_user", userId);
+        console.log(`[deleteAccount] Deleted ${bookingsDeleted} bookings`);
+
+        // 4. Delete flight bookings
+        const flightBookingsDeleted = await deleteAll("flightBookings", "by_user", userId);
+        console.log(`[deleteAccount] Deleted ${flightBookingsDeleted} flightBookings`);
+
+        // 5. Delete flight booking drafts
+        const draftsDeleted = await deleteAll("flightBookingDrafts", "by_user", userId);
+        console.log(`[deleteAccount] Deleted ${draftsDeleted} flightBookingDrafts`);
+
+        // 6. Delete travelers
+        const travelersDeleted = await deleteAll("travelers", "by_user", userId);
+        console.log(`[deleteAccount] Deleted ${travelersDeleted} travelers`);
+
+        // 7. Delete insights
+        const insightsDeleted = await deleteAll("insights", "by_user", userId);
+        console.log(`[deleteAccount] Deleted ${insightsDeleted} insights`);
+
+        // 8. Delete insight likes
+        const likesDeleted = await deleteAll("insightLikes", "by_user", userId);
+        console.log(`[deleteAccount] Deleted ${likesDeleted} insightLikes`);
+
+        // 9. Delete dismissed trips
+        const dismissedDeleted = await deleteAll("dismissedTrips", "by_user", userId);
+        console.log(`[deleteAccount] Deleted ${dismissedDeleted} dismissedTrips`);
+
+        // 10. Delete events
+        const eventsDeleted = await deleteAll("events", "by_user", userId);
+        console.log(`[deleteAccount] Deleted ${eventsDeleted} events`);
+
+        // 11. Delete IAP transactions
+        const iapDeleted = await deleteAll("iapTransactions", "by_user", userId);
+        console.log(`[deleteAccount] Deleted ${iapDeleted} iapTransactions`);
+
+        // 12. Delete sessions (uses auth userId string)
+        const sessionsDeleted = await deleteAll("sessions", "by_user", userIdString);
+        console.log(`[deleteAccount] Deleted ${sessionsDeleted} sessions`);
+
+        // 13. Delete password reset codes (by email)
+        if (ctx.user.email) {
+            const resetCodes = await ctx.db
+                .query("passwordResetCodes")
+                .withIndex("by_email", (q: any) => q.eq("email", ctx.user.email.toLowerCase()))
+                .collect();
+            for (const code of resetCodes) {
+                await ctx.db.delete(code._id);
+            }
+            console.log(`[deleteAccount] Deleted ${resetCodes.length} passwordResetCodes`);
+        }
+
+        // 14. Delete profile picture from storage if exists
+        if (ctx.user.profilePicture) {
+            try {
+                await ctx.storage.delete(ctx.user.profilePicture);
+                console.log("[deleteAccount] Deleted profile picture from storage");
+            } catch (e) {
+                console.log("[deleteAccount] Could not delete profile picture:", e);
+            }
+        }
+
+        // 15. Delete the userSettings record itself (must be last)
+        await ctx.db.delete(ctx.user._id);
+        console.log("[deleteAccount] Deleted userSettings record");
+
+        console.log("[deleteAccount] Account deletion complete");
+        return { success: true };
+    },
+});

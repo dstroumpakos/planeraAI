@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, ActivityIndicator, Linking } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useMutation, useQuery } from "convex/react";
@@ -317,12 +317,12 @@ export default function SubscriptionScreen() {
                 </Text>
 
                 <View style={styles.linksRow}>
-                    <TouchableOpacity onPress={() => router.push("/privacy")}>
+                    <TouchableOpacity onPress={() => Linking.openURL("https://www.planeraai.app/privacy")}>
                         <Text style={[styles.linkText, { color: colors.textSecondary }]}>Privacy Policy</Text>
                     </TouchableOpacity>
                     <Text style={[styles.linkDot, { color: colors.textMuted }]}>•</Text>
-                    <TouchableOpacity onPress={() => router.push("/terms")}>
-                        <Text style={[styles.linkText, { color: colors.textSecondary }]}>Terms of Service</Text>
+                    <TouchableOpacity onPress={() => Linking.openURL("https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")}>
+                        <Text style={[styles.linkText, { color: colors.textSecondary }]}>Terms of Use (EULA)</Text>
                     </TouchableOpacity>
                 </View>
 

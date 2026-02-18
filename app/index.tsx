@@ -1,4 +1,4 @@
-import { Text, View, StyleSheet, Image, TouchableOpacity, ActivityIndicator, TextInput, Alert, ScrollView, KeyboardAvoidingView, Platform, StatusBar } from "react-native";
+import { Text, View, StyleSheet, Image, TouchableOpacity, ActivityIndicator, TextInput, Alert, ScrollView, KeyboardAvoidingView, Platform, StatusBar, Linking } from "react-native";
 import { useConvexAuth } from "@/lib/auth-components";
 import { authClient } from "@/lib/auth-client";
 import { useToken } from "@/lib/useAuthenticatedMutation";
@@ -422,7 +422,7 @@ export default function Index() {
                 )}
                 
                 <Text style={styles.termsText}>
-                    By continuing, you agree to our <Text style={styles.termsLink} onPress={() => router.push("/terms")}>Terms of Service</Text> and{"\n"}<Text style={styles.termsLink} onPress={() => router.push("/privacy")}>Privacy Policy</Text>.
+                    By continuing, you agree to our <Text style={styles.termsLink} onPress={() => Linking.openURL("https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")}>Terms of Use (EULA)</Text> and{"\n"}<Text style={styles.termsLink} onPress={() => Linking.openURL("https://www.planeraai.app/privacy")}>Privacy Policy</Text>.
                 </Text>
             </ScrollView>
         </KeyboardAvoidingView>

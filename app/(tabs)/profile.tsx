@@ -61,6 +61,8 @@ export default function Profile() {
     const createInsight = useAuthenticatedMutation(api.insights.create as any);
     const dismissTrip = useAuthenticatedMutation(api.insights.dismissTrip as any);
     
+    const deleteAccount = useAuthenticatedMutation(api.users.deleteAccount as any);
+    
     const { isDarkMode, toggleDarkMode, colors } = useTheme();
     const [menuVisible, setMenuVisible] = useState(false);
     const [uploading, setUploading] = useState(false);
@@ -96,6 +98,44 @@ export default function Profile() {
             // Still try to redirect even if signOut fails
             router.replace("/");
         }
+    };
+
+    const handleDeleteAccount = () => {
+        Alert.alert(
+            "Delete Account",
+            "Are you sure you want to permanently delete your account? This will remove all your trips, bookings, settings, and personal data. This action cannot be undone.",
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Delete Account",
+                    style: "destructive",
+                    onPress: () => {
+                        // Second confirmation
+                        Alert.alert(
+                            "Final Confirmation",
+                            "This is irreversible. All your data will be permanently deleted. Are you absolutely sure?",
+                            [
+                                { text: "Cancel", style: "cancel" },
+                                {
+                                    text: "Yes, Delete Everything",
+                                    style: "destructive",
+                                    onPress: async () => {
+                                        try {
+                                            await deleteAccount({});
+                                            await authClient.signOut();
+                                            router.replace("/");
+                                        } catch (error) {
+                                            console.error("Account deletion failed:", error);
+                                            Alert.alert("Error", "Failed to delete account. Please try again or contact support@planeraai.app.");
+                                        }
+                                    },
+                                },
+                            ]
+                        );
+                    },
+                },
+            ]
+        );
     };
 
     const handleToggleDarkMode = async () => {
@@ -352,23 +392,23 @@ export default function Profile() {
                             style={styles.menuDropdownItem}
                             onPress={() => {
                                 setMenuVisible(false);
-                                router.push("/privacy");
+                                Linking.openURL("https://www.planeraai.app/privacy");
                             }}
                         >
                             <Ionicons name="shield-checkmark-outline" size={20} color={colors.text} />
                             <Text style={styles.menuDropdownText}>Privacy Policy</Text>
                         </TouchableOpacity>
 
-                        {/* Terms of Service */}
+                        {/* Terms of Use (EULA) */}
                         <TouchableOpacity 
                             style={styles.menuDropdownItem}
                             onPress={() => {
                                 setMenuVisible(false);
-                                router.push("/terms");
+                                Linking.openURL("https://www.apple.com/legal/internet-services/itunes/dev/stdeula/");
                             }}
                         >
                             <Ionicons name="document-text-outline" size={20} color={colors.text} />
-                            <Text style={styles.menuDropdownText}>Terms of Service</Text>
+                            <Text style={styles.menuDropdownText}>Terms of Use (EULA)</Text>
                         </TouchableOpacity>
                     </View>
                 </TouchableOpacity>
@@ -673,6 +713,12 @@ export default function Profile() {
                         <Text style={styles.helpText}>Log Out</Text>
                     </TouchableOpacity>
                 </View>
+
+                {/* Delete Account */}
+                <TouchableOpacity style={styles.deleteAccountButton} onPress={handleDeleteAccount}>
+                    <Ionicons name="trash-outline" size={18} color="#FF3B30" />
+                    <Text style={styles.deleteAccountText}>Delete Account</Text>
+                </TouchableOpacity>
 
                 {/* Version */}
                 <Text style={styles.versionText}>PLANERA V{Constants.expoConfig?.version || '1.0.0'}</Text>
@@ -1331,5 +1377,19 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
     insightSubmitText: {
         fontSize: 16,
         fontWeight: "700",
+    },
+    deleteAccountButton: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        paddingVertical: 14,
+        marginTop: 12,
+        marginBottom: 8,
+        gap: 8,
+    },
+    deleteAccountText: {
+        fontSize: 14,
+        color: "#FF3B30",
+        fontWeight: "600",
     },
 });
