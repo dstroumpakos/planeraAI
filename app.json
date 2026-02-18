@@ -14,7 +14,7 @@
       "backgroundColor": "#FAF9F6"
     },
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "newArchEnabled": true,
       "bundleIdentifier": "com.dstroump.planeraaitravelplanner",
       "infoPlist": {
