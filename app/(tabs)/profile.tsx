@@ -2,6 +2,8 @@ import { View, Text, StyleSheet, TouchableOpacity, Alert, ScrollView, Modal, Pla
 import { Image } from "expo-image";
 import { authClient } from "@/lib/auth-client";
 import { useRouter } from "expo-router";
+import { useNavigation } from "@react-navigation/native";
+import { CommonActions } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useQuery } from "convex/react";
@@ -26,6 +28,7 @@ const INSIGHT_CATEGORIES = [
 
 export default function Profile() {
     const router = useRouter();
+    const navigation = useNavigation();
     const { data: session } = authClient.useSession();
     const { token } = useToken();
     const trips = useQuery(api.trips.list as any, { token: token || "skip" });
@@ -85,19 +88,28 @@ export default function Profile() {
     // @ts-ignore
     const updateUserName = useAuthenticatedMutation(api.users.updateUserName as any);
 
+    const navigateToLogin = () => {
+        // Get the root navigator (Stack) and reset it to the login screen
+        const rootNav = navigation.getParent();
+        if (rootNav) {
+            rootNav.dispatch(
+                CommonActions.reset({
+                    index: 0,
+                    routes: [{ name: "index" }],
+                })
+            );
+        } else {
+            router.replace("/");
+        }
+    };
+
     const handleLogout = async () => {
         try {
             await authClient.signOut();
-            // Clear any cached data and redirect to login
-            router.replace("/");
         } catch (error) {
             console.error("Logout failed:", error);
-            if (Platform.OS !== 'web') {
-                Alert.alert("Error", "Failed to log out. Please try again.");
-            }
-            // Still try to redirect even if signOut fails
-            router.replace("/");
         }
+        navigateToLogin();
     };
 
     const handleDeleteAccount = () => {
@@ -123,11 +135,12 @@ export default function Profile() {
                                         try {
                                             await deleteAccount({});
                                             await authClient.signOut();
-                                            router.replace("/");
                                         } catch (error) {
                                             console.error("Account deletion failed:", error);
                                             Alert.alert("Error", "Failed to delete account. Please try again or contact support@planeraai.app.");
+                                            return;
                                         }
+                                        navigateToLogin();
                                     },
                                 },
                             ]

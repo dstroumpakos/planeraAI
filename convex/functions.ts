@@ -95,7 +95,14 @@ export const authQuery: any = (config: any) => {
       }
       
       // Validate token directly from database
-      const user: any = await validateTokenDirect(ctx, token);
+      // Return null gracefully if session is invalid (e.g. after logout/account deletion)
+      let user: any;
+      try {
+        user = await validateTokenDirect(ctx, token);
+      } catch (e) {
+        console.log("[authQuery] Token validation failed, returning null");
+        return null;
+      }
       console.log("[authQuery] User authenticated:", user?.userId || user?._id);
       
       // Inject user into context for the handler

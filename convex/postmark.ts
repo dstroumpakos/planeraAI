@@ -524,3 +524,129 @@ export const sendWelcomeEmail = internalAction({
     }
   },
 });
+
+/**
+ * Send account deletion confirmation email via Postmark
+ */
+export const sendAccountDeletionEmail = internalAction({
+  args: {
+    to: v.string(),
+    name: v.string(),
+  },
+  returns: v.object({
+    success: v.boolean(),
+    error: v.optional(v.string()),
+  }),
+  handler: async (ctx, args) => {
+    const apiToken = process.env.POSTMARK_SERVER_TOKEN;
+
+    if (!apiToken) {
+      console.error("❌ [POSTMARK] POSTMARK_SERVER_TOKEN not set, skipping deletion email");
+      return { success: false, error: "POSTMARK_SERVER_TOKEN not set" };
+    }
+
+    try {
+      const userName = args.name || "there";
+      console.log(`📧 [POSTMARK] Sending account deletion email to ${args.to}`);
+
+      const htmlBody = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1A1A1A; line-height: 1.6; padding: 0; margin: 0; background-color: #FAF9F6; }
+    .container { max-width: 560px; margin: 0 auto; padding: 40px 24px; }
+    .header { text-align: center; margin-bottom: 32px; }
+    .logo { font-size: 28px; font-weight: 800; color: #1A1A1A; }
+    .logo span { color: #FFE500; }
+    h1 { font-size: 22px; font-weight: 700; margin: 0 0 16px; }
+    p { font-size: 15px; color: #6B6B6B; margin: 0 0 16px; }
+    .highlight { background: #FFF9C4; padding: 16px 20px; border-radius: 12px; margin: 24px 0; }
+    .highlight p { color: #1A1A1A; margin: 0; font-size: 14px; }
+    .footer { margin-top: 40px; padding-top: 24px; border-top: 1px solid #E8E6E1; text-align: center; }
+    .footer p { font-size: 12px; color: #9B9B9B; }
+    a { color: #1A1A1A; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="logo">Planera<span>.</span></div>
+    </div>
+    <h1>Your account has been deleted</h1>
+    <p>Hi ${userName},</p>
+    <p>We're confirming that your Planera account and all associated data have been permanently deleted as requested.</p>
+    <div class="highlight">
+      <p><strong>What was deleted:</strong></p>
+      <p>• Your profile and account settings</p>
+      <p>• All saved trips and itineraries</p>
+      <p>• Booking history and traveler profiles</p>
+      <p>• Insights and preferences</p>
+      <p>• Session and authentication data</p>
+    </div>
+    <p>This action is irreversible. If you'd like to use Planera again in the future, you're welcome to create a new account.</p>
+    <p>If you did not request this deletion, please contact us immediately at <a href="mailto:support@planeraai.app">support@planeraai.app</a>.</p>
+    <p>We're sorry to see you go. Thank you for being part of Planera.</p>
+    <div class="footer">
+      <p>Planera – Travel smarter. Plan better.</p>
+      <p>&copy; ${new Date().getFullYear()} Planera. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>`;
+
+      const textBody = `Your Planera Account Has Been Deleted
+
+Hi ${userName},
+
+We're confirming that your Planera account and all associated data have been permanently deleted as requested.
+
+What was deleted:
+- Your profile and account settings
+- All saved trips and itineraries
+- Booking history and traveler profiles
+- Insights and preferences
+- Session and authentication data
+
+This action is irreversible. If you'd like to use Planera again in the future, you're welcome to create a new account.
+
+If you did not request this deletion, please contact us immediately at support@planeraai.app.
+
+We're sorry to see you go. Thank you for being part of Planera.
+
+Planera – Travel smarter. Plan better.`;
+
+      const response = await fetch("https://api.postmarkapp.com/email", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "X-Postmark-Server-Token": apiToken,
+        },
+        body: JSON.stringify({
+          From: SENDER_EMAIL,
+          To: args.to,
+          Subject: "Your Planera account has been deleted",
+          HtmlBody: htmlBody,
+          TextBody: textBody,
+          MessageStream: MESSAGE_STREAM,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        console.error(`❌ [POSTMARK] Account deletion email error (${response.status}):`, result);
+        return { success: false, error: result.Message || `HTTP ${response.status}` };
+      }
+
+      console.log(`✅ [POSTMARK] Account deletion email sent to ${args.to} - MessageID: ${result.MessageID}`);
+      return { success: true };
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      console.error("❌ [POSTMARK] Account deletion email error:", errorMessage);
+      return { success: false, error: errorMessage };
+    }
+  },
+});

@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { authMutation, authQuery } from "./functions";
 import { isSubscriptionActiveWithGrace, BILLING_GRACE_PERIOD_MS } from "./helpers/subscription";
 
@@ -958,6 +959,8 @@ export const deleteAccount = authMutation({
     handler: async (ctx: any) => {
         const userId = ctx.user._id; // userSettings doc ID used across tables
         const userIdString = ctx.user.userId; // original auth userId string (used in sessions)
+        const userEmail = ctx.user.email;
+        const userName = ctx.user.name || "";
 
         console.log("[deleteAccount] Starting account deletion for userId:", userId);
 
@@ -1048,6 +1051,15 @@ export const deleteAccount = authMutation({
         // 15. Delete the userSettings record itself (must be last)
         await ctx.db.delete(ctx.user._id);
         console.log("[deleteAccount] Deleted userSettings record");
+
+        // 16. Send account deletion confirmation email
+        if (userEmail) {
+            await ctx.scheduler.runAfter(0, internal.postmark.sendAccountDeletionEmail, {
+                to: userEmail,
+                name: userName,
+            });
+            console.log(`[deleteAccount] Scheduled deletion confirmation email to ${userEmail}`);
+        }
 
         console.log("[deleteAccount] Account deletion complete");
         return { success: true };

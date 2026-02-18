@@ -50,6 +50,9 @@ const SHIMS = {
   // @better-auth/expo
   "@better-auth/expo": path.resolve(__dirname, "shims/better-auth-expo.native.js"),
   "@better-auth/expo/client": path.resolve(__dirname, "shims/better-auth-expo.native.js"),
+  
+  // Google Sign-In (not used on iOS - shim to prevent native module crash)
+  "@react-native-google-signin/google-signin": path.resolve(__dirname, "shims/google-signin.native.js"),
 };
 
 const EMPTY_SHIM = path.resolve(__dirname, "shims/empty-module.native.js");
