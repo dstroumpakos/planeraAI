@@ -13,14 +13,17 @@ import {
     Keyboard,
     ScrollView,
     Animated,
+    Alert,
 } from "react-native";
 import { useToken, useAuthenticatedAction } from "@/lib/useAuthenticatedMutation";
+import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "@/lib/ThemeContext";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
+import AIConsentModal from "@/components/AIConsentModal";
 
 // Animated typing dots component
 const TypingIndicator = ({ colors }: { colors: any }) => {
@@ -690,6 +693,13 @@ export default function AtlasScreen() {
     const flatListRef = useRef<FlatList>(null);
     const atlasChat = useAuthenticatedAction(api.atlas.chat, token);
     
+    // AI data consent (Apple guideline 5.1.1/5.1.2)
+    // @ts-ignore
+    const userSettings = useQuery(api.users.getSettings as any, { token: token || "skip" }) as any;
+    const updateAiConsent = useMutation(api.users.updateAiConsent);
+    const [showAiConsentModal, setShowAiConsentModal] = useState(false);
+    const [pendingMessage, setPendingMessage] = useState<string | null>(null);
+    
     const [messages, setMessages] = useState<Message[]>([]);
     const [inputText, setInputText] = useState("");
     const [isLoading, setIsLoading] = useState(false);
@@ -707,6 +717,13 @@ export default function AtlasScreen() {
     const sendMessage = async (text?: string) => {
         const messageText = text || inputText.trim();
         if (!messageText || isLoading) return;
+
+        // Check AI data consent before sending to OpenAI (Apple guideline 5.1.1/5.1.2)
+        if (userSettings && userSettings.aiDataConsent !== true) {
+            setPendingMessage(messageText);
+            setShowAiConsentModal(true);
+            return;
+        }
 
         if (Platform.OS !== 'web') {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -943,6 +960,35 @@ export default function AtlasScreen() {
                     </View>
                 </KeyboardAvoidingView>
             </SafeAreaView>
+
+            {/* AI Data Consent Modal */}
+            <AIConsentModal
+                visible={showAiConsentModal}
+                colors={colors}
+                onAccept={async () => {
+                    try {
+                        await updateAiConsent({ token: token || "", aiDataConsent: true });
+                        setShowAiConsentModal(false);
+                        // Re-send the pending message after consent
+                        if (pendingMessage) {
+                            const msg = pendingMessage;
+                            setPendingMessage(null);
+                            // Small delay to let userSettings re-query
+                            setTimeout(() => sendMessage(msg), 300);
+                        }
+                    } catch (e) {
+                        console.error("Failed to save AI consent:", e);
+                    }
+                }}
+                onDecline={() => {
+                    setShowAiConsentModal(false);
+                    setPendingMessage(null);
+                    Alert.alert(
+                        "AI Features Disabled",
+                        "Atlas requires AI data processing to work. You can enable this in Settings → Travel Preferences at any time.",
+                    );
+                }}
+            />
         </>
     );
 }

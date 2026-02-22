@@ -15,6 +15,8 @@ import { useTheme } from "@/lib/ThemeContext";
 import * as Haptics from "expo-haptics";
 import { Id } from "@/convex/_generated/dataModel";
 import Constants from "expo-constants";
+import * as Notifications from "expo-notifications";
+import { useMutation } from "convex/react";
 
 const INSIGHT_CATEGORIES = [
   { id: "food", label: "Food & Drink", icon: "restaurant" },
@@ -103,8 +105,24 @@ export default function Profile() {
         }
     };
 
+    const removePushToken = useMutation((api as any).notifications.removePushToken);
+
     const handleLogout = async () => {
         try {
+            // Remove push token from backend before signing out
+            if (token) {
+                try {
+                    const tokenData = await Notifications.getExpoPushTokenAsync({
+                        projectId: Constants.expoConfig?.extra?.eas?.projectId,
+                    });
+                    if (tokenData?.data) {
+                        await removePushToken({ token, pushToken: tokenData.data });
+                    }
+                } catch (e) {
+                    // Non-blocking — continue with logout
+                    console.warn("[Logout] Failed to remove push token:", e);
+                }
+            }
             await authClient.signOut();
         } catch (error) {
             console.error("Logout failed:", error);
@@ -321,6 +339,14 @@ export default function Profile() {
             iconBg: isDarkMode ? "#3D3D00" : "#FFF8E1",
             iconColor: colors.primary,
             action: () => router.push("/settings/travel-preferences")
+        },
+        {
+            title: "Notifications",
+            subtitle: "Push, email & trip reminders",
+            icon: "notifications-outline",
+            iconBg: isDarkMode ? "#1E3A5F" : "#DBEAFE",
+            iconColor: "#2563EB",
+            action: () => router.push("/settings/notifications")
         },
         // {
         //     title: "Payment Methods",

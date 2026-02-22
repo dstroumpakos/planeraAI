@@ -81,6 +81,9 @@ export default defineSchema({
         }))),
         optimizedRoute: v.optional(v.any()),
         errorMessage: v.optional(v.string()),
+        // Location-based: tracks whether user is physically at the destination
+        userAtDestination: v.optional(v.boolean()),
+        lastLocationCheckAt: v.optional(v.float64()),
     })
         .index("by_user", ["userId"])
         .index("by_status", ["status"]),
@@ -156,6 +159,9 @@ export default defineSchema({
         dealAlerts: v.optional(v.boolean()),
         tripReminders: v.optional(v.boolean()),
         onboardingCompleted: v.optional(v.boolean()),
+        // AI data sharing consent (Apple guideline 5.1.1/5.1.2)
+        aiDataConsent: v.optional(v.boolean()),
+        aiDataConsentDate: v.optional(v.float64()),
     }).index("by_user", ["userId"]),
 
     insights: defineTable({
@@ -593,19 +599,46 @@ export default defineSchema({
         .index("by_email", ["email"])
         .index("by_email_created", ["email", "createdAt"]),
 
-    // V1: AI-generated Top 5 sights for destinations
+    // Push notification tokens (Expo push tokens per device)
+    pushTokens: defineTable({
+        userId: v.string(),
+        token: v.string(), // Expo push token e.g. "ExponentPushToken[...]"
+        platform: v.string(), // "ios" | "android"
+        deviceName: v.optional(v.string()),
+        createdAt: v.float64(),
+        updatedAt: v.float64(),
+    })
+        .index("by_user", ["userId"])
+        .index("by_token", ["token"]),
+
+    // Notification log — tracks what was sent to avoid duplicates
+    notificationLog: defineTable({
+        userId: v.string(),
+        tripId: v.optional(v.id("trips")),
+        type: v.string(), // "countdown_7d", "countdown_3d", "countdown_1d", "morning_briefing", "post_trip_review", "plan_next", "anniversary"
+        sentAt: v.float64(),
+        title: v.string(),
+        body: v.string(),
+    })
+        .index("by_user", ["userId"])
+        .index("by_user_type", ["userId", "type"])
+        .index("by_trip_type", ["tripId", "type"]),
+
+    // V1: AI-generated sights for destinations (no limit)
     destinationSights: defineTable({
         // Link to trip for trip-specific sights
         tripId: v.optional(v.id("trips")),
-        // Destination key for caching (e.g., "paris-france", "tokyo-japan")
+        // Destination key (e.g., "paris-france", "tokyo-japan")
         destinationKey: v.string(),
-        // Array of 5 sights
+        // Array of sights (as many as AI generates)
         sights: v.array(v.object({
             name: v.string(),
             shortDescription: v.string(),
             neighborhoodOrArea: v.optional(v.string()),
             bestTimeToVisit: v.optional(v.string()),
             estDurationHours: v.optional(v.string()),
+            latitude: v.optional(v.float64()),
+            longitude: v.optional(v.float64()),
         })),
         createdAt: v.float64(),
     })

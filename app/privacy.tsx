@@ -26,7 +26,7 @@ export default function PrivacyPolicy() {
             </View>
 
             <ScrollView contentContainerStyle={styles.content}>
-                <Text style={styles.updated}>Last updated: January 2026</Text>
+                <Text style={styles.updated}>Last updated: February 2026</Text>
 
                 <Text style={styles.intro}>
                     Planera respects your privacy and is committed to protecting your personal data. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use the Planera mobile application and related services.
@@ -63,19 +63,37 @@ export default function PrivacyPolicy() {
                     <Text style={styles.text}>We do not sell your personal data.</Text>
                 </Section>
 
-                <Section title="4. AI & Automated Processing">
-                    <Text style={styles.text}>Planera uses AI systems to analyze your inputs (such as travel preferences) in order to generate itineraries and recommendations.</Text>
-                    <Text style={styles.bullet}>• AI outputs are automated and informational</Text>
-                    <Text style={styles.bullet}>• No automated decisions produce legal or similarly significant effects</Text>
-                    <Text style={styles.bullet}>• You remain in control of final travel decisions</Text>
+                <Section title="4. AI & Automated Processing — Third-Party AI Service">
+                    <Text style={styles.text}>Planera uses AI systems provided by OpenAI, Inc. (San Francisco, CA, USA) to generate personalized travel itineraries, recommend sights and attractions, and power the Atlas travel assistant.</Text>
+
+                    <Text style={styles.subtitle}>4.1 What Data Is Sent to OpenAI</Text>
+                    <Text style={styles.text}>When you use AI-powered features, the following data may be transmitted to OpenAI's API:</Text>
+                    <Text style={styles.bullet}>• Trip destinations and origin city</Text>
+                    <Text style={styles.bullet}>• Trip dates, arrival time, and departure time</Text>
+                    <Text style={styles.bullet}>• Budget amount and number of travelers</Text>
+                    <Text style={styles.bullet}>• Travel interests and local experience preferences</Text>
+                    <Text style={styles.bullet}>• Messages you send to the Atlas travel assistant</Text>
+
+                    <Text style={styles.subtitle}>4.2 What Data Is NOT Sent to OpenAI</Text>
+                    <Text style={styles.text}>We do not send the following personal data to OpenAI or any other third-party AI service:</Text>
+                    <Text style={styles.bullet}>• Your name, email address, or account credentials</Text>
+                    <Text style={styles.bullet}>• Payment or billing information</Text>
+                    <Text style={styles.bullet}>• Profile picture or photos</Text>
+
+                    <Text style={styles.subtitle}>4.3 Purpose and Safeguards</Text>
+                    <Text style={styles.text}>Data is sent to OpenAI solely to generate AI-powered travel content. OpenAI processes data in accordance with their API data usage policy and does not use API inputs to train their models. AI outputs are automated and informational only — no automated decisions produce legal or similarly significant effects, and you remain in full control of your travel decisions.</Text>
+
+                    <Text style={styles.subtitle}>4.4 Your Consent</Text>
+                    <Text style={styles.text}>Before any data is sent to OpenAI, Planera will request your explicit consent. You may grant or withdraw this consent at any time via Settings → Travel Preferences. If you decline consent, AI-powered features (trip generation, sights recommendations, and Atlas chat) will be unavailable, but all other app features will continue to work normally.</Text>
                 </Section>
 
                 <Section title="5. Sharing of Information">
                     <Text style={styles.text}>We may share your information only:</Text>
+                    <Text style={styles.bullet}>• With OpenAI, Inc. — to provide AI-powered travel planning features (see Section 4 above)</Text>
                     <Text style={styles.bullet}>• With trusted service providers (hosting, analytics, email, payments)</Text>
                     <Text style={styles.bullet}>• To comply with legal obligations</Text>
                     <Text style={styles.bullet}>• To protect our rights, users, or the security of the Service</Text>
-                    <Text style={styles.text}>All third-party partners are required to handle data securely and lawfully.</Text>
+                    <Text style={styles.text}>All third-party partners are required to handle data securely and lawfully. OpenAI's data processing is governed by their API data usage policy, which does not permit use of API data for model training.</Text>
                 </Section>
 
                 <Section title="6. Third-Party Links & Services">

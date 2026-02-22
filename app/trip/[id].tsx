@@ -5,8 +5,9 @@ import { useQuery, useMutation, useAction } from "convex/react";
 import { Id } from "@/convex/_generated/dataModel";
 import { api } from "@/convex/_generated/api";
 import { Ionicons } from "@expo/vector-icons";
+import FontAwesome from "@expo/vector-icons/FontAwesome";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { BlurView } from "expo-blur";
 import { useDestinationImage } from "@/lib/useImages";
 import ActivityCard from "@/components/ActivityCard";
@@ -16,6 +17,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useAuthenticatedMutation, useToken } from "@/lib/useAuthenticatedMutation";
 import { optimizeUnsplashUrl, IMAGE_SIZES } from "@/lib/imageUtils";
 import * as Haptics from "expo-haptics";
+import { useLocationNotifications } from "@/lib/useLocationNotifications";
 
 // Sanitize location titles for maps deep links by stripping descriptions, ratings, etc.
 const cleanLocationTitle = (title: string): string => {
@@ -638,11 +640,30 @@ export default function TripDetails() {
     const myLikedInsightIds = useQuery((api as any).insights.getMyLikedInsightIds, token ? { token } : "skip");
     const { image: destinationImage } = useDestinationImage(trip?.destination);
     const getDestinationImages = useAction(api.images.getDestinationImages);
+
+    // Phase 3: Location-based notifications for active trips
+    // Reports arrival status to server so cron notifications are gated on physical presence
+    const updateLocationStatus = useAuthenticatedMutation(api.trips.updateLocationStatus as any);
+    const handleLocationStatus = useCallback((atDestination: boolean) => {
+        if (trip?._id && token) {
+            updateLocationStatus({ tripId: trip._id, atDestination }).catch((e: any) =>
+                console.log("[LocationNotif] Failed to update location status:", e)
+            );
+        }
+    }, [trip?._id, token]);
+    useLocationNotifications(trip, true, handleLocationStatus);
      
     // V1: AI-generated Top 5 Sights (replaces Viator activities)
     const topSights = useQuery(api.sights.getTopSights, trip ? { tripId: id as Id<"trips"> } : "skip");
     const generateTopSights = useMutation(api.sights.generateTopSights);
     const [generatingSights, setGeneratingSights] = useState(false);
+
+    // Reset generatingSights when new sights data arrives
+    useEffect(() => {
+        if (generatingSights && topSights?.sights && topSights.sights.length > 0) {
+            setGeneratingSights(false);
+        }
+    }, [topSights, generatingSights]);
 
 
     // Loading screen state
@@ -784,13 +805,29 @@ export default function TripDetails() {
     const handleDayPress = (day: any) => {
         const newDate = new Date(day.dateString);
         const timestamp = newDate.getTime();
+        const MAX_TRIP_DAYS = 15;
         
         if (selectingDate === 'start') {
-            setEditForm(prev => ({
-                ...prev,
-                startDate: timestamp,
-            }));
+            // If new start makes trip > 15 days, auto-cap end date
+            const daysDiff = Math.ceil((editForm.endDate - timestamp) / (24 * 60 * 60 * 1000));
+            if (daysDiff > MAX_TRIP_DAYS) {
+                setEditForm(prev => ({
+                    ...prev,
+                    startDate: timestamp,
+                    endDate: timestamp + MAX_TRIP_DAYS * 24 * 60 * 60 * 1000,
+                }));
+            } else {
+                setEditForm(prev => ({
+                    ...prev,
+                    startDate: timestamp,
+                }));
+            }
         } else {
+            const daysDiff = Math.ceil((timestamp - editForm.startDate) / (24 * 60 * 60 * 1000));
+            if (daysDiff > MAX_TRIP_DAYS) {
+                Alert.alert("Trip Too Long", "Trips can be up to 15 days. Please choose an earlier return date.");
+                return;
+            }
             setEditForm(prev => ({
                 ...prev,
                 endDate: timestamp,
@@ -1112,6 +1149,18 @@ export default function TripDetails() {
                         <Text style={styles.loadingHelperText}>
                             This usually takes about 1–2 minutes.
                         </Text>
+                        
+                        {/* Leave screen hint */}
+                        <TouchableOpacity 
+                            style={styles.leaveHintContainer} 
+                            onPress={() => router.back()}
+                            activeOpacity={0.7}
+                        >
+                            <Ionicons name="notifications-outline" size={16} color="rgba(255,255,255,0.7)" />
+                            <Text style={styles.leaveHintText}>
+                                You can leave this screen — we'll notify you when your trip is ready!
+                            </Text>
+                        </TouchableOpacity>
                     </View>
                     
                     {/* Photo Attribution */}
@@ -1308,9 +1357,9 @@ export default function TripDetails() {
                             {itinerary.flights.message || "You indicated you already have flights booked."}
                         </Text>
                     </View>
-                    <TouchableOpacity style={styles.viewMapButton} onPress={() => openMap(trip.destination)}>
+                    <TouchableOpacity style={styles.viewMapButton} onPress={() => router.push({ pathname: '/trip/map', params: { id: id as string } })}>
                         <Ionicons name="map" size={20} color="#F9F506" />
-                        <Text style={styles.viewMapText}>View Map</Text>
+                        <Text style={styles.viewMapText}>Explore Route</Text>
                     </TouchableOpacity>
                 </View>
             );
@@ -1669,9 +1718,9 @@ export default function TripDetails() {
                             </View>
                         </View>
                     </LinearGradient>
-                    <TouchableOpacity style={[styles.viewMapButton, { backgroundColor: colors.card }]} onPress={() => openMap(trip.destination)}>
+                    <TouchableOpacity style={[styles.viewMapButton, { backgroundColor: colors.card }]} onPress={() => router.push({ pathname: '/trip/map', params: { id: id as string } })}>
                         <Ionicons name="map" size={20} color={colors.primary} />
-                        <Text style={[styles.viewMapText, { color: colors.text }]}>View Map</Text>
+                        <Text style={[styles.viewMapText, { color: colors.text }]}>Explore Route</Text>
                     </TouchableOpacity>
                 </View>
 
@@ -1792,10 +1841,8 @@ export default function TripDetails() {
                                             <View style={styles.travelSegmentLeft}>
                                                 <View style={[styles.travelDottedLine, { borderColor: colors.border }]} />
                                             </View>
-                                            <TouchableOpacity 
+                                            <View 
                                                 style={[styles.travelSegmentCard, { backgroundColor: isDarkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)' }]}
-                                                onPress={() => Linking.openURL(getDirectionsUrl())}
-                                                activeOpacity={0.7}
                                             >
                                                 <View style={styles.travelSegmentContent}>
                                                     <Ionicons name="walk" size={16} color={colors.textMuted} />
@@ -1803,20 +1850,13 @@ export default function TripDetails() {
                                                         {activity.travelFromPrevious.walkingMinutes} min walk
                                                         {activity.travelFromPrevious.distanceKm && ` · ${activity.travelFromPrevious.distanceKm} km`}
                                                     </Text>
-                                                    <View style={styles.travelDirectionsLink}>
-                                                        <View style={styles.directionsBetaBadge}>
-                                                            <Text style={styles.directionsBetaText}>Beta</Text>
-                                                        </View>
-                                                        <Text style={[styles.travelDirectionsText, { color: colors.primary }]}>Directions</Text>
-                                                        <Ionicons name="navigate" size={12} color={colors.primary} />
-                                                    </View>
                                                 </View>
                                                 {activity.travelFromPrevious.description && (
                                                     <Text style={[styles.travelSegmentDesc, { color: colors.textMuted }]}>
                                                         {activity.travelFromPrevious.description}
                                                     </Text>
                                                 )}
-                                            </TouchableOpacity>
+                                            </View>
                                         </View>
                                     )}
                                     
@@ -2001,6 +2041,34 @@ export default function TripDetails() {
                                                         <Text style={[styles.metaDurationText, { color: colors.textMuted }]}>{activity.duration || '1h'}</Text>
                                                     </View>
                                                 </View>
+                                                {/* TripAdvisor link */}
+                                                {activity.fromTripAdvisor && activity.tripAdvisorUrl && (
+                                                    <TouchableOpacity
+                                                        style={styles.tripAdvisorRow}
+                                                        onPress={(e) => {
+                                                            e.stopPropagation();
+                                                            Linking.openURL(activity.tripAdvisorUrl);
+                                                        }}
+                                                        activeOpacity={0.7}
+                                                    >
+                                                        <View style={styles.tripAdvisorLogoMark}>
+                                                            <FontAwesome name="tripadvisor" size={14} color="#00AA6C" />
+                                                        </View>
+                                                        <Text style={styles.tripAdvisorBrandText}>Tripadvisor</Text>
+                                                        {activity.tripAdvisorRating && (
+                                                            <View style={styles.tripAdvisorRating}>
+                                                                <Text style={styles.tripAdvisorRatingText}>{activity.tripAdvisorRating}</Text>
+                                                                <Ionicons name="star" size={10} color="#00AA6C" />
+                                                            </View>
+                                                        )}
+                                                        {activity.tripAdvisorReviewCount && (
+                                                            <Text style={[styles.tripAdvisorReviews, { color: colors.textMuted }]}>
+                                                                ({activity.tripAdvisorReviewCount.toLocaleString()})
+                                                            </Text>
+                                                        )}
+                                                        <Ionicons name="chevron-forward" size={12} color="#00AA6C" />
+                                                    </TouchableOpacity>
+                                                )}
                                             </View>
                                             <View style={styles.googleMapsIcon}>
                                                 <Ionicons 
@@ -2185,6 +2253,35 @@ export default function TripDetails() {
                                                                 {act.address && (
                                                                     <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 2 }} numberOfLines={1}>📍 {act.address}</Text>
                                                                 )}
+
+                                                                {/* TripAdvisor link */}
+                                                                {act.fromTripAdvisor && act.tripAdvisorUrl && (
+                                                                    <TouchableOpacity
+                                                                        style={styles.tripAdvisorRow}
+                                                                        onPress={(e) => {
+                                                                            e.stopPropagation();
+                                                                            Linking.openURL(act.tripAdvisorUrl);
+                                                                        }}
+                                                                        activeOpacity={0.7}
+                                                                    >
+                                                                        <View style={styles.tripAdvisorLogoMark}>
+                                                                            <FontAwesome name="tripadvisor" size={14} color="#00AA6C" />
+                                                                        </View>
+                                                                        <Text style={styles.tripAdvisorBrandText}>Tripadvisor</Text>
+                                                                        {act.tripAdvisorRating && (
+                                                                            <View style={styles.tripAdvisorRating}>
+                                                                                <Text style={styles.tripAdvisorRatingText}>{act.tripAdvisorRating}</Text>
+                                                                                <Ionicons name="star" size={10} color="#00AA6C" />
+                                                                            </View>
+                                                                        )}
+                                                                        {act.tripAdvisorReviewCount && (
+                                                                            <Text style={[styles.tripAdvisorReviews, { color: colors.textMuted }]}>
+                                                                                ({act.tripAdvisorReviewCount.toLocaleString()})
+                                                                            </Text>
+                                                                        )}
+                                                                        <Ionicons name="chevron-forward" size={12} color="#00AA6C" />
+                                                                    </TouchableOpacity>
+                                                                )}
                                                             </View>
                                                         </TouchableOpacity>
                                                     ))}
@@ -2216,9 +2313,9 @@ export default function TripDetails() {
 
                     {activeFilter === 'sights' && (
                         <>
-                            <Text style={[styles.sectionTitle, { color: colors.text }]}>Top 5 Sights</Text>
+                            <Text style={[styles.sectionTitle, { color: colors.text }]}>Sights & Attractions</Text>
                             
-                            {/* V1: AI-generated Top 5 Sights (Viator disabled) */}
+                            {/* AI-generated Sights & Attractions */}
                             {topSights === undefined ? (
                                 <View style={[styles.loadingContainer, { backgroundColor: colors.card }]}>
                                     <ActivityIndicator size="small" color={colors.primary} />
@@ -2273,41 +2370,75 @@ export default function TripDetails() {
                                             Suggestions are AI-generated. Confirm details locally.
                                         </Text>
                                     </View>
-                                </>
-                            ) : (
-                                <View style={[styles.emptySightsContainer, { backgroundColor: colors.card }]}>
-                                    <Ionicons name="telescope-outline" size={48} color={colors.textMuted} />
-                                    <Text style={[styles.emptySightsTitle, { color: colors.text }]}>Discover Top Sights</Text>
-                                    <Text style={[styles.emptySightsText, { color: colors.textMuted }]}>
-                                        Get AI-powered recommendations for the best sights to see in {trip?.destination}.
-                                    </Text>
-                                    <TouchableOpacity 
-                                        style={[styles.generateSightsButton, { backgroundColor: colors.primary }]}
+                                    {/* Refresh sights button */}
+                                    <TouchableOpacity
+                                        style={[styles.generateSightsButton, { backgroundColor: colors.secondary, opacity: generatingSights ? 0.7 : 1, marginTop: 8 }]}
                                         onPress={async () => {
                                             if (!trip) return;
                                             setGeneratingSights(true);
                                             try {
                                                 await generateTopSights({ tripId: trip._id });
                                             } catch (error) {
-                                                console.error("Failed to generate sights:", error);
+                                                console.error("Failed to refresh sights:", error);
                                                 if (Platform.OS !== 'web') {
-                                                    Alert.alert("Error", "Failed to generate sights. Please try again.");
+                                                    Alert.alert("Error", "Failed to refresh sights. Please try again.");
                                                 }
-                                            } finally {
                                                 setGeneratingSights(false);
                                             }
                                         }}
                                         disabled={generatingSights}
                                     >
                                         {generatingSights ? (
-                                            <ActivityIndicator size="small" color={colors.text} />
+                                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                                <ActivityIndicator size="small" color={colors.text} />
+                                                <Text style={[styles.generateSightsButtonText, { color: colors.text }]}>Refreshing sights...</Text>
+                                            </View>
                                         ) : (
                                             <>
-                                                <Ionicons name="sparkles" size={18} color={colors.text} />
-                                                <Text style={[styles.generateSightsButtonText, { color: colors.text }]}>Generate Top 5 Sights</Text>
+                                                <Ionicons name="refresh" size={16} color={colors.text} />
+                                                <Text style={[styles.generateSightsButtonText, { color: colors.text }]}>Refresh Sights</Text>
                                             </>
                                         )}
                                     </TouchableOpacity>
+                                </>
+                            ) : (
+                                <View style={[styles.emptySightsContainer, { backgroundColor: colors.card }]}>
+                                    {generatingSights ? (
+                                        <View style={{ alignItems: 'center', paddingVertical: 32 }}>
+                                            <ActivityIndicator size="large" color={colors.primary} style={{ marginBottom: 20 }} />
+                                            <Text style={[styles.emptySightsTitle, { color: colors.text }]}>Generating sights...</Text>
+                                            <Text style={[styles.emptySightsText, { color: colors.textMuted, marginTop: 8 }]}>
+                                                Our AI is finding the best sights in {trip?.destination}. This may take a moment.
+                                            </Text>
+                                        </View>
+                                    ) : (
+                                        <>
+                                            <Ionicons name="telescope-outline" size={48} color={colors.textMuted} />
+                                            <Text style={[styles.emptySightsTitle, { color: colors.text }]}>Discover Sights & Attractions</Text>
+                                            <Text style={[styles.emptySightsText, { color: colors.textMuted }]}>
+                                                Get AI-powered recommendations for the best sights to see in {trip?.destination}.
+                                            </Text>
+                                            <TouchableOpacity 
+                                                style={[styles.generateSightsButton, { backgroundColor: colors.primary }]}
+                                                onPress={async () => {
+                                                    if (!trip) return;
+                                                    setGeneratingSights(true);
+                                                    try {
+                                                        await generateTopSights({ tripId: trip._id });
+                                                    } catch (error) {
+                                                        console.error("Failed to generate sights:", error);
+                                                        if (Platform.OS !== 'web') {
+                                                            Alert.alert("Error", "Failed to generate sights. Please try again.");
+                                                        }
+                                                        setGeneratingSights(false);
+                                                    }
+                                                }}
+                                            >
+                                                <Ionicons name="sparkles" size={18} color={colors.text} />
+                                                <Text style={[styles.generateSightsButtonText, { color: colors.text }]}>Generate All Sights</Text>
+                                            </TouchableOpacity>
+                                        </>
+                                    )}
                                 </View>
                             )}
                         </>
@@ -2696,6 +2827,7 @@ export default function TripDetails() {
                                                 onDayPress={handleDayPress}
                                                 markedDates={getMarkedDates()}
                                                 minDate={new Date().toISOString().split('T')[0]}
+                                                maxDate={new Date(Date.now() + 18 * 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]}
                                                 theme={{
                                                     backgroundColor: colors.background,
                                                     calendarBackground: colors.background,
@@ -2978,7 +3110,7 @@ const styles = StyleSheet.create({
         gap: 8,
     },
     mapPreviewContainer: {
-        height: 224,
+        height: 280,
         width: "100%",
         position: "relative",
     },
@@ -3376,6 +3508,23 @@ const styles = StyleSheet.create({
         fontSize: 13,
         textAlign: "center",
         marginTop: 16,
+    },
+    leaveHintContainer: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        marginTop: 14,
+        paddingVertical: 10,
+        paddingHorizontal: 16,
+        backgroundColor: "rgba(255,255,255,0.1)",
+        borderRadius: 12,
+        gap: 8,
+    },
+    leaveHintText: {
+        color: "rgba(255,255,255,0.7)",
+        fontSize: 13,
+        textAlign: "center",
+        flexShrink: 1,
     },
     loadingAttribution: {
         marginTop: 20,
@@ -3861,7 +4010,7 @@ const styles = StyleSheet.create({
         padding: 16,
     },
     headerTitleOverlay: {
-        paddingBottom: 16,
+        paddingBottom: 52,
     },
     headerTitleOnImage: {
         fontSize: 32,
@@ -3950,6 +4099,43 @@ const styles = StyleSheet.create({
         fontSize: 13,
         fontWeight: "600",
         color: "#00AA6C",
+    },
+    tripAdvisorRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        marginTop: 6,
+        paddingVertical: 6,
+        paddingHorizontal: 10,
+        backgroundColor: "rgba(0, 170, 108, 0.08)",
+        borderRadius: 8,
+        alignSelf: "flex-start",
+    },
+    tripAdvisorRating: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 2,
+    },
+    tripAdvisorRatingText: {
+        fontSize: 12,
+        fontWeight: "700",
+        color: "#00AA6C",
+    },
+    tripAdvisorReviews: {
+        fontSize: 11,
+        fontWeight: "500",
+    },
+    tripAdvisorLogoMark: {
+        width: 20,
+        height: 20,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    tripAdvisorBrandText: {
+        fontSize: 12,
+        fontWeight: "700",
+        color: "#00AA6C",
+        letterSpacing: -0.2,
     },
     ratingContainer: {
         flexDirection: "row",

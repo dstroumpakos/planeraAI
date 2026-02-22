@@ -18,6 +18,8 @@ export const getTopSights = query({
                 neighborhoodOrArea: v.optional(v.string()),
                 bestTimeToVisit: v.optional(v.string()),
                 estDurationHours: v.optional(v.string()),
+                latitude: v.optional(v.float64()),
+                longitude: v.optional(v.float64()),
             })),
             createdAt: v.float64(),
         })
@@ -41,10 +43,10 @@ export const getTopSights = query({
             .withIndex("by_destination_key", (q) => q.eq("destinationKey", destinationKey))
             .first();
         
-        // Return cached sights if they exist and are recent (less than 30 days old)
+        // Return cached sights if they exist, are recent (30 days), and have a full set (15+)
         if (cachedSights) {
             const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
-            if (cachedSights.createdAt > thirtyDaysAgo) {
+            if (cachedSights.createdAt > thirtyDaysAgo && cachedSights.sights.length >= 15) {
                 return cachedSights;
             }
         }
@@ -61,15 +63,24 @@ export const generateTopSights = mutation({
         const trip = await ctx.db.get(args.tripId);
         if (!trip) throw new Error("Trip not found");
         
-        // Check if we already have sights for this trip
+        // Delete existing sights for this trip so we regenerate
         const existingSights = await ctx.db
             .query("destinationSights")
             .withIndex("by_trip", (q) => q.eq("tripId", args.tripId))
             .first();
         
         if (existingSights) {
-            console.log("Sights already exist for this trip");
-            return null;
+            await ctx.db.delete(existingSights._id);
+        }
+        
+        // Also clear destination-level cache so the action generates fresh
+        const destinationKey = normalizeDestinationKey(trip.destination);
+        const cachedSights = await ctx.db
+            .query("destinationSights")
+            .withIndex("by_destination_key", (q) => q.eq("destinationKey", destinationKey))
+            .first();
+        if (cachedSights) {
+            await ctx.db.delete(cachedSights._id);
         }
         
         // Schedule the AI generation action
@@ -94,6 +105,8 @@ export const getCachedSights = internalMutation({
                 neighborhoodOrArea: v.optional(v.string()),
                 bestTimeToVisit: v.optional(v.string()),
                 estDurationHours: v.optional(v.string()),
+                latitude: v.optional(v.float64()),
+                longitude: v.optional(v.float64()),
             })),
         })
     ),
@@ -105,9 +118,9 @@ export const getCachedSights = internalMutation({
         
         if (!cached) return null;
         
-        // Check if recent (30 days)
+        // Only use cache if recent (30 days) AND has a full set of sights (15+)
         const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
-        if (cached.createdAt < thirtyDaysAgo) return null;
+        if (cached.createdAt < thirtyDaysAgo || cached.sights.length < 15) return null;
         
         return { sights: cached.sights };
     },
@@ -124,6 +137,8 @@ export const saveSights = internalMutation({
             neighborhoodOrArea: v.optional(v.string()),
             bestTimeToVisit: v.optional(v.string()),
             estDurationHours: v.optional(v.string()),
+            latitude: v.optional(v.float64()),
+            longitude: v.optional(v.float64()),
         })),
     },
     returns: v.null(),

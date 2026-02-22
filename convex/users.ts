@@ -286,6 +286,8 @@ export const getSettings = authQuery({
       darkMode: v.optional(v.boolean()),
       dealAlerts: v.optional(v.boolean()),
       tripReminders: v.optional(v.boolean()),
+      aiDataConsent: v.optional(v.boolean()),
+      aiDataConsentDate: v.optional(v.float64()),
     }),
     handler: async (ctx: any) => {
         const settings = await ctx.db
@@ -318,6 +320,8 @@ export const getSettings = authQuery({
                 darkMode: undefined,
                 dealAlerts: undefined,
                 tripReminders: undefined,
+                aiDataConsent: undefined,
+                aiDataConsentDate: undefined,
             };
         }
 
@@ -350,6 +354,8 @@ export const getSettings = authQuery({
             darkMode: settings.darkMode,
             dealAlerts: settings.dealAlerts,
             tripReminders: settings.tripReminders,
+            aiDataConsent: settings.aiDataConsent,
+            aiDataConsentDate: settings.aiDataConsentDate,
         };
     },
 });
@@ -535,6 +541,37 @@ export const updateNotifications = authMutation({
             await ctx.db.insert("userSettings", {
                 userId: ctx.user._id,
                 ...updates,
+            });
+        }
+
+        return null;
+    },
+});
+
+// Update AI data sharing consent (Apple guideline 5.1.1/5.1.2)
+export const updateAiConsent = authMutation({
+    args: {
+        token: v.string(),
+        aiDataConsent: v.boolean(),
+    },
+    returns: v.null(),
+    handler: async (ctx: any, args: any) => {
+        const settings = await ctx.db
+            .query("userSettings")
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
+            .unique();
+
+        const updateData = {
+            aiDataConsent: args.aiDataConsent,
+            aiDataConsentDate: Date.now(),
+        };
+
+        if (settings) {
+            await ctx.db.patch(settings._id, updateData);
+        } else {
+            await ctx.db.insert("userSettings", {
+                userId: ctx.user._id,
+                ...updateData,
             });
         }
 

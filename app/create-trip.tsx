@@ -11,6 +11,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { INTERESTS } from "@/lib/data";
 import { useTheme } from "@/lib/ThemeContext";
 import { useAuthenticatedMutation, useToken } from "@/lib/useAuthenticatedMutation";
+import AIConsentModal from "@/components/AIConsentModal";
 
 import logoImage from "@/assets/images/appicon-1024x1024-01-1vb1vx.png";
 
@@ -227,6 +228,10 @@ export default function CreateTripScreen() {
     const [showLoadingScreen, setShowLoadingScreen] = useState(false);
     const [showErrorScreen, setShowErrorScreen] = useState(false);
     const [isCreditsError, setIsCreditsError] = useState(false);
+    const [showAiConsentModal, setShowAiConsentModal] = useState(false);
+    
+    // AI data consent
+    const updateAiConsent = useMutation(api.users.updateAiConsent);
     
     // Time picker state for arrival/departure times
     const [showTimePicker, setShowTimePicker] = useState(false);
@@ -435,22 +440,41 @@ export default function CreateTripScreen() {
         return marked;
     };
 
+    const MAX_TRIP_DAYS = 15;
+
     const handleDayPress = (day: DateData) => {
         const selectedTimestamp = new Date(day.dateString).getTime();
         
         if (selectingDate === 'start') {
             if (selectedTimestamp >= formData.endDate) {
+                // Auto-set end date to start + 7 days, but cap at 15
+                const autoEnd = selectedTimestamp + 7 * 24 * 60 * 60 * 1000;
                 setFormData({
                     ...formData,
                     startDate: selectedTimestamp,
-                    endDate: selectedTimestamp + 7 * 24 * 60 * 60 * 1000,
+                    endDate: autoEnd,
                 });
             } else {
-                setFormData({ ...formData, startDate: selectedTimestamp });
+                // Check if existing end date would exceed 15 days from new start
+                const daysDiff = Math.ceil((formData.endDate - selectedTimestamp) / (24 * 60 * 60 * 1000));
+                if (daysDiff > MAX_TRIP_DAYS) {
+                    setFormData({
+                        ...formData,
+                        startDate: selectedTimestamp,
+                        endDate: selectedTimestamp + MAX_TRIP_DAYS * 24 * 60 * 60 * 1000,
+                    });
+                } else {
+                    setFormData({ ...formData, startDate: selectedTimestamp });
+                }
             }
         } else {
             if (selectedTimestamp <= formData.startDate) {
                 Alert.alert("Invalid Date", "End date must be after start date");
+                return;
+            }
+            const daysDiff = Math.ceil((selectedTimestamp - formData.startDate) / (24 * 60 * 60 * 1000));
+            if (daysDiff > MAX_TRIP_DAYS) {
+                Alert.alert("Trip Too Long", "Trips can be up to 15 days. Please choose an earlier return date.");
                 return;
             }
             setFormData({ ...formData, endDate: selectedTimestamp });
@@ -471,9 +495,22 @@ export default function CreateTripScreen() {
             return;
         }
 
+        // Check AI data consent before proceeding (Apple guideline 5.1.1/5.1.2)
+        if (userSettings && userSettings.aiDataConsent !== true) {
+            setShowAiConsentModal(true);
+            return;
+        }
+
           // V1: Validate travelerCount (1-12)
         if (formData.travelerCount < 1 || formData.travelerCount > 12) {
             Alert.alert("Error", "Number of travelers must be between 1 and 12");
+            return;
+        }
+
+        // Validate trip duration (max 15 days)
+        const submitTripDays = Math.ceil((formData.endDate - formData.startDate) / (24 * 60 * 60 * 1000));
+        if (submitTripDays > 15) {
+            Alert.alert("Trip Too Long", "Trips can be up to 15 days. Please shorten your trip dates.");
             return;
         }
 
@@ -752,6 +789,12 @@ export default function CreateTripScreen() {
                             </View>
                         </TouchableOpacity>
                     </View>
+                    <View style={styles.dateLimitHint}>
+                        <Ionicons name="information-circle-outline" size={14} color={colors.textMuted} />
+                        <Text style={[styles.dateLimitHintText, { color: colors.textMuted }]}>
+                            {tripDays} day{tripDays !== 1 ? 's' : ''} selected · Max 15 days
+                        </Text>
+                    </View>
                 </View>
 
                 {/* Flight Times Section (Optional) - Affects itinerary timing */}
@@ -1026,8 +1069,9 @@ export default function CreateTripScreen() {
                             </View>
                             
                             <Calendar
-                                current={formatDateForCalendar(selectingDate === 'start' ? formData.startDate : formData.endDate)}
+                                initialDate={formatDateForCalendar(selectingDate === 'start' ? formData.startDate : formData.endDate)}
                                 minDate={selectingDate === 'start' ? formatDateForCalendar(Date.now()) : formatDateForCalendar(formData.startDate + 24 * 60 * 60 * 1000)}
+                                maxDate={selectingDate === 'end' ? formatDateForCalendar(formData.startDate + MAX_TRIP_DAYS * 24 * 60 * 60 * 1000) : formatDateForCalendar(Date.now() + 18 * 30 * 24 * 60 * 60 * 1000)}
                                 onDayPress={handleDayPress}
                                 markingType={'period'}
                                 markedDates={getMarkedDates()}
@@ -1113,6 +1157,29 @@ export default function CreateTripScreen() {
                 )}
             </ScrollView>
         </SafeAreaView>
+
+        {/* AI Data Consent Modal */}
+        <AIConsentModal
+            visible={showAiConsentModal}
+            colors={colors}
+            onAccept={async () => {
+                try {
+                    await updateAiConsent({ token: token || "", aiDataConsent: true });
+                    setShowAiConsentModal(false);
+                    // Re-trigger submit after consent is granted
+                    handleSubmit();
+                } catch (e) {
+                    console.error("Failed to save AI consent:", e);
+                }
+            }}
+            onDecline={() => {
+                setShowAiConsentModal(false);
+                Alert.alert(
+                    "AI Features Disabled",
+                    "Trip generation requires AI data processing. You can enable this in Settings → Travel Preferences at any time.",
+                );
+            }}
+        />
         </>
     );
 }
@@ -1404,6 +1471,16 @@ const styles = StyleSheet.create({
         width: 1,
         height: "60%",
         backgroundColor: "#E8E6E1",
+    },
+    dateLimitHint: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+        marginTop: 8,
+    },
+    dateLimitHintText: {
+        fontSize: 12,
+        fontWeight: "500",
     },
     dateLabel: {
         fontSize: 11,
