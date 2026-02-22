@@ -8,12 +8,14 @@ import { useToken } from "@/lib/useAuthenticatedMutation";
 import { useState, useEffect } from "react";
 import { INTERESTS } from "@/lib/data";
 import { AIRPORTS } from "@/lib/airports";
+import AIConsentModal from "@/components/AIConsentModal";
 
 export default function TravelPreferences() {
     const router = useRouter();
     const { token } = useToken();
     const settings = useQuery(api.users.getSettings as any, { token: token || "skip" }) as any;
     const updatePreferences = useMutation(api.users.updateTravelPreferences);
+    const updateAiConsent = useMutation(api.users.updateAiConsent);
 
     const [homeAirport, setHomeAirport] = useState("");
     const [defaultBudget, setDefaultBudget] = useState("2000");
@@ -21,6 +23,8 @@ export default function TravelPreferences() {
     const [defaultSkipFlights, setDefaultSkipFlights] = useState(false);
     const [defaultSkipHotel, setDefaultSkipHotel] = useState(false);
     const [defaultPreferredFlightTime, setDefaultPreferredFlightTime] = useState("any");
+    const [aiDataConsent, setAiDataConsent] = useState(false);
+    const [showAiConsentModal, setShowAiConsentModal] = useState(false);
 
     const [showAirportSuggestions, setShowAirportSuggestions] = useState(false);
     const [airportSuggestions, setAirportSuggestions] = useState<typeof AIRPORTS>([]);
@@ -34,6 +38,7 @@ export default function TravelPreferences() {
             setDefaultSkipFlights(settings.skipFlights || false);
             setDefaultSkipHotel(settings.skipHotels || false);
             setDefaultPreferredFlightTime(settings.flightTimePreference || "any");
+            setAiDataConsent(settings.aiDataConsent || false);
         }
     }, [settings]);
 
@@ -287,12 +292,74 @@ export default function TravelPreferences() {
                     </View>
                 </View> */}
 
+                {/* AI Data Sharing */}
+                <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>AI Data Sharing</Text>
+                    <Text style={styles.sectionDescription}>
+                        Planera sends your travel preferences (destinations, dates, budget, interests, and Atlas chat messages) to OpenAI to generate personalized itineraries and recommendations.
+                    </Text>
+                    <View style={styles.toggleRow}>
+                        <View style={styles.toggleInfo}>
+                            <Text style={styles.toggleLabel}>Share data with OpenAI</Text>
+                            <Text style={styles.toggleDescription}>
+                                {aiDataConsent 
+                                    ? "AI features are enabled" 
+                                    : "AI features are disabled (trip generation, sights, Atlas)"}
+                            </Text>
+                        </View>
+                        <Switch
+                            value={aiDataConsent}
+                            onValueChange={(value) => {
+                                if (value) {
+                                    // Show consent modal when enabling
+                                    setShowAiConsentModal(true);
+                                } else {
+                                    // Allow direct disable
+                                    setAiDataConsent(false);
+                                    updateAiConsent({ token: token || "", aiDataConsent: false }).catch(
+                                        (e: any) => console.error("Failed to update AI consent:", e)
+                                    );
+                                }
+                            }}
+                            trackColor={{ false: "#E2E8F0", true: "#FFE500" }}
+                            thumbColor={Platform.OS === "ios" ? "#FFFFFF" : aiDataConsent ? "#FFFFFF" : "#F1F5F9"}
+                        />
+                    </View>
+                    <TouchableOpacity onPress={() => router.push("/privacy")} style={styles.privacyLink}>
+                        <Ionicons name="document-text-outline" size={16} color="#007AFF" />
+                        <Text style={styles.privacyLinkText}>Read our Privacy Policy</Text>
+                    </TouchableOpacity>
+                </View>
+
                 <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
                     <Text style={styles.saveButtonText}>Save Preferences</Text>
                 </TouchableOpacity>
                 
                 <View style={{ height: 40 }} />
             </ScrollView>
+
+            {/* AI Consent Modal */}
+            <AIConsentModal
+                visible={showAiConsentModal}
+                colors={{
+                    text: "#1A1A1A",
+                    background: "#FAF9F6",
+                    textSecondary: "#6B6B6B",
+                    border: "#E8E6E1",
+                }}
+                onAccept={async () => {
+                    try {
+                        await updateAiConsent({ token: token || "", aiDataConsent: true });
+                        setAiDataConsent(true);
+                        setShowAiConsentModal(false);
+                    } catch (e) {
+                        console.error("Failed to save AI consent:", e);
+                    }
+                }}
+                onDecline={() => {
+                    setShowAiConsentModal(false);
+                }}
+            />
         </SafeAreaView>
     );
 }
@@ -488,5 +555,22 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: "#9B9B9B",
         marginTop: 2,
+    },
+    sectionDescription: {
+        fontSize: 13,
+        color: "#9B9B9B",
+        lineHeight: 19,
+        marginBottom: 12,
+    },
+    privacyLink: {
+        flexDirection: "row",
+        alignItems: "center",
+        marginTop: 12,
+    },
+    privacyLinkText: {
+        fontSize: 14,
+        color: "#007AFF",
+        marginLeft: 6,
+        fontWeight: "500",
     },
 });

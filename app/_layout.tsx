@@ -10,6 +10,7 @@ import { ThemeProvider } from "@/lib/ThemeContext";
 import { ConvexNativeAuthProvider } from "@/lib/ConvexAuthProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { authClient } from "@/lib/auth-client";
+import { useNotifications } from "@/lib/useNotifications";
 
 // Prevent splash screen from auto-hiding before app is ready
 SplashScreen.preventAutoHideAsync();
@@ -90,6 +91,12 @@ function LoadingScreen() {
     return (
         <View style={{ flex: 1, backgroundColor: "#FAF9F6" }} />
     );
+}
+
+// Notification registration - lives inside provider tree so it can use Convex
+function NotificationInitializer() {
+    useNotifications();
+    return null;
 }
 
 // Inner app component that handles initialization
@@ -177,6 +184,7 @@ function AppContent() {
     return (
         <ConvexNativeAuthProvider client={convex}>
             <ThemeProvider>
+                <NotificationInitializer />
                 <Stack screenOptions={{ headerShown: false }} />
             </ThemeProvider>
         </ConvexNativeAuthProvider>

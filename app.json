@@ -19,7 +19,8 @@
       "bundleIdentifier": "com.dstroump.planeraaitravelplanner",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSPhotoLibraryUsageDescription": "Planera needs access to your photo library so you can select a photo for your profile."
+        "NSPhotoLibraryUsageDescription": "Planera needs access to your photo library so you can select a profile photo.",
+        "NSLocationWhenInUseUsageDescription": "Planera uses your location to show your position on the trip map, help you navigate to activities, and notify you when you are near a planned stop on your itinerary."
       },
       "splash": {
         "image": "./assets/images/appicon-1024x1024-01-9h6cls.jpg",
@@ -59,7 +60,22 @@
       "expo-font",
       "expo-web-browser",
       "@react-native-google-signin/google-signin",
-      "expo-iap"
+      "expo-iap",
+      "expo-image-picker",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Planera uses your location to show your position on the trip map, help you navigate to activities, and notify you when you are near a planned stop on your itinerary."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/appicon-1024x1024-01-9h6cls.jpg",
+          "color": "#1B3F92",
+          "sounds": []
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

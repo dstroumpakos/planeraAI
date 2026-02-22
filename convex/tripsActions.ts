@@ -567,6 +567,12 @@ export const generate = internalAction({
                     
                     // Calculate the number of days
                     const tripDays = Math.ceil((trip.endDate - trip.startDate) / (24 * 60 * 60 * 1000));
+                    
+                    // Enforce max 15-day limit
+                    if (tripDays > 15) {
+                        throw new Error("Trip duration cannot exceed 15 days. Please shorten your trip dates.");
+                    }
+                    
                     console.log(`📅 Generating itinerary for ${tripDays} days`);
                     
                     // Generate budget-aware guidance
@@ -839,7 +845,7 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                         }
                         
                         // Merge TripAdvisor data into restaurant activities
-                        dayByDayItinerary = mergeRestaurantDataIntoItinerary(dayByDayItinerary, restaurants);
+                        dayByDayItinerary = await mergeRestaurantDataIntoItinerary(dayByDayItinerary, restaurants, trip.destination);
                         
                         // POST-PROCESSING: Enforce arrival day buffer
                         // Even if the AI ignores the prompt, we fix Day 1 activities that start too early
@@ -890,6 +896,16 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                 itinerary: result,
                 status: "completed",
             });
+
+            // Send push notification that trip is ready
+            await ctx.runAction(internal.notifications.sendPushNotification, {
+                userId: trip.userId,
+                title: "Your trip is ready! ✈️",
+                body: `Your ${trip.destination} itinerary has been generated. Tap to explore it!`,
+                data: { tripId, screen: "trip" },
+                tripId,
+                type: "trip_ready",
+            });
         } catch (error: unknown) {
             const errorMessage = error instanceof Error ? error.message : "Unknown error";
             console.error("❌ Error generating itinerary:", error);
@@ -903,6 +919,20 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                 itinerary: null,
                 status: "failed",
             });
+
+            // Notify user that trip generation failed
+            try {
+                await ctx.runAction(internal.notifications.sendPushNotification, {
+                    userId: trip.userId,
+                    title: "Trip generation failed",
+                    body: `We couldn't generate your ${trip.destination} trip. Tap to try again.`,
+                    data: { tripId, screen: "trip" },
+                    tripId,
+                    type: "trip_failed",
+                });
+            } catch (notifError) {
+                console.warn("⚠️ Failed to send failure notification:", notifError);
+            }
             
             throw new Error(`Failed to generate trip: ${errorMessage}`);
         }
@@ -1949,14 +1979,19 @@ interface RestaurantInfo {
     tripAdvisorUrl?: string;
 }
 
-function mergeRestaurantDataIntoItinerary(dayByDayItinerary: ItineraryDay[], restaurants: RestaurantInfo[]): ItineraryDay[] {
+async function mergeRestaurantDataIntoItinerary(dayByDayItinerary: ItineraryDay[], restaurants: RestaurantInfo[], destination: string): Promise<ItineraryDay[]> {
     if (!restaurants || restaurants.length === 0) {
         return dayByDayItinerary;
     }
     
     console.log(`🔄 Merging TripAdvisor data for ${restaurants.length} restaurants into itinerary`);
     
-    // Create a map of restaurant names (lowercase) to their TripAdvisor data
+    // Build a pool of available restaurants (copies so we can remove used ones)
+    const availablePool: RestaurantInfo[] = [...restaurants];
+    // Track names we've already assigned (lowercase) to guarantee uniqueness
+    const usedNames = new Set<string>();
+    
+    // Create a map for name-based lookup
     const restaurantMap = new Map<string, RestaurantInfo>();
     for (const restaurant of restaurants) {
         if (restaurant.name) {
@@ -1964,7 +1999,107 @@ function mergeRestaurantDataIntoItinerary(dayByDayItinerary: ItineraryDay[], res
         }
     }
     
+    // First pass: count how many restaurant activities we need to fill
+    let totalRestaurantSlots = 0;
+    for (const day of dayByDayItinerary) {
+        if (!day.activities) continue;
+        for (const activity of day.activities) {
+            if (activity.type === "restaurant" || activity.type === "meal" || 
+                activity.title?.toLowerCase().includes("lunch") || 
+                activity.title?.toLowerCase().includes("dinner") ||
+                activity.title?.toLowerCase().includes("breakfast") ||
+                activity.title?.toLowerCase().includes("restaurant")) {
+                totalRestaurantSlots++;
+            }
+        }
+    }
+    
+    console.log(`📊 Need ${totalRestaurantSlots} unique restaurants, have ${availablePool.length} in pool`);
+    
+    // If we don't have enough restaurants, fetch more from TripAdvisor
+    if (totalRestaurantSlots > availablePool.length) {
+        const needed = totalRestaurantSlots - availablePool.length;
+        console.log(`🔍 Need ${needed} more restaurants, fetching additional from TripAdvisor...`);
+        
+        const existingNames = new Set(availablePool.map(r => r.name?.toLowerCase()));
+        
+        // Try different search queries to get more diverse results
+        const extraQueries = [
+            `best restaurants ${destination}`,
+            `top rated dining ${destination}`,
+            `local food ${destination}`,
+            `popular cafes ${destination}`,
+            `traditional cuisine ${destination}`,
+        ];
+        
+        const tripadvisorKey = process.env.TRIPADVISOR_API_KEY;
+        if (tripadvisorKey) {
+            for (const query of extraQueries) {
+                if (availablePool.length >= totalRestaurantSlots) break;
+                
+                try {
+                    const searchUrl = `https://api.content.tripadvisor.com/api/v1/location/search?key=${tripadvisorKey}&searchQuery=${encodeURIComponent(query)}&category=restaurants&language=en`;
+                    const searchResponse = await fetch(searchUrl, {
+                        method: "GET",
+                        headers: { "Accept": "application/json" },
+                    });
+                    
+                    if (!searchResponse.ok) continue;
+                    const searchData = await searchResponse.json() as any;
+                    if (!searchData.data) continue;
+                    
+                    for (const item of searchData.data) {
+                        if (availablePool.length >= totalRestaurantSlots) break;
+                        const nameLower = (item.name || "").toLowerCase();
+                        if (existingNames.has(nameLower)) continue; // Skip duplicates
+                        
+                        // Fetch details for this restaurant
+                        try {
+                            const detailsUrl = `https://api.content.tripadvisor.com/api/v1/location/${item.location_id}/details?key=${tripadvisorKey}&language=en`;
+                            const detailsResponse = await fetch(detailsUrl, {
+                                method: "GET",
+                                headers: { "Accept": "application/json" },
+                            });
+                            
+                            if (detailsResponse.ok) {
+                                const details = await detailsResponse.json() as any;
+                                const newRestaurant: RestaurantInfo = {
+                                    name: details.name || item.name || "Restaurant",
+                                    cuisine: details.cuisine?.map((c: any) => c.localized_name || c.name).join(", ") || "Various",
+                                    priceRange: details.price_level || "€€",
+                                    rating: parseFloat(details.rating) || 4.0,
+                                    reviewCount: parseInt(details.num_reviews) || 0,
+                                    address: details.address_obj?.address_string || item.address_obj?.address_string || destination,
+                                    tripAdvisorUrl: details.web_url || `https://www.tripadvisor.com/Restaurant_Review-g${item.location_id}`,
+                                };
+                                availablePool.push(newRestaurant);
+                                existingNames.add(nameLower);
+                                console.log(`  ➕ Added: ${newRestaurant.name}`);
+                            }
+                        } catch (e) {
+                            // Skip this restaurant
+                        }
+                    }
+                } catch (e) {
+                    console.log(`⚠️ Extra search failed for: ${query}`);
+                }
+            }
+            console.log(`📊 Pool now has ${availablePool.length} restaurants after extra fetches`);
+        }
+    }
+    
     let mergedCount = 0;
+    
+    // Helper: pick the next available restaurant that hasn't been used yet
+    const pickUnusedRestaurant = (): RestaurantInfo | null => {
+        for (const r of availablePool) {
+            const name = r.name?.toLowerCase() || "";
+            if (!usedNames.has(name)) {
+                return r;
+            }
+        }
+        return null; // All restaurants have been used
+    };
     
     // Go through each day and each activity
     for (const day of dayByDayItinerary) {
@@ -1980,16 +2115,19 @@ function mergeRestaurantDataIntoItinerary(dayByDayItinerary: ItineraryDay[], res
                 activity.title?.toLowerCase().includes("breakfast") ||
                 activity.title?.toLowerCase().includes("restaurant")) {
                 
-                // Try to find a matching restaurant from TripAdvisor data
                 const activityNameLower = activity.title?.toLowerCase() || "";
+                let matchedRestaurant: RestaurantInfo | undefined | null = undefined;
                 
-                // First try exact match
-                let matchedRestaurant = restaurantMap.get(activityNameLower);
+                // First try exact name match (only if not already used)
+                const exactMatch = restaurantMap.get(activityNameLower);
+                if (exactMatch && !usedNames.has(exactMatch.name?.toLowerCase() || "")) {
+                    matchedRestaurant = exactMatch;
+                }
                 
-                // If no exact match, try to find a partial match or assign by index
+                // If no exact match, try partial match (only unused)
                 if (!matchedRestaurant) {
-                    // Try partial match
                     for (const [name, restaurant] of restaurantMap) {
+                        if (usedNames.has(name)) continue; // Skip already used
                         if (activityNameLower.includes(name) || name.includes(activityNameLower)) {
                             matchedRestaurant = restaurant;
                             break;
@@ -1997,24 +2135,16 @@ function mergeRestaurantDataIntoItinerary(dayByDayItinerary: ItineraryDay[], res
                     }
                 }
                 
-                // If still no match, assign a restaurant based on meal type
-                if (!matchedRestaurant && restaurants.length > 0) {
-                    const dayIndex = day.day - 1;
-                    const isLunch = activityNameLower.includes("lunch");
-                    const isDinner = activityNameLower.includes("dinner");
-                    
-                    // Assign different restaurants for lunch and dinner
-                    const restaurantIndex = isLunch 
-                        ? (dayIndex * 2) % restaurants.length 
-                        : isDinner 
-                            ? (dayIndex * 2 + 1) % restaurants.length 
-                            : dayIndex % restaurants.length;
-                    
-                    matchedRestaurant = restaurants[restaurantIndex];
+                // If still no match, pick the next unused restaurant from the pool
+                if (!matchedRestaurant) {
+                    matchedRestaurant = pickUnusedRestaurant();
                 }
                 
                 // Merge TripAdvisor data if we found a match
                 if (matchedRestaurant && (matchedRestaurant.tripAdvisorUrl || matchedRestaurant.rating)) {
+                    const usedName = matchedRestaurant.name?.toLowerCase() || "";
+                    usedNames.add(usedName);
+                    
                     day.activities[i] = {
                         ...activity,
                         type: "restaurant",
@@ -2037,12 +2167,14 @@ function mergeRestaurantDataIntoItinerary(dayByDayItinerary: ItineraryDay[], res
                         culinaryTags: activity.culinaryTags || null,
                     };
                     mergedCount++;
+                } else {
+                    console.log(`⚠️ No unused restaurant available for: ${activity.title}`);
                 }
             }
         }
     }
     
-    console.log(`✅ Merged TripAdvisor data into ${mergedCount} restaurant activities`);
+    console.log(`✅ Merged TripAdvisor data into ${mergedCount} restaurant activities (${usedNames.size} unique restaurants used)`);
     return dayByDayItinerary;
 }
 
@@ -2061,6 +2193,9 @@ function generateBasicItinerary(trip: TripData, activities: Array<{ title?: stri
     
     // Get destination-specific activities with prices
     const destActivities = getActivitiesWithPrices(trip.destination);
+    
+    // Running index so every restaurant slot gets a unique restaurant
+    let restaurantIdx = 0;
     
     for (let i = 0; i < days; i++) {
         const dayActivities: ItineraryActivity[] = [];
@@ -2104,8 +2239,8 @@ function generateBasicItinerary(trip: TripData, activities: Array<{ title?: stri
             tips: morningActivity?.tips || null,
         });
         
-        // Lunch - include TripAdvisor data if available
-        const lunchRestaurant = restaurants[i % restaurants.length];
+        // Lunch - include TripAdvisor data if available (each restaurant used only once)
+        const lunchRestaurant = restaurants.length > 0 ? restaurants[restaurantIdx++ % restaurants.length] : undefined;
         const lunchActivity: ItineraryActivity = {
             time: "1:00 PM",
             title: lunchRestaurant?.name || "Lunch",
@@ -2155,8 +2290,8 @@ function generateBasicItinerary(trip: TripData, activities: Array<{ title?: stri
             tips: afternoonActivity?.tips || null,
         });
         
-        // Dinner - include TripAdvisor data if available
-        const dinnerRestaurant = restaurants[(i + 1) % restaurants.length];
+        // Dinner - include TripAdvisor data if available (each restaurant used only once)
+        const dinnerRestaurant = restaurants.length > 0 ? restaurants[restaurantIdx++ % restaurants.length] : undefined;
         const dinnerActivity: ItineraryActivity = {
             time: "7:00 PM",
             title: dinnerRestaurant?.name || "Dinner",

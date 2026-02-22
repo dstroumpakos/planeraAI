@@ -89,6 +89,22 @@ const originalResolveRequest = defaultConfig.resolver.resolveRequest;
 
 defaultConfig.resolver.resolveRequest = (context, moduleName, platform) => {
   const isNative = platform === "ios" || platform === "android";
+
+  // FIX: Convex 1.32.0 react/client.js imports ../server/api.js via a relative
+  // path, but the "convex" package only exports "./server" (not "./server/api").
+  // With unstable_enablePackageExports, Metro blocks this internal import.
+  // Resolve it directly to the on-disk file.
+  if (
+    context.originModulePath &&
+    context.originModulePath.replace(/\\/g, "/").includes("node_modules/convex/") &&
+    moduleName === "../server/api.js"
+  ) {
+    const resolved = path.resolve(
+      path.dirname(context.originModulePath),
+      moduleName
+    );
+    return { filePath: resolved, type: "sourceFile" };
+  }
   
   if (isNative) {
     // STRATEGY 1: Exact module name match -> return shim immediately

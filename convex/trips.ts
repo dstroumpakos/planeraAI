@@ -435,6 +435,27 @@ export const update = authMutation({
     },
 });
 
+// Update whether user is physically at the trip destination (used by location notifications)
+export const updateLocationStatus = authMutation({
+    args: {
+        token: v.string(),
+        tripId: v.id("trips"),
+        atDestination: v.boolean(),
+    },
+    returns: v.null(),
+    handler: async (ctx: any, args: any) => {
+        const trip = await ctx.db.get(args.tripId);
+        if (!trip) throw new Error("Trip not found");
+        if (trip.userId !== ctx.user._id) throw new Error("Unauthorized");
+
+        await ctx.db.patch(args.tripId, {
+            userAtDestination: args.atDestination,
+            lastLocationCheckAt: Date.now(),
+        });
+        return null;
+    },
+});
+
 export const regenerate = authMutation({
     args: { 
         token: v.string(),
