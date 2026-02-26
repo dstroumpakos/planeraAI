@@ -1052,7 +1052,11 @@ export default function TripDetails() {
                     </TouchableOpacity>
                     
                     {/* Center Content */}
-                    <View style={styles.loadingCenterContent}>
+                    <ScrollView 
+                        style={styles.loadingCenterContent}
+                        contentContainerStyle={styles.loadingCenterContentInner}
+                        showsVerticalScrollIndicator={false}
+                    >
                         {/* Trip Title with Route */}
                         <View style={styles.loadingTitleContainer}>
                             <Text style={styles.loadingDestination}>{trip.origin || "Unknown"}</Text>
@@ -1150,6 +1154,10 @@ export default function TripDetails() {
                             This usually takes about 1–2 minutes.
                         </Text>
                         
+                    </ScrollView>
+
+                    {/* Bottom section: notification hint + attribution, outside center content */}
+                    <View style={styles.loadingBottomSection}>
                         {/* Leave screen hint */}
                         <TouchableOpacity 
                             style={styles.leaveHintContainer} 
@@ -1161,16 +1169,16 @@ export default function TripDetails() {
                                 You can leave this screen — we'll notify you when your trip is ready!
                             </Text>
                         </TouchableOpacity>
+                        
+                        {/* Photo Attribution */}
+                        {currentImage && (
+                            <View style={styles.loadingAttribution}>
+                                <Text style={styles.loadingAttributionText}>
+                                    Photo by {currentImage.photographer} on Unsplash
+                                </Text>
+                            </View>
+                        )}
                     </View>
-                    
-                    {/* Photo Attribution */}
-                    {currentImage && (
-                        <View style={styles.loadingAttribution}>
-                            <Text style={styles.loadingAttributionText}>
-                                Photo by {currentImage.photographer} on Unsplash
-                            </Text>
-                        </View>
-                    )}
                 </SafeAreaView>
                 
                 {/* Image Indicators */}
@@ -3411,7 +3419,7 @@ const styles = StyleSheet.create({
         justifyContent: "space-between",
         paddingHorizontal: 24,
         paddingTop: 16,
-        paddingBottom: 40,
+        paddingBottom: 16,
     },
     loadingBackButton: {
         width: 40,
@@ -3423,8 +3431,13 @@ const styles = StyleSheet.create({
     },
     loadingCenterContent: {
         flex: 1,
+        flexShrink: 1,
+    },
+    loadingCenterContentInner: {
         justifyContent: "center",
         alignItems: "center",
+        flexGrow: 1,
+        paddingVertical: 8,
     },
     loadingTitleContainer: {
         flexDirection: "column",
@@ -3526,8 +3539,12 @@ const styles = StyleSheet.create({
         textAlign: "center",
         flexShrink: 1,
     },
+    loadingBottomSection: {
+        alignItems: "center",
+        paddingBottom: 8,
+    },
     loadingAttribution: {
-        marginTop: 20,
+        marginTop: 10,
     },
     loadingAttributionText: {
         color: "rgba(255,255,255,0.6)",

@@ -220,6 +220,8 @@ export default function CreateTripScreen() {
     const { token } = useToken();
     // @ts-ignore
     const userSettings = useQuery(api.users.getSettings as any, { token: token || "skip" }) as any;
+    // @ts-ignore
+    const userPlan = useQuery(api.users.getPlan as any, token ? { token } : "skip") as any;
     // V1: Traveler profiles disabled - removed travelers query
     
     const [loading, setLoading] = useState(false);
@@ -484,7 +486,7 @@ export default function CreateTripScreen() {
 
      // V1: Traveler profiles disabled - removed getSelectedTravelersWithAges and areAllTravelersReady
 
-    const handleSubmit = async () => {
+    const handleSubmit = async (options?: { skipConsentCheck?: boolean }) => {
         if (!formData.destination) {
             Alert.alert("Error", "Please enter a destination");
             return;
@@ -496,7 +498,7 @@ export default function CreateTripScreen() {
         }
 
         // Check AI data consent before proceeding (Apple guideline 5.1.1/5.1.2)
-        if (userSettings && userSettings.aiDataConsent !== true) {
+        if (!options?.skipConsentCheck && userSettings && userSettings.aiDataConsent !== true) {
             setShowAiConsentModal(true);
             return;
         }
@@ -518,6 +520,29 @@ export default function CreateTripScreen() {
         if (!formData.budgetTotal || isNaN(Number(formData.budgetTotal)) || Number(formData.budgetTotal) <= 0) {
             Alert.alert("Error", "Please enter a valid budget amount");
             return;
+        }
+
+        // Client-side credit check to avoid server error (Apple guideline 2.1)
+        if (userPlan) {
+            const isSubActive = userPlan.isSubscriptionActive === true;
+            const tripCredits = userPlan.tripCredits ?? 0;
+            const tripsGenerated = userPlan.tripsGenerated ?? 0;
+            const hasFreeTrial = tripsGenerated < 1;
+
+            if (!isSubActive && tripCredits <= 0 && !hasFreeTrial) {
+                Alert.alert(
+                    "No Trip Credits",
+                    "You've used all your trip credits. Purchase a trip pack or upgrade to Premium for unlimited trips.",
+                    [
+                        { text: "Cancel", style: "cancel" },
+                        {
+                            text: "View Options",
+                            onPress: () => router.push("/subscription"),
+                        },
+                    ]
+                );
+                return;
+            }
         }
 
         setLoading(true);
@@ -1166,8 +1191,8 @@ export default function CreateTripScreen() {
                 try {
                     await updateAiConsent({ token: token || "", aiDataConsent: true });
                     setShowAiConsentModal(false);
-                    // Re-trigger submit after consent is granted
-                    handleSubmit();
+                    // Re-trigger submit after consent is granted, skip re-checking consent
+                    handleSubmit({ skipConsentCheck: true });
                 } catch (e) {
                     console.error("Failed to save AI consent:", e);
                 }

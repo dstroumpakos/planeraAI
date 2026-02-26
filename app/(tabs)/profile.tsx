@@ -344,8 +344,8 @@ export default function Profile() {
             title: "Notifications",
             subtitle: "Push, email & trip reminders",
             icon: "notifications-outline",
-            iconBg: isDarkMode ? "#1E3A5F" : "#DBEAFE",
-            iconColor: "#2563EB",
+            iconBg: isDarkMode ? "#3D3D00" : "#FFF8E1",
+            iconColor: colors.primary,
             action: () => router.push("/settings/notifications")
         },
         // {
