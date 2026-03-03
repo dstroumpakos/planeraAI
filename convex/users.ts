@@ -10,17 +10,15 @@ export const validateToken = query({
         token: v.string(),
     },
     handler: async (ctx, args) => {
-        // Look up the session in the database
-        const sessions = await ctx.db
+        // Look up the session in the database using index
+        const session = await ctx.db
             .query("sessions")
-            .filter((q) => q.eq(q.field("token"), args.token))
-            .collect();
+            .withIndex("by_token", (q) => q.eq("token", args.token))
+            .first();
         
-        if (!sessions || sessions.length === 0) {
+        if (!session) {
             return null;
         }
-        
-        const session = sessions[0];
         
         // Get the user from userSettings
         const userSettings = await ctx.db
@@ -435,17 +433,18 @@ export const updatePersonalInfo = authMutation({
     },
     returns: v.null(),
     handler: async (ctx: any, args: any) => {
+        const { token, ...updates } = args;
         const settings = await ctx.db
             .query("userSettings")
             .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
             .unique();
 
         if (settings) {
-            await ctx.db.patch(settings._id, args);
+            await ctx.db.patch(settings._id, updates);
         } else {
             await ctx.db.insert("userSettings", {
                 userId: ctx.user._id,
-                ...args,
+                ...updates,
             });
         }
 
@@ -738,7 +737,7 @@ export const processApplePurchase = authMutation({
         // Check if this transaction was already processed (idempotency)
         const existingTx = await ctx.db
             .query("iapTransactions")
-            .filter((q: any) => q.eq(q.field("transactionId"), transactionId))
+            .withIndex("by_transaction", (q: any) => q.eq("transactionId", transactionId))
             .first();
         
         if (existingTx) {
@@ -771,6 +770,9 @@ export const processApplePurchase = authMutation({
                 tripCredits: 0,
             });
             userPlan = await ctx.db.get(planId);
+            if (!userPlan) {
+                throw new Error("Failed to create user plan");
+            }
         }
 
         // Process based on product type
@@ -835,7 +837,7 @@ export const restoreApplePurchases = authMutation({
             // Check if transaction already processed
             const existingTx = await ctx.db
                 .query("iapTransactions")
-                .filter((q: any) => q.eq(q.field("transactionId"), purchase.transactionId))
+                .withIndex("by_transaction", (q: any) => q.eq("transactionId", purchase.transactionId))
                 .first();
 
             if (existingTx) {
@@ -867,20 +869,26 @@ export const restoreApplePurchases = authMutation({
                 .unique();
 
             if (!userPlan) {
-                const planId = await ctx.db.insert("userPlans", {
+                const planId = await ctx.db.insert(\"userPlans\", {
                     userId: ctx.user._id,
-                    plan: "free",
+                    plan: \"free\",
                     tripsGenerated: 0,
                     tripCredits: 0,
                 });
                 userPlan = await ctx.db.get(planId);
+                if (!userPlan) {
+                    throw new Error(\"Failed to create user plan\");
+                }
             }
 
-            // Find the latest subscription purchase
-            const subscriptionPurchase = purchases.find(
+            // Find the latest subscription purchase (last in array = most recent)
+            const subscriptionPurchases = purchases.filter(
                 (p: { productId: string; transactionId: string; receipt?: string }) => 
                     p.productId === PRODUCT_IDS.YEARLY || p.productId === PRODUCT_IDS.MONTHLY
             );
+            const subscriptionPurchase = subscriptionPurchases.length > 0 
+                ? subscriptionPurchases[subscriptionPurchases.length - 1] 
+                : null;
 
             if (subscriptionPurchase) {
                 const isYearly = subscriptionPurchase.productId === PRODUCT_IDS.YEARLY;
@@ -1085,11 +1093,17 @@ export const deleteAccount = authMutation({
             }
         }
 
-        // 15. Delete the userSettings record itself (must be last)
+        // 15. Delete push tokens
+        const pushTokensDeleted = await deleteAll("pushTokens", "by_user", userId);
+        // Also try with auth userId string
+        const pushTokensDeletedLegacy = await deleteAll("pushTokens", "by_user", userIdString);
+        console.log(`[deleteAccount] Deleted ${pushTokensDeleted + pushTokensDeletedLegacy} pushTokens`);
+
+        // 16. Delete the userSettings record itself (must be last)
         await ctx.db.delete(ctx.user._id);
         console.log("[deleteAccount] Deleted userSettings record");
 
-        // 16. Send account deletion confirmation email
+        // 17. Send account deletion confirmation email
         if (userEmail) {
             await ctx.scheduler.runAfter(0, internal.postmark.sendAccountDeletionEmail, {
                 to: userEmail,

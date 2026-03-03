@@ -68,12 +68,20 @@ export default function FlightOfferDetailsScreen() {
   const createDraft = useAction(api.bookingDraft.createDraft);
 
   // Parse travelers from params
-  const travelers: TravelerParam[] = travelersParam
-    ? JSON.parse(travelersParam)
-    : [];
+  let travelers: TravelerParam[] = [];
+  try {
+    travelers = travelersParam ? JSON.parse(travelersParam) : [];
+  } catch (e) {
+    console.error('[FlightOfferDetails] Failed to parse travelers:', e);
+  }
 
   // Parse flight info
-  const flightInfo = flightInfoParam ? JSON.parse(flightInfoParam) : null;
+  let flightInfo: any = null;
+  try {
+    flightInfo = flightInfoParam ? JSON.parse(flightInfoParam) : null;
+  } catch (e) {
+    console.error('[FlightOfferDetails] Failed to parse flightInfo:', e);
+  }
 
   useEffect(() => {
     initializeDraft();

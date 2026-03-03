@@ -4,7 +4,7 @@
  * User can customize their booking before proceeding to review
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -96,7 +96,12 @@ export default function FlightExtrasScreen() {
   const acknowledgePolicy = useMutation(api.bookingDraftMutations.acknowledgePolicy);
   const fetchSeatMaps = useAction(api.bookingDraft.fetchSeatMaps);
 
-  const flightInfo = flightInfoParam ? JSON.parse(flightInfoParam) : null;
+  let flightInfo: any = null;
+  try {
+    flightInfo = flightInfoParam ? JSON.parse(flightInfoParam) : null;
+  } catch (e) {
+    console.error('[FlightExtras] Failed to parse flightInfo:', e);
+  }
 
   useEffect(() => {
     if (draft) {
@@ -299,15 +304,20 @@ export default function FlightExtrasScreen() {
     }
   };
 
-  // Save bags when they change
+  // Save bags when they change (only after initial load)
+  const bagsInitialized = useRef(false);
   useEffect(() => {
-    if (selectedBags.length >= 0 && draft) {
+    if (!bagsInitialized.current) {
+      bagsInitialized.current = true;
+      return;
+    }
+    if (selectedBags.length > 0 && draft) {
       const timer = setTimeout(() => {
         handleSaveBagSelections();
       }, 500);
       return () => clearTimeout(timer);
     }
-  }, [selectedBags]);
+  }, [selectedBags, draft]);
 
   const renderBagsTab = () => {
     const getSelectedQuantity = (bagId: string, passengerId: string) => {

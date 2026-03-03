@@ -219,7 +219,7 @@ export default function CreateTripScreen() {
     const createTrip = useAuthenticatedMutation(api.trips.create as any);
     const { token } = useToken();
     // @ts-ignore
-    const userSettings = useQuery(api.users.getSettings as any, { token: token || "skip" }) as any;
+    const userSettings = useQuery(api.users.getSettings as any, token ? { token } : "skip") as any;
     // @ts-ignore
     const userPlan = useQuery(api.users.getPlan as any, token ? { token } : "skip") as any;
     // V1: Traveler profiles disabled - removed travelers query

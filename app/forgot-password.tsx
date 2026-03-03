@@ -213,10 +213,6 @@ export default function ForgotPasswordScreen() {
                     ],
                     { cancelable: false }
                 );
-                // Also navigate after a short delay as fallback
-                setTimeout(() => {
-                    router.replace("/");
-                }, 3000);
             } else {
                 setError(result.error || "Failed to reset password. Please try again.");
             }

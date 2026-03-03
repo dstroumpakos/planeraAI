@@ -79,7 +79,7 @@ export default function Onboarding() {
   const { token } = useToken();
   
   // Query existing travelers
-  const existingTravelers = useQuery(api.travelers.list as any, { token: token || "skip" });
+  const existingTravelers = useQuery(api.travelers.list as any, token ? { token } : "skip");
 
   const hapticFeedback = () => {
     if (Platform.OS !== "web") {

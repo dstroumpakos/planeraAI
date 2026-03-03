@@ -55,7 +55,12 @@ export default function FlightReviewScreen() {
   const draft = useQuery(api.bookingDraftMutations.getBookingDraft, { draftId });
   const completeBooking = useAction(api.bookingDraft.completeBooking);
 
-  const flightInfo = flightInfoParam ? JSON.parse(flightInfoParam) : null;
+  let flightInfo: any = null;
+  try {
+    flightInfo = flightInfoParam ? JSON.parse(flightInfoParam) : null;
+  } catch (e) {
+    console.error('[FlightReview] Failed to parse flightInfo:', e);
+  }
 
   const handleCompleteBooking = async () => {
     if (Platform.OS !== "web") {
@@ -113,6 +118,12 @@ export default function FlightReviewScreen() {
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={colors.primary} />
           <Text style={styles.loadingText}>Loading booking details...</Text>
+          <TouchableOpacity
+            style={{ marginTop: 20, padding: 12 }}
+            onPress={() => router.back()}
+          >
+            <Text style={{ color: colors.primary, fontSize: 16, fontWeight: '600' }}>Go Back</Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );

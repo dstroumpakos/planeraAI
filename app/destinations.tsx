@@ -32,24 +32,33 @@ export default function DestinationsScreen() {
   const fetchImages = useCallback(async () => {
     const imageMap: Record<string, any> = {};
     if (!allDestinations) return;
-    for (const destination of allDestinations) {
-      try {
-        const images = await getImages({ destination: destination.destination });
-        if (images && images.length > 0) {
-          imageMap[destination.destination] = images[0];
+    // Fetch images in parallel for better performance
+    const results = await Promise.allSettled(
+      allDestinations.map(async (destination) => {
+        try {
+          const images = await getImages({ destination: destination.destination });
+          if (images && images.length > 0) {
+            return { key: destination.destination, image: images[0] };
+          }
+        } catch (error) {
+          console.error(`Failed to fetch images for ${destination.destination}:`, error);
         }
-      } catch (error) {
-        console.error(`Failed to fetch images for ${destination.destination}:`, error);
+        return null;
+      })
+    );
+    for (const result of results) {
+      if (result.status === 'fulfilled' && result.value) {
+        imageMap[result.value.key] = result.value.image;
       }
     }
     setDestinationImages(imageMap);
-  }, [allDestinations]);
+  }, [allDestinations, getImages]);
 
   useEffect(() => {
     if (allDestinations && allDestinations.length > 0) {
       fetchImages();
     }
-  }, [allDestinations]);
+  }, [allDestinations, fetchImages]);
 
   // Filter destinations based on search
   const filteredDestinations = allDestinations?.filter((dest) =>

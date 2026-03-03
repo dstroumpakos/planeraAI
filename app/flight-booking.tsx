@@ -65,7 +65,12 @@ export default function FlightBookingScreen() {
   const offerId = params.offerId as string;
   const tripId = params.tripId as string;
   const numPassengers = parseInt(params.passengers as string) || 1;
-  const flightInfo = params.flightInfo ? JSON.parse(params.flightInfo as string) : null;
+  let flightInfo: any = null;
+  try {
+    flightInfo = params.flightInfo ? JSON.parse(params.flightInfo as string) : null;
+  } catch (e) {
+    console.error('[FlightBooking] Failed to parse flightInfo:', e);
+  }
   // Get traveler IDs from params (comma-separated)
   const travelerIdsParam = params.travelerIds as string;
   const travelerIds = travelerIdsParam ? travelerIdsParam.split(",") as Id<"travelers">[] : [];
@@ -75,7 +80,7 @@ export default function FlightBookingScreen() {
   const { token } = useToken();
   
   // Fetch saved traveler profiles if IDs are provided
-  const savedTravelers = useQuery(api.travelers.list as any, { token: token || "skip" });
+  const savedTravelers = useQuery(api.travelers.list as any, token ? { token } : "skip");
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);

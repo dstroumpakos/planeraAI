@@ -19,7 +19,7 @@ export default function SubscriptionScreen() {
     const processApplePurchase = useMutation(api.users.processApplePurchase);
     // @ts-ignore
     const restoreApplePurchases = useMutation(api.users.restoreApplePurchases);
-    const userPlan = useQuery(api.users.getPlan as any, { token: token || "skip" });
+    const userPlan = useQuery(api.users.getPlan as any, token ? { token } : "skip");
     
     // IAP hook for real Apple StoreKit purchases
     const {

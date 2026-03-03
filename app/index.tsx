@@ -18,7 +18,7 @@ const ENABLE_GOOGLE = false;
 function AuthenticatedRedirect() {
     const { token } = useToken();
     // @ts-ignore
-    const settings = useQuery(api.users.getSettings as any, { token: token || "skip" });
+    const settings = useQuery(api.users.getSettings as any, token ? { token } : "skip");
 
     // Still loading settings from Convex
     if (settings === undefined) {
@@ -90,11 +90,8 @@ export default function Index() {
                         Alert.alert("Error", result.error.message || "Sign up failed");
                     }
                 } else {
-                    // Sign-up successful - redirect to onboarding after brief delay
-                    console.log("[Index] Email Sign-Up successful, redirecting to onboarding...");
-                    setTimeout(() => {
-                        router.replace("/onboarding");
-                    }, 1000);
+                    // Sign-up successful - let AuthenticatedRedirect handle navigation
+                    console.log("[Index] Email Sign-Up successful, waiting for auth state update...");
                 }
             } else {
                 const result = await authClient.signIn.email({ email, password });
@@ -185,6 +182,7 @@ export default function Index() {
             } else {
                 // Success - navigate after a brief delay to let auth state update
                 console.log("[Index] Anonymous Sign-In successful, redirecting...");
+                setOauthLoading(null);
                 setTimeout(() => {
                     router.replace("/onboarding");
                 }, 2000);  // Increased to 2 seconds
