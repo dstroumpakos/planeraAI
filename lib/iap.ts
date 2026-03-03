@@ -126,7 +126,7 @@ class IAPService {
             const availablePurchases = await ExpoIAP.getAvailablePurchases();
             
             if (availablePurchases && availablePurchases.length > 0) {
-                console.log(`[IAP] Found ${availablePurchases.length} available purchases, checking for pending consumables...`);
+                console.log(`[IAP] Found ${availablePurchases.length} available purchases, checking transactions (will only auto-finish consumables)...`);
                 
                 for (const purchase of availablePurchases) {
                     const productId = (purchase as any).productId || '';
