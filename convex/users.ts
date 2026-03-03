@@ -869,15 +869,15 @@ export const restoreApplePurchases = authMutation({
                 .unique();
 
             if (!userPlan) {
-                const planId = await ctx.db.insert(\"userPlans\", {
+                const planId = await ctx.db.insert("userPlans", {
                     userId: ctx.user._id,
-                    plan: \"free\",
+                    plan: "free",
                     tripsGenerated: 0,
                     tripCredits: 0,
                 });
                 userPlan = await ctx.db.get(planId);
                 if (!userPlan) {
-                    throw new Error(\"Failed to create user plan\");
+                    throw new Error("Failed to create user plan");
                 }
             }
 
