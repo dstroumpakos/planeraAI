@@ -4,7 +4,7 @@
  * Provides easy access to IAP functionality in React components.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Platform, Alert } from 'react-native';
 import {
     iapService,
@@ -13,6 +13,16 @@ import {
     PRODUCT_IDS,
     SUBSCRIPTION_PRODUCT_IDS,
 } from './iap';
+
+// Lazy load expo-iap for event listeners
+let ExpoIAPListeners: any = null;
+if (Platform.OS === 'ios') {
+    try {
+        ExpoIAPListeners = require('expo-iap');
+    } catch (e) {
+        // Not available in Expo Go
+    }
+}
 
 export interface UseIAPReturn {
     // State
@@ -39,10 +49,35 @@ export function useIAP(): UseIAPReturn {
     const [isInitialized, setIsInitialized] = useState(false);
     const [products, setProducts] = useState<IAPProduct[]>([]);
     const [error, setError] = useState<string | null>(null);
+    const listenersRef = useRef<{ remove: () => void }[]>([]);
 
-    // Initialize IAP on mount
+    // Initialize IAP on mount and set up purchase listeners
     useEffect(() => {
         let mounted = true;
+
+        // Set up purchase event listeners (iOS only)
+        if (Platform.OS === 'ios' && ExpoIAPListeners) {
+            try {
+                if (ExpoIAPListeners.purchaseUpdatedListener) {
+                    const purchaseSub = ExpoIAPListeners.purchaseUpdatedListener((purchase: any) => {
+                        console.log('[useIAP] Purchase updated:', purchase?.productId);
+                    });
+                    if (purchaseSub) listenersRef.current.push(purchaseSub);
+                }
+                
+                if (ExpoIAPListeners.purchaseErrorListener) {
+                    const errorSub = ExpoIAPListeners.purchaseErrorListener((error: any) => {
+                        console.error('[useIAP] Purchase error event:', error);
+                        if (mounted) {
+                            setError(error?.message || 'Purchase error');
+                        }
+                    });
+                    if (errorSub) listenersRef.current.push(errorSub);
+                }
+            } catch (e) {
+                console.warn('[useIAP] Failed to set up purchase listeners:', e);
+            }
+        }
 
         const init = async () => {
             if (Platform.OS !== 'ios') {
@@ -63,7 +98,12 @@ export function useIAP(): UseIAPReturn {
                     const fetchedProducts = await iapService.getProducts();
                     if (mounted) {
                         setProducts(fetchedProducts);
+                        if (fetchedProducts.length === 0) {
+                            setError('Unable to load products from App Store. Please check your connection and try again.');
+                        }
                     }
+                } else if (mounted) {
+                    setError('Unable to connect to the App Store. Please try again later.');
                 }
             } catch (err: any) {
                 console.error('[useIAP] Initialization error:', err);
@@ -81,6 +121,11 @@ export function useIAP(): UseIAPReturn {
 
         return () => {
             mounted = false;
+            // Clean up listeners
+            listenersRef.current.forEach(sub => {
+                try { sub.remove(); } catch (e) { /* ignore */ }
+            });
+            listenersRef.current = [];
         };
     }, []);
 

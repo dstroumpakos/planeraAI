@@ -96,10 +96,53 @@ class IAPService {
             const result = await ExpoIAP.initConnection();
             this.isInitialized = !!result;
             console.log('[IAP] Connection initialized:', result);
+            
+            // Flush any pending/unfinished transactions from previous sessions
+            // This prevents "Item already owned" errors during Apple review
+            if (this.isInitialized) {
+                await this.flushPendingTransactions();
+            }
+            
             return this.isInitialized;
         } catch (error) {
             console.error('[IAP] Failed to initialize:', error);
             return false;
+        }
+    }
+
+    /**
+     * Flush any pending/unfinished transactions
+     * This resolves "Item already owned" errors that occur when previous
+     * transactions were not properly finished (common in sandbox/review)
+     */
+    async flushPendingTransactions(): Promise<void> {
+        if (!this.isAvailable()) return;
+
+        try {
+            const availablePurchases = await ExpoIAP.getAvailablePurchases();
+            
+            if (availablePurchases && availablePurchases.length > 0) {
+                console.log(`[IAP] Found ${availablePurchases.length} pending transactions, finishing them...`);
+                
+                for (const purchase of availablePurchases) {
+                    try {
+                        const isSubscription = SUBSCRIPTION_PRODUCT_IDS.includes(
+                            (purchase as any).productId || ''
+                        );
+                        await ExpoIAP.finishTransaction({ 
+                            purchase, 
+                            isConsumable: !isSubscription 
+                        });
+                        console.log('[IAP] Finished pending transaction:', (purchase as any).productId, (purchase as any).transactionId);
+                    } catch (finishErr) {
+                        console.warn('[IAP] Could not finish pending transaction:', finishErr);
+                    }
+                }
+            } else {
+                console.log('[IAP] No pending transactions to flush');
+            }
+        } catch (error) {
+            console.warn('[IAP] Failed to flush pending transactions:', error);
         }
     }
 
@@ -208,7 +251,12 @@ class IAPService {
             return allProducts;
         } catch (error) {
             console.error('[IAP] Failed to fetch products:', error);
-            return this.getMockProducts();
+            // Only return mock products on non-iOS (for development)
+            // On iOS, return empty array so the UI can show a proper error
+            if (Platform.OS !== 'ios') {
+                return this.getMockProducts();
+            }
+            return [];
         }
     }
 
@@ -244,12 +292,19 @@ class IAPService {
             const purchaseItem = Array.isArray(purchase) ? purchase[0] : purchase;
             
             if (purchaseItem) {
+                // Finish the transaction for subscriptions too
+                try {
+                    await ExpoIAP.finishTransaction({ purchase: purchaseItem, isConsumable: false });
+                } catch (finishErr) {
+                    console.warn('[IAP] Failed to finish subscription transaction:', finishErr);
+                }
+                
                 console.log('[IAP] Subscription purchase successful:', (purchaseItem as any).transactionId);
                 return {
                     success: true,
                     productId: (purchaseItem as any).productId,
                     transactionId: (purchaseItem as any).transactionId || undefined,
-                    receipt: (purchaseItem as any).transactionReceipt || undefined,
+                    receipt: (purchaseItem as any).purchaseToken || undefined,
                 };
             }
             
@@ -260,6 +315,16 @@ class IAPService {
             // Handle user cancellation
             if (error.code === 'E_USER_CANCELLED' || error.message?.includes('cancelled')) {
                 return { success: false, error: 'cancelled' };
+            }
+            
+            // Handle "Item already owned" - the user already has this subscription
+            // This happens in sandbox/review when previous transactions weren't finished
+            if (error.message?.includes('already owned') || 
+                error.message?.includes('Already owned') ||
+                error.code === 'E_ALREADY_OWNED' ||
+                error.code === 6778003) {
+                console.log('[IAP] Item already owned, attempting to restore...');
+                return { success: false, error: 'already_owned' };
             }
             
             return { success: false, error: error.message || 'Purchase failed' };
@@ -299,7 +364,7 @@ class IAPService {
                     success: true,
                     productId: (purchaseItem as any).productId,
                     transactionId: (purchaseItem as any).transactionId || undefined,
-                    receipt: (purchaseItem as any).transactionReceipt || undefined,
+                    receipt: (purchaseItem as any).purchaseToken || undefined,
                 };
             }
             
@@ -345,7 +410,7 @@ class IAPService {
                         success: true,
                         productId: purchase.productId,
                         transactionId: purchase.transactionId || undefined,
-                        receipt: (purchase as any).transactionReceipt || undefined,
+                        receipt: (purchase as any).purchaseToken || undefined,
                     });
                 }
             }
@@ -380,7 +445,7 @@ class IAPService {
                     success: true,
                     productId: sub.productId,
                     transactionId: sub.transactionId || undefined,
-                    receipt: (sub as any).transactionReceipt || undefined,
+                    receipt: (sub as any).purchaseToken || undefined,
                 };
             }
             

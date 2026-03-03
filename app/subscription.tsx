@@ -24,6 +24,7 @@ export default function SubscriptionScreen() {
     // IAP hook for real Apple StoreKit purchases
     const {
         isLoading: iapLoading,
+        error: iapError,
         yearlySubscription,
         monthlySubscription,
         singleTrip,
@@ -58,12 +59,22 @@ export default function SubscriptionScreen() {
     const monthlyPrice = monthlySubscription?.price || null;
     const singleTripPrice = singleTrip?.price || null;
     
-    // Check if products are loaded
+    // Check if products are loaded (real StoreKit products, not mocks)
     const productsLoaded = yearlyPrice && monthlyPrice;
 
     const handlePurchase = async () => {
         if (!token) {
             Alert.alert("Error", "Please sign in to make a purchase");
+            return;
+        }
+
+        // Prevent purchase if products haven't loaded from StoreKit
+        if (!productsLoaded) {
+            Alert.alert(
+                "Products Not Available",
+                "Unable to load products from the App Store. Please check your internet connection and try again.",
+                [{ text: "OK" }]
+            );
             return;
         }
 
@@ -115,6 +126,40 @@ export default function SubscriptionScreen() {
             } else if (result.error === "cancelled") {
                 // User cancelled - do nothing silently
                 console.log("Purchase cancelled by user");
+            } else if (result.error === "already_owned") {
+                // User already owns this subscription - auto-restore
+                console.log("Item already owned, auto-restoring...");
+                try {
+                    const restoreResults = await restorePurchases();
+                    const successfulRestores = restoreResults.filter(r => r.success && r.transactionId);
+                    
+                    if (successfulRestores.length > 0) {
+                        await restoreApplePurchases({
+                            token,
+                            purchases: successfulRestores.map(r => ({
+                                productId: r.productId!,
+                                transactionId: r.transactionId!,
+                                receipt: r.receipt,
+                            })),
+                        });
+                        Alert.alert(
+                            "Subscription Restored! ✓",
+                            "You already have an active subscription. It has been restored to your account."
+                        );
+                        router.back();
+                    } else {
+                        Alert.alert(
+                            "Already Subscribed",
+                            "You already have an active subscription. If it's not showing, try tapping 'Restore Purchases' below."
+                        );
+                    }
+                } catch (restoreErr: any) {
+                    console.error("Auto-restore after already_owned failed:", restoreErr);
+                    Alert.alert(
+                        "Already Subscribed",
+                        "You already have an active subscription. Please tap 'Restore Purchases' to sync it to your account."
+                    );
+                }
             } else if (result.error) {
                 Alert.alert("Purchase Failed", result.error);
             }
@@ -171,6 +216,7 @@ export default function SubscriptionScreen() {
 
     const isSubscriptionActive = userPlan?.isSubscriptionActive;
     const isProcessing = loading !== null || restoring || iapLoading;
+    const purchaseDisabled = isProcessing || (Platform.OS === 'ios' && !productsLoaded);
 
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -333,20 +379,28 @@ export default function SubscriptionScreen() {
                         <Text style={[styles.restoreText, { color: colors.text }]}>Restore Purchases</Text>
                     )}
                 </TouchableOpacity>
+
+                {iapError && Platform.OS === 'ios' ? (
+                    <Text style={[styles.termsText, { color: '#DC2626', marginTop: 12 }]}>
+                        {iapError}
+                    </Text>
+                ) : null}
             </ScrollView>
 
             {/* Bottom CTA */}
             <View style={[styles.bottomCTA, { backgroundColor: colors.background }]}>
                 <TouchableOpacity 
-                    style={[styles.ctaButton, { backgroundColor: colors.primary }, isProcessing && styles.ctaButtonLoading]}
+                    style={[styles.ctaButton, { backgroundColor: colors.primary }, purchaseDisabled && styles.ctaButtonLoading]}
                     onPress={handlePurchase}
-                    disabled={isProcessing}
+                    disabled={purchaseDisabled}
                 >
                     {loading ? (
                         <ActivityIndicator size="small" color={colors.text} />
                     ) : (
                         <Text style={[styles.ctaButtonText, { color: colors.text }]}>
-                            {selectedPlan === "single" ? "Purchase Trip Credit" : "Start my next era"}
+                            {!productsLoaded && Platform.OS === 'ios' 
+                                ? "Loading products..." 
+                                : selectedPlan === "single" ? "Purchase Trip Credit" : "Start my next era"}
                         </Text>
                     )}
                 </TouchableOpacity>

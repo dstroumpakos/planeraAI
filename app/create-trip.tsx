@@ -333,6 +333,14 @@ export default function CreateTripScreen() {
         setDestinationSuggestions([]);
     };
 
+    const pickRandomDestination = () => {
+        const randomIndex = Math.floor(Math.random() * DESTINATIONS.length);
+        const dest = DESTINATIONS[randomIndex];
+        setFormData({ ...formData, destination: `${dest.city}, ${dest.country}` });
+        setShowDestinationSuggestions(false);
+        setDestinationSuggestions([]);
+    };
+
     const formatDateForCalendar = (timestamp: number) => {
         const date = new Date(timestamp);
         return date.toISOString().split('T')[0];
@@ -768,6 +776,17 @@ export default function CreateTripScreen() {
                             )}
                         </View>
                     </View>
+
+                    {/* Surprise Me - Random Destination */}
+                    <TouchableOpacity 
+                        style={[styles.surpriseMeButton, { backgroundColor: colors.primary }]} 
+                        onPress={pickRandomDestination}
+                        activeOpacity={0.7}
+                    >
+                        <Ionicons name="shuffle" size={20} color={colors.text} />
+                        <Text style={[styles.surpriseMeText, { color: colors.text }]}>Surprise Me</Text>
+                        <Text style={[styles.surpriseMeSubtext, { color: colors.text, opacity: 0.7 }]}>Pick a random destination</Text>
+                    </TouchableOpacity>
 
                     <TouchableOpacity style={[styles.multiCityButton, { backgroundColor: colors.inputBackground, borderColor: colors.border }]} disabled={true}>
                         <View style={styles.multiCityContent}>
@@ -1417,6 +1436,28 @@ const styles = StyleSheet.create({
         fontSize: 13,
         color: "#9B9B9B",
         marginTop: 2,
+    },
+    surpriseMeButton: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        paddingVertical: 14,
+        paddingHorizontal: 16,
+        borderRadius: 14,
+        marginTop: 12,
+        gap: 8,
+        flexWrap: "wrap",
+    },
+    surpriseMeText: {
+        fontSize: 15,
+        fontWeight: "700",
+    },
+    surpriseMeSubtext: {
+        fontSize: 12,
+        fontWeight: "500",
+        width: "100%",
+        textAlign: "center",
+        marginTop: -4,
     },
     skipFlightsContainer: {
         flexDirection: 'row',
