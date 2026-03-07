@@ -13,7 +13,7 @@ import { useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useToken } from "@/lib/useAuthenticatedMutation";
 import { useTheme } from "@/lib/ThemeContext";
-import { SUPPORTED_LANGUAGES } from "@/lib/i18n";
+import { SUPPORTED_LANGUAGES, saveLanguagePreference } from "@/lib/i18n";
 
 interface LanguagePickerModalProps {
   visible: boolean;
@@ -33,6 +33,8 @@ export function LanguagePickerModal({ visible, onDismiss }: LanguagePickerModalP
     setSaving(true);
     try {
       await i18n.changeLanguage(selectedLanguage);
+      // Persist language locally so it survives app restarts
+      await saveLanguagePreference(selectedLanguage);
       await updateAppSettings({
         token: token || "",
         language: selectedLanguage,
