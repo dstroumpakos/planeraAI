@@ -16,7 +16,7 @@ export const registerPushToken = authMutation({
     },
     returns: v.null(),
     handler: async (ctx: any, args: any) => {
-        const userId = ctx.user._id;
+        const userId = ctx.user.userId;
 
         // Check if this exact token already exists
         const existing = await ctx.db

@@ -439,6 +439,11 @@ export const generate = internalAction({
             // Define async functions for each data source
             const fetchFlightsAsync = async () => {
                 if (skipFlights) {
+                    // Check if this is a deal-based trip with pre-set flight data
+                    if (trip.dealFlightData) {
+                        console.log("✈️ Using flight data from Low Fare Radar deal");
+                        return trip.dealFlightData;
+                    }
                     console.log("✈️ Skipping flight search - user already has flights booked");
                     return {
                         skipped: true,

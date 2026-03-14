@@ -31,6 +31,7 @@ import type * as helpers_subscription from "../helpers/subscription.js";
 import type * as helpers_unsplash from "../helpers/unsplash.js";
 import type * as images from "../images.js";
 import type * as insights from "../insights.js";
+import type * as lowFareRadar from "../lowFareRadar.js";
 import type * as notifications from "../notifications.js";
 import type * as passwordReset from "../passwordReset.js";
 import type * as passwordResetDb from "../passwordResetDb.js";
@@ -72,6 +73,7 @@ declare const fullApi: ApiFromModules<{
   "helpers/unsplash": typeof helpers_unsplash;
   images: typeof images;
   insights: typeof insights;
+  lowFareRadar: typeof lowFareRadar;
   notifications: typeof notifications;
   passwordReset: typeof passwordReset;
   passwordResetDb: typeof passwordResetDb;

@@ -179,6 +179,32 @@
     "basedOnBudget": "Basierend auf Ihrem Budget",
     "pleaseLogIn": "Bitte melden Sie sich an, um Ihre Reisen zu sehen"
   },
+  "lowFare": {
+    "title": "Niedrigpreis-Radar",
+    "subtitle": "Die besten Flugangebote für Sie",
+    "allDeals": "Alle Angebote",
+    "recommended": "Für Sie",
+    "depart": "Abflug",
+    "arrive": "Ankunft",
+    "roundTrip": "Hin und zurück",
+    "oneWay": "Nur Hinflug",
+    "baggage": "Gepäckfreigabe",
+    "returnFlight": "Rückflug",
+    "bookNow": "Diesen Flug buchen",
+    "savedDest": "Gespeichertes Ziel",
+    "noDeals": "Keine Angebote passen zu Ihren Präferenzen",
+    "noBaggageInfo": "Gepäckinfo bei der Airline prüfen",
+    "planTrip": "Reise planen"
+  },
+  "dealTrip": {
+    "title": "Planen Sie Ihre Reise",
+    "fromRadar": "Niedrigpreis-Radar",
+    "days": "Tage",
+    "generate": "Reiseplan erstellen",
+    "selectInterests": "Bitte wählen Sie mindestens ein Interesse",
+    "outbound": "Hinflug",
+    "return": "Rückflug"
+  },
   "createTrip": {
     "designYour": "Gestalten Sie Ihren",
     "perfectEscape": "perfekten Urlaub",
@@ -825,6 +851,7 @@
     "regenerateMsg": "Möchten Sie diese Reiseroute neu generieren? Dadurch wird eine neue Version Ihrer Reise erstellt.",
     "regenerate": "Neu Generieren",
     "flightsNotIncluded": "Flüge Nicht Enthalten",
+    "fromLowFareRadar": "Ausgewählt vom Niedrigpreis-Radar",
     "exploreRoute": "Route Erkunden",
     "bestPrice": "Bester Preis",
     "outbound": "Hinflug",

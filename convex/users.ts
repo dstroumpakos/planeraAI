@@ -37,7 +37,7 @@ export const getPlan = authQuery({
     handler: async (ctx: any) => {
         const userPlan = await ctx.db
             .query("userPlans")
-            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
             .unique();
 
         if (!userPlan) {
@@ -75,12 +75,12 @@ export const ensureUserPlan = authMutation({
     handler: async (ctx: any) => {
         const existingPlan = await ctx.db
             .query("userPlans")
-            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
             .unique();
 
         if (!existingPlan) {
             await ctx.db.insert("userPlans", {
-                userId: ctx.user._id,
+                userId: ctx.user.userId,
                 plan: "free",
                 tripsGenerated: 0,
                 tripCredits: 1, // Free tier gets 1 trip
@@ -98,7 +98,7 @@ export const upgradeToPremium = authMutation({
     handler: async (ctx: any, args: any) => {
         const userPlan = await ctx.db
             .query("userPlans")
-            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
             .unique();
 
         // Set subscription duration based on plan type
@@ -114,7 +114,7 @@ export const upgradeToPremium = authMutation({
             });
         } else {
             await ctx.db.insert("userPlans", {
-                userId: ctx.user._id,
+                userId: ctx.user.userId,
                 plan: "premium",
                 tripsGenerated: 0,
                 tripCredits: 0,
@@ -136,7 +136,7 @@ export const purchaseTripPack = authMutation({
 
         const userPlan = await ctx.db
             .query("userPlans")
-            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
             .unique();
 
         if (userPlan) {
@@ -146,7 +146,7 @@ export const purchaseTripPack = authMutation({
             });
         } else {
             await ctx.db.insert("userPlans", {
-                userId: ctx.user._id,
+                userId: ctx.user.userId,
                 plan: "free",
                 tripsGenerated: 0,
                 tripCredits: creditsToAdd,
@@ -165,7 +165,7 @@ export const canGenerateTrip = authQuery({
     handler: async (ctx: any) => {
         const userPlan = await ctx.db
             .query("userPlans")
-            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
             .unique();
 
         if (!userPlan) {
@@ -206,13 +206,13 @@ export const useTripCredit = authMutation({
     handler: async (ctx: any) => {
         const userPlan = await ctx.db
             .query("userPlans")
-            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
             .unique();
 
         if (!userPlan) {
             // Create new user plan with 1 trip used
             await ctx.db.insert("userPlans", {
-                userId: ctx.user._id,
+                userId: ctx.user.userId,
                 plan: "free",
                 tripsGenerated: 1,
                 tripCredits: 0,
@@ -290,7 +290,7 @@ export const getSettings = authQuery({
     handler: async (ctx: any) => {
         const settings = await ctx.db
             .query("userSettings")
-            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
             .unique();
 
         if (!settings) {
@@ -366,7 +366,7 @@ export const completeOnboarding = authMutation({
   handler: async (ctx: any) => {
     const settings = await ctx.db
         .query("userSettings")
-        .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
+        .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
         .unique();
 
     if (settings) {
@@ -375,7 +375,7 @@ export const completeOnboarding = authMutation({
       });
     } else {
       await ctx.db.insert("userSettings", {
-        userId: ctx.user._id,
+        userId: ctx.user.userId,
         onboardingCompleted: true,
       });
     }
@@ -399,7 +399,7 @@ export const saveTravelPreferences = authMutation({
   handler: async (ctx: any, args: any) => {
     const settings = await ctx.db
         .query("userSettings")
-        .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
+        .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
         .unique();
 
     const updateData = {
@@ -415,7 +415,7 @@ export const saveTravelPreferences = authMutation({
       await ctx.db.patch(settings._id, updateData);
     } else {
       await ctx.db.insert("userSettings", {
-        userId: ctx.user._id,
+        userId: ctx.user.userId,
         ...updateData,
       });
     }
@@ -436,14 +436,14 @@ export const updatePersonalInfo = authMutation({
         const { token, ...updates } = args;
         const settings = await ctx.db
             .query("userSettings")
-            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
             .unique();
 
         if (settings) {
             await ctx.db.patch(settings._id, updates);
         } else {
             await ctx.db.insert("userSettings", {
-                userId: ctx.user._id,
+                userId: ctx.user.userId,
                 ...updates,
             });
         }
@@ -475,14 +475,14 @@ export const updateTravelPreferences = authMutation({
         const { token, ...updates } = args;
         const settings = await ctx.db
             .query("userSettings")
-            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
             .unique();
 
         if (settings) {
             await ctx.db.patch(settings._id, updates);
         } else {
             await ctx.db.insert("userSettings", {
-                userId: ctx.user._id,
+                userId: ctx.user.userId,
                 ...updates,
             });
         }
@@ -499,14 +499,14 @@ export const markFirstTripGuideSeen = authMutation({
     handler: async (ctx: any, args: any) => {
         const settings = await ctx.db
             .query("userSettings")
-            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
             .unique();
 
         if (settings) {
             await ctx.db.patch(settings._id, { hasSeenFirstTripGuide: true });
         } else {
             await ctx.db.insert("userSettings", {
-                userId: ctx.user._id,
+                userId: ctx.user.userId,
                 hasSeenFirstTripGuide: true,
             });
         }
@@ -526,14 +526,14 @@ export const updateAppSettings = authMutation({
         const { token, ...updates } = args;
         const settings = await ctx.db
             .query("userSettings")
-            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
             .unique();
 
         if (settings) {
             await ctx.db.patch(settings._id, updates);
         } else {
             await ctx.db.insert("userSettings", {
-                userId: ctx.user._id,
+                userId: ctx.user.userId,
                 ...updates,
             });
         }
@@ -555,14 +555,14 @@ export const updateNotifications = authMutation({
         const { token, ...updates } = args;
         const settings = await ctx.db
             .query("userSettings")
-            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
             .unique();
 
         if (settings) {
             await ctx.db.patch(settings._id, updates);
         } else {
             await ctx.db.insert("userSettings", {
-                userId: ctx.user._id,
+                userId: ctx.user.userId,
                 ...updates,
             });
         }
@@ -581,7 +581,7 @@ export const updateAiConsent = authMutation({
     handler: async (ctx: any, args: any) => {
         const settings = await ctx.db
             .query("userSettings")
-            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
             .unique();
 
         const updateData = {
@@ -593,7 +593,7 @@ export const updateAiConsent = authMutation({
             await ctx.db.patch(settings._id, updateData);
         } else {
             await ctx.db.insert("userSettings", {
-                userId: ctx.user._id,
+                userId: ctx.user.userId,
                 ...updateData,
             });
         }
@@ -611,14 +611,14 @@ export const updateDarkMode = authMutation({
     handler: async (ctx: any, args: any) => {
         const settings = await ctx.db
             .query("userSettings")
-            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
             .unique();
 
         if (settings) {
             await ctx.db.patch(settings._id, { darkMode: args.darkMode });
         } else {
             await ctx.db.insert("userSettings", {
-                userId: ctx.user._id,
+                userId: ctx.user.userId,
                 darkMode: args.darkMode,
             });
         }
@@ -646,7 +646,7 @@ export const saveProfilePicture = authMutation({
     handler: async (ctx: any, args: any) => {
         const settings = await ctx.db
             .query("userSettings")
-            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
             .unique();
 
         // Delete old profile picture if exists
@@ -658,7 +658,7 @@ export const saveProfilePicture = authMutation({
             await ctx.db.patch(settings._id, { profilePicture: args.storageId });
         } else {
             await ctx.db.insert("userSettings", {
-                userId: ctx.user._id,
+                userId: ctx.user.userId,
                 profilePicture: args.storageId,
             });
         }
@@ -675,7 +675,7 @@ export const cancelSubscription = authMutation({
     handler: async (ctx: any) => {
         const userPlan = await ctx.db
             .query("userPlans")
-            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
             .unique();
 
         if (!userPlan) {
@@ -716,7 +716,7 @@ export const updateUserName = authMutation({
         // Update the user's name in userSettings
         const settings = await ctx.db
             .query("userSettings")
-            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
             .unique();
 
         if (settings) {
@@ -725,7 +725,7 @@ export const updateUserName = authMutation({
             });
         } else {
             await ctx.db.insert("userSettings", {
-                userId: ctx.user._id,
+                userId: ctx.user.userId,
                 name: args.name,
             });
         }
@@ -771,7 +771,7 @@ export const processApplePurchase = authMutation({
 
         // Record the transaction
         await ctx.db.insert("iapTransactions", {
-            userId: ctx.user._id,
+            userId: ctx.user.userId,
             productId,
             transactionId,
             receipt: receipt || "",
@@ -782,13 +782,13 @@ export const processApplePurchase = authMutation({
         // Get or create user plan
         let userPlan = await ctx.db
             .query("userPlans")
-            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
             .unique();
 
         if (!userPlan) {
             // Create new user plan
             const planId = await ctx.db.insert("userPlans", {
-                userId: ctx.user._id,
+                userId: ctx.user.userId,
                 plan: "free",
                 tripsGenerated: 0,
                 tripCredits: 0,
@@ -871,7 +871,7 @@ export const restoreApplePurchases = authMutation({
 
             // Record the restored transaction
             await ctx.db.insert("iapTransactions", {
-                userId: ctx.user._id,
+                userId: ctx.user.userId,
                 productId: purchase.productId,
                 transactionId: purchase.transactionId,
                 receipt: purchase.receipt || "",
@@ -889,12 +889,12 @@ export const restoreApplePurchases = authMutation({
             // Get or create user plan
             let userPlan = await ctx.db
                 .query("userPlans")
-                .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
+                .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
                 .unique();
 
             if (!userPlan) {
                 const planId = await ctx.db.insert("userPlans", {
-                    userId: ctx.user._id,
+                    userId: ctx.user.userId,
                     plan: "free",
                     tripsGenerated: 0,
                     tripCredits: 0,
@@ -948,7 +948,7 @@ export const checkEntitlements = authQuery({
     handler: async (ctx: any) => {
         const userPlan = await ctx.db
             .query("userPlans")
-            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
             .unique();
 
         if (!userPlan) {
@@ -1026,7 +1026,7 @@ export const deleteAccount = authMutation({
         token: v.string(),
     },
     handler: async (ctx: any) => {
-        const userId = ctx.user._id; // userSettings doc ID used across tables
+        const userId = ctx.user.userId; // userSettings doc ID used across tables
         const userIdString = ctx.user.userId; // original auth userId string (used in sessions)
         const userEmail = ctx.user.email;
         const userName = ctx.user.name || "";
@@ -1124,7 +1124,7 @@ export const deleteAccount = authMutation({
         console.log(`[deleteAccount] Deleted ${pushTokensDeleted + pushTokensDeletedLegacy} pushTokens`);
 
         // 16. Delete the userSettings record itself (must be last)
-        await ctx.db.delete(ctx.user._id);
+        await ctx.db.delete(ctx.user.userId);
         console.log("[deleteAccount] Deleted userSettings record");
 
         // 17. Send account deletion confirmation email

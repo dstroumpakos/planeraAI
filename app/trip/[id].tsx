@@ -1520,6 +1520,12 @@ export default function TripDetails() {
             
             return (
                 <View style={styles.card}>
+                    {itinerary.flights.dataSource === "low-fare-radar" && (
+                        <View style={[styles.dealFlightBanner, { backgroundColor: colors.primary }]}>
+                            <Ionicons name="pulse" size={14} color="#000" />
+                            <Text style={styles.dealFlightBannerText}>{t('tripDetail.fromLowFareRadar', { defaultValue: 'Selected from Low Fare Radar' })}</Text>
+                        </View>
+                    )}
                     <View style={styles.bestPriceBanner}>
                         <Ionicons name="pricetag" size={16} color="#10B981" />
                         <Text style={styles.bestPriceText}>{t('tripDetail.bestPriceFrom', { price: Math.round(bestPrice) })}</Text>
@@ -1601,10 +1607,25 @@ export default function TripDetails() {
                                 <Ionicons name="arrow-forward" size={16} color="#8E8E93" />
                                 <Text style={styles.time}>{selectedFlight.outbound.arrival}</Text>
                             </View>
+                            {selectedFlight.outbound.stops > 0 && selectedFlight.outbound.segments && (
+                                <View style={{ marginTop: 8 }}>
+                                    {selectedFlight.outbound.segments.map((seg: any, idx: number) => (
+                                        <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                                            <Text style={{ fontSize: 12, color: '#14B8A6', fontWeight: '600' }}>
+                                                {seg.departureAirport} → {seg.arrivalAirport}
+                                            </Text>
+                                            <Text style={{ fontSize: 11, color: '#8E8E93' }}>
+                                                {seg.airline}{seg.flightNumber ? ` ${seg.flightNumber}` : ''} {seg.departureTime}–{seg.arrivalTime}
+                                            </Text>
+                                        </View>
+                                    ))}
+                                </View>
+                            )}
                         </View>
 
                         <View style={styles.divider} />
 
+                        {selectedFlight.return && (
                         <View style={styles.flightSegment}>
                             <View style={styles.segmentHeader}>
                                 <Ionicons name="airplane" size={20} color="#14B8A6" style={{ transform: [{ rotate: '180deg' }] }} />
@@ -1622,7 +1643,22 @@ export default function TripDetails() {
                                 <Ionicons name="arrow-forward" size={16} color="#8E8E93" />
                                 <Text style={styles.time}>{selectedFlight.return.arrival}</Text>
                             </View>
+                            {selectedFlight.return.stops > 0 && selectedFlight.return.segments && (
+                                <View style={{ marginTop: 8 }}>
+                                    {selectedFlight.return.segments.map((seg: any, idx: number) => (
+                                        <View key={idx} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                                            <Text style={{ fontSize: 12, color: '#14B8A6', fontWeight: '600' }}>
+                                                {seg.departureAirport} → {seg.arrivalAirport}
+                                            </Text>
+                                            <Text style={{ fontSize: 11, color: '#8E8E93' }}>
+                                                {seg.airline}{seg.flightNumber ? ` ${seg.flightNumber}` : ''} {seg.departureTime}–{seg.arrivalTime}
+                                            </Text>
+                                        </View>
+                                    ))}
+                                </View>
+                            )}
                         </View>
+                        )}
 
                         {/* Baggage Options */}
                         <View style={styles.baggageSection}>
@@ -2444,6 +2480,104 @@ export default function TripDetails() {
                     {activeFilter === 'flights' && (
                         <View>
                             <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('tripDetail.availableFlights')}</Text>
+
+                            {/* Deal / API Flight Card */}
+                            {trip.itinerary?.flights?.options && Array.isArray(trip.itinerary.flights.options) && trip.itinerary.flights.options.length > 0 && (() => {
+                                const flightOpts = trip.itinerary.flights.options;
+                                const selected = flightOpts[selectedFlightIndex] || flightOpts[0];
+                                return (
+                                    <View style={{
+                                        marginTop: 16,
+                                        backgroundColor: colors.card,
+                                        borderRadius: 16,
+                                        padding: 20,
+                                        borderWidth: 1,
+                                        borderColor: colors.border,
+                                        shadowColor: '#000',
+                                        shadowOffset: { width: 0, height: 2 },
+                                        shadowOpacity: 0.08,
+                                        shadowRadius: 8,
+                                        elevation: 3,
+                                    }}>
+                                        {trip.itinerary.flights.dataSource === "low-fare-radar" && (
+                                            <View style={[styles.dealFlightBanner, { backgroundColor: colors.primary }]}>
+                                                <Ionicons name="pulse" size={14} color="#000" />
+                                                <Text style={styles.dealFlightBannerText}>{t('tripDetail.fromLowFareRadar', { defaultValue: 'Selected from Low Fare Radar' })}</Text>
+                                            </View>
+                                        )}
+
+                                        {/* Price */}
+                                        <View style={{ flexDirection: 'row', alignItems: 'baseline', marginBottom: 12 }}>
+                                            <Text style={{ fontSize: 22, fontWeight: '800', color: colors.text }}>€{Math.round(selected.pricePerPerson)}</Text>
+                                            <Text style={{ fontSize: 13, color: colors.textMuted, marginLeft: 4 }}>{t('tripDetail.perPerson')}</Text>
+                                            {selected.luggage && (
+                                                <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 'auto', backgroundColor: isDarkMode ? colors.secondary : '#F0FDFA', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}>
+                                                    <Ionicons name="briefcase-outline" size={14} color={colors.primary} />
+                                                    <Text style={{ fontSize: 12, color: colors.primary, fontWeight: '600', marginLeft: 4 }}>{selected.luggage}</Text>
+                                                </View>
+                                            )}
+                                        </View>
+
+                                        {/* Outbound */}
+                                        {selected.outbound && (
+                                            <View style={{ marginBottom: 12 }}>
+                                                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                                                    <Ionicons name="airplane" size={18} color={colors.primary} />
+                                                    <Text style={{ fontSize: 13, fontWeight: '700', color: colors.textMuted, marginLeft: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>{t('tripDetail.outbound')}</Text>
+                                                </View>
+                                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                    <View>
+                                                        <Text style={{ fontSize: 15, fontWeight: '700', color: colors.text }}>{selected.outbound.airline}</Text>
+                                                        {selected.outbound.flightNumber ? <Text style={{ fontSize: 12, color: colors.textMuted }}>{selected.outbound.flightNumber}</Text> : null}
+                                                    </View>
+                                                    {selected.outbound.duration ? <Text style={{ fontSize: 13, color: colors.textMuted }}>{selected.outbound.duration}</Text> : null}
+                                                </View>
+                                                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6, gap: 8 }}>
+                                                    <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text }}>{selected.outbound.departure}</Text>
+                                                    <Ionicons name="arrow-forward" size={14} color={colors.textMuted} />
+                                                    <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text }}>{selected.outbound.arrival}</Text>
+                                                </View>
+                                            </View>
+                                        )}
+
+                                        {/* Return */}
+                                        {selected.return && (
+                                            <>
+                                                <View style={{ borderTopWidth: StyleSheet.hairlineWidth, borderColor: colors.border, marginVertical: 12 }} />
+                                                <View style={{ marginBottom: 12 }}>
+                                                    <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                                                        <Ionicons name="airplane" size={18} color={colors.primary} style={{ transform: [{ scaleX: -1 }] }} />
+                                                        <Text style={{ fontSize: 13, fontWeight: '700', color: colors.textMuted, marginLeft: 6, textTransform: 'uppercase', letterSpacing: 0.5 }}>{t('tripDetail.return')}</Text>
+                                                    </View>
+                                                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                        <View>
+                                                            <Text style={{ fontSize: 15, fontWeight: '700', color: colors.text }}>{selected.return.airline}</Text>
+                                                            {selected.return.flightNumber ? <Text style={{ fontSize: 12, color: colors.textMuted }}>{selected.return.flightNumber}</Text> : null}
+                                                        </View>
+                                                        {selected.return.duration ? <Text style={{ fontSize: 13, color: colors.textMuted }}>{selected.return.duration}</Text> : null}
+                                                    </View>
+                                                    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 6, gap: 8 }}>
+                                                        <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text }}>{selected.return.departure}</Text>
+                                                        <Ionicons name="arrow-forward" size={14} color={colors.textMuted} />
+                                                        <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text }}>{selected.return.arrival}</Text>
+                                                    </View>
+                                                </View>
+                                            </>
+                                        )}
+
+                                        {/* Book button for deals with bookingUrl */}
+                                        {selected.bookingUrl && (
+                                            <TouchableOpacity
+                                                style={{ backgroundColor: colors.primary, borderRadius: 10, paddingVertical: 12, alignItems: 'center', marginTop: 4 }}
+                                                onPress={() => Linking.openURL(selected.bookingUrl)}
+                                            >
+                                                <Text style={{ color: '#000', fontSize: 15, fontWeight: '700' }}>{t('tripDetail.bookThisFlight', { defaultValue: 'Book This Flight' })}</Text>
+                                            </TouchableOpacity>
+                                        )}
+                                    </View>
+                                );
+                            })()}
+
                             {/* Trip.com Search Card */}
                             <TouchableOpacity
                                 style={{
@@ -4206,6 +4340,20 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     // Flight-related styles
+    dealFlightBanner: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 8,
+        marginBottom: 8,
+    },
+    dealFlightBannerText: {
+        fontSize: 12,
+        fontWeight: "700",
+        color: "#000",
+    },
     bestPriceBanner: {
         flexDirection: "row",
         alignItems: "center",

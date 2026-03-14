@@ -19,7 +19,7 @@ export const getCompletedTrips = authQuery({
             return [];
         }
 
-        const userId = ctx.user._id;
+        const userId = ctx.user.userId;
         const now = Date.now();
         
         // Get dismissed trips
@@ -73,7 +73,7 @@ export const hasCompletedTripTo = authQuery({
             return false;
         }
 
-        const userId = ctx.user._id;
+        const userId = ctx.user.userId;
         const now = Date.now();
         const trips = await ctx.db
             .query("trips")
@@ -105,7 +105,7 @@ export const getMyInsights = authQuery({
 
         const insights = await ctx.db
             .query("insights")
-            .filter((q: any) => q.eq(q.field("userId"), ctx.user._id))
+            .filter((q: any) => q.eq(q.field("userId"), ctx.user.userId))
             .order("desc")
             .take(20);
 
@@ -159,7 +159,7 @@ export const create = authMutation({
         const destinationId = args.destination.toLowerCase().replace(/\s+/g, '-');
 
         const insightId = await ctx.db.insert("insights", {
-            userId: ctx.user._id,
+            userId: ctx.user.userId,
             destination: args.destination,
             destinationId,
             content: args.content,
@@ -274,13 +274,13 @@ export const dismissTrip = authMutation({
         const existing = await ctx.db
             .query("dismissedTrips")
             .withIndex("by_user_and_trip", (q: any) => 
-                q.eq("userId", ctx.user._id).eq("tripId", args.tripId)
+                q.eq("userId", ctx.user.userId).eq("tripId", args.tripId)
             )
             .unique();
 
         if (!existing) {
             await ctx.db.insert("dismissedTrips", {
-                userId: ctx.user._id,
+                userId: ctx.user.userId,
                 tripId: args.tripId,
                 dismissedAt: Date.now(),
             });
@@ -346,7 +346,7 @@ export const shareInsight = authMutation({
         const destinationId = args.destination.toLowerCase().replace(/\\s+/g, '-');
         
         await ctx.db.insert("insights", {
-            userId: ctx.user._id,
+            userId: ctx.user.userId,
             destination: args.destination,
             destinationId,
             tripId: args.tripId,

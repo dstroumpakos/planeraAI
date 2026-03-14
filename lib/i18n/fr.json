@@ -179,6 +179,32 @@
     "basedOnBudget": "Basé sur votre budget",
     "pleaseLogIn": "Veuillez vous connecter pour voir vos voyages"
   },
+  "lowFare": {
+    "title": "Radar Bas Prix",
+    "subtitle": "Les meilleures offres de vols pour vous",
+    "allDeals": "Toutes les Offres",
+    "recommended": "Pour Vous",
+    "depart": "Départ",
+    "arrive": "Arrivée",
+    "roundTrip": "Aller-retour",
+    "oneWay": "Aller simple",
+    "baggage": "Franchise Bagages",
+    "returnFlight": "Vol Retour",
+    "bookNow": "Réserver Ce Vol",
+    "savedDest": "Destination Sauvegardée",
+    "noDeals": "Aucune offre ne correspond à vos préférences",
+    "noBaggageInfo": "Vérifiez les bagages auprès de la compagnie",
+    "planTrip": "Planifier un Voyage"
+  },
+  "dealTrip": {
+    "title": "Planifiez votre Voyage",
+    "fromRadar": "Radar Bas Prix",
+    "days": "jours",
+    "generate": "Générer l'Itinéraire",
+    "selectInterests": "Veuillez sélectionner au moins un intérêt",
+    "outbound": "Aller",
+    "return": "Retour"
+  },
   "createTrip": {
     "designYour": "Concevez votre",
     "perfectEscape": "évasion parfaite",
@@ -825,6 +851,7 @@
     "regenerateMsg": "Souhaitez-vous régénérer cet itinéraire ? Cela créera une nouvelle version de votre voyage.",
     "regenerate": "Régénérer",
     "flightsNotIncluded": "Vols Non Inclus",
+    "fromLowFareRadar": "Sélectionné depuis le Radar Bas Prix",
     "exploreRoute": "Explorer l'Itinéraire",
     "bestPrice": "Meilleur Prix",
     "outbound": "Aller",
