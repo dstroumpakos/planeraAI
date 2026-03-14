@@ -86,6 +86,10 @@ export default defineSchema({
         // Location-based: tracks whether user is physically at the destination
         userAtDestination: v.optional(v.boolean()),
         lastLocationCheckAt: v.optional(v.float64()),
+        // Deal-based trip fields (from Low Fare Radar)
+        tripType: v.optional(v.union(v.literal("standard"), v.literal("deal"))),
+        dealId: v.optional(v.id("lowFareRadar")),
+        dealFlightData: v.optional(v.any()),
     })
         .index("by_user", ["userId"])
         .index("by_status", ["status"]),
@@ -648,4 +652,70 @@ export default defineSchema({
     })
         .index("by_trip", ["tripId"])
         .index("by_destination_key", ["destinationKey"]),
+
+    // Low Fare Radar — flight deals managed via website widget, shown in app
+    lowFareRadar: defineTable({
+        // Route
+        origin: v.string(),           // IATA code e.g. "ATH"
+        originCity: v.string(),        // e.g. "Athens"
+        destination: v.string(),       // IATA code e.g. "CDG"
+        destinationCity: v.string(),   // e.g. "Paris"
+        // Airline
+        airline: v.string(),
+        airlineLogo: v.optional(v.string()),
+        flightNumber: v.optional(v.string()),
+        // Outbound leg
+        outboundDate: v.string(),      // "2024-03-15"
+        outboundDeparture: v.string(), // "08:00"
+        outboundArrival: v.string(),   // "10:30"
+        outboundDuration: v.optional(v.string()),
+        outboundStops: v.optional(v.number()),  // 0=direct, 1=one stop, etc.
+        outboundSegments: v.optional(v.array(v.object({
+            airline: v.string(),
+            flightNumber: v.optional(v.string()),
+            departureAirport: v.string(),  // IATA code
+            departureTime: v.string(),     // "08:00"
+            arrivalAirport: v.string(),    // IATA code
+            arrivalTime: v.string(),       // "10:30"
+            duration: v.optional(v.string()),
+        }))),
+        // Return leg (optional for one-way)
+        returnDate: v.optional(v.string()),
+        returnDeparture: v.optional(v.string()),
+        returnArrival: v.optional(v.string()),
+        returnDuration: v.optional(v.string()),
+        returnAirline: v.optional(v.string()),
+        returnFlightNumber: v.optional(v.string()),
+        returnStops: v.optional(v.number()),
+        returnSegments: v.optional(v.array(v.object({
+            airline: v.string(),
+            flightNumber: v.optional(v.string()),
+            departureAirport: v.string(),
+            departureTime: v.string(),
+            arrivalAirport: v.string(),
+            arrivalTime: v.string(),
+            duration: v.optional(v.string()),
+        }))),
+        // Pricing
+        price: v.float64(),
+        originalPrice: v.optional(v.float64()),
+        currency: v.string(),         // "EUR", "USD", etc.
+        // Baggage
+        cabinBaggage: v.optional(v.string()),   // "1x 8kg"
+        checkedBaggage: v.optional(v.string()),  // "1x 23kg"
+        // Metadata
+        isRecommended: v.optional(v.boolean()),
+        dealTag: v.optional(v.string()),  // "HOT DEAL", "LOWEST PRICE"
+        bookingUrl: v.optional(v.string()),
+        expiresAt: v.optional(v.float64()),
+        notes: v.optional(v.string()),
+        // Status
+        active: v.boolean(),
+        createdAt: v.float64(),
+        updatedAt: v.optional(v.float64()),
+    })
+        .index("by_origin", ["origin"])
+        .index("by_destination", ["destination"])
+        .index("by_active", ["active"])
+        .index("by_origin_destination", ["origin", "destination"]),
 });

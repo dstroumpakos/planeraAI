@@ -58,7 +58,7 @@ export const create = authMutation({
         // Check if user can generate a trip
         const userPlan = await ctx.db
             .query("userPlans")
-            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
             .unique();
 
         // Check permissions (includes 16-day Apple billing grace period)
@@ -98,7 +98,7 @@ export const create = authMutation({
         } else {
             // New user - create plan and use the 1 free credit
             await ctx.db.insert("userPlans", {
-                userId: ctx.user._id,
+                userId: ctx.user.userId,
                 plan: "free",
                 tripsGenerated: 1,
                 tripCredits: 0, // They used their 1 free credit
@@ -106,7 +106,7 @@ export const create = authMutation({
         }
 
         const tripId = await ctx.db.insert("trips", {
-            userId: ctx.user._id,
+            userId: ctx.user.userId,
             destination: args.destination,
             origin: args.origin,
             startDate: args.startDate,
@@ -185,6 +185,178 @@ export const create = authMutation({
     },
 });
 
+// Create a trip from a Low Fare Radar deal
+export const createFromDeal = authMutation({
+    args: {
+        token: v.string(),
+        dealId: v.id("lowFareRadar"),
+        budgetTotal: v.float64(),
+        travelerCount: v.float64(),
+        interests: v.array(v.string()),
+        localExperiences: v.optional(v.array(v.string())),
+        skipHotel: v.optional(v.boolean()),
+        language: v.optional(v.string()),
+    },
+    returns: v.id("trips"),
+    handler: async (ctx: any, args: any) => {
+        // Fetch the deal
+        const deal = await ctx.db.get(args.dealId);
+        if (!deal || !deal.active) {
+            throw new Error("This deal is no longer available");
+        }
+
+        // Validate
+        if (args.travelerCount < 1 || args.travelerCount > 12) {
+            throw new Error("Traveler count must be between 1 and 12");
+        }
+        if (args.budgetTotal <= 0) {
+            throw new Error("Budget must be greater than 0");
+        }
+
+        const perPersonBudget = Math.round(args.budgetTotal / args.travelerCount);
+
+        // Compute dates from deal
+        const startDate = new Date(deal.outboundDate).getTime();
+        const endDate = deal.returnDate
+            ? new Date(deal.returnDate).getTime()
+            : startDate + 3 * 24 * 60 * 60 * 1000; // Default 3 days for one-way
+
+        // Check credits (same logic as create)
+        const userPlan = await ctx.db
+            .query("userPlans")
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
+            .unique();
+
+        const subscriptionStatus = isSubscriptionActiveWithGrace(
+            userPlan?.plan,
+            userPlan?.subscriptionExpiresAt,
+        );
+        const isSubActive = subscriptionStatus.active;
+        const tripCredits = userPlan?.tripCredits ?? 0;
+        const tripsGenerated = userPlan?.tripsGenerated ?? 0;
+        const hasFreeTrial = tripsGenerated < 1;
+
+        if (!isSubActive && tripCredits <= 0 && !hasFreeTrial) {
+            throw new Error("No trip credits available. Please purchase a trip pack or subscribe to Premium.");
+        }
+
+        // Deduct credit
+        if (userPlan) {
+            if (isSubActive) {
+                await ctx.db.patch(userPlan._id, { tripsGenerated: tripsGenerated + 1 });
+            } else if (tripCredits > 0) {
+                await ctx.db.patch(userPlan._id, { tripCredits: tripCredits - 1, tripsGenerated: tripsGenerated + 1 });
+            } else {
+                await ctx.db.patch(userPlan._id, { tripsGenerated: 1 });
+            }
+        } else {
+            await ctx.db.insert("userPlans", {
+                userId: ctx.user.userId,
+                plan: "free",
+                tripsGenerated: 1,
+                tripCredits: 0,
+            });
+        }
+
+        // Build deal flight data matching the itinerary.flights.options format
+        const dealFlightData = {
+            options: [{
+                id: `deal-${deal._id}`,
+                outbound: {
+                    airline: deal.airline,
+                    flightNumber: deal.flightNumber || "",
+                    departure: deal.outboundDeparture,
+                    arrival: deal.outboundArrival,
+                    duration: deal.outboundDuration || "",
+                    stops: deal.outboundStops ?? 0,
+                    segments: deal.outboundSegments || undefined,
+                },
+                return: deal.returnDate ? {
+                    airline: deal.returnAirline || deal.airline,
+                    flightNumber: deal.returnFlightNumber || "",
+                    departure: deal.returnDeparture || "",
+                    arrival: deal.returnArrival || "",
+                    duration: deal.returnDuration || "",
+                    stops: deal.returnStops ?? 0,
+                    segments: deal.returnSegments || undefined,
+                } : undefined,
+                pricePerPerson: deal.price,
+                currency: deal.currency,
+                isBestPrice: true,
+                checkedBaggageIncluded: !!deal.checkedBaggage,
+                checkedBaggagePrice: 0,
+                luggage: deal.cabinBaggage || "Check airline",
+                bookingUrl: deal.bookingUrl || "",
+            }],
+            bestPrice: deal.price,
+            dataSource: "low-fare-radar",
+            dealId: deal._id,
+        };
+
+        const origin = `${deal.originCity}, ${deal.origin}`;
+        const destination = `${deal.destinationCity}, ${deal.destination}`;
+
+        const tripId = await ctx.db.insert("trips", {
+            userId: ctx.user.userId,
+            destination,
+            origin,
+            startDate,
+            endDate,
+            budgetTotal: args.budgetTotal,
+            travelerCount: args.travelerCount,
+            perPersonBudget,
+            budget: args.budgetTotal,
+            travelers: args.travelerCount,
+            interests: args.interests,
+            localExperiences: args.localExperiences ?? [],
+            status: "generating",
+            skipFlights: true, // Flight comes from the deal
+            skipHotel: args.skipHotel ?? false,
+            preferredFlightTime: "any",
+            arrivalTime: deal.outboundDate && deal.outboundArrival
+                ? `${deal.outboundDate}T${deal.outboundArrival}:00`
+                : undefined,
+            departureTime: deal.returnDate && deal.returnDeparture
+                ? `${deal.returnDate}T${deal.returnDeparture}:00`
+                : undefined,
+            language: args.language || "en",
+            tripType: "deal",
+            dealId: args.dealId,
+            dealFlightData,
+        });
+
+        const flightInfo = `Flying from: ${origin} to ${destination}. Flight already booked via Low Fare Radar deal (${deal.airline}, ${deal.outboundDeparture}-${deal.outboundArrival}). Do NOT include flight recommendations — focus on activities, hotels, and restaurants.`;
+
+        const hotelInfo = args.skipHotel
+            ? "Note: User already has accommodation booked, so DO NOT include hotel recommendations."
+            : "";
+
+        const prompt = `Plan a trip to ${destination} for ${args.travelerCount} people.
+        ${flightInfo}
+        ${hotelInfo}
+        Budget: €${args.budgetTotal} total (€${perPersonBudget} per person).
+        Dates: ${new Date(startDate).toDateString()} to ${new Date(endDate).toDateString()}.
+        Interests: ${args.interests.join(", ")}.`;
+
+        await ctx.scheduler.runAfter(0, internal.tripsActions.generate, {
+            tripId,
+            prompt,
+            skipFlights: true,
+            skipHotel: args.skipHotel ?? false,
+            preferredFlightTime: "any",
+            arrivalTime: deal.outboundDate && deal.outboundArrival
+                ? `${deal.outboundDate}T${deal.outboundArrival}:00`
+                : undefined,
+            departureTime: deal.returnDate && deal.returnDeparture
+                ? `${deal.returnDate}T${deal.returnDeparture}:00`
+                : undefined,
+            language: args.language || "en",
+        });
+
+        return tripId;
+    },
+});
+
 // Internal query to get trip details
 export const getTripDetails = internalQuery({
     args: { tripId: v.id("trips") },
@@ -216,6 +388,10 @@ export const getTripDetails = internalQuery({
             // Language preference
             language: v.optional(v.string()),
             selectedTravelerIds: v.optional(v.array(v.id("travelers"))),
+            // Deal trip fields
+            tripType: v.optional(v.string()),
+            dealId: v.optional(v.id("lowFareRadar")),
+            dealFlightData: v.optional(v.any()),
             status: v.string(),
             itinerary: v.optional(v.any()),
         })
@@ -309,7 +485,7 @@ export const list = authQuery({
     handler: async (ctx: any) => {
         const trips = await ctx.db
             .query("trips")
-            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
             .order("desc")
             .collect();
             // Compute perPersonBudget on the fly for older trips that don't have it
@@ -382,7 +558,7 @@ export const get = authQuery({
         // Get user plan info
         const userPlan = await ctx.db
             .query("userPlans")
-            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user._id))
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
             .unique();
 
       // Check if user has full access (includes 16-day Apple billing grace period)
@@ -453,7 +629,7 @@ export const updateLocationStatus = authMutation({
     handler: async (ctx: any, args: any) => {
         const trip = await ctx.db.get(args.tripId);
         if (!trip) throw new Error("Trip not found");
-        if (trip.userId !== ctx.user._id) throw new Error("Unauthorized");
+        if (trip.userId !== ctx.user.userId) throw new Error("Unauthorized");
 
         await ctx.db.patch(args.tripId, {
             userAtDestination: args.atDestination,

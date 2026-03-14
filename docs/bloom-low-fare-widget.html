@@ -1,0 +1,1338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bloom Low Fare Radar</title>
+  <style>
+    :root {
+      --primary: #FFE500;
+      --bg: #FAF9F6;
+      --card: #FFFFFF;
+      --text: #1A1A1A;
+      --muted: #9B9B9B;
+      --border: #E8E6E1;
+      --danger: #EF4444;
+      --success: #34C759;
+      --radius: 16px;
+    }
+    .bloom-lf-widget, .bloom-lf-widget * { margin: 0; padding: 0; box-sizing: border-box; }
+    .bloom-lf-widget {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      position: relative;
+      border-radius: 16px;
+      overflow: hidden;
+    }
+
+    /* Login Page */
+    .login-page {
+      min-height: 600px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #1A1A1A 0%, #2C2C2E 100%);
+      border-radius: 16px;
+    }
+    .login-card {
+      background: var(--card);
+      border-radius: 24px;
+      padding: 48px 40px;
+      width: 100%;
+      max-width: 420px;
+      margin: 20px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.3);
+      text-align: center;
+    }
+    .login-logo {
+      width: 72px; height: 72px;
+      background: var(--primary);
+      border-radius: 20px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 36px;
+      margin: 0 auto 20px;
+    }
+    .login-card h1 { font-size: 24px; font-weight: 800; margin-bottom: 6px; }
+    .login-card .subtitle { font-size: 14px; color: var(--muted); margin-bottom: 32px; }
+    .login-input {
+      width: 100%;
+      padding: 14px 18px;
+      border: 2px solid var(--border);
+      border-radius: 14px;
+      font-size: 16px;
+      color: var(--text);
+      background: var(--bg);
+      text-align: center;
+      letter-spacing: 2px;
+      font-weight: 600;
+      transition: border-color .2s;
+    }
+    .login-input:focus { outline: none; border-color: var(--primary); }
+    .login-input.error { border-color: var(--danger); animation: shake .4s; }
+    @keyframes shake {
+      0%,100% { transform: translateX(0); }
+      25% { transform: translateX(-8px); }
+      75% { transform: translateX(8px); }
+    }
+    .login-btn {
+      width: 100%;
+      padding: 14px;
+      background: var(--primary);
+      color: #000;
+      border: none;
+      border-radius: 14px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 16px;
+      transition: transform .1s;
+    }
+    .login-btn:hover { transform: scale(1.02); }
+    .login-btn:active { transform: scale(.98); }
+    .login-btn:disabled { opacity: .5; cursor: not-allowed; }
+    .login-error {
+      color: var(--danger);
+      font-size: 13px;
+      font-weight: 600;
+      margin-top: 12px;
+      min-height: 20px;
+    }
+    .login-lang {
+      margin-top: 24px;
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+    }
+    .lang-btn {
+      padding: 6px 16px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: transparent;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .2s;
+      color: var(--muted);
+    }
+    .lang-btn.active {
+      background: var(--text);
+      color: #fff;
+      border-color: var(--text);
+    }
+
+    /* Header */
+    .bloom-lf-widget .header {
+      background: var(--text);
+      color: #fff;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      position: relative;
+      z-index: 10;
+    }
+    .header-icon {
+      width: 40px; height: 40px;
+      background: var(--primary);
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px;
+    }
+    .header-info { flex: 1; }
+    .header h1 { font-size: 18px; font-weight: 700; }
+    .header p { font-size: 12px; opacity: .7; margin-top: 1px; }
+    .header-actions { display: flex; gap: 8px; align-items: center; }
+    .header .lang-toggle {
+      padding: 6px 12px;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,.2);
+      background: transparent;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .header .lang-toggle:hover { background: rgba(255,255,255,.1); }
+    .header .logout-btn {
+      padding: 6px 12px;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,.2);
+      background: transparent;
+      color: #fff;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .header .logout-btn:hover { background: rgba(239,68,68,.3); border-color: var(--danger); }
+
+    /* Tabs */
+    .tabs {
+      display: flex;
+      gap: 0;
+      padding: 0 20px;
+      border-bottom: 2px solid var(--border);
+      background: var(--card);
+    }
+    .tab {
+      padding: 14px 20px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      border-bottom: 3px solid transparent;
+      margin-bottom: -2px;
+      color: var(--muted);
+      transition: all .2s;
+    }
+    .tab.active { color: var(--text); border-bottom-color: var(--primary); }
+    .tab:hover { color: var(--text); }
+
+    /* Content */
+    .content { padding: 20px; max-width: 900px; margin: 0 auto; }
+    .bloom-lf-widget .app-container { display: none; }
+
+    /* Form */
+    .form-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin-bottom: 16px;
+    }
+    .form-section-title {
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+    }
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 12px;
+    }
+    .form-group { display: flex; flex-direction: column; }
+    .form-group label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      color: var(--muted);
+      margin-bottom: 5px;
+    }
+    .form-group input, .form-group select {
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      font-size: 14px;
+      color: var(--text);
+      background: #fff;
+    }
+    .form-group input:focus, .form-group select:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(255,229,0,.15);
+    }
+    .form-group.full { grid-column: 1 / -1; }
+    .form-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px;
+      justify-content: flex-end;
+    }
+    .btn-primary {
+      background: var(--primary);
+      color: #000;
+      border: none;
+      padding: 12px 28px;
+      border-radius: 12px;
+      font-weight: 700;
+      font-size: 15px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: transform .1s;
+    }
+    .btn-primary:hover { transform: scale(1.02); }
+    .btn-primary:active { transform: scale(.98); }
+    .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-secondary {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      padding: 12px 20px;
+      border-radius: 12px;
+      font-weight: 600;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    /* Deal List */
+    .deal-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      transition: box-shadow .2s;
+    }
+    .deal-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,.05); }
+    .deal-route {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 140px;
+    }
+    .deal-iata { font-size: 18px; font-weight: 800; letter-spacing: 1px; }
+    .deal-arrow { color: var(--muted); font-size: 14px; }
+    .deal-info { flex: 1; min-width: 0; }
+    .deal-info .airline { font-size: 13px; font-weight: 600; }
+    .deal-info .dates { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .deal-price { text-align: right; min-width: 80px; }
+    .deal-price .amount { font-size: 20px; font-weight: 800; }
+    .deal-price .original {
+      font-size: 12px; color: var(--muted); text-decoration: line-through;
+    }
+    .deal-price .tag {
+      display: inline-block;
+      background: var(--danger);
+      color: #fff;
+      padding: 2px 6px;
+      border-radius: 6px;
+      font-size: 9px;
+      font-weight: 700;
+      margin-top: 3px;
+    }
+    .deal-status {
+      padding: 4px 8px;
+      border-radius: 8px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .deal-status.active { background: #D1FAE5; color: #065F46; }
+    .deal-status.inactive { background: #FEE2E2; color: #991B1B; }
+    .deal-actions { display: flex; gap: 4px; }
+    .deal-actions button {
+      width: 32px; height: 32px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #fff;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      transition: all .2s;
+    }
+    .deal-actions button:hover { background: var(--bg); }
+    .deal-actions .btn-delete:hover { background: #FEE2E2; border-color: var(--danger); }
+
+    /* Checkbox */
+    .checkbox-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding-top: 20px;
+    }
+
+    /* Segments */
+    .segments-section {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px dashed var(--border);
+    }
+    .segment-block {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 10px;
+    }
+    .segment-header {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .segment-header .seg-num {
+      background: var(--primary);
+      color: #000;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: 800;
+    }
+    .layover-indicator {
+      text-align: center;
+      padding: 8px 0;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .checkbox-group input[type="checkbox"] {
+      width: 18px; height: 18px;
+      accent-color: var(--primary);
+    }
+    .checkbox-group label {
+      font-size: 13px;
+      font-weight: 500;
+      margin-bottom: 0;
+      text-transform: none;
+      letter-spacing: 0;
+      color: var(--text);
+    }
+
+    /* Toast */
+    .toast {
+      position: absolute;
+      bottom: 24px;
+      right: 24px;
+      padding: 14px 20px;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #fff;
+      z-index: 999;
+      transform: translateY(100px);
+      opacity: 0;
+      transition: all .3s ease;
+    }
+    .toast.show { transform: translateY(0); opacity: 1; }
+    .toast.success { background: var(--success); }
+    .toast.error { background: var(--danger); }
+
+    /* Empty */
+    .empty-state {
+      text-align: center;
+      padding: 50px 20px;
+      color: var(--muted);
+    }
+    .empty-state .icon { font-size: 42px; margin-bottom: 10px; }
+    .empty-state p { font-size: 14px; }
+
+    /* Stats */
+    .stats-row {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .stat-card {
+      flex: 1;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      text-align: center;
+    }
+    .stat-card .num { font-size: 28px; font-weight: 800; }
+    .stat-card .label { font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; margin-top: 4px; }
+
+    /* Airport List */
+    .airport-item {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 14px 16px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      margin-bottom: 8px;
+      transition: box-shadow .2s;
+    }
+    .airport-item:hover { box-shadow: 0 2px 12px rgba(0,0,0,.05); }
+    .airport-code {
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      min-width: 54px;
+    }
+    .airport-info { flex: 1; min-width: 0; }
+    .airport-city { font-size: 14px; font-weight: 600; }
+    .airport-users {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+    .airport-deals-count {
+      font-size: 11px;
+      padding: 3px 8px;
+      border-radius: 8px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .airport-btn {
+      padding: 6px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--primary);
+      background: var(--primary);
+      color: #000;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: transform .1s;
+    }
+    .airport-btn:hover { transform: scale(1.03); }
+
+    @media (max-width: 600px) {
+      .form-grid { grid-template-columns: 1fr; }
+      .deal-card { flex-wrap: wrap; }
+      .deal-price { text-align: left; }
+      .stats-row { flex-direction: column; }
+      .login-card { padding: 32px 24px; }
+      .airport-item { flex-wrap: wrap; }
+    }
+  </style>
+</head>
+<body>
+<div class="bloom-lf-widget">
+
+<!-- LOGIN PAGE -->
+<div class="login-page" id="loginPage">
+  <div class="login-card">
+    <div class="login-logo">&#9992;&#65039;</div>
+    <h1 id="login-title">Low Fare Radar</h1>
+    <p class="subtitle" id="login-subtitle">Enter your admin key to continue</p>
+    <input type="password" class="login-input" id="loginKey" placeholder="&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;&#8226;">
+    <button class="login-btn" onclick="doLogin()" id="loginBtn">
+      <span id="login-btn-text">Sign In</span>
+    </button>
+    <div class="login-error" id="loginError"></div>
+    <div class="login-lang">
+      <button class="lang-btn active" onclick="setLang('en')" id="lang-en">English</button>
+      <button class="lang-btn" onclick="setLang('el')" id="lang-el">&#917;&#955;&#955;&#951;&#957;&#953;&#954;&#940;</button>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div class="app-container" id="appContainer">
+  <div class="header">
+    <div class="header-icon">&#9992;&#65039;</div>
+    <div class="header-info">
+      <h1 id="header-title">Low Fare Radar</h1>
+      <p id="header-subtitle">Manage flight deals</p>
+    </div>
+    <div class="header-actions">
+      <button class="lang-toggle" onclick="toggleLang()" id="langToggleBtn">&#127468;&#127479; EL</button>
+      <button class="logout-btn" onclick="doLogout()" id="logoutBtn">&#128682;</button>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('add')" id="tab-add">
+      <span data-i18n="tab_add">&#10133; Add Deal</span>
+    </div>
+    <div class="tab" onclick="switchTab('list')" id="tab-list">
+      <span data-i18n="tab_list">&#128203; Deals</span>
+    </div>
+    <div class="tab" onclick="switchTab('airports')" id="tab-airports">
+      <span data-i18n="tab_airports">&#127968; User Airports</span>
+    </div>
+  </div>
+
+  <!-- Add Deal -->
+  <div class="content" id="content-add">
+
+    <!-- Route -->
+    <div class="form-card">
+      <div class="form-section-title">&#128747; <span data-i18n="section_route">Route</span></div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label data-i18n="lbl_origin_code">Origin Code</label>
+          <input type="text" id="f-origin" placeholder="ATH" maxlength="3" style="text-transform:uppercase">
+        </div>
+        <div class="form-group">
+          <label data-i18n="lbl_origin_city">Origin City</label>
+          <input type="text" id="f-originCity" placeholder="Athens">
+        </div>
+        <div class="form-group">
+          <label data-i18n="lbl_dest_code">Destination Code</label>
+          <input type="text" id="f-destination" placeholder="CDG" maxlength="3" style="text-transform:uppercase">
+        </div>
+        <div class="form-group">
+          <label data-i18n="lbl_dest_city">Destination City</label>
+          <input type="text" id="f-destinationCity" placeholder="Paris">
+        </div>
+      </div>
+    </div>
+
+    <!-- Outbound -->
+    <div class="form-card">
+      <div class="form-section-title">&#9992;&#65039; <span data-i18n="section_outbound">Outbound Flight</span></div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label data-i18n="lbl_airline">Airline</label>
+          <input type="text" id="f-airline" placeholder="Aegean Airlines">
+        </div>
+        <div class="form-group">
+          <label data-i18n="lbl_flight_no">Flight No.</label>
+          <input type="text" id="f-flightNumber" placeholder="A3 610">
+        </div>
+        <div class="form-group">
+          <label data-i18n="lbl_date">Date</label>
+          <input type="date" id="f-outboundDate">
+        </div>
+        <div class="form-group">
+          <label data-i18n="lbl_departure">Departure</label>
+          <input type="time" id="f-outboundDeparture">
+        </div>
+        <div class="form-group">
+          <label data-i18n="lbl_arrival">Arrival</label>
+          <input type="time" id="f-outboundArrival">
+        </div>
+        <div class="form-group">
+          <label data-i18n="lbl_duration">Duration</label>
+          <input type="text" id="f-outboundDuration" placeholder="3h 15m">
+        </div>
+        <div class="form-group">
+          <label data-i18n="lbl_stops">Stops</label>
+          <select id="f-outboundStops" onchange="updateSegments('outbound')">
+            <option value="0">Direct</option>
+            <option value="1">1 Stop</option>
+            <option value="2">2 Stops</option>
+          </select>
+        </div>
+      </div>
+      <div id="outbound-segments-container"></div>
+    </div>
+
+    <!-- Return -->
+    <div class="form-card">
+      <div class="form-section-title">&#128260; <span data-i18n="section_return">Return Flight</span> <span style="font-size:12px;font-weight:400;color:var(--muted);margin-left:6px" data-i18n="optional">(optional)</span></div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label data-i18n="lbl_return_date">Return Date</label>
+          <input type="date" id="f-returnDate">
+        </div>
+        <div class="form-group">
+          <label data-i18n="lbl_departure">Departure</label>
+          <input type="time" id="f-returnDeparture">
+        </div>
+        <div class="form-group">
+          <label data-i18n="lbl_arrival">Arrival</label>
+          <input type="time" id="f-returnArrival">
+        </div>
+        <div class="form-group">
+          <label data-i18n="lbl_duration">Duration</label>
+          <input type="text" id="f-returnDuration" placeholder="3h 30m">
+        </div>
+        <div class="form-group">
+          <label data-i18n="lbl_airline">Airline</label>
+          <input type="text" id="f-returnAirline" placeholder="">
+        </div>
+        <div class="form-group">
+          <label data-i18n="lbl_flight_no">Flight No.</label>
+          <input type="text" id="f-returnFlightNumber" placeholder="">
+        </div>
+        <div class="form-group">
+          <label data-i18n="lbl_stops">Stops</label>
+          <select id="f-returnStops" onchange="updateSegments('return')">
+            <option value="0">Direct</option>
+            <option value="1">1 Stop</option>
+            <option value="2">2 Stops</option>
+          </select>
+        </div>
+      </div>
+      <div id="return-segments-container"></div>
+    </div>
+
+    <!-- Pricing -->
+    <div class="form-card">
+      <div class="form-section-title">&#128176; <span data-i18n="section_pricing">Pricing &amp; Details</span></div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label data-i18n="lbl_price">Price *</label>
+          <input type="number" id="f-price" placeholder="89" step="0.01">
+        </div>
+        <div class="form-group">
+          <label data-i18n="lbl_original_price">Original Price</label>
+          <input type="number" id="f-originalPrice" placeholder="129" step="0.01">
+        </div>
+        <div class="form-group">
+          <label data-i18n="lbl_currency">Currency</label>
+          <select id="f-currency">
+            <option value="EUR">EUR (&euro;)</option>
+            <option value="USD">USD ($)</option>
+            <option value="GBP">GBP (&pound;)</option>
+            <option value="SEK">SEK (kr)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label data-i18n="lbl_cabin_bag">Cabin Baggage</label>
+          <input type="text" id="f-cabinBaggage" placeholder="1x 8kg">
+        </div>
+        <div class="form-group">
+          <label data-i18n="lbl_checked_bag">Checked Baggage</label>
+          <input type="text" id="f-checkedBaggage" placeholder="1x 23kg">
+        </div>
+        <div class="form-group">
+          <label data-i18n="lbl_deal_tag">Deal Tag</label>
+          <select id="f-dealTag">
+            <option value="">&mdash;</option>
+            <option value="HOT DEAL">&#128293; HOT DEAL</option>
+            <option value="LOWEST PRICE">&#128142; LOWEST PRICE</option>
+            <option value="LAST SEATS">&#9889; LAST SEATS</option>
+            <option value="NEW ROUTE">&#127381; NEW ROUTE</option>
+          </select>
+        </div>
+        <div class="form-group full">
+          <label data-i18n="lbl_booking_url">Booking URL</label>
+          <input type="url" id="f-bookingUrl" placeholder="https://...">
+        </div>
+        <div class="form-group full">
+          <label data-i18n="lbl_notes">Notes</label>
+          <input type="text" id="f-notes" placeholder="">
+        </div>
+        <div class="form-group">
+          <label data-i18n="lbl_expires">Expires At</label>
+          <input type="datetime-local" id="f-expiresAt">
+        </div>
+        <div class="checkbox-group">
+          <input type="checkbox" id="f-isRecommended">
+          <label for="f-isRecommended" data-i18n="lbl_recommended">&#11088; Recommended</label>
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button class="btn-secondary" onclick="clearForm()" data-i18n="btn_clear">Clear</button>
+        <button class="btn-primary" onclick="submitDeal()" id="submitBtn">
+          <span data-i18n="btn_publish">&#9992;&#65039; Publish Deal</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Deals List -->
+  <div class="content" id="content-list" style="display:none">
+    <div class="stats-row" id="statsRow"></div>
+    <div id="dealsList"></div>
+  </div>
+
+  <!-- User Airports -->
+  <div class="content" id="content-airports" style="display:none">
+    <div class="form-card">
+      <div class="form-section-title">&#127968; <span data-i18n="airports_title">User Home Airports</span></div>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:16px" data-i18n="airports_subtitle">Airports selected by app users as their home airport</p>
+      <div id="airportsList"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+  // CONFIG
+  var CONVEX_URL = 'https://canny-bobcat-846.convex.cloud';
+
+  // i18n TRANSLATIONS
+  var TRANSLATIONS = {
+    en: {
+      login_title: 'Low Fare Radar',
+      login_subtitle: 'Enter your admin key to continue',
+      login_btn: 'Sign In',
+      login_error_empty: 'Please enter your admin key',
+      login_error_invalid: 'Invalid admin key. Try again.',
+      login_verifying: 'Verifying...',
+      header_title: 'Low Fare Radar',
+      header_subtitle: 'Manage flight deals',
+      tab_add: '➕ Add Deal',
+      tab_list: '📋 Deals',
+      section_route: 'Route',
+      section_outbound: 'Outbound Flight',
+      section_return: 'Return Flight',
+      section_pricing: 'Pricing & Details',
+      optional: '(optional)',
+      lbl_origin_code: 'Origin Code',
+      lbl_origin_city: 'Origin City',
+      lbl_dest_code: 'Destination Code',
+      lbl_dest_city: 'Destination City',
+      lbl_airline: 'Airline',
+      lbl_flight_no: 'Flight No.',
+      lbl_date: 'Date',
+      lbl_departure: 'Departure',
+      lbl_arrival: 'Arrival',
+      lbl_duration: 'Duration',
+      lbl_return_date: 'Return Date',
+      lbl_price: 'Price *',
+      lbl_original_price: 'Original Price',
+      lbl_currency: 'Currency',
+      lbl_cabin_bag: 'Cabin Baggage',
+      lbl_checked_bag: 'Checked Baggage',
+      lbl_deal_tag: 'Deal Tag',
+      lbl_booking_url: 'Booking URL',
+      lbl_notes: 'Notes',
+      lbl_expires: 'Expires At',
+      lbl_recommended: '⭐ Recommended',
+      btn_clear: 'Clear',
+      btn_publish: '✈️ Publish Deal',
+      btn_update: '✏️ Update Deal',
+      msg_published: 'Deal published! Appears in app instantly.',
+      msg_updated: 'Deal updated!',
+      msg_deleted: 'Deal deleted',
+      msg_activated: 'Deal activated',
+      msg_deactivated: 'Deal deactivated',
+      msg_fill: 'Please fill: ',
+      msg_connect_first: 'Connect first!',
+      msg_delete_confirm: 'Delete this deal permanently?',
+      stat_total: 'Total',
+      stat_active: 'Active',
+      stat_recommended: 'Recommended',
+      empty_deals: 'No deals yet. Add your first!',
+      empty_connect: 'Connect first',
+      lang_toggle: '🇬🇷 EL',
+      lbl_stops: 'Stops',
+      lbl_segment: 'Segment',
+      lbl_layover_at: 'Layover at',
+      lbl_dep_airport: 'From (IATA)',
+      lbl_arr_airport: 'To (IATA)',
+      tab_airports: '🏠 User Airports',
+      airports_title: 'User Home Airports',
+      airports_subtitle: 'Airports selected by app users as their home airport',
+      airports_users: 'users',
+      airports_user: 'user',
+      airports_no_deals: 'No deals yet',
+      airports_deals: 'deals',
+      airports_create: 'Create Deal',
+      empty_airports: 'No users have set a home airport yet.',
+    },
+    el: {
+      login_title: 'Ραντάρ Χαμηλών Ναύλων',
+      login_subtitle: 'Εισάγετε το κλειδί διαχειριστή',
+      login_btn: 'Σύνδεση',
+      login_error_empty: 'Εισάγετε το κλειδί σας',
+      login_error_invalid: 'Λάθος κλειδί. Δοκιμάστε ξανά.',
+      login_verifying: 'Επαλήθευση...',
+      header_title: 'Ραντάρ Χαμηλών Ναύλων',
+      header_subtitle: 'Διαχείριση προσφορών πτήσεων',
+      tab_add: '➕ Νέα Προσφορά',
+      tab_list: '📋 Προσφορές',
+      section_route: 'Διαδρομή',
+      section_outbound: 'Πτήση Μετάβασης',
+      section_return: 'Πτήση Επιστροφής',
+      section_pricing: 'Τιμολόγηση & Λεπτομέρειες',
+      optional: '(προαιρετικό)',
+      lbl_origin_code: 'Κωδικός Αφετηρίας',
+      lbl_origin_city: 'Πόλη Αφετηρίας',
+      lbl_dest_code: 'Κωδικός Προορισμού',
+      lbl_dest_city: 'Πόλη Προορισμού',
+      lbl_airline: 'Αεροπορική',
+      lbl_flight_no: 'Αρ. Πτήσης',
+      lbl_date: 'Ημερομηνία',
+      lbl_departure: 'Αναχώρηση',
+      lbl_arrival: 'Άφιξη',
+      lbl_duration: 'Διάρκεια',
+      lbl_return_date: 'Ημ/νία Επιστροφής',
+      lbl_price: 'Τιμή *',
+      lbl_original_price: 'Αρχική Τιμή',
+      lbl_currency: 'Νόμισμα',
+      lbl_cabin_bag: 'Χειραπ. Αποσκευή',
+      lbl_checked_bag: 'Παραδ. Αποσκευή',
+      lbl_deal_tag: 'Ετικέτα',
+      lbl_booking_url: 'URL Κράτησης',
+      lbl_notes: 'Σημειώσεις',
+      lbl_expires: 'Λήξη',
+      lbl_recommended: '⭐ Προτεινόμενο',
+      btn_clear: 'Καθαρισμός',
+      btn_publish: '✈️ Δημοσίευση',
+      btn_update: '✏️ Ενημέρωση',
+      msg_published: 'Δημοσιεύτηκε! Εμφανίζεται αμέσως στην εφαρμογή.',
+      msg_updated: 'Ενημερώθηκε!',
+      msg_deleted: 'Διαγράφηκε',
+      msg_activated: 'Ενεργοποιήθηκε',
+      msg_deactivated: 'Απενεργοποιήθηκε',
+      msg_fill: 'Συμπληρώστε: ',
+      msg_connect_first: 'Συνδεθείτε πρώτα!',
+      msg_delete_confirm: 'Οριστική διαγραφή αυτής της προσφοράς;',
+      stat_total: 'Σύνολο',
+      stat_active: 'Ενεργές',
+      stat_recommended: 'Προτεινόμενες',
+      empty_deals: 'Δεν υπάρχουν προσφορές. Προσθέστε την πρώτη!',
+      empty_connect: 'Συνδεθείτε πρώτα',
+      lang_toggle: '🇬🇧 EN',
+      lbl_stops: 'Στάσεις',
+      lbl_segment: 'Τμήμα',
+      lbl_layover_at: 'Στάση στο',
+      lbl_dep_airport: 'Από (IATA)',
+      lbl_arr_airport: 'Προς (IATA)',
+      tab_airports: '🏠 Αεροδρόμια Χρηστών',
+      airports_title: 'Αεροδρόμια Χρηστών',
+      airports_subtitle: 'Αεροδρόμια που έχουν επιλέξει οι χρήστες ως βάση τους',
+      airports_users: 'χρήστες',
+      airports_user: 'χρήστης',
+      airports_no_deals: 'Δεν υπάρχουν προσφορές',
+      airports_deals: 'προσφορές',
+      airports_create: 'Δημιουργία Προσφοράς',
+      empty_airports: 'Κανένας χρήστης δεν έχει ορίσει αεροδρόμιο ακόμα.',
+    }
+  };
+
+  // STATE
+  var lang = localStorage.getItem('bloom_widget_lang') || 'en';
+  var adminKey = '';
+  var deals = [];
+  var editingId = null;
+
+  // i18n ENGINE
+  function t(key) { return TRANSLATIONS[lang] && TRANSLATIONS[lang][key] || TRANSLATIONS.en[key] || key; }
+
+  function applyLang() {
+    document.querySelectorAll('[data-i18n]').forEach(function(el) {
+      var key = el.getAttribute('data-i18n');
+      if (TRANSLATIONS[lang] && TRANSLATIONS[lang][key]) el.textContent = TRANSLATIONS[lang][key];
+      else if (TRANSLATIONS.en[key]) el.textContent = TRANSLATIONS.en[key];
+    });
+    document.getElementById('login-title').textContent = t('login_title');
+    document.getElementById('login-subtitle').textContent = t('login_subtitle');
+    document.getElementById('login-btn-text').textContent = t('login_btn');
+    document.getElementById('header-title').textContent = t('header_title');
+    document.getElementById('header-subtitle').textContent = t('header_subtitle');
+    document.getElementById('langToggleBtn').textContent = t('lang_toggle');
+    document.getElementById('lang-en').classList.toggle('active', lang === 'en');
+    document.getElementById('lang-el').classList.toggle('active', lang === 'el');
+  }
+
+  function setLang(l) {
+    lang = l;
+    localStorage.setItem('bloom_widget_lang', l);
+    applyLang();
+  }
+
+  function toggleLang() {
+    setLang(lang === 'en' ? 'el' : 'en');
+  }
+
+  // LOGIN
+  function doLogin() {
+    var keyInput = document.getElementById('loginKey');
+    var key = keyInput.value.trim();
+    var errorEl = document.getElementById('loginError');
+    var btn = document.getElementById('loginBtn');
+
+    if (!key) {
+      errorEl.textContent = t('login_error_empty');
+      keyInput.classList.add('error');
+      setTimeout(function() { keyInput.classList.remove('error'); }, 400);
+      return;
+    }
+
+    btn.disabled = true;
+    document.getElementById('login-btn-text').textContent = t('login_verifying');
+    errorEl.textContent = '';
+
+    convexQuery('lowFareRadar:listAll', { adminKey: key }).then(function() {
+      adminKey = key;
+      sessionStorage.setItem('bloom_admin_session', key);
+      document.getElementById('loginPage').style.display = 'none';
+      document.getElementById('appContainer').style.display = 'block';
+      applyLang();
+      btn.disabled = false;
+      document.getElementById('login-btn-text').textContent = t('login_btn');
+    }).catch(function() {
+      errorEl.textContent = t('login_error_invalid');
+      keyInput.classList.add('error');
+      setTimeout(function() { keyInput.classList.remove('error'); }, 400);
+      btn.disabled = false;
+      document.getElementById('login-btn-text').textContent = t('login_btn');
+    });
+  }
+
+  function doLogout() {
+    adminKey = '';
+    sessionStorage.removeItem('bloom_admin_session');
+    document.getElementById('loginKey').value = '';
+    document.getElementById('loginError').textContent = '';
+    document.getElementById('appContainer').style.display = 'none';
+    document.getElementById('loginPage').style.display = 'flex';
+  }
+
+  document.getElementById('loginKey').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') doLogin();
+  });
+
+  // AUTO-LOGIN FROM SESSION
+  (function checkSession() {
+    var saved = sessionStorage.getItem('bloom_admin_session');
+    if (saved) {
+      adminKey = saved;
+      document.getElementById('loginPage').style.display = 'none';
+      document.getElementById('appContainer').style.display = 'block';
+    }
+    applyLang();
+  })();
+
+  // TABS
+  function switchTab(tab) {
+    ['add', 'list', 'airports'].forEach(function(t) {
+      document.getElementById('content-' + t).style.display = t === tab ? 'block' : 'none';
+      document.getElementById('tab-' + t).classList.toggle('active', t === tab);
+    });
+    if (tab === 'list') loadDeals();
+    if (tab === 'airports') loadAirports();
+  }
+
+  // CONVEX API
+  function convexQuery(funcName, args) {
+    return fetch(CONVEX_URL.replace(/\/$/, '') + '/api/query', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: funcName, args: args, format: 'json' }),
+    }).then(function(resp) { return resp.json(); }).then(function(data) {
+      if (data.status === 'error') throw new Error(data.errorMessage || 'Query failed');
+      return data.value;
+    });
+  }
+
+  function convexMutation(funcName, args) {
+    return fetch(CONVEX_URL.replace(/\/$/, '') + '/api/mutation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: funcName, args: args, format: 'json' }),
+    }).then(function(resp) { return resp.json(); }).then(function(data) {
+      if (data.status === 'error') throw new Error(data.errorMessage || 'Mutation failed');
+      return data.value;
+    });
+  }
+
+  // SUBMIT DEAL
+  function submitDeal() {
+    if (!adminKey) return toast(t('msg_connect_first'), 'error');
+
+    var required = ['origin', 'originCity', 'destination', 'destinationCity',
+      'airline', 'outboundDate', 'outboundDeparture', 'outboundArrival', 'price', 'currency'];
+    var data = {};
+    for (var i = 0; i < required.length; i++) {
+      var field = required[i];
+      var val = document.getElementById('f-' + field).value.trim();
+      if (!val) return toast(t('msg_fill') + field, 'error');
+      data[field] = field === 'price' ? parseFloat(val) : val;
+    }
+
+    var optionalText = ['flightNumber', 'outboundDuration', 'returnDate', 'returnDeparture',
+      'returnArrival', 'returnDuration', 'returnAirline', 'returnFlightNumber',
+      'cabinBaggage', 'checkedBaggage', 'dealTag', 'bookingUrl', 'notes'];
+    for (var j = 0; j < optionalText.length; j++) {
+      var oField = optionalText[j];
+      var oVal = document.getElementById('f-' + oField).value.trim();
+      if (oVal) data[oField] = oVal;
+    }
+
+    var origPrice = document.getElementById('f-originalPrice').value.trim();
+    if (origPrice) data.originalPrice = parseFloat(origPrice);
+
+    var exp = document.getElementById('f-expiresAt').value;
+    if (exp) data.expiresAt = new Date(exp).getTime();
+
+    data.isRecommended = document.getElementById('f-isRecommended').checked;
+
+    // Stops & segments
+    var outboundStops = parseInt(document.getElementById('f-outboundStops').value) || 0;
+    data.outboundStops = outboundStops;
+    var outSegs = collectSegments('outbound');
+    if (outSegs) data.outboundSegments = outSegs;
+
+    var returnStops = parseInt(document.getElementById('f-returnStops').value) || 0;
+    if (data.returnDate) {
+      data.returnStops = returnStops;
+      var retSegs = collectSegments('return');
+      if (retSegs) data.returnSegments = retSegs;
+    }
+
+    data.adminKey = adminKey;
+
+    var btn = document.getElementById('submitBtn');
+    btn.disabled = true;
+
+    var promise;
+    if (editingId) {
+      data.id = editingId;
+      promise = convexMutation('lowFareRadar:update', data).then(function() {
+        toast(t('msg_updated'), 'success');
+        editingId = null;
+      });
+    } else {
+      promise = convexMutation('lowFareRadar:create', data).then(function() {
+        toast(t('msg_published'), 'success');
+      });
+    }
+    promise.then(function() {
+      clearForm();
+    }).catch(function(err) {
+      toast('Error: ' + err.message, 'error');
+    }).then(function() {
+      btn.disabled = false;
+    });
+  }
+
+  // LOAD DEALS
+  function loadDeals() {
+    if (!adminKey) {
+      document.getElementById('dealsList').innerHTML =
+        '<div class="empty-state"><div class="icon">\uD83D\uDD0C</div><p>' + escapeHtml(t('empty_connect')) + '</p></div>';
+      return;
+    }
+    convexQuery('lowFareRadar:listAll', { adminKey: adminKey }).then(function(result) {
+      deals = result;
+      renderStats();
+      renderDeals();
+    }).catch(function(err) {
+      toast('Error: ' + err.message, 'error');
+    });
+  }
+
+  function renderStats() {
+    var active = deals.filter(function(d) { return d.active; }).length;
+    var recommended = deals.filter(function(d) { return d.isRecommended; }).length;
+    document.getElementById('statsRow').innerHTML =
+      '<div class="stat-card"><div class="num">' + deals.length + '</div><div class="label">' + escapeHtml(t('stat_total')) + '</div></div>' +
+      '<div class="stat-card"><div class="num" style="color:var(--success)">' + active + '</div><div class="label">' + escapeHtml(t('stat_active')) + '</div></div>' +
+      '<div class="stat-card"><div class="num" style="color:#F5A623">' + recommended + '</div><div class="label">' + escapeHtml(t('stat_recommended')) + '</div></div>';
+  }
+
+  function renderDeals() {
+    var container = document.getElementById('dealsList');
+    if (!deals || deals.length === 0) {
+      container.innerHTML = '<div class="empty-state"><div class="icon">\u2708\uFE0F</div><p>' + escapeHtml(t('empty_deals')) + '</p></div>';
+      return;
+    }
+    container.innerHTML = deals.map(function(d) {
+      return '<div class="deal-card">' +
+        '<div class="deal-route">' +
+          '<span class="deal-iata">' + escapeHtml(d.origin) + '</span>' +
+          '<span class="deal-arrow">\u2192</span>' +
+          '<span class="deal-iata">' + escapeHtml(d.destination) + '</span>' +
+        '</div>' +
+        '<div class="deal-info">' +
+          '<div class="airline">' + escapeHtml(d.airline) + (d.flightNumber ? ' \u00B7 ' + escapeHtml(d.flightNumber) : '') + (d.outboundStops ? ' \u00B7 ' + d.outboundStops + ' stop' + (d.outboundStops > 1 ? 's' : '') : '') + '</div>' +
+          '<div class="dates">' + escapeHtml(d.outboundDate) + ' \u00B7 ' + escapeHtml(d.outboundDeparture) + ' \u2192 ' + escapeHtml(d.outboundArrival) + (d.returnDate ? ' | \u21A9 ' + escapeHtml(d.returnDate) : '') + '</div>' +
+        '</div>' +
+        '<div class="deal-price">' +
+          (d.originalPrice ? '<div class="original">' + getCurrSym(d.currency) + d.originalPrice + '</div>' : '') +
+          '<div class="amount">' + getCurrSym(d.currency) + d.price + '</div>' +
+          (d.dealTag ? '<div class="tag">' + escapeHtml(d.dealTag) + '</div>' : '') +
+        '</div>' +
+        '<span class="deal-status ' + (d.active ? 'active' : 'inactive') + '">' + (d.active ? '\u25CF' : '\u25CB') + '</span>' +
+        '<div class="deal-actions">' +
+          '<button onclick="toggleActive(\'' + d._id + '\', ' + !d.active + ')" title="' + (d.active ? 'Pause' : 'Activate') + '">' +
+            (d.active ? '\u23F8\uFE0F' : '\u25B6\uFE0F') +
+          '</button>' +
+          '<button class="btn-delete" onclick="deleteDeal(\'' + d._id + '\')" title="Delete">\uD83D\uDDD1\uFE0F</button>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  }
+
+  // AIRPORTS
+  var userAirports = [];
+
+  function loadAirports() {
+    if (!adminKey) {
+      document.getElementById('airportsList').innerHTML =
+        '<div class="empty-state"><div class="icon">\uD83D\uDD0C</div><p>' + escapeHtml(t('empty_connect')) + '</p></div>';
+      return;
+    }
+    // Load deals in parallel so we can show deal counts per airport
+    var airportsPromise = convexQuery('lowFareRadar:getHomeAirports', { adminKey: adminKey });
+    var dealsPromise = deals.length ? Promise.resolve(deals) : convexQuery('lowFareRadar:listAll', { adminKey: adminKey });
+    Promise.all([airportsPromise, dealsPromise]).then(function(results) {
+      userAirports = results[0];
+      deals = results[1];
+      renderAirports();
+    }).catch(function(err) {
+      toast('Error: ' + err.message, 'error');
+    });
+  }
+
+  function renderAirports() {
+    var container = document.getElementById('airportsList');
+    if (!userAirports || userAirports.length === 0) {
+      container.innerHTML = '<div class="empty-state"><div class="icon">\u2708\uFE0F</div><p>' + escapeHtml(t('empty_airports')) + '</p></div>';
+      return;
+    }
+
+    // Count existing deals per origin airport
+    var dealCountByOrigin = {};
+    if (deals && deals.length) {
+      deals.forEach(function(d) {
+        dealCountByOrigin[d.origin] = (dealCountByOrigin[d.origin] || 0) + 1;
+      });
+    }
+
+    container.innerHTML = userAirports.map(function(a) {
+      var dealCount = dealCountByOrigin[a.code] || 0;
+      var usersLabel = a.count === 1 ? t('airports_user') : t('airports_users');
+      var dealsLabel = dealCount > 0
+        ? '<span class="airport-deals-count" style="background:#D1FAE5;color:#065F46">' + dealCount + ' ' + escapeHtml(t('airports_deals')) + '</span>'
+        : '<span class="airport-deals-count" style="background:#FEE2E2;color:#991B1B">' + escapeHtml(t('airports_no_deals')) + '</span>';
+
+      return '<div class="airport-item">' +
+        '<span class="airport-code">' + escapeHtml(a.code) + '</span>' +
+        '<div class="airport-info">' +
+          '<div class="airport-city">' + escapeHtml(a.city) + '</div>' +
+          '<div class="airport-users">' + a.count + ' ' + escapeHtml(usersLabel) + '</div>' +
+        '</div>' +
+        dealsLabel +
+        '<button class="airport-btn" onclick="createDealFromAirport(\'' + escapeHtml(a.code) + '\', \'' + escapeHtml(a.city).replace(/'/g, "\\'") + '\')">' + escapeHtml(t('airports_create')) + '</button>' +
+      '</div>';
+    }).join('');
+  }
+
+  function createDealFromAirport(code, city) {
+    // Pre-fill the origin fields and switch to Add Deal tab
+    document.getElementById('f-origin').value = code;
+    document.getElementById('f-originCity').value = city;
+    switchTab('add');
+  }
+
+  // ACTIONS
+  function toggleActive(id, newState) {
+    convexMutation('lowFareRadar:update', { adminKey: adminKey, id: id, active: newState }).then(function() {
+      toast(newState ? t('msg_activated') : t('msg_deactivated'), 'success');
+      loadDeals();
+    }).catch(function(err) { toast('Error: ' + err.message, 'error'); });
+  }
+
+  function deleteDeal(id) {
+    if (!confirm(t('msg_delete_confirm'))) return;
+    convexMutation('lowFareRadar:remove', { adminKey: adminKey, id: id }).then(function() {
+      toast(t('msg_deleted'), 'success');
+      loadDeals();
+    }).catch(function(err) { toast('Error: ' + err.message, 'error'); });
+  }
+
+  function clearForm() {
+    var fields = ['origin', 'originCity', 'destination', 'destinationCity',
+      'airline', 'flightNumber', 'outboundDate', 'outboundDeparture', 'outboundArrival',
+      'outboundDuration', 'returnDate', 'returnDeparture', 'returnArrival', 'returnDuration',
+      'returnAirline', 'returnFlightNumber', 'price', 'originalPrice',
+      'cabinBaggage', 'checkedBaggage', 'bookingUrl', 'notes', 'expiresAt'];
+    fields.forEach(function(f) { document.getElementById('f-' + f).value = ''; });
+    document.getElementById('f-currency').value = 'EUR';
+    document.getElementById('f-dealTag').value = '';
+    document.getElementById('f-isRecommended').checked = false;
+    document.getElementById('f-outboundStops').value = '0';
+    document.getElementById('f-returnStops').value = '0';
+    document.getElementById('outbound-segments-container').innerHTML = '';
+    document.getElementById('return-segments-container').innerHTML = '';
+    editingId = null;
+    applyLang();
+  }
+
+  // HELPERS
+  function getCurrSym(c) { return { EUR: '\u20AC', USD: '$', GBP: '\u00A3', SEK: 'kr' }[c] || c; }
+
+  function escapeHtml(str) {
+    if (!str) return '';
+    var d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  function toast(msg, type) {
+    var el = document.getElementById('toast');
+    el.textContent = msg;
+    el.className = 'toast ' + type + ' show';
+    setTimeout(function() { el.className = 'toast'; }, 3000);
+  }
+
+  // SEGMENTS — dynamic UI for connecting flights
+  function updateSegments(leg) {
+    var stops = parseInt(document.getElementById('f-' + leg + 'Stops').value) || 0;
+    var container = document.getElementById(leg + '-segments-container');
+    if (stops === 0) { container.innerHTML = ''; return; }
+
+    var segCount = stops + 1; // 1 stop = 2 segments, 2 stops = 3 segments
+    var html = '<div class="segments-section">';
+    for (var i = 0; i < segCount; i++) {
+      html += '<div class="segment-block">' +
+        '<div class="segment-header"><span class="seg-num">' + (i + 1) + '</span> ' +
+        t('lbl_segment') + ' ' + (i + 1) + '</div>' +
+        '<div class="form-grid">' +
+          '<div class="form-group">' +
+            '<label>' + t('lbl_airline') + '</label>' +
+            '<input type="text" id="f-' + leg + 'Seg' + i + '-airline" placeholder="Airline">' +
+          '</div>' +
+          '<div class="form-group">' +
+            '<label>' + t('lbl_flight_no') + '</label>' +
+            '<input type="text" id="f-' + leg + 'Seg' + i + '-flightNumber" placeholder="XX 123">' +
+          '</div>' +
+          '<div class="form-group">' +
+            '<label>' + t('lbl_dep_airport') + '</label>' +
+            '<input type="text" id="f-' + leg + 'Seg' + i + '-depAirport" placeholder="ATH" maxlength="3" style="text-transform:uppercase">' +
+          '</div>' +
+          '<div class="form-group">' +
+            '<label>' + t('lbl_departure') + '</label>' +
+            '<input type="time" id="f-' + leg + 'Seg' + i + '-depTime">' +
+          '</div>' +
+          '<div class="form-group">' +
+            '<label>' + t('lbl_arr_airport') + '</label>' +
+            '<input type="text" id="f-' + leg + 'Seg' + i + '-arrAirport" placeholder="MUC" maxlength="3" style="text-transform:uppercase">' +
+          '</div>' +
+          '<div class="form-group">' +
+            '<label>' + t('lbl_arrival') + '</label>' +
+            '<input type="time" id="f-' + leg + 'Seg' + i + '-arrTime">' +
+          '</div>' +
+          '<div class="form-group">' +
+            '<label>' + t('lbl_duration') + '</label>' +
+            '<input type="text" id="f-' + leg + 'Seg' + i + '-duration" placeholder="2h 15m">' +
+          '</div>' +
+        '</div></div>';
+      if (i < segCount - 1) {
+        html += '<div class="layover-indicator">⏳ ' + t('lbl_layover_at') + '...</div>';
+      }
+    }
+    html += '</div>';
+    container.innerHTML = html;
+  }
+
+  function collectSegments(leg) {
+    var stops = parseInt(document.getElementById('f-' + leg + 'Stops').value) || 0;
+    if (stops === 0) return null;
+    var segCount = stops + 1;
+    var segments = [];
+    for (var i = 0; i < segCount; i++) {
+      var airline = (document.getElementById('f-' + leg + 'Seg' + i + '-airline') || {}).value || '';
+      var flightNumber = (document.getElementById('f-' + leg + 'Seg' + i + '-flightNumber') || {}).value || '';
+      var depAirport = (document.getElementById('f-' + leg + 'Seg' + i + '-depAirport') || {}).value || '';
+      var depTime = (document.getElementById('f-' + leg + 'Seg' + i + '-depTime') || {}).value || '';
+      var arrAirport = (document.getElementById('f-' + leg + 'Seg' + i + '-arrAirport') || {}).value || '';
+      var arrTime = (document.getElementById('f-' + leg + 'Seg' + i + '-arrTime') || {}).value || '';
+      var duration = (document.getElementById('f-' + leg + 'Seg' + i + '-duration') || {}).value || '';
+      if (depAirport && arrAirport) {
+        var seg = {
+          airline: airline || 'Unknown',
+          departureAirport: depAirport.toUpperCase(),
+          departureTime: depTime,
+          arrivalAirport: arrAirport.toUpperCase(),
+          arrivalTime: arrTime,
+        };
+        if (flightNumber) seg.flightNumber = flightNumber;
+        if (duration) seg.duration = duration;
+        segments.push(seg);
+      }
+    }
+    return segments.length > 0 ? segments : null;
+  }
+</script>
+</div>
+</body>
+</html>

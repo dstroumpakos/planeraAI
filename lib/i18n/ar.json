@@ -179,6 +179,32 @@
     "basedOnBudget": "بناءً على ميزانيتك",
     "pleaseLogIn": "يرجى تسجيل الدخول لمشاهدة رحلاتك"
   },
+  "lowFare": {
+    "title": "رادار الأسعار المنخفضة",
+    "subtitle": "أفضل عروض الرحلات لك",
+    "allDeals": "جميع العروض",
+    "recommended": "لك",
+    "depart": "مغادرة",
+    "arrive": "وصول",
+    "roundTrip": "ذهاب وعودة",
+    "oneWay": "ذهاب فقط",
+    "baggage": "الأمتعة المسموحة",
+    "returnFlight": "رحلة العودة",
+    "bookNow": "احجز هذه الرحلة",
+    "savedDest": "وجهة محفوظة",
+    "noDeals": "لا توجد عروض تتوافق مع تفضيلاتك حتى الآن",
+    "noBaggageInfo": "تحقق من شركة الطيران للأمتعة",
+    "planTrip": "خطط لرحلة"
+  },
+  "dealTrip": {
+    "title": "خطط لرحلتك",
+    "fromRadar": "رادار الأسعار المنخفضة",
+    "days": "أيام",
+    "generate": "إنشاء خطة الرحلة",
+    "selectInterests": "يرجى اختيار اهتمام واحد على الأقل",
+    "outbound": "ذهاب",
+    "return": "عودة"
+  },
   "createTrip": {
     "designYour": "صمم",
     "perfectEscape": "إجازتك المثالية",
@@ -825,6 +851,7 @@
     "regenerateMsg": "هل تريد إعادة إنشاء هذا البرنامج؟ سيتم إنشاء نسخة جديدة من رحلتك.",
     "regenerate": "إعادة الإنشاء",
     "flightsNotIncluded": "الرحلات الجوية غير مشمولة",
+    "fromLowFareRadar": "تم الاختيار من رادار الأسعار المنخفضة",
     "exploreRoute": "استكشاف المسار",
     "bestPrice": "أفضل سعر",
     "outbound": "ذهاب",

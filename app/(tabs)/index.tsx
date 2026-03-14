@@ -22,6 +22,7 @@ import { useTheme } from "@/lib/ThemeContext";
 import { useTranslation } from "react-i18next";
 import { LanguagePickerModal } from "@/components/LanguagePickerModal";
 import { FirstTripPopup } from "@/components/FirstTripGuide";
+import { LowFareRadar } from "@/components/LowFareRadar";
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -69,6 +70,7 @@ export default function HomeScreen() {
   const userPlan = useQuery(api.users.getPlan as any, { token: token || "skip" });
   const trips = useQuery(api.trips.list as any, { token: token || "skip" });
   const trendingDestinations = useQuery(api.trips.getTrendingDestinations);
+  const lowFareDeals = useQuery(api.lowFareRadar.getDealsForUser as any, { token: token || "skip" });
   const getImages = useAction(api.images.getDestinationImages);
   const ensureUserPlan = useMutation(api.users.ensureUserPlan as any);
 
@@ -266,6 +268,39 @@ export default function HomeScreen() {
             <Text style={[styles.featureText, { color: colors.text }]}>{t("home.multiCityRoute")}</Text>
           </TouchableOpacity>
         </ScrollView>
+
+        {/* Low Fare Radar */}
+        {lowFareDeals && lowFareDeals.length > 0 && (
+          <LowFareRadar
+            deals={lowFareDeals}
+            onPlanTrip={(deal) => {
+              router.push({
+                pathname: "/deal-trip",
+                params: {
+                  dealId: deal._id,
+                  origin: deal.origin,
+                  originCity: deal.originCity,
+                  destination: deal.destination,
+                  destinationCity: deal.destinationCity,
+                  airline: deal.airline,
+                  outboundDate: deal.outboundDate,
+                  outboundDeparture: deal.outboundDeparture,
+                  outboundArrival: deal.outboundArrival,
+                  returnDate: deal.returnDate || "",
+                  returnDeparture: deal.returnDeparture || "",
+                  returnArrival: deal.returnArrival || "",
+                  returnAirline: deal.returnAirline || "",
+                  price: String(deal.price),
+                  currency: deal.currency,
+                  outboundStops: String(deal.outboundStops ?? 0),
+                  returnStops: String(deal.returnStops ?? 0),
+                  outboundSegments: deal.outboundSegments ? JSON.stringify(deal.outboundSegments) : "",
+                  returnSegments: deal.returnSegments ? JSON.stringify(deal.returnSegments) : "",
+                },
+              });
+            }}
+          />
+        )}
 
         {/* Trending Destinations Section */}
         {trendingDestinations && trendingDestinations.length > 0 && (

@@ -179,6 +179,32 @@
     "basedOnBudget": "Based on your budget",
     "pleaseLogIn": "Please log in to see your trips"
   },
+  "lowFare": {
+    "title": "Low Fare Radar",
+    "subtitle": "Best flight deals for you",
+    "allDeals": "All Deals",
+    "recommended": "For You",
+    "depart": "Depart",
+    "arrive": "Arrive",
+    "roundTrip": "Round trip",
+    "oneWay": "One way",
+    "baggage": "Luggage Allowance",
+    "returnFlight": "Return Flight",
+    "bookNow": "Book This Flight",
+    "savedDest": "Saved Destination",
+    "noDeals": "No recommended deals match your preferences yet",
+    "noBaggageInfo": "Check airline for baggage info",
+    "planTrip": "Plan a Trip"
+  },
+  "dealTrip": {
+    "title": "Plan Your Trip",
+    "fromRadar": "Low Fare Radar",
+    "days": "days",
+    "generate": "Generate Itinerary",
+    "selectInterests": "Please select at least one interest",
+    "outbound": "Outbound",
+    "return": "Return"
+  },
   "createTrip": {
     "designYour": "Design your",
     "perfectEscape": "perfect escape",
@@ -820,6 +846,7 @@
     "regenerateMsg": "Do you want to regenerate this itinerary? This will create a new version of your trip.",
     "regenerate": "Regenerate",
     "flightsNotIncluded": "Flights Not Included",
+    "fromLowFareRadar": "Selected from Low Fare Radar",
     "exploreRoute": "Explore Route",
     "bestPrice": "Best Price",
     "outbound": "Outbound",

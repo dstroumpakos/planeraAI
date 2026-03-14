@@ -179,6 +179,32 @@
     "basedOnBudget": "Basado en tu presupuesto",
     "pleaseLogIn": "Por favor inicia sesión para ver tus viajes"
   },
+  "lowFare": {
+    "title": "Radar de Tarifas Bajas",
+    "subtitle": "Las mejores ofertas de vuelos para ti",
+    "allDeals": "Todas las Ofertas",
+    "recommended": "Para Ti",
+    "depart": "Salida",
+    "arrive": "Llegada",
+    "roundTrip": "Ida y vuelta",
+    "oneWay": "Solo ida",
+    "baggage": "Equipaje Permitido",
+    "returnFlight": "Vuelo de Regreso",
+    "bookNow": "Reservar Este Vuelo",
+    "savedDest": "Destino Guardado",
+    "noDeals": "No hay ofertas que coincidan con tus preferencias",
+    "noBaggageInfo": "Consulta la aerolínea para equipaje",
+    "planTrip": "Planificar Viaje"
+  },
+  "dealTrip": {
+    "title": "Planifica tu Viaje",
+    "fromRadar": "Radar de Tarifas Bajas",
+    "days": "días",
+    "generate": "Generar Itinerario",
+    "selectInterests": "Por favor selecciona al menos un interés",
+    "outbound": "Ida",
+    "return": "Vuelta"
+  },
   "createTrip": {
     "designYour": "Diseña tu",
     "perfectEscape": "escapada perfecta",
@@ -820,6 +846,7 @@
     "regenerateMsg": "¿Deseas regenerar este itinerario? Esto creará una nueva versión de tu viaje.",
     "regenerate": "Regenerar",
     "flightsNotIncluded": "Vuelos No Incluidos",
+    "fromLowFareRadar": "Seleccionado del Radar de Tarifas Bajas",
     "exploreRoute": "Explorar Ruta",
     "bestPrice": "Mejor Precio",
     "outbound": "Ida",

@@ -316,7 +316,7 @@ export const getUserFlightBookings = authQuery({
   handler: async (ctx: any) => {
     const bookings = await ctx.db
       .query("flightBookings")
-      .withIndex("by_user", (q:any) => q.eq("userId", ctx.user._id))
+      .withIndex("by_user", (q:any) => q.eq("userId", ctx.user.userId))
       .order("desc")
       .collect();
     
