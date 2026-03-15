@@ -281,6 +281,7 @@ export const createFromDeal = authMutation({
                     segments: deal.returnSegments || undefined,
                 } : undefined,
                 pricePerPerson: deal.price,
+                totalPrice: deal.totalPrice || deal.price * 2,
                 currency: deal.currency,
                 isBestPrice: true,
                 checkedBaggageIncluded: !!deal.checkedBaggage,

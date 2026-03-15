@@ -2481,8 +2481,8 @@ export default function TripDetails() {
                         <View>
                             <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('tripDetail.availableFlights')}</Text>
 
-                            {/* Deal / API Flight Card */}
-                            {trip.itinerary?.flights?.options && Array.isArray(trip.itinerary.flights.options) && trip.itinerary.flights.options.length > 0 && (() => {
+                            {/* Deal Flight Card - only shown for deal-generated trips */}
+                            {trip.tripType === 'deal' && trip.itinerary?.flights?.options && Array.isArray(trip.itinerary.flights.options) && trip.itinerary.flights.options.length > 0 && (() => {
                                 const flightOpts = trip.itinerary.flights.options;
                                 const selected = flightOpts[selectedFlightIndex] || flightOpts[0];
                                 return (
@@ -2507,14 +2507,19 @@ export default function TripDetails() {
                                         )}
 
                                         {/* Price */}
-                                        <View style={{ flexDirection: 'row', alignItems: 'baseline', marginBottom: 12 }}>
-                                            <Text style={{ fontSize: 22, fontWeight: '800', color: colors.text }}>€{Math.round(selected.pricePerPerson)}</Text>
-                                            <Text style={{ fontSize: 13, color: colors.textMuted, marginLeft: 4 }}>{t('tripDetail.perPerson')}</Text>
-                                            {selected.luggage && (
-                                                <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 'auto', backgroundColor: isDarkMode ? colors.secondary : '#F0FDFA', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}>
-                                                    <Ionicons name="briefcase-outline" size={14} color={colors.primary} />
-                                                    <Text style={{ fontSize: 12, color: colors.primary, fontWeight: '600', marginLeft: 4 }}>{selected.luggage}</Text>
-                                                </View>
+                                        <View style={{ marginBottom: 12 }}>
+                                            <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                                                <Text style={{ fontSize: 22, fontWeight: '800', color: colors.text }}>€{Math.round(selected.pricePerPerson)}</Text>
+                                                <Text style={{ fontSize: 13, color: colors.textMuted, marginLeft: 4 }}>{t('tripDetail.perPerson')}</Text>
+                                                {selected.luggage && (
+                                                    <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 'auto', backgroundColor: isDarkMode ? colors.secondary : '#F0FDFA', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}>
+                                                        <Ionicons name="briefcase-outline" size={14} color={colors.primary} />
+                                                        <Text style={{ fontSize: 12, color: colors.primary, fontWeight: '600', marginLeft: 4 }}>{selected.luggage}</Text>
+                                                    </View>
+                                                )}
+                                            </View>
+                                            {selected.totalPrice && (
+                                                <Text style={{ fontSize: 13, color: colors.textMuted, marginTop: 2 }}>€{Math.round(selected.totalPrice)} {t('tripDetail.totalFor2', { defaultValue: 'total for 2' })}</Text>
                                             )}
                                         </View>
 

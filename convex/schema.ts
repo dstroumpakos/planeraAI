@@ -698,6 +698,7 @@ export default defineSchema({
         }))),
         // Pricing
         price: v.float64(),
+        totalPrice: v.optional(v.float64()),
         originalPrice: v.optional(v.float64()),
         currency: v.string(),         // "EUR", "USD", etc.
         // Baggage

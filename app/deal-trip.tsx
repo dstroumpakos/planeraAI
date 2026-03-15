@@ -56,6 +56,7 @@ export default function DealTripScreen() {
   const returnArrival = params.returnArrival as string | undefined;
   const returnAirline = params.returnAirline as string | undefined;
   const price = params.price as string;
+  const totalPrice = params.totalPrice as string | undefined;
   const currency = params.currency as string;
   const outboundStops = parseInt(params.outboundStops as string) || 0;
   const returnStops = parseInt(params.returnStops as string) || 0;
@@ -301,9 +302,17 @@ export default function DealTripScreen() {
           ) : null}
 
           <View style={styles.priceRow}>
-            <Text style={[styles.dealPrice, { color: colors.text }]}>
-              {getCurrencySymbol(currency)}{price}
-            </Text>
+            <View>
+              <Text style={[styles.dealPrice, { color: colors.text }]}>
+                {getCurrencySymbol(currency)}{price}
+                <Text style={[styles.dealPriceNote, { color: colors.textMuted }]}> /pp</Text>
+              </Text>
+              {totalPrice && (
+                <Text style={[styles.dealPriceNote, { color: colors.textMuted, marginTop: 2 }]}>
+                  {getCurrencySymbol(currency)}{totalPrice} {t("dealTrip.total", { defaultValue: "total" })}
+                </Text>
+              )}
+            </View>
             <Text style={[styles.dealPriceNote, { color: colors.textMuted }]}>
               {tripDays} {t("dealTrip.days", { defaultValue: "days" })}
             </Text>

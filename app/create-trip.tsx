@@ -14,6 +14,7 @@ import { useAuthenticatedMutation, useToken } from "@/lib/useAuthenticatedMutati
 import AIConsentModal from "@/components/AIConsentModal";
 import { useTranslation } from "react-i18next";
 import { TripGuideTooltip, GuideStep } from "@/components/FirstTripGuide";
+import { CITY_TRANSLATIONS, COUNTRY_TRANSLATIONS } from "@/lib/destinationTranslations";
 
 import logoImage from "@/assets/images/appicon-1024x1024-01-1vb1vx.png";
 
@@ -614,10 +615,18 @@ export default function CreateTripScreen() {
         }
 
         const lowerQuery = query.toLowerCase();
-        const filtered = DESTINATIONS.filter(dest => 
-            dest.city.toLowerCase().includes(lowerQuery) ||
-            dest.country.toLowerCase().includes(lowerQuery)
-        ).slice(0, 8);
+        const filtered = DESTINATIONS.filter(dest => {
+            // Match English names
+            if (dest.city.toLowerCase().includes(lowerQuery) ||
+                dest.country.toLowerCase().includes(lowerQuery)) return true;
+            // Match translated city names (all languages)
+            const cityTrans = CITY_TRANSLATIONS[dest.city];
+            if (cityTrans && Object.values(cityTrans).some(v => v.toLowerCase().includes(lowerQuery))) return true;
+            // Match translated country names (all languages)
+            const countryTrans = COUNTRY_TRANSLATIONS[dest.country];
+            if (countryTrans && Object.values(countryTrans).some(v => v.toLowerCase().includes(lowerQuery))) return true;
+            return false;
+        }).slice(0, 8);
 
         setDestinationSuggestions(filtered);
         setShowDestinationSuggestions(filtered.length > 0);

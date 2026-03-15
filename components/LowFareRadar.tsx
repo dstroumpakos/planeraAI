@@ -50,6 +50,7 @@ interface FlightDeal {
   returnStops?: number;
   returnSegments?: FlightSegment[];
   price: number;
+  totalPrice?: number;
   originalPrice?: number;
   currency: string;
   cabinBaggage?: string;
@@ -72,7 +73,7 @@ export function LowFareRadar({ deals, onPlanTrip }: LowFareRadarProps) {
   const { colors } = useTheme();
   const { t } = useTranslation();
   const [filter, setFilter] = useState<Filter>("all");
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const animValues = useRef<Record<string, Animated.Value>>({});
 
   if (!deals || deals.length === 0) return null;
@@ -90,20 +91,18 @@ export function LowFareRadar({ deals, onPlanTrip }: LowFareRadarProps) {
   };
 
   const toggleExpand = (id: string) => {
-    const isExpanding = expandedId !== id;
-    if (expandedId && expandedId !== id) {
-      Animated.timing(getAnimValue(expandedId), {
-        toValue: 0,
-        duration: 200,
-        useNativeDriver: false,
-      }).start();
-    }
+    const isExpanding = !expandedIds.has(id);
     Animated.timing(getAnimValue(id), {
       toValue: isExpanding ? 1 : 0,
       duration: 250,
       useNativeDriver: false,
     }).start();
-    setExpandedId(isExpanding ? id : null);
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (isExpanding) next.add(id);
+      else next.delete(id);
+      return next;
+    });
   };
 
   const formatDate = (dateStr: string) => {
@@ -235,7 +234,7 @@ export function LowFareRadar({ deals, onPlanTrip }: LowFareRadarProps) {
         {filteredDeals.map((deal) => {
           const discount = getDiscount(deal);
           const animValue = getAnimValue(deal._id);
-          const isExpanded = expandedId === deal._id;
+          const isExpanded = expandedIds.has(deal._id);
 
           const expandedHeight = animValue.interpolate({
             inputRange: [0, 1],
@@ -423,7 +422,16 @@ export function LowFareRadar({ deals, onPlanTrip }: LowFareRadarProps) {
                   <Text style={[styles.price, { color: colors.text }]}>
                     {getCurrencySymbol(deal.currency)}
                     {deal.price}
+                    <Text style={[styles.priceNote, { color: colors.textMuted }]}> /pp</Text>
                   </Text>
+                  {deal.totalPrice && (
+                    <Text
+                      style={[styles.priceNote, { color: colors.textMuted }]}
+                    >
+                      {getCurrencySymbol(deal.currency)}
+                      {deal.totalPrice} {t("lowFare.total", { defaultValue: "total" })}
+                    </Text>
+                  )}
                   <Text
                     style={[styles.priceNote, { color: colors.textMuted }]}
                   >
