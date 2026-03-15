@@ -291,6 +291,7 @@ export default function HomeScreen() {
                   returnArrival: deal.returnArrival || "",
                   returnAirline: deal.returnAirline || "",
                   price: String(deal.price),
+                  totalPrice: deal.totalPrice ? String(deal.totalPrice) : "",
                   currency: deal.currency,
                   outboundStops: String(deal.outboundStops ?? 0),
                   returnStops: String(deal.returnStops ?? 0),

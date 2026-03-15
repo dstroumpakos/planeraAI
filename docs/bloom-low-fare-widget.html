@@ -660,8 +660,12 @@
       <div class="form-section-title">&#128176; <span data-i18n="section_pricing">Pricing &amp; Details</span></div>
       <div class="form-grid">
         <div class="form-group">
-          <label data-i18n="lbl_price">Price *</label>
-          <input type="number" id="f-price" placeholder="89" step="0.01">
+          <label data-i18n="lbl_price">Price Per Person *</label>
+          <input type="number" id="f-price" placeholder="89" step="0.01" oninput="syncPrice('pp')">
+        </div>
+        <div class="form-group">
+          <label data-i18n="lbl_total_price">Total Price (2 pax)</label>
+          <input type="number" id="f-totalPrice" placeholder="178" step="0.01" oninput="syncPrice('total')">
         </div>
         <div class="form-group">
           <label data-i18n="lbl_original_price">Original Price</label>
@@ -773,7 +777,8 @@
       lbl_arrival: 'Arrival',
       lbl_duration: 'Duration',
       lbl_return_date: 'Return Date',
-      lbl_price: 'Price *',
+      lbl_price: 'Price Per Person *',
+      lbl_total_price: 'Total Price (2 pax)',
       lbl_original_price: 'Original Price',
       lbl_currency: 'Currency',
       lbl_cabin_bag: 'Cabin Baggage',
@@ -842,7 +847,8 @@
       lbl_arrival: 'Άφιξη',
       lbl_duration: 'Διάρκεια',
       lbl_return_date: 'Ημ/νία Επιστροφής',
-      lbl_price: 'Τιμή *',
+      lbl_price: 'Τιμή Ανά Άτομο *',
+      lbl_total_price: 'Συνολική Τιμή (2 άτομα)',
       lbl_original_price: 'Αρχική Τιμή',
       lbl_currency: 'Νόμισμα',
       lbl_cabin_bag: 'Χειραπ. Αποσκευή',
@@ -1013,6 +1019,21 @@
     });
   }
 
+  // PRICE SYNC
+  function syncPrice(source) {
+    var ppEl = document.getElementById('f-price');
+    var totalEl = document.getElementById('f-totalPrice');
+    if (source === 'pp') {
+      var pp = parseFloat(ppEl.value);
+      if (!isNaN(pp)) totalEl.value = (pp * 2).toFixed(2);
+      else totalEl.value = '';
+    } else {
+      var total = parseFloat(totalEl.value);
+      if (!isNaN(total)) ppEl.value = (total / 2).toFixed(2);
+      else ppEl.value = '';
+    }
+  }
+
   // SUBMIT DEAL
   function submitDeal() {
     if (!adminKey) return toast(t('msg_connect_first'), 'error');
@@ -1038,6 +1059,9 @@
 
     var origPrice = document.getElementById('f-originalPrice').value.trim();
     if (origPrice) data.originalPrice = parseFloat(origPrice);
+
+    var totalPriceVal = document.getElementById('f-totalPrice').value.trim();
+    if (totalPriceVal) data.totalPrice = parseFloat(totalPriceVal);
 
     var exp = document.getElementById('f-expiresAt').value;
     if (exp) data.expiresAt = new Date(exp).getTime();
@@ -1127,11 +1151,13 @@
         '</div>' +
         '<div class="deal-price">' +
           (d.originalPrice ? '<div class="original">' + getCurrSym(d.currency) + d.originalPrice + '</div>' : '') +
-          '<div class="amount">' + getCurrSym(d.currency) + d.price + '</div>' +
+          '<div class="amount">' + getCurrSym(d.currency) + d.price + ' <span style="font-size:11px;font-weight:400;color:var(--muted)">/pp</span></div>' +
+          (d.totalPrice ? '<div style="font-size:12px;color:var(--muted);margin-top:2px">' + getCurrSym(d.currency) + d.totalPrice + ' total</div>' : '') +
           (d.dealTag ? '<div class="tag">' + escapeHtml(d.dealTag) + '</div>' : '') +
         '</div>' +
         '<span class="deal-status ' + (d.active ? 'active' : 'inactive') + '">' + (d.active ? '\u25CF' : '\u25CB') + '</span>' +
         '<div class="deal-actions">' +
+          '<button onclick="editDeal(\'' + d._id + '\')" title="Edit">\u270F\uFE0F</button>' +
           '<button onclick="toggleActive(\'' + d._id + '\', ' + !d.active + ')" title="' + (d.active ? 'Pause' : 'Activate') + '">' +
             (d.active ? '\u23F8\uFE0F' : '\u25B6\uFE0F') +
           '</button>' +
@@ -1204,6 +1230,99 @@
   }
 
   // ACTIONS
+  function editDeal(id) {
+    var deal = deals.find(function(d) { return d._id === id; });
+    if (!deal) return toast('Deal not found', 'error');
+
+    // Populate form fields
+    document.getElementById('f-origin').value = deal.origin || '';
+    document.getElementById('f-originCity').value = deal.originCity || '';
+    document.getElementById('f-destination').value = deal.destination || '';
+    document.getElementById('f-destinationCity').value = deal.destinationCity || '';
+    document.getElementById('f-airline').value = deal.airline || '';
+    document.getElementById('f-flightNumber').value = deal.flightNumber || '';
+    document.getElementById('f-outboundDate').value = deal.outboundDate || '';
+    document.getElementById('f-outboundDeparture').value = deal.outboundDeparture || '';
+    document.getElementById('f-outboundArrival').value = deal.outboundArrival || '';
+    document.getElementById('f-outboundDuration').value = deal.outboundDuration || '';
+    document.getElementById('f-returnDate').value = deal.returnDate || '';
+    document.getElementById('f-returnDeparture').value = deal.returnDeparture || '';
+    document.getElementById('f-returnArrival').value = deal.returnArrival || '';
+    document.getElementById('f-returnDuration').value = deal.returnDuration || '';
+    document.getElementById('f-returnAirline').value = deal.returnAirline || '';
+    document.getElementById('f-returnFlightNumber').value = deal.returnFlightNumber || '';
+    document.getElementById('f-price').value = deal.price || '';
+    document.getElementById('f-totalPrice').value = deal.totalPrice || '';
+    document.getElementById('f-originalPrice').value = deal.originalPrice || '';
+    document.getElementById('f-currency').value = deal.currency || 'EUR';
+    document.getElementById('f-cabinBaggage').value = deal.cabinBaggage || '';
+    document.getElementById('f-checkedBaggage').value = deal.checkedBaggage || '';
+    document.getElementById('f-dealTag').value = deal.dealTag || '';
+    document.getElementById('f-bookingUrl').value = deal.bookingUrl || '';
+    document.getElementById('f-notes').value = deal.notes || '';
+    document.getElementById('f-isRecommended').checked = !!deal.isRecommended;
+
+    // Expires at
+    if (deal.expiresAt) {
+      var d = new Date(deal.expiresAt);
+      var pad = function(n) { return n < 10 ? '0' + n : n; };
+      document.getElementById('f-expiresAt').value = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    } else {
+      document.getElementById('f-expiresAt').value = '';
+    }
+
+    // Outbound stops & segments
+    var outStops = deal.outboundStops || 0;
+    document.getElementById('f-outboundStops').value = String(outStops);
+    updateSegments('outbound');
+    if (deal.outboundSegments && deal.outboundSegments.length > 0) {
+      setTimeout(function() {
+        deal.outboundSegments.forEach(function(seg, i) {
+          var el;
+          el = document.getElementById('f-outboundSeg' + i + '-airline'); if (el) el.value = seg.airline || '';
+          el = document.getElementById('f-outboundSeg' + i + '-flightNumber'); if (el) el.value = seg.flightNumber || '';
+          el = document.getElementById('f-outboundSeg' + i + '-depAirport'); if (el) el.value = seg.departureAirport || '';
+          el = document.getElementById('f-outboundSeg' + i + '-depTime'); if (el) el.value = seg.departureTime || '';
+          el = document.getElementById('f-outboundSeg' + i + '-arrAirport'); if (el) el.value = seg.arrivalAirport || '';
+          el = document.getElementById('f-outboundSeg' + i + '-arrTime'); if (el) el.value = seg.arrivalTime || '';
+          el = document.getElementById('f-outboundSeg' + i + '-duration'); if (el) el.value = seg.duration || '';
+        });
+      }, 50);
+    }
+
+    // Return stops & segments
+    var retStops = deal.returnStops || 0;
+    document.getElementById('f-returnStops').value = String(retStops);
+    updateSegments('return');
+    if (deal.returnSegments && deal.returnSegments.length > 0) {
+      setTimeout(function() {
+        deal.returnSegments.forEach(function(seg, i) {
+          var el;
+          el = document.getElementById('f-returnSeg' + i + '-airline'); if (el) el.value = seg.airline || '';
+          el = document.getElementById('f-returnSeg' + i + '-flightNumber'); if (el) el.value = seg.flightNumber || '';
+          el = document.getElementById('f-returnSeg' + i + '-depAirport'); if (el) el.value = seg.departureAirport || '';
+          el = document.getElementById('f-returnSeg' + i + '-depTime'); if (el) el.value = seg.departureTime || '';
+          el = document.getElementById('f-returnSeg' + i + '-arrAirport'); if (el) el.value = seg.arrivalAirport || '';
+          el = document.getElementById('f-returnSeg' + i + '-arrTime'); if (el) el.value = seg.arrivalTime || '';
+          el = document.getElementById('f-returnSeg' + i + '-duration'); if (el) el.value = seg.duration || '';
+        });
+      }, 50);
+    }
+
+    // Set editing state
+    editingId = id;
+
+    // Update button text
+    var btnSpan = document.querySelector('#submitBtn span');
+    if (btnSpan) btnSpan.textContent = t('btn_update');
+
+    // Switch to Add tab
+    switchTab('add');
+
+    // Scroll to top
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
   function toggleActive(id, newState) {
     convexMutation('lowFareRadar:update', { adminKey: adminKey, id: id, active: newState }).then(function() {
       toast(newState ? t('msg_activated') : t('msg_deactivated'), 'success');
@@ -1223,7 +1342,7 @@
     var fields = ['origin', 'originCity', 'destination', 'destinationCity',
       'airline', 'flightNumber', 'outboundDate', 'outboundDeparture', 'outboundArrival',
       'outboundDuration', 'returnDate', 'returnDeparture', 'returnArrival', 'returnDuration',
-      'returnAirline', 'returnFlightNumber', 'price', 'originalPrice',
+      'returnAirline', 'returnFlightNumber', 'price', 'totalPrice', 'originalPrice',
       'cabinBaggage', 'checkedBaggage', 'bookingUrl', 'notes', 'expiresAt'];
     fields.forEach(function(f) { document.getElementById('f-' + f).value = ''; });
     document.getElementById('f-currency').value = 'EUR';
@@ -1234,6 +1353,8 @@
     document.getElementById('outbound-segments-container').innerHTML = '';
     document.getElementById('return-segments-container').innerHTML = '';
     editingId = null;
+    var btnSpan = document.querySelector('#submitBtn span');
+    if (btnSpan) btnSpan.textContent = t('btn_publish');
     applyLang();
   }
 
