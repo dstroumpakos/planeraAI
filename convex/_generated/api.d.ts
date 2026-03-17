@@ -18,6 +18,7 @@ import type * as bookingDraftMutations from "../bookingDraftMutations.js";
 import type * as bookingLinks from "../bookingLinks.js";
 import type * as bookings from "../bookings.js";
 import type * as crons from "../crons.js";
+import type * as dealExtractor from "../dealExtractor.js";
 import type * as emailHelpers from "../emailHelpers.js";
 import type * as emails from "../emails.js";
 import type * as features from "../features.js";
@@ -60,6 +61,7 @@ declare const fullApi: ApiFromModules<{
   bookingLinks: typeof bookingLinks;
   bookings: typeof bookings;
   crons: typeof crons;
+  dealExtractor: typeof dealExtractor;
   emailHelpers: typeof emailHelpers;
   emails: typeof emails;
   features: typeof features;

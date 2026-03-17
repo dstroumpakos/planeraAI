@@ -492,12 +492,179 @@
     }
     .airport-btn:hover { transform: scale(1.03); }
 
+    /* Import Deal */
+    .import-card {
+      background: var(--card);
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 32px 24px;
+      text-align: center;
+      margin-bottom: 16px;
+      transition: border-color .2s, background .2s;
+    }
+    .import-card.drag-over {
+      border-color: var(--primary);
+      background: rgba(255,229,0,.05);
+    }
+    .import-url-row {
+      display: flex;
+      gap: 10px;
+      max-width: 700px;
+      margin: 16px auto 0;
+    }
+    .import-url-row input {
+      flex: 1;
+      padding: 14px 18px;
+      border: 2px solid var(--border);
+      border-radius: 14px;
+      font-size: 15px;
+      color: var(--text);
+      background: #fff;
+    }
+    .import-url-row input:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(255,229,0,.15);
+    }
+    .import-btn {
+      padding: 14px 24px;
+      background: var(--text);
+      color: #fff;
+      border: none;
+      border-radius: 14px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: transform .1s;
+    }
+    .import-btn:hover { transform: scale(1.02); }
+    .import-btn:disabled { opacity: .5; cursor: not-allowed; }
+    .import-status {
+      margin-top: 16px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .import-status.loading { color: var(--muted); }
+    .import-status.error { color: var(--danger); }
+    .import-status.success { color: var(--success); }
+    .import-spinner {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid var(--border);
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Preview Card */
+    .preview-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin-top: 16px;
+      text-align: left;
+    }
+    .preview-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 20px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    .preview-route {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .preview-iata {
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: 1px;
+    }
+    .preview-city {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .preview-arrow {
+      font-size: 20px;
+      color: var(--muted);
+    }
+    .preview-price {
+      text-align: right;
+    }
+    .preview-price .amount {
+      font-size: 28px;
+      font-weight: 800;
+    }
+    .preview-price .label {
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .preview-leg {
+      background: var(--bg);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+    .preview-leg-title {
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .preview-seg {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 8px 0;
+    }
+    .preview-seg + .preview-seg {
+      border-top: 1px dashed var(--border);
+    }
+    .preview-seg-time {
+      font-size: 15px;
+      font-weight: 700;
+      min-width: 50px;
+    }
+    .preview-seg-route {
+      font-size: 14px;
+      font-weight: 600;
+      min-width: 90px;
+    }
+    .preview-seg-info {
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .preview-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px;
+      justify-content: flex-end;
+    }
+    .preview-source {
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 12px;
+    }
     @media (max-width: 600px) {
       .form-grid { grid-template-columns: 1fr; }
       .deal-card { flex-wrap: wrap; }
       .deal-price { text-align: left; }
       .stats-row { flex-direction: column; }
       .login-card { padding: 32px 24px; }
+      .import-url-row { flex-direction: column; }
       .airport-item { flex-wrap: wrap; }
     }
   </style>
@@ -538,7 +705,10 @@
   </div>
 
   <div class="tabs">
-    <div class="tab active" onclick="switchTab('add')" id="tab-add">
+    <div class="tab active" onclick="switchTab('import')" id="tab-import">
+      <span data-i18n="tab_import">&#128279; Import Deal</span>
+    </div>
+    <div class="tab" onclick="switchTab('add')" id="tab-add">
       <span data-i18n="tab_add">&#10133; Add Deal</span>
     </div>
     <div class="tab" onclick="switchTab('list')" id="tab-list">
@@ -549,8 +719,52 @@
     </div>
   </div>
 
+  <!-- Import Deal -->
+  <div class="content" id="content-import">
+    <div class="import-card" id="importDropZone">
+      <div style="font-size:42px;margin-bottom:8px">&#128279;</div>
+      <div style="font-size:16px;font-weight:700;margin-bottom:4px" data-i18n="import_title">Import Flight Deal</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:8px" data-i18n="import_subtitle">Paste a flight link or copy-paste the text from a booking popup</div>
+
+      <!-- Mode toggle -->
+      <div style="display:flex;gap:6px;margin-bottom:10px;justify-content:center">
+        <button id="modeUrlBtn" onclick="setImportMode('url')" style="padding:6px 14px;border-radius:20px;border:2px solid var(--primary);background:var(--primary);font-size:12px;font-weight:600;cursor:pointer">🔗 URL</button>
+        <button id="modeTextBtn" onclick="setImportMode('text')" style="padding:6px 14px;border-radius:20px;border:2px solid var(--border);background:transparent;font-size:12px;font-weight:600;cursor:pointer">📋 Paste Text</button>
+      </div>
+
+      <!-- URL mode -->
+      <div id="importModeUrl">
+        <div class="import-url-row">
+          <input type="url" id="importUrl" placeholder="https://www.booking.com/flight-..." data-i18n-placeholder="import_placeholder">
+          <button class="import-btn" onclick="extractDeal(false)" id="importBtn">
+            <span id="importBtnText" data-i18n="import_btn">&#128270; Extract</span>
+          </button>
+          <button class="import-btn" onclick="extractDeal(true)" id="debugBtn" style="background:#444;color:#fff;font-size:11px;padding:8px 12px;" title="Debug: see raw fetched content">
+            🐛 Debug
+          </button>
+        </div>
+      </div>
+
+      <!-- Text paste mode -->
+      <div id="importModeText" style="display:none">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:6px">💡 Open the flight popup, select all text (Ctrl+A), copy (Ctrl+C) and paste below:</div>
+        <textarea id="importText" rows="8" placeholder="Paste flight details here...&#10;&#10;e.g. Athens → Bangkok&#10;15 Apr 2026 · 08:30 → 22:45&#10;Qatar Airways · QR208&#10;1 stop (DOH)&#10;€520 per person&#10;1x 8kg cabin bag, 1x 23kg checked" style="width:100%;padding:12px;border-radius:12px;border:2px solid var(--border);font-size:13px;font-family:inherit;resize:vertical;background:var(--bg)"></textarea>
+        <div style="margin-top:6px;display:flex;gap:6px">
+          <input type="url" id="importTextUrl" placeholder="Booking URL (optional, for reference)" style="flex:1;padding:8px 12px;border:2px solid var(--border);border-radius:10px;font-size:12px">
+          <button class="import-btn" onclick="extractFromText()" id="importTextBtn">
+            <span>&#128270; Extract</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="import-status" id="importStatus"></div>
+    </div>
+
+    <div id="importPreview" style="display:none"></div>
+  </div>
+
   <!-- Add Deal -->
-  <div class="content" id="content-add">
+  <div class="content" id="content-add" style="display:none">
 
     <!-- Route -->
     <div class="form-card">
@@ -819,6 +1033,23 @@
       airports_deals: 'deals',
       airports_create: 'Create Deal',
       empty_airports: 'No users have set a home airport yet.',
+      // Import Deal
+      tab_import: '🔗 Import Deal',
+      import_title: 'Import Flight Deal',
+      import_subtitle: 'Paste a flight link from Booking.com, Skyscanner, Google Flights, airline websites, or any travel site',
+      import_placeholder: 'https://www.booking.com/flight-...',
+      import_btn: '🔍 Extract',
+      import_extracting: 'Extracting flight data...',
+      import_success: 'Flight data extracted successfully!',
+      import_error: 'Could not extract flight data',
+      import_fill: '✅ Use this data',
+      import_retry: '🔄 Try again',
+      import_preview_outbound: 'Outbound',
+      import_preview_return: 'Return',
+      import_preview_direct: 'Direct',
+      import_preview_stop: 'stop',
+      import_preview_stops: 'stops',
+      import_preview_source: 'Source',
     },
     el: {
       login_title: 'Ραντάρ Χαμηλών Ναύλων',
@@ -889,6 +1120,23 @@
       airports_deals: 'προσφορές',
       airports_create: 'Δημιουργία Προσφοράς',
       empty_airports: 'Κανένας χρήστης δεν έχει ορίσει αεροδρόμιο ακόμα.',
+      // Import Deal
+      tab_import: '🔗 Εισαγωγή',
+      import_title: 'Εισαγωγή Προσφοράς Πτήσης',
+      import_subtitle: 'Επικολλήστε σύνδεσμο πτήσης από Booking.com, Skyscanner, Google Flights ή οποιαδήποτε ταξιδιωτική σελίδα',
+      import_placeholder: 'https://www.booking.com/flight-...',
+      import_btn: '🔍 Εξαγωγή',
+      import_extracting: 'Εξαγωγή δεδομένων πτήσης...',
+      import_success: 'Τα δεδομένα πτήσης εξήχθησαν!',
+      import_error: 'Δεν ήταν δυνατή η εξαγωγή δεδομένων',
+      import_fill: '✅ Χρήση δεδομένων',
+      import_retry: '🔄 Δοκιμάστε ξανά',
+      import_preview_outbound: 'Μετάβαση',
+      import_preview_return: 'Επιστροφή',
+      import_preview_direct: 'Απευθείας',
+      import_preview_stop: 'στάση',
+      import_preview_stops: 'στάσεις',
+      import_preview_source: 'Πηγή',
     }
   };
 
@@ -988,7 +1236,7 @@
 
   // TABS
   function switchTab(tab) {
-    ['add', 'list', 'airports'].forEach(function(t) {
+    ['import', 'add', 'list', 'airports'].forEach(function(t) {
       document.getElementById('content-' + t).style.display = t === tab ? 'block' : 'none';
       document.getElementById('tab-' + t).classList.toggle('active', t === tab);
     });
@@ -1015,6 +1263,17 @@
       body: JSON.stringify({ path: funcName, args: args, format: 'json' }),
     }).then(function(resp) { return resp.json(); }).then(function(data) {
       if (data.status === 'error') throw new Error(data.errorMessage || 'Mutation failed');
+      return data.value;
+    });
+  }
+
+  function convexAction(funcName, args) {
+    return fetch(CONVEX_URL.replace(/\/$/, '') + '/api/action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: funcName, args: args, format: 'json' }),
+    }).then(function(resp) { return resp.json(); }).then(function(data) {
+      if (data.status === 'error') throw new Error(data.errorMessage || 'Action failed');
       return data.value;
     });
   }
@@ -1158,6 +1417,7 @@
         '<span class="deal-status ' + (d.active ? 'active' : 'inactive') + '">' + (d.active ? '\u25CF' : '\u25CB') + '</span>' +
         '<div class="deal-actions">' +
           '<button onclick="editDeal(\'' + d._id + '\')" title="Edit">\u270F\uFE0F</button>' +
+          (d.bookingUrl ? '<button onclick="refreshDeal(\'' + d._id + '\')" title="Re-scrape &amp; update from URL" id="refresh-' + d._id + '">\uD83D\uDD04</button>' : '') +
           '<button onclick="toggleActive(\'' + d._id + '\', ' + !d.active + ')" title="' + (d.active ? 'Pause' : 'Activate') + '">' +
             (d.active ? '\u23F8\uFE0F' : '\u25B6\uFE0F') +
           '</button>' +
@@ -1338,6 +1598,118 @@
     }).catch(function(err) { toast('Error: ' + err.message, 'error'); });
   }
 
+  var refreshingDealId = null;
+
+  function refreshDeal(id) {
+    var deal = deals.find(function(d) { return d._id === id; });
+    if (!deal) return toast('Deal not found', 'error');
+    if (!deal.bookingUrl) return toast('This deal has no booking URL', 'error');
+
+    var btn = document.getElementById('refresh-' + id);
+    if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+    toast('Re-scraping ' + deal.origin + ' → ' + deal.destination + '...', 'success');
+
+    convexAction('dealExtractor:extractFromUrl', { url: deal.bookingUrl, adminKey: adminKey })
+    .then(function(result) {
+      if (btn) { btn.disabled = false; btn.textContent = '🔄'; }
+
+      if (!result || !result.success) {
+        toast('Could not extract updated data', 'error');
+        return;
+      }
+
+      refreshingDealId = id;
+      lastExtractedData = result.data;
+
+      // Switch to import tab and show preview with "Update Deal" button
+      switchTab('import');
+      var previewEl = document.getElementById('importPreview');
+      renderImportPreview(result.data, result.source);
+
+      // Replace the buttons in preview with Update-specific actions
+      var actionsDiv = previewEl.querySelector('.preview-actions');
+      if (actionsDiv) {
+        actionsDiv.innerHTML =
+          '<button class="btn-secondary" onclick="cancelRefresh()">❌ Cancel</button>' +
+          '<button class="btn-primary" onclick="applyRefresh()">✅ Update Deal</button>';
+      }
+
+      // Show status
+      var statusEl = document.getElementById('importStatus');
+      statusEl.className = 'import-status success';
+      statusEl.textContent = '✅ Fresh data extracted for ' + deal.origin + ' → ' + deal.destination + '. Review and click Update Deal.';
+    })
+    .catch(function(err) {
+      if (btn) { btn.disabled = false; btn.textContent = '🔄'; }
+      toast('Refresh error: ' + (err.message || 'Unknown error'), 'error');
+    });
+  }
+
+  function applyRefresh() {
+    if (!refreshingDealId || !lastExtractedData) return;
+    var d = lastExtractedData;
+
+    // Build update payload from extracted data
+    var updates = {
+      adminKey: adminKey,
+      id: refreshingDealId,
+      airline: d.airline || undefined,
+      flightNumber: d.flightNumber || undefined,
+      outboundDate: d.outboundDate || undefined,
+      outboundDeparture: d.outboundDeparture || undefined,
+      outboundArrival: d.outboundArrival || undefined,
+      outboundDuration: d.outboundDuration || undefined,
+      outboundStops: typeof d.outboundStops === 'number' ? d.outboundStops : undefined,
+      returnDate: d.returnDate || undefined,
+      returnDeparture: d.returnDeparture || undefined,
+      returnArrival: d.returnArrival || undefined,
+      returnDuration: d.returnDuration || undefined,
+      returnAirline: d.returnAirline || undefined,
+      returnFlightNumber: d.returnFlightNumber || undefined,
+      returnStops: typeof d.returnStops === 'number' ? d.returnStops : undefined,
+      cabinBaggage: d.cabinBaggage || undefined,
+      checkedBaggage: d.checkedBaggage || undefined,
+    };
+
+    // Only update price if extracted price is > 0
+    if (d.price && d.price > 0) {
+      updates.price = d.price;
+      updates.totalPrice = d.price * 2;
+      updates.currency = d.currency || 'EUR';
+    }
+
+    // Update segments if available
+    if (d.outboundSegments && d.outboundSegments.length > 0) {
+      updates.outboundSegments = d.outboundSegments;
+    }
+    if (d.returnSegments && d.returnSegments.length > 0) {
+      updates.returnSegments = d.returnSegments;
+    }
+
+    // Remove undefined values
+    Object.keys(updates).forEach(function(k) {
+      if (updates[k] === undefined) delete updates[k];
+    });
+
+    convexMutation('lowFareRadar:update', updates).then(function() {
+      toast('Deal updated successfully!', 'success');
+      refreshingDealId = null;
+      lastExtractedData = null;
+      clearImport();
+      switchTab('list');
+      loadDeals();
+    }).catch(function(err) {
+      toast('Update error: ' + (err.message || 'Unknown error'), 'error');
+    });
+  }
+
+  function cancelRefresh() {
+    refreshingDealId = null;
+    lastExtractedData = null;
+    clearImport();
+    switchTab('list');
+  }
+
   function clearForm() {
     var fields = ['origin', 'originCity', 'destination', 'destinationCity',
       'airline', 'flightNumber', 'outboundDate', 'outboundDeparture', 'outboundArrival',
@@ -1453,6 +1825,340 @@
     }
     return segments.length > 0 ? segments : null;
   }
+  // ─── IMPORT DEAL — Flight Link Extractor ───
+
+  var lastExtractedData = null;
+
+  function extractDeal(debugMode) {
+    var url = document.getElementById('importUrl').value.trim();
+    var statusEl = document.getElementById('importStatus');
+    var btn = document.getElementById('importBtn');
+    var debugBtn = document.getElementById('debugBtn');
+    var previewEl = document.getElementById('importPreview');
+
+    if (!url) {
+      statusEl.className = 'import-status error';
+      statusEl.textContent = '⚠️ Please paste a flight URL';
+      return;
+    }
+
+    if (!adminKey) {
+      statusEl.className = 'import-status error';
+      statusEl.textContent = t('msg_connect_first');
+      return;
+    }
+
+    // Show loading
+    btn.disabled = true;
+    debugBtn.disabled = true;
+    statusEl.className = 'import-status loading';
+    statusEl.innerHTML = '<span class="import-spinner"></span> ' + escapeHtml(debugMode ? 'Fetching debug info...' : t('import_extracting'));
+    previewEl.style.display = 'none';
+
+    var actionArgs = { url: url, adminKey: adminKey };
+    if (debugMode) actionArgs.debug = true;
+
+    convexAction('dealExtractor:extractFromUrl', actionArgs)
+    .then(function(result) {
+      btn.disabled = false;
+      debugBtn.disabled = false;
+
+      // Handle debug response
+      if (result && result.debug) {
+        statusEl.className = 'import-status';
+        statusEl.textContent = '';
+        previewEl.style.display = 'block';
+        previewEl.innerHTML =
+          '<div class="form-card" style="margin-top:12px">' +
+          '<div class="form-section-title">🐛 Debug Info</div>' +
+          '<div style="font-size:13px;line-height:1.6">' +
+          '<p><b>Source used:</b> ' + escapeHtml(result.source || 'none') + '</p>' +
+          '<p><b>Scrapfly:</b> ' + (result.scrapflyLength ? (result.scrapflyLength + ' chars ✅') : ('❌ ' + escapeHtml(result.scrapflyError || 'unknown'))) + '</p>' +
+          '<p><b>Direct fetch:</b> ' + (result.directLength ? (result.directLength + ' chars ✅') : ('❌ ' + escapeHtml(result.directError || 'unknown'))) + '</p>' +
+          '<p><b>Combined content:</b> ' + (result.contentLength || 0) + ' chars</p>' +
+          '<p><b>Page title:</b> ' + escapeHtml(result.title || '(none)') + '</p>' +
+          '<p><b>JSON-LD blocks:</b> ' + (result.jsonLdCount || 0) + '</p>' +
+          '<p><b>Price hints:</b> ' + escapeHtml((result.priceHints || []).join(', ') || '(none)') + '</p>' +
+          '<p><b>Flight hints:</b> ' + escapeHtml((result.flightHints || []).join(', ') || '(none)') + '</p>' +
+          '<p><b>Baggage hints:</b> ' + escapeHtml((result.baggageHints || []).join(', ') || '(none)') + '</p>' +
+          '</div>' +
+          '<div style="margin-top:12px"><b>Text preview (first 2000 chars):</b></div>' +
+          '<pre style="background:#f5f5f0;padding:12px;border-radius:8px;font-size:11px;max-height:400px;overflow:auto;white-space:pre-wrap;word-break:break-all;margin-top:4px">' +
+          escapeHtml(result.textPreview || '(empty)') +
+          '</pre>' +
+          '</div>';
+        return;
+      }
+
+      if (!result || !result.success) {
+        statusEl.className = 'import-status error';
+        statusEl.textContent = '❌ ' + t('import_error');
+        return;
+      }
+
+      lastExtractedData = result.data;
+      statusEl.className = 'import-status success';
+      statusEl.textContent = '✅ ' + t('import_success');
+
+      // Show preview
+      renderImportPreview(result.data, result.source);
+    })
+    .catch(function(err) {
+      btn.disabled = false;
+      debugBtn.disabled = false;
+      statusEl.className = 'import-status error';
+      statusEl.textContent = '❌ ' + escapeHtml(err.message || t('import_error'));
+    });
+  }
+
+  function renderImportPreview(data, source) {
+    var previewEl = document.getElementById('importPreview');
+    var currSym = getCurrSym(data.currency || 'EUR');
+
+    var html = '<div class="preview-card">';
+
+    // Header: route + price
+    html += '<div class="preview-header">';
+    html += '<div class="preview-route">';
+    html += '<div><div class="preview-iata">' + escapeHtml(data.origin) + '</div><div class="preview-city">' + escapeHtml(data.originCity) + '</div></div>';
+    html += '<div class="preview-arrow">✈️ →</div>';
+    html += '<div><div class="preview-iata">' + escapeHtml(data.destination) + '</div><div class="preview-city">' + escapeHtml(data.destinationCity) + '</div></div>';
+    html += '</div>';
+    html += '<div class="preview-price"><div class="amount">' + currSym + (data.price || '?') + '</div><div class="label">/person · ' + escapeHtml(data.currency || 'EUR') + '</div></div>';
+    html += '</div>';
+
+    // Outbound leg
+    html += renderPreviewLeg(t('import_preview_outbound'), data.outboundDate, data.outboundDeparture, data.outboundArrival, data.outboundDuration, data.outboundStops, data.outboundSegments, data.airline, data.flightNumber);
+
+    // Return leg
+    if (data.returnDate) {
+      html += renderPreviewLeg(t('import_preview_return'), data.returnDate, data.returnDeparture, data.returnArrival, data.returnDuration, data.returnStops, data.returnSegments, data.returnAirline || data.airline, data.returnFlightNumber);
+    }
+
+    // Baggage
+    if (data.cabinBaggage || data.checkedBaggage) {
+      html += '<div style="font-size:13px;color:var(--muted);margin-top:8px">';
+      if (data.cabinBaggage) html += '🧳 Cabin: ' + escapeHtml(data.cabinBaggage) + '  ';
+      if (data.checkedBaggage) html += '💼 Checked: ' + escapeHtml(data.checkedBaggage);
+      html += '</div>';
+    }
+
+    // Source
+    html += '<div class="preview-source">' + t('import_preview_source') + ': ' + escapeHtml(source || 'unknown') + ' · ' + escapeHtml(data.bookingUrl || '') + '</div>';
+
+    // Actions
+    html += '<div class="preview-actions">';
+    html += '<button class="btn-secondary" onclick="clearImport()">' + t('import_retry') + '</button>';
+    html += '<button class="btn-primary" onclick="fillFormFromImport()">✅ ' + t('import_fill') + '</button>';
+    html += '</div>';
+
+    html += '</div>';
+
+    previewEl.innerHTML = html;
+    previewEl.style.display = 'block';
+  }
+
+  function renderPreviewLeg(title, date, dep, arr, duration, stops, segments, airline, flightNum) {
+    var stopsLabel = stops === 0 ? t('import_preview_direct') : stops + ' ' + (stops === 1 ? t('import_preview_stop') : t('import_preview_stops'));
+    var html = '<div class="preview-leg">';
+    html += '<div class="preview-leg-title">' + escapeHtml(title) + ' · ' + escapeHtml(date || '?') + ' · ' + escapeHtml(stopsLabel);
+    if (duration) html += ' · ' + escapeHtml(duration);
+    html += '</div>';
+
+    if (segments && segments.length > 0) {
+      for (var i = 0; i < segments.length; i++) {
+        var seg = segments[i];
+        html += '<div class="preview-seg">';
+        html += '<div class="preview-seg-time">' + escapeHtml(seg.departureTime || '?') + '</div>';
+        html += '<div class="preview-seg-route">' + escapeHtml(seg.departureAirport) + ' → ' + escapeHtml(seg.arrivalAirport) + '</div>';
+        html += '<div class="preview-seg-info">' + escapeHtml(seg.airline || '') + (seg.flightNumber ? ' · ' + escapeHtml(seg.flightNumber) : '') + (seg.duration ? ' · ' + escapeHtml(seg.duration) : '') + '</div>';
+        html += '<div class="preview-seg-time" style="text-align:right">' + escapeHtml(seg.arrivalTime || '?') + '</div>';
+        html += '</div>';
+      }
+    } else {
+      html += '<div class="preview-seg">';
+      html += '<div class="preview-seg-time">' + escapeHtml(dep || '?') + '</div>';
+      html += '<div class="preview-seg-route">' + escapeHtml(airline || '?') + (flightNum ? ' · ' + escapeHtml(flightNum) : '') + '</div>';
+      html += '<div class="preview-seg-time" style="text-align:right">' + escapeHtml(arr || '?') + '</div>';
+      html += '</div>';
+    }
+
+    html += '</div>';
+    return html;
+  }
+
+  function fillFormFromImport() {
+    if (!lastExtractedData) return;
+    var d = lastExtractedData;
+
+    // Fill route
+    document.getElementById('f-origin').value = d.origin || '';
+    document.getElementById('f-originCity').value = d.originCity || '';
+    document.getElementById('f-destination').value = d.destination || '';
+    document.getElementById('f-destinationCity').value = d.destinationCity || '';
+
+    // Fill outbound
+    document.getElementById('f-airline').value = d.airline || '';
+    document.getElementById('f-flightNumber').value = d.flightNumber || '';
+    document.getElementById('f-outboundDate').value = d.outboundDate || '';
+    document.getElementById('f-outboundDeparture').value = d.outboundDeparture || '';
+    document.getElementById('f-outboundArrival').value = d.outboundArrival || '';
+    document.getElementById('f-outboundDuration').value = d.outboundDuration || '';
+    document.getElementById('f-outboundStops').value = String(d.outboundStops || 0);
+
+    // Fill return
+    document.getElementById('f-returnDate').value = d.returnDate || '';
+    document.getElementById('f-returnDeparture').value = d.returnDeparture || '';
+    document.getElementById('f-returnArrival').value = d.returnArrival || '';
+    document.getElementById('f-returnDuration').value = d.returnDuration || '';
+    document.getElementById('f-returnAirline').value = d.returnAirline || '';
+    document.getElementById('f-returnFlightNumber').value = d.returnFlightNumber || '';
+    document.getElementById('f-returnStops').value = String(d.returnStops || 0);
+
+    // Fill pricing
+    if (d.price) document.getElementById('f-price').value = d.price;
+    if (d.price) document.getElementById('f-totalPrice').value = (d.price * 2).toFixed(2);
+    document.getElementById('f-currency').value = d.currency || 'EUR';
+
+    // Fill baggage
+    document.getElementById('f-cabinBaggage').value = d.cabinBaggage || '';
+    document.getElementById('f-checkedBaggage').value = d.checkedBaggage || '';
+
+    // Fill booking URL
+    document.getElementById('f-bookingUrl').value = d.bookingUrl || '';
+
+    // Update segments UI
+    updateSegments('outbound');
+    if (d.returnDate) updateSegments('return');
+
+    // Fill segment data after DOM update
+    setTimeout(function() {
+      if (d.outboundSegments && d.outboundSegments.length > 0) {
+        d.outboundSegments.forEach(function(seg, i) {
+          setVal('f-outboundSeg' + i + '-airline', seg.airline);
+          setVal('f-outboundSeg' + i + '-flightNumber', seg.flightNumber);
+          setVal('f-outboundSeg' + i + '-depAirport', seg.departureAirport);
+          setVal('f-outboundSeg' + i + '-depTime', seg.departureTime);
+          setVal('f-outboundSeg' + i + '-arrAirport', seg.arrivalAirport);
+          setVal('f-outboundSeg' + i + '-arrTime', seg.arrivalTime);
+          setVal('f-outboundSeg' + i + '-duration', seg.duration);
+        });
+      }
+      if (d.returnSegments && d.returnSegments.length > 0) {
+        d.returnSegments.forEach(function(seg, i) {
+          setVal('f-returnSeg' + i + '-airline', seg.airline);
+          setVal('f-returnSeg' + i + '-flightNumber', seg.flightNumber);
+          setVal('f-returnSeg' + i + '-depAirport', seg.departureAirport);
+          setVal('f-returnSeg' + i + '-depTime', seg.departureTime);
+          setVal('f-returnSeg' + i + '-arrAirport', seg.arrivalAirport);
+          setVal('f-returnSeg' + i + '-arrTime', seg.arrivalTime);
+          setVal('f-returnSeg' + i + '-duration', seg.duration);
+        });
+      }
+    }, 100);
+
+    // Switch to Add Deal tab for review
+    editingId = null;
+    var btnSpan = document.querySelector('#submitBtn span');
+    if (btnSpan) btnSpan.textContent = t('btn_publish');
+    switchTab('add');
+    toast(t('import_success') + ' — Review and publish below.', 'success');
+  }
+
+  function setVal(id, val) {
+    var el = document.getElementById(id);
+    if (el && val) el.value = val;
+  }
+
+  function clearImport() {
+    lastExtractedData = null;
+    document.getElementById('importUrl').value = '';
+    document.getElementById('importText').value = '';
+    document.getElementById('importTextUrl').value = '';
+    document.getElementById('importStatus').textContent = '';
+    document.getElementById('importStatus').className = 'import-status';
+    document.getElementById('importPreview').style.display = 'none';
+    document.getElementById('importPreview').innerHTML = '';
+  }
+
+  var importMode = 'url';
+  function setImportMode(mode) {
+    importMode = mode;
+    document.getElementById('importModeUrl').style.display = mode === 'url' ? 'block' : 'none';
+    document.getElementById('importModeText').style.display = mode === 'text' ? 'block' : 'none';
+    var urlBtn = document.getElementById('modeUrlBtn');
+    var textBtn = document.getElementById('modeTextBtn');
+    if (mode === 'url') {
+      urlBtn.style.background = 'var(--primary)';
+      urlBtn.style.borderColor = 'var(--primary)';
+      textBtn.style.background = 'transparent';
+      textBtn.style.borderColor = 'var(--border)';
+    } else {
+      textBtn.style.background = 'var(--primary)';
+      textBtn.style.borderColor = 'var(--primary)';
+      urlBtn.style.background = 'transparent';
+      urlBtn.style.borderColor = 'var(--border)';
+    }
+    // Clear status when switching
+    document.getElementById('importStatus').textContent = '';
+    document.getElementById('importStatus').className = 'import-status';
+    document.getElementById('importPreview').style.display = 'none';
+  }
+
+  function extractFromText() {
+    var text = document.getElementById('importText').value.trim();
+    var bookingUrl = document.getElementById('importTextUrl').value.trim();
+    var statusEl = document.getElementById('importStatus');
+    var btn = document.getElementById('importTextBtn');
+    var previewEl = document.getElementById('importPreview');
+
+    if (!text || text.length < 20) {
+      statusEl.className = 'import-status error';
+      statusEl.textContent = '⚠️ Please paste more text — include at least the route, dates, and price';
+      return;
+    }
+
+    if (!adminKey) {
+      statusEl.className = 'import-status error';
+      statusEl.textContent = t('msg_connect_first');
+      return;
+    }
+
+    btn.disabled = true;
+    statusEl.className = 'import-status loading';
+    statusEl.innerHTML = '<span class="import-spinner"></span> Extracting from pasted text...';
+    previewEl.style.display = 'none';
+
+    var actionArgs = { text: text, adminKey: adminKey };
+    if (bookingUrl) actionArgs.bookingUrl = bookingUrl;
+
+    convexAction('dealExtractor:extractFromText', actionArgs)
+    .then(function(result) {
+      btn.disabled = false;
+
+      if (!result || !result.success) {
+        statusEl.className = 'import-status error';
+        statusEl.textContent = '❌ ' + t('import_error');
+        return;
+      }
+
+      lastExtractedData = result.data;
+      statusEl.className = 'import-status success';
+      statusEl.textContent = '✅ ' + t('import_success');
+      renderImportPreview(result.data, result.source);
+    })
+    .catch(function(err) {
+      btn.disabled = false;
+      statusEl.className = 'import-status error';
+      statusEl.textContent = '❌ ' + escapeHtml(err.message || t('import_error'));
+    });
+  }
+
+  // URL input — extract on Enter key
+  document.getElementById('importUrl').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') extractDeal(false);
+  });
+
 </script>
 </div>
 </body>

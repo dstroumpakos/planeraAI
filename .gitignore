@@ -39,3 +39,7 @@ yarn-error.*
 # Lock files
 *.lockb
 *.lock
+
+# Deal extractor tools (admin-only, not needed for app builds)
+scripts/flight-deal-extractor/
+convex/dealExtractor.ts
