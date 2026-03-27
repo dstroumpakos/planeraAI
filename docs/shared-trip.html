@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shared Trip — Planera AI</title>
+  <meta name="description" content="View a shared trip itinerary on Planera AI">
+  <!-- OG tags (dynamically updated by JS) -->
+  <meta property="og:title" content="Shared Trip — Planera AI">
+  <meta property="og:description" content="Check out this AI-generated travel itinerary!">
+  <meta property="og:type" content="website">
+  <style>
+    :root { --primary: #FFE500; --bg: #FAF9F6; --card: #FFFFFF; --text: #1A1A1A; --muted: #9B9B9B; --border: #E8E6E1; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+    .container { max-width: 640px; margin: 0 auto; padding: 24px 16px; }
+    .header { text-align: center; padding: 32px 0 24px; }
+    .logo { font-size: 28px; font-weight: 800; letter-spacing: -0.5px; }
+    .logo span { color: var(--text); }
+    .logo em { font-style: normal; background: var(--primary); padding: 2px 8px; border-radius: 6px; }
+    .subtitle { color: var(--muted); font-size: 14px; margin-top: 8px; }
+    .loading { text-align: center; padding: 60px 0; color: var(--muted); }
+    .spinner { width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--text); border-radius: 50%; animation: spin .8s linear infinite; margin: 0 auto 16px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .error { text-align: center; padding: 60px 0; }
+    .error h2 { font-size: 20px; margin-bottom: 8px; }
+    .error p { color: var(--muted); }
+    .trip-hero { background: var(--card); border-radius: 16px; padding: 24px; margin-bottom: 16px; border: 1px solid var(--border); }
+    .trip-destination { font-size: 28px; font-weight: 700; margin-bottom: 4px; }
+    .trip-dates { color: var(--muted); font-size: 14px; }
+    .trip-origin { color: var(--muted); font-size: 13px; margin-top: 4px; }
+    .day-section { background: var(--card); border-radius: 16px; padding: 20px; margin-bottom: 12px; border: 1px solid var(--border); }
+    .day-title { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+    .day-subtitle { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+    .activity { display: flex; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border); }
+    .activity:first-of-type { border-top: none; }
+    .activity-time { font-size: 12px; font-weight: 600; color: var(--muted); min-width: 48px; padding-top: 2px; }
+    .activity-body { flex: 1; }
+    .activity-title { font-size: 15px; font-weight: 600; margin-bottom: 2px; }
+    .activity-desc { font-size: 13px; color: var(--muted); line-height: 1.4; }
+    .activity-meta { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+    .meta-badge { font-size: 11px; background: #f3f3f0; padding: 2px 8px; border-radius: 6px; color: var(--text); }
+    .cta-bar { position: sticky; bottom: 0; background: var(--bg); padding: 16px 0; text-align: center; border-top: 1px solid var(--border); }
+    .cta-btn { display: inline-block; background: var(--primary); color: var(--text); font-weight: 700; font-size: 16px; padding: 14px 32px; border-radius: 12px; text-decoration: none; }
+    .cta-btn:hover { opacity: 0.9; }
+    .store-links { display: flex; justify-content: center; gap: 12px; margin-top: 12px; }
+    .store-links a { display: inline-block; }
+    .store-links img { height: 40px; }
+    .powered { text-align: center; color: var(--muted); font-size: 12px; margin-top: 24px; padding-bottom: 16px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="logo"><span>Planera</span> <em>AI</em></div>
+      <p class="subtitle">AI-Powered Travel Planning</p>
+    </div>
+
+    <div id="content">
+      <div class="loading">
+        <div class="spinner"></div>
+        <p>Loading shared trip...</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    var CONVEX_URL = 'https://canny-bobcat-846.convex.cloud';
+
+    function getTokenFromPath() {
+      // Supports /shared-trip/TOKEN and ?token=TOKEN
+      var parts = window.location.pathname.split('/');
+      var idx = parts.indexOf('shared-trip');
+      if (idx !== -1 && parts[idx + 1]) return parts[idx + 1];
+      var params = new URLSearchParams(window.location.search);
+      return params.get('token');
+    }
+
+    function convexQuery(functionName, args) {
+      return fetch(CONVEX_URL.replace(/\/$/, '') + '/api/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: functionName, args: args })
+      }).then(function(r) { return r.json(); }).then(function(d) {
+        if (d.status === 'success') return d.value;
+        throw new Error(d.errorMessage || 'Query failed');
+      });
+    }
+
+    function formatDate(ts) {
+      return new Date(ts).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      var div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    function renderTrip(trip) {
+      var html = '';
+      // Hero
+      html += '<div class="trip-hero">';
+      html += '<div class="trip-destination">' + escapeHtml(trip.destination) + '</div>';
+      html += '<div class="trip-dates">📅 ' + formatDate(trip.startDate) + ' — ' + formatDate(trip.endDate) + '</div>';
+      if (trip.origin) html += '<div class="trip-origin">✈️ From ' + escapeHtml(trip.origin) + '</div>';
+      html += '</div>';
+
+      // Day by day
+      var days = (trip.itinerary && trip.itinerary.dayByDayItinerary) || [];
+      for (var i = 0; i < days.length; i++) {
+        var day = days[i];
+        html += '<div class="day-section">';
+        html += '<div class="day-title">Day ' + day.day + '</div>';
+        if (day.title) html += '<div class="day-subtitle">' + escapeHtml(day.title) + '</div>';
+
+        var acts = day.activities || [];
+        for (var j = 0; j < acts.length; j++) {
+          var a = acts[j];
+          html += '<div class="activity">';
+          html += '<div class="activity-time">' + escapeHtml(a.startTime || a.time || '') + '</div>';
+          html += '<div class="activity-body">';
+          html += '<div class="activity-title">' + escapeHtml(a.title) + '</div>';
+          if (a.description) html += '<div class="activity-desc">' + escapeHtml(a.description) + '</div>';
+          html += '<div class="activity-meta">';
+          if (a.type) html += '<span class="meta-badge">' + escapeHtml(a.culinaryType || a.type) + '</span>';
+          if (a.duration) html += '<span class="meta-badge">⏱ ' + escapeHtml(a.duration) + '</span>';
+          if (a.isLocalExperience) html += '<span class="meta-badge">⭐ Local</span>';
+          html += '</div></div></div>';
+        }
+        html += '</div>';
+      }
+
+      // CTA
+      html += '<div class="cta-bar">';
+      html += '<a class="cta-btn" href="https://planeraai.app">Plan Your Own Trip with AI ✨</a>';
+      html += '</div>';
+      html += '<p class="powered">Powered by Planera AI</p>';
+
+      document.getElementById('content').innerHTML = html;
+      // Update page title
+      document.title = trip.destination + ' Trip — Planera AI';
+    }
+
+    function showError(msg) {
+      document.getElementById('content').innerHTML =
+        '<div class="error"><h2>😔 ' + escapeHtml(msg) + '</h2><p>This link may have expired or the trip was removed.</p>' +
+        '<br><a class="cta-btn" href="https://planeraai.app">Visit Planera AI</a></div>';
+    }
+
+    // Main
+    var token = getTokenFromPath();
+    if (!token) {
+      showError('No trip link provided');
+    } else {
+      convexQuery('tripShareLinks:getByToken', { token: token })
+        .then(function(trip) {
+          if (!trip) { showError('Trip not found or link expired'); return; }
+          renderTrip(trip);
+        })
+        .catch(function() {
+          showError('Failed to load trip');
+        });
+    }
+  </script>
+</body>
+</html>

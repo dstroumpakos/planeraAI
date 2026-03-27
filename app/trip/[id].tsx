@@ -1,6 +1,6 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Linking, Platform, Alert, Modal, TextInput, KeyboardAvoidingView, Keyboard, StatusBar } from "react-native";
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Linking, Platform, Alert, Modal, TextInput, KeyboardAvoidingView, Keyboard, StatusBar, Share } from "react-native";
 import { Image } from "expo-image";
 import { useQuery, useMutation, useAction } from "convex/react";
 import { Id } from "@/convex/_generated/dataModel";
@@ -770,6 +770,15 @@ export default function TripDetails() {
     // @ts-ignore
     const regenerateTrip = useAuthenticatedMutation(api.trips.regenerate as any);
     // @ts-ignore
+    const removeActivityMut = useAuthenticatedMutation(api.trips.removeActivity as any);
+    // @ts-ignore
+    const replaceActivityMut = useAuthenticatedMutation(api.trips.scheduleReplaceActivity as any);
+    // @ts-ignore
+    const createShareLinkMut = useAuthenticatedMutation(api.tripShareLinks.createShareLink as any);
+    // @ts-ignore
+    const createInviteMut = useAuthenticatedMutation(api.tripCollaborators.createInvite as any);
+    const collaborators = useQuery(token ? (api.tripCollaborators.list as any) : "skip", token && trip ? { token, tripId: id as Id<"trips"> } : "skip");
+    // @ts-ignore
     const likeInsight = useAuthenticatedMutation(api.insights.like as any);
     // @ts-ignore
     const unlikeInsight = useAuthenticatedMutation(api.insights.unlike as any);
@@ -819,6 +828,13 @@ export default function TripDetails() {
     ];
 
     const [selectedHotelIndex, setSelectedHotelIndex] = useState<number | null>(null);
+    const [replacingActivity, setReplacingActivity] = useState<string | null>(null); // "dayIndex-actIndex"
+
+    // Clear replacing state when the itinerary changes (AI finished)
+    useEffect(() => {
+        if (replacingActivity) setReplacingActivity(null);
+    }, [trip?.itinerary]);
+
     const [accommodationType, setAccommodationType] = useState<'all' | 'hotel' | 'airbnb'>('all');
     const [isEditing, setIsEditing] = useState(false);
     const [editForm, setEditForm] = useState({
@@ -1855,6 +1871,39 @@ export default function TripDetails() {
                         <Ionicons name="chevron-back" size={24} color="#1A1A1A" />
                     </TouchableOpacity>
                     <View style={{ flex: 1 }} />
+                    <TouchableOpacity 
+                        style={[styles.iconButton, { backgroundColor: 'rgba(255,255,255,0.9)', borderRadius: 20, marginRight: 8 }]}
+                        onPress={async () => {
+                            try {
+                                const result = await createShareLinkMut({ tripId: trip._id });
+                                const shareUrl = `https://planeraai.app/shared-trip?token=${result.token}`;
+                                await Share.share({ message: `${t('tripDetail.checkOutTrip', { destination: trip.destination })}\n${shareUrl}` });
+                            } catch (err) {
+                                console.error("Share failed:", err);
+                            }
+                        }}
+                    >
+                        <Ionicons name="share-outline" size={20} color="#1A1A1A" />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.iconButton, { backgroundColor: 'rgba(255,255,255,0.9)', borderRadius: 20, marginRight: 8 }]}
+                        onPress={async () => {
+                            try {
+                                const result = await createInviteMut({ tripId: trip._id, role: "viewer" });
+                                const inviteUrl = `https://planeraai.app/invite?token=${result.inviteToken}`;
+                                await Share.share({ message: `${t('tripDetail.joinMyTrip', { destination: trip.destination })}\n${inviteUrl}` });
+                            } catch (err) {
+                                console.error("Invite failed:", err);
+                            }
+                        }}
+                    >
+                        <Ionicons name="people-outline" size={20} color="#1A1A1A" />
+                        {collaborators && collaborators.length > 0 && (
+                            <View style={{ position: 'absolute', top: -4, right: -4, backgroundColor: colors.primary, borderRadius: 8, minWidth: 16, height: 16, justifyContent: 'center', alignItems: 'center' }}>
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#000' }}>{collaborators.length}</Text>
+                            </View>
+                        )}
+                    </TouchableOpacity>
                     <View style={[styles.aiBadge, { backgroundColor: 'rgba(255,255,255,0.9)' }]}>
                         <Ionicons name="sparkles" size={12} color="#FFE500" />
                         <Text style={[styles.aiBadgeText, { color: '#1A1A1A' }]}>{t('tripDetail.aiGenerated')}</Text>
@@ -2076,7 +2125,46 @@ export default function TripDetails() {
                                         {actIndex < day.activities.length - 1 && <View style={[styles.timelineLine, { backgroundColor: colors.border }]} />}
                                     </View>
                                     <TouchableOpacity 
-                                        style={[styles.timelineCard, { backgroundColor: colors.card }]}
+                                        style={[styles.timelineCard, { backgroundColor: colors.card }, replacingActivity === `${index}-${actIndex}` && { opacity: 0.4 }]}
+                                        disabled={replacingActivity === `${index}-${actIndex}`}
+                                        onLongPress={() => {
+                                            if (replacingActivity) return;
+                                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+                                            Alert.alert(
+                                                activity.title,
+                                                t('tripDetail.replaceActivityMsg'),
+                                                [
+                                                    { text: t('common.cancel'), style: 'cancel' },
+                                                    {
+                                                        text: t('tripDetail.replaceActivity'),
+                                                        onPress: () => {
+                                                            setReplacingActivity(`${index}-${actIndex}`);
+                                                            replaceActivityMut({
+                                                                tripId: trip._id,
+                                                                dayIndex: index,
+                                                                activityIndex: actIndex,
+                                                                language: i18n.language,
+                                                            }).catch((err: any) => {
+                                                                console.error("Replace activity failed:", err);
+                                                                setReplacingActivity(null);
+                                                            });
+                                                        },
+                                                    },
+                                                    {
+                                                        text: t('common.delete'),
+                                                        style: 'destructive',
+                                                        onPress: () => {
+                                                            removeActivityMut({
+                                                                tripId: trip._id,
+                                                                dayIndex: index,
+                                                                activityIndex: actIndex,
+                                                            }).catch((err: any) => console.error("Remove activity failed:", err));
+                                                        },
+                                                    },
+                                                ]
+                                            );
+                                        }}
+                                        delayLongPress={500}
                                         onPress={() => {
                                             const title = activity.title?.toLowerCase() || '';
                                             const description = activity.description?.toLowerCase() || '';
@@ -2197,6 +2285,12 @@ export default function TripDetails() {
                                             openMaps();
                                         }}
                                     >
+                                        {replacingActivity === `${index}-${actIndex}` && (
+                                            <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: isDarkMode ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.7)', borderRadius: 12, zIndex: 10, justifyContent: 'center', alignItems: 'center' }}>
+                                                <ActivityIndicator size="small" color={colors.primary} />
+                                                <Text style={{ color: colors.textMuted, fontSize: 12, marginTop: 6 }}>{t('tripDetail.replacingActivity')}</Text>
+                                            </View>
+                                        )}
                                         <View style={styles.timelineCardContent}>
                                             <View style={{flex: 1}}>
                                                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>

@@ -1,6 +1,10 @@
 import { query, mutation } from "./_generated/server";
 import { authQuery } from "./functions";
+import { internal as _internal } from "./_generated/api";
 import { ConvexError, v } from "convex/values";
+
+// Type assertion: internal references won't exist until `npx convex dev` regenerates types
+const internal = _internal as any;
 
 // ─── Public Queries (no auth needed — used by website widget + app) ───
 
@@ -112,6 +116,34 @@ export const get = query({
   },
 });
 
+/** Surprise Me: Get a random active deal, optionally under a max price */
+export const surpriseMe = query({
+  args: {
+    maxPrice: v.optional(v.float64()),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const allDeals = await ctx.db
+      .query("lowFareRadar")
+      .withIndex("by_active", (q) => q.eq("active", true))
+      .collect();
+
+    let eligible = allDeals.filter(
+      (d) => d.active && (!d.expiresAt || d.expiresAt > now)
+    );
+
+    if (args.maxPrice !== undefined) {
+      eligible = eligible.filter((d) => d.price <= args.maxPrice!);
+    }
+
+    if (eligible.length === 0) return null;
+
+    // Pick a random deal
+    const randomIndex = Math.floor(Math.random() * eligible.length);
+    return eligible[randomIndex];
+  },
+});
+
 // ─── Admin Mutations (called from website widget with admin key) ───
 
 const dealFields = {
@@ -175,13 +207,20 @@ export const create = mutation({
     validateAdminKey(args.adminKey);
     const { adminKey, ...dealData } = args;
 
-    return await ctx.db.insert("lowFareRadar", {
+    const dealId = await ctx.db.insert("lowFareRadar", {
       ...dealData,
       origin: dealData.origin.toUpperCase(),
       destination: dealData.destination.toUpperCase(),
       active: true,
       createdAt: Date.now(),
     });
+
+    // Notify users watching this destination (non-blocking)
+    await ctx.scheduler.runAfter(0, internal.watchedDestinations.notifyMatchingUsers, {
+      dealId,
+    });
+
+    return dealId;
   },
 });
 
@@ -213,7 +252,21 @@ export const update = mutation({
     if (cleanUpdates.origin) cleanUpdates.origin = cleanUpdates.origin.toUpperCase();
     if (cleanUpdates.destination) cleanUpdates.destination = cleanUpdates.destination.toUpperCase();
 
+    // Detect price drop for watched destination alerts
+    const oldPrice = existing.price;
+    const newPrice = cleanUpdates.price;
+    const hasPriceDrop = newPrice !== undefined && newPrice < oldPrice;
+
     await ctx.db.patch(id, cleanUpdates);
+
+    // Notify watchers if price dropped
+    if (hasPriceDrop && existing.active) {
+      await ctx.scheduler.runAfter(0, internal.watchedDestinations.notifyPriceDrop, {
+        dealId: id,
+        oldPrice,
+        newPrice,
+      });
+    }
   },
 });
 

@@ -719,4 +719,39 @@ export default defineSchema({
         .index("by_destination", ["destination"])
         .index("by_active", ["active"])
         .index("by_origin_destination", ["origin", "destination"]),
+
+    // Watched Destinations — users watching destinations for deal alerts
+    watchedDestinations: defineTable({
+        userId: v.string(),
+        destination: v.string(),          // normalized lowercase city name e.g. "paris"
+        destinationIata: v.optional(v.string()), // IATA code if known e.g. "CDG"
+        createdAt: v.float64(),
+    })
+        .index("by_user", ["userId"])
+        .index("by_destination", ["destination"])
+        .index("by_user_destination", ["userId", "destination"]),
+
+    // Trip Share Links — shareable read-only links to trip itineraries
+    tripShareLinks: defineTable({
+        tripId: v.id("trips"),
+        userId: v.string(),
+        token: v.string(),
+        expiresAt: v.float64(),
+        createdAt: v.float64(),
+    })
+        .index("by_token", ["token"])
+        .index("by_trip", ["tripId"]),
+
+    // Trip Collaborators — group trip planning with role-based access
+    tripCollaborators: defineTable({
+        tripId: v.id("trips"),
+        userId: v.string(),
+        role: v.union(v.literal("owner"), v.literal("editor"), v.literal("viewer")),
+        inviteToken: v.optional(v.string()),  // set when invite is pending (no userId yet)
+        joinedAt: v.float64(),
+    })
+        .index("by_trip", ["tripId"])
+        .index("by_user", ["userId"])
+        .index("by_trip_user", ["tripId", "userId"])
+        .index("by_invite_token", ["inviteToken"]),
 });

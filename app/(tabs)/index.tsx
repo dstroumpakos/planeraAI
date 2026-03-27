@@ -71,6 +71,7 @@ export default function HomeScreen() {
   const trips = useQuery(api.trips.list as any, { token: token || "skip" });
   const trendingDestinations = useQuery(api.trips.getTrendingDestinations);
   const lowFareDeals = useQuery(api.lowFareRadar.getDealsForUser as any, { token: token || "skip" });
+  const surpriseDeal = useQuery(api.lowFareRadar.surpriseMe as any, {});
   const getImages = useAction(api.images.getDestinationImages);
   const ensureUserPlan = useMutation(api.users.ensureUserPlan as any);
 
@@ -266,6 +267,44 @@ export default function HomeScreen() {
               <Ionicons name="map-outline" size={20} color={colors.text} />
             </View>
             <Text style={[styles.featureText, { color: colors.text }]}>{t("home.multiCityRoute")}</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={[styles.featureCard, { backgroundColor: "#FF6B35", borderColor: "#FF6B35" }]}
+            onPress={() => {
+              if (surpriseDeal) {
+                router.push({
+                  pathname: "/deal-trip",
+                  params: {
+                    dealId: surpriseDeal._id,
+                    origin: surpriseDeal.origin,
+                    originCity: surpriseDeal.originCity,
+                    destination: surpriseDeal.destination,
+                    destinationCity: surpriseDeal.destinationCity,
+                    airline: surpriseDeal.airline,
+                    outboundDate: surpriseDeal.outboundDate,
+                    outboundDeparture: surpriseDeal.outboundDeparture,
+                    outboundArrival: surpriseDeal.outboundArrival,
+                    returnDate: surpriseDeal.returnDate || "",
+                    returnDeparture: surpriseDeal.returnDeparture || "",
+                    returnArrival: surpriseDeal.returnArrival || "",
+                    returnAirline: surpriseDeal.returnAirline || "",
+                    price: String(surpriseDeal.price),
+                    totalPrice: surpriseDeal.totalPrice ? String(surpriseDeal.totalPrice) : "",
+                    currency: surpriseDeal.currency,
+                    outboundStops: String(surpriseDeal.outboundStops ?? 0),
+                    returnStops: String(surpriseDeal.returnStops ?? 0),
+                    outboundSegments: surpriseDeal.outboundSegments ? JSON.stringify(surpriseDeal.outboundSegments) : "",
+                    returnSegments: surpriseDeal.returnSegments ? JSON.stringify(surpriseDeal.returnSegments) : "",
+                  },
+                });
+              }
+            }}
+          >
+            <View style={[styles.featureIcon, { backgroundColor: "rgba(255,255,255,0.25)" }]}>
+              <Ionicons name="dice-outline" size={20} color="#FFFFFF" />
+            </View>
+            <Text style={[styles.featureText, { color: "#FFFFFF" }]}>{t("home.surpriseMe")}</Text>
           </TouchableOpacity>
         </ScrollView>
 

@@ -619,6 +619,90 @@ export const update = authMutation({
     },
 });
 
+/** Remove an activity from a specific day in the itinerary */
+export const removeActivity = authMutation({
+    args: {
+        token: v.string(),
+        tripId: v.id("trips"),
+        dayIndex: v.number(),
+        activityIndex: v.number(),
+    },
+    handler: async (ctx: any, args: any) => {
+        const trip = await ctx.db.get(args.tripId);
+        if (!trip) throw new Error("Trip not found");
+        if (trip.userId !== ctx.user.userId) throw new Error("Unauthorized");
+        if (!trip.itinerary?.dayByDayItinerary) throw new Error("No itinerary");
+
+        const days = [...trip.itinerary.dayByDayItinerary];
+        if (args.dayIndex < 0 || args.dayIndex >= days.length) throw new Error("Invalid day");
+        const day = { ...days[args.dayIndex] };
+        const activities = [...day.activities];
+        if (args.activityIndex < 0 || args.activityIndex >= activities.length) throw new Error("Invalid activity");
+
+        activities.splice(args.activityIndex, 1);
+        day.activities = activities;
+        days[args.dayIndex] = day;
+
+        await ctx.db.patch(args.tripId, {
+            itinerary: { ...trip.itinerary, dayByDayItinerary: days },
+        });
+    },
+});
+
+/** Update a single activity's fields in the itinerary */
+export const updateActivity = authMutation({
+    args: {
+        token: v.string(),
+        tripId: v.id("trips"),
+        dayIndex: v.number(),
+        activityIndex: v.number(),
+        updates: v.any(),
+    },
+    handler: async (ctx: any, args: any) => {
+        const trip = await ctx.db.get(args.tripId);
+        if (!trip) throw new Error("Trip not found");
+        if (trip.userId !== ctx.user.userId) throw new Error("Unauthorized");
+        if (!trip.itinerary?.dayByDayItinerary) throw new Error("No itinerary");
+
+        const days = [...trip.itinerary.dayByDayItinerary];
+        if (args.dayIndex < 0 || args.dayIndex >= days.length) throw new Error("Invalid day");
+        const day = { ...days[args.dayIndex] };
+        const activities = [...day.activities];
+        if (args.activityIndex < 0 || args.activityIndex >= activities.length) throw new Error("Invalid activity");
+
+        activities[args.activityIndex] = { ...activities[args.activityIndex], ...args.updates };
+        day.activities = activities;
+        days[args.dayIndex] = day;
+
+        await ctx.db.patch(args.tripId, {
+            itinerary: { ...trip.itinerary, dayByDayItinerary: days },
+        });
+    },
+});
+
+/** Schedule AI replacement of a single activity */
+export const scheduleReplaceActivity = authMutation({
+    args: {
+        token: v.string(),
+        tripId: v.id("trips"),
+        dayIndex: v.number(),
+        activityIndex: v.number(),
+        language: v.optional(v.string()),
+    },
+    handler: async (ctx: any, args: any) => {
+        const trip = await ctx.db.get(args.tripId);
+        if (!trip) throw new Error("Trip not found");
+        if (trip.userId !== ctx.user.userId) throw new Error("Unauthorized");
+
+        await (ctx as any).scheduler.runAfter(0, (internal as any).tripsActions.replaceActivity, {
+            tripId: args.tripId,
+            dayIndex: args.dayIndex,
+            activityIndex: args.activityIndex,
+            language: args.language,
+        });
+    },
+});
+
 // Update whether user is physically at the trip destination (used by location notifications)
 export const updateLocationStatus = authMutation({
     args: {

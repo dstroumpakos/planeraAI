@@ -40,9 +40,12 @@ import type * as postmark from "../postmark.js";
 import type * as sights from "../sights.js";
 import type * as sightsAction from "../sightsAction.js";
 import type * as travelers from "../travelers.js";
+import type * as tripCollaborators from "../tripCollaborators.js";
+import type * as tripShareLinks from "../tripShareLinks.js";
 import type * as trips from "../trips.js";
 import type * as tripsActions from "../tripsActions.js";
 import type * as users from "../users.js";
+import type * as watchedDestinations from "../watchedDestinations.js";
 
 import type {
   ApiFromModules,
@@ -83,9 +86,12 @@ declare const fullApi: ApiFromModules<{
   sights: typeof sights;
   sightsAction: typeof sightsAction;
   travelers: typeof travelers;
+  tripCollaborators: typeof tripCollaborators;
+  tripShareLinks: typeof tripShareLinks;
   trips: typeof trips;
   tripsActions: typeof tripsActions;
   users: typeof users;
+  watchedDestinations: typeof watchedDestinations;
 }>;
 
 /**

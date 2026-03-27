@@ -2698,3 +2698,121 @@ function addHoursToTime(time: string, hours: number): string {
 
     return `${String(newH).padStart(2, '0')}:${String(m).padStart(2, '0')} ${newPeriod}`;
 }
+
+/** Replace a single activity in a trip's itinerary with an AI-generated alternative */
+export const replaceActivity = internalAction({
+    args: {
+        tripId: v.id("trips"),
+        dayIndex: v.number(),
+        activityIndex: v.number(),
+        language: v.optional(v.string()),
+    },
+    returns: v.null(),
+    handler: async (ctx, args) => {
+        const { tripId, dayIndex, activityIndex, language } = args;
+
+        const LANGUAGE_NAMES: Record<string, string> = {
+            en: "English", el: "Greek", es: "Spanish",
+            fr: "French", de: "German", ar: "Arabic",
+        };
+        const lang = language || "en";
+        const langName = LANGUAGE_NAMES[lang] || "English";
+
+        const trip = await ctx.runQuery(internal.trips.getTripDetails, { tripId });
+        if (!trip) throw new Error("Trip not found");
+        if (!trip.itinerary?.dayByDayItinerary) throw new Error("No itinerary");
+
+        const days = trip.itinerary.dayByDayItinerary;
+        if (dayIndex < 0 || dayIndex >= days.length) throw new Error("Invalid day");
+        const day = days[dayIndex];
+        const activities = day.activities || [];
+        if (activityIndex < 0 || activityIndex >= activities.length) throw new Error("Invalid activity");
+
+        const oldActivity = activities[activityIndex];
+        const otherTitles = activities
+            .filter((_: any, i: number) => i !== activityIndex)
+            .map((a: any) => a.title)
+            .join(", ");
+
+        const prevActivity = activityIndex > 0 ? activities[activityIndex - 1] : null;
+        const nextActivity = activityIndex < activities.length - 1 ? activities[activityIndex + 1] : null;
+
+        const prompt = `You are a travel itinerary planner for ${trip.destination}. 
+I need you to replace ONE activity. Generate a DIFFERENT alternative — do NOT repeat any of these existing activities: ${otherTitles}.
+
+The activity to replace:
+- Title: "${oldActivity.title}"
+- Type: ${oldActivity.type}
+- Time slot: ${oldActivity.startTime || oldActivity.time} to ${oldActivity.endTime || ""}
+- Duration: ${oldActivity.duration || oldActivity.durationMinutes + " min"}
+
+Constraints:
+- Keep the same time slot (startTime: "${oldActivity.startTime || oldActivity.time}", endTime: "${oldActivity.endTime || ""}")
+- Keep similar duration
+- Must be in ${trip.destination}
+- The previous activity ends at: ${prevActivity ? (prevActivity.endTime || prevActivity.time) + " at " + (prevActivity.address || prevActivity.title) : "N/A (first activity)"}
+- The next activity starts at: ${nextActivity ? (nextActivity.startTime || nextActivity.time) + " at " + (nextActivity.address || nextActivity.title) : "N/A (last activity)"}
+- Include realistic travelFromPrevious walking time from the previous location
+${lang !== "en" ? `- Write ALL text content (title, description, tips, address descriptions) in ${langName}` : ""}
+
+Return a single JSON object (NOT an array) with the replacement activity:
+{
+  "time": "${oldActivity.startTime || oldActivity.time}",
+  "startTime": "${oldActivity.startTime || oldActivity.time}",
+  "endTime": "${oldActivity.endTime || ""}",
+  "title": "New activity name",
+  "description": "Brief description",
+  "address": "Full address, ${trip.destination}",
+  "type": "attraction|museum|restaurant|tour|free|local-experience",
+  "price": 0,
+  "currency": "EUR",
+  "skipTheLine": false,
+  "skipTheLinePrice": 0,
+  "durationMinutes": ${oldActivity.durationMinutes || 60},
+  "duration": "${oldActivity.duration || "1 hour"}",
+  "tips": "Useful tip",
+  "isLocalExperience": false,
+  "travelFromPrevious": ${prevActivity ? '{"walkingMinutes": 10, "distanceKm": 0.8, "description": "Short walk"}' : "null"},
+  "culinaryMoment": null,
+  "culinaryType": null,
+  "whyThisFits": null,
+  "priceRange": null,
+  "walkability": null,
+  "culinaryTags": null
+}`;
+
+        if (!process.env.OPENAI_API_KEY) throw new Error("OpenAI API key not configured");
+
+        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+        const completion = await openai.chat.completions.create({
+            messages: [
+                { role: "system", content: `You are a travel planner. Return only valid JSON for a single activity.${lang !== "en" ? ` Write all content in ${langName}.` : ""}` },
+                { role: "user", content: prompt },
+            ],
+            model: "gpt-5.2",
+            response_format: { type: "json_object" },
+            max_completion_tokens: 1000,
+        });
+
+        const content = completion.choices[0]?.message?.content;
+        if (!content) throw new Error("No response from AI");
+
+        const newActivity = JSON.parse(content);
+
+        // Patch the itinerary with the new activity
+        const updatedDays = [...days];
+        const updatedDay = { ...updatedDays[dayIndex] };
+        const updatedActivities = [...updatedDay.activities];
+        updatedActivities[activityIndex] = newActivity;
+        updatedDay.activities = updatedActivities;
+        updatedDays[dayIndex] = updatedDay;
+
+        await ctx.runMutation(internal.trips.updateItinerary, {
+            tripId,
+            itinerary: { ...trip.itinerary, dayByDayItinerary: updatedDays },
+            status: "completed" as const,
+        });
+
+        return null;
+    },
+});

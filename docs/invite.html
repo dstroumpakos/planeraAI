@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trip Invite — Planera AI</title>
+  <meta name="description" content="You've been invited to join a trip on Planera AI">
+  <meta property="og:title" content="You're invited to a trip!">
+  <meta property="og:description" content="Join this AI-planned trip on Planera AI">
+  <meta property="og:type" content="website">
+  <style>
+    :root { --primary: #FFE500; --bg: #FAF9F6; --card: #FFFFFF; --text: #1A1A1A; --muted: #9B9B9B; --border: #E8E6E1; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: linear-gradient(135deg, #1A1A1A 0%, #2C2C2E 100%); color: var(--text); min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+    .invite-card { background: var(--card); border-radius: 24px; padding: 48px 40px; width: 100%; max-width: 420px; margin: 20px; box-shadow: 0 20px 60px rgba(0,0,0,.3); text-align: center; }
+    .logo { font-size: 28px; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 32px; }
+    .logo span { color: var(--text); }
+    .logo em { font-style: normal; background: var(--primary); padding: 2px 8px; border-radius: 6px; }
+    .invite-icon { font-size: 48px; margin-bottom: 16px; }
+    .invite-title { font-size: 22px; font-weight: 700; margin-bottom: 8px; }
+    .invite-subtitle { color: var(--muted); font-size: 14px; margin-bottom: 24px; line-height: 1.5; }
+    .trip-preview { background: var(--bg); border-radius: 12px; padding: 20px; margin-bottom: 24px; border: 1px solid var(--border); }
+    .trip-dest { font-size: 24px; font-weight: 700; margin-bottom: 4px; }
+    .trip-dates { color: var(--muted); font-size: 13px; }
+    .trip-role { display: inline-block; background: var(--primary); font-size: 12px; font-weight: 600; padding: 4px 12px; border-radius: 8px; margin-top: 8px; }
+    .cta-btn { display: block; background: var(--primary); color: var(--text); font-weight: 700; font-size: 16px; padding: 14px 32px; border-radius: 12px; text-decoration: none; margin-bottom: 12px; }
+    .cta-btn:hover { opacity: 0.9; }
+    .secondary-text { color: var(--muted); font-size: 12px; }
+    .spinner { width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--text); border-radius: 50%; animation: spin .8s linear infinite; margin: 0 auto 16px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading { padding: 40px 0; color: var(--muted); }
+    .error-text { color: #EF4444; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div class="invite-card">
+    <div class="logo"><span>Planera</span> <em>AI</em></div>
+    <div id="content">
+      <div class="loading">
+        <div class="spinner"></div>
+        <p>Loading invite...</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    var CONVEX_URL = 'https://canny-bobcat-846.convex.cloud';
+    var APP_SCHEME = 'myapp'; // matches app.json scheme
+
+    function getTokenFromPath() {
+      var parts = window.location.pathname.split('/');
+      var idx = parts.indexOf('invite');
+      if (idx !== -1 && parts[idx + 1]) return parts[idx + 1];
+      var params = new URLSearchParams(window.location.search);
+      return params.get('token');
+    }
+
+    function convexQuery(functionName, args) {
+      return fetch(CONVEX_URL.replace(/\/$/, '') + '/api/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: functionName, args: args })
+      }).then(function(r) { return r.json(); }).then(function(d) {
+        if (d.status === 'success') return d.value;
+        throw new Error(d.errorMessage || 'Query failed');
+      });
+    }
+
+    function formatDate(ts) {
+      return new Date(ts).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      var div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    function renderInvite(info, inviteToken) {
+      var html = '';
+      html += '<div class="invite-icon">🤝</div>';
+      html += '<div class="invite-title">You\'re invited!</div>';
+      html += '<div class="invite-subtitle">Someone wants you to join their trip. Open the Planera AI app to accept.</div>';
+
+      html += '<div class="trip-preview">';
+      html += '<div class="trip-dest">📍 ' + escapeHtml(info.destination) + '</div>';
+      html += '<div class="trip-dates">📅 ' + formatDate(info.startDate) + ' — ' + formatDate(info.endDate) + '</div>';
+      html += '<div class="trip-role">' + (info.role === 'editor' ? '✏️ Editor' : '👁 Viewer') + '</div>';
+      html += '</div>';
+
+      // Deep link into the app
+      var deepLink = APP_SCHEME + '://invite/' + encodeURIComponent(inviteToken);
+      html += '<a class="cta-btn" href="' + deepLink + '">Open in Planera AI</a>';
+      html += '<p class="secondary-text">Don\'t have the app? Download it from the App Store.</p>';
+
+      document.getElementById('content').innerHTML = html;
+      document.title = 'Join trip to ' + info.destination + ' — Planera AI';
+    }
+
+    function showError(msg) {
+      document.getElementById('content').innerHTML =
+        '<div class="invite-icon">😔</div>' +
+        '<div class="invite-title">' + escapeHtml(msg) + '</div>' +
+        '<div class="invite-subtitle">This invite may have expired or already been used.</div>' +
+        '<br><a class="cta-btn" href="https://planeraai.app">Visit Planera AI</a>';
+    }
+
+    // Main
+    var inviteToken = getTokenFromPath();
+    if (!inviteToken) {
+      showError('No invite link provided');
+    } else {
+      convexQuery('tripCollaborators:getInviteInfo', { inviteToken: inviteToken })
+        .then(function(info) {
+          if (!info) { showError('Invite not found or already used'); return; }
+          renderInvite(info, inviteToken);
+        })
+        .catch(function() {
+          showError('Failed to load invite');
+        });
+    }
+  </script>
+</body>
+</html>

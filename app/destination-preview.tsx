@@ -5,10 +5,11 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useDestinationImage } from "@/lib/useImages";
 import { ImageWithAttribution } from "@/components/ImageWithAttribution";
-import { useAction } from "convex/react";
+import { useAction, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useTheme } from "@/lib/ThemeContext";
 import { useTranslation } from "react-i18next";
+import { useToken, useAuthenticatedMutation } from "@/lib/useAuthenticatedMutation";
 
 // Destination highlights data
 const DESTINATION_HIGHLIGHTS: Record<string, { emoji: string; highlights: string[]; bestFor: string[]; bestTime: string }> = {
@@ -457,9 +458,26 @@ export default function DestinationPreviewScreen() {
     const router = useRouter();
     const { colors, isDarkMode } = useTheme();
     const { t } = useTranslation();
+    const { token } = useToken();
     const { destination } = useLocalSearchParams<{ destination: string }>();
     const { image, loading } = useDestinationImage(destination);
     const trackDownload = useAction(api.images.trackUnsplashDownload);
+
+    // Watch destination state
+    const isWatching = useQuery(api.watchedDestinations.isWatching as any, 
+        token ? { token, destination: destination || "" } : "skip"
+    );
+    const watchMutation = useAuthenticatedMutation(api.watchedDestinations.watch as any);
+    const unwatchMutation = useAuthenticatedMutation(api.watchedDestinations.unwatch as any);
+
+    const handleToggleWatch = async () => {
+        if (!destination) return;
+        if (isWatching) {
+            await unwatchMutation({ destination });
+        } else {
+            await watchMutation({ destination });
+        }
+    };
     
     const avgBudget = parseFloat((useLocalSearchParams() as any).avgBudget) || 0;
     const avgRating = parseFloat((useLocalSearchParams() as any).avgRating) || 0;
@@ -513,9 +531,20 @@ export default function DestinationPreviewScreen() {
                 <LinearGradient colors={["transparent", "rgba(0,0,0,0.7)"]} style={styles.heroGradient} pointerEvents="none" />
                 
                 <SafeAreaView style={styles.headerOverlay} pointerEvents="box-none">
-                    <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-                        <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
-                    </TouchableOpacity>
+                    <View style={styles.headerRow}>
+                        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+                            <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+                        </TouchableOpacity>
+                        {token && (
+                            <TouchableOpacity style={styles.watchButton} onPress={handleToggleWatch}>
+                                <Ionicons 
+                                    name={isWatching ? "notifications" : "notifications-outline"} 
+                                    size={22} 
+                                    color={isWatching ? colors.primary : "#FFFFFF"} 
+                                />
+                            </TouchableOpacity>
+                        )}
+                    </View>
                 </SafeAreaView>
 
                 <View style={styles.heroContent}>
@@ -619,7 +648,9 @@ const styles = StyleSheet.create({
     heroEmoji: { fontSize: 100, opacity: 0.3 },
     heroGradient: { position: "absolute", bottom: 0, left: 0, right: 0, height: 200 },
     headerOverlay: { position: "absolute", top: 0, left: 0, right: 0, zIndex: 10 },
-    backButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(0,0,0,0.3)", justifyContent: "center", alignItems: "center", marginLeft: 16, marginTop: 8 },
+    headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 16, paddingTop: 8 },
+    backButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(0,0,0,0.3)", justifyContent: "center", alignItems: "center" },
+    watchButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(0,0,0,0.3)", justifyContent: "center", alignItems: "center" },
     heroContent: { position: "absolute", bottom: 24, left: 20, right: 20 },
     heroTitle: { fontSize: 36, fontWeight: "800", color: "#FFFFFF", marginBottom: 16 },
     heroStats: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,0.15)", borderRadius: 16, padding: 16 },

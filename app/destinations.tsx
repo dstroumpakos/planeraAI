@@ -11,7 +11,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { useQuery, useAction } from "convex/react";
+import { useQuery, useAction, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Ionicons } from "@expo/vector-icons";
 import { useToken } from "@/lib/useAuthenticatedMutation";
@@ -27,9 +27,32 @@ export default function DestinationsScreen() {
   const { t } = useTranslation();
   const [destinationImages, setDestinationImages] = useState<Record<string, any>>({});
   const [searchQuery, setSearchQuery] = useState("");
+  const [activeTab, setActiveTab] = useState<"all" | "watching">("all");
 
   const allDestinations = useQuery(api.trips.getAllDestinations);
   const getImages = useAction(api.images.getDestinationImages);
+
+  // Watched destinations
+  const watchedDestinations = useQuery(
+    api.watchedDestinations.getWatchedDestinations as any,
+    token ? { token } : "skip"
+  ) as any[] | undefined;
+  const watchMutation = useMutation(api.watchedDestinations.watch as any);
+  const unwatchMutation = useMutation(api.watchedDestinations.unwatch as any);
+
+  const watchedSet = new Set(
+    (watchedDestinations || []).map((w: any) => w.destination)
+  );
+
+  const handleToggleWatch = async (destinationName: string) => {
+    if (!token) return;
+    const normalized = destinationName.toLowerCase().trim();
+    if (watchedSet.has(normalized)) {
+      await unwatchMutation({ token, destination: destinationName });
+    } else {
+      await watchMutation({ token, destination: destinationName });
+    }
+  };
 
   const fetchImages = useCallback(async () => {
     const imageMap: Record<string, any> = {};
@@ -62,10 +85,14 @@ export default function DestinationsScreen() {
     }
   }, [allDestinations, fetchImages]);
 
-  // Filter destinations based on search
-  const filteredDestinations = allDestinations?.filter((dest) =>
-    dest.destination.toLowerCase().includes(searchQuery.toLowerCase())
-  ) || [];
+  // Filter destinations based on search and active tab
+  const filteredDestinations = allDestinations?.filter((dest) => {
+    const matchesSearch = dest.destination.toLowerCase().includes(searchQuery.toLowerCase());
+    if (activeTab === "watching") {
+      return matchesSearch && watchedSet.has(dest.destination.toLowerCase().trim());
+    }
+    return matchesSearch;
+  }) || [];
 
   if (tokenLoading) {
     return (
@@ -119,6 +146,45 @@ export default function DestinationsScreen() {
           </TouchableOpacity>
         )}
       </View>
+
+      {/* Filter Tabs */}
+      {token && (
+        <View style={styles.filterTabs}>
+          <TouchableOpacity
+            style={[
+              styles.filterTab,
+              activeTab === "all" && { backgroundColor: colors.primary },
+              activeTab !== "all" && { backgroundColor: colors.card },
+            ]}
+            onPress={() => setActiveTab("all")}
+          >
+            <Text style={[styles.filterTabText, { color: colors.text }]}>
+              {t('destinations.allDestinations')}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.filterTab,
+              activeTab === "watching" && { backgroundColor: colors.primary },
+              activeTab !== "watching" && { backgroundColor: colors.card },
+            ]}
+            onPress={() => setActiveTab("watching")}
+          >
+            <Ionicons 
+              name="notifications" 
+              size={14} 
+              color={colors.text} 
+              style={{ marginRight: 4 }} 
+            />
+            <Text style={[styles.filterTabText, { color: colors.text }]}>
+              {t('destinations.watching')}
+              {watchedDestinations && watchedDestinations.length > 0 
+                ? ` (${watchedDestinations.length})` 
+                : ""}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Destinations List */}
       <ScrollView
@@ -175,6 +241,24 @@ export default function DestinationsScreen() {
                   colors={["transparent", "rgba(0,0,0,0.8)"]}
                   style={styles.cardGradient}
                 />
+
+                {/* Watch Icon */}
+                {token && (
+                  <TouchableOpacity
+                    style={styles.watchIconOverlay}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      handleToggleWatch(destination.destination);
+                    }}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  >
+                    <Ionicons
+                      name={watchedSet.has(destination.destination.toLowerCase().trim()) ? "notifications" : "notifications-outline"}
+                      size={20}
+                      color={watchedSet.has(destination.destination.toLowerCase().trim()) ? colors.primary : "#FFFFFF"}
+                    />
+                  </TouchableOpacity>
+                )}
                 
                 {/* Content Overlay */}
                 <View style={styles.cardOverlay}>
@@ -412,5 +496,34 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "500",
     color: "#FFFFFF",
+  },
+  filterTabs: {
+    flexDirection: "row",
+    paddingHorizontal: 16,
+    marginBottom: 12,
+    gap: 8,
+  },
+  filterTab: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+  },
+  filterTabText: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  watchIconOverlay: {
+    position: "absolute",
+    top: 12,
+    right: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 10,
   },
 });
