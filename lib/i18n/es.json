@@ -1277,6 +1277,18 @@
     "tipGenerateTitle": "¡Todo listo!",
     "tipGenerateDesc": "Presiona el botón de abajo para que la IA genere tu itinerario de viaje perfecto."
   },
+  "tripDetailGuide": {
+    "stepItineraryTitle": "Tu plan día a día",
+    "stepItineraryDesc": "Desplázate por tu itinerario generado con IA con actividades, horarios y consejos para cada día.",
+    "stepFiltersTitle": "Explora por categoría",
+    "stepFiltersDesc": "Usa estas pestañas para ir a vuelos, comida, lugares, alojamiento, transporte o información local.",
+    "stepActivityTitle": "Personaliza actividades",
+    "stepActivityDesc": "Mantén presionada cualquier tarjeta de actividad para reemplazarla con una nueva sugerencia o eliminarla.",
+    "stepMapTitle": "Ver en el mapa",
+    "stepMapDesc": "Toca aquí para explorar tu ruta completa en un mapa interactivo.",
+    "stepEditTitle": "Editar y regenerar",
+    "stepEditDesc": "Toca el botón del lápiz para cambiar fechas, presupuesto o intereses — luego regenera tu viaje."
+  },
   "stats": {
     "travelStats": "Estadísticas de Viaje",
     "trips": "Viajes",

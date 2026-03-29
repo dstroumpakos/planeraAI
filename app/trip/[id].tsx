@@ -19,6 +19,7 @@ import { useAuthenticatedMutation, useToken } from "@/lib/useAuthenticatedMutati
 import { optimizeUnsplashUrl, IMAGE_SIZES } from "@/lib/imageUtils";
 import * as Haptics from "expo-haptics";
 import { useLocationNotifications } from "@/lib/useLocationNotifications";
+import { TripGuideTooltip, GuideStep } from "@/components/FirstTripGuide";
 
 // Sanitize location titles for maps deep links by stripping descriptions, ratings, etc.
 const cleanLocationTitle = (title: string): string => {
@@ -789,6 +790,10 @@ export default function TripDetails() {
     const { image: destinationImage } = useDestinationImage(trip?.destination);
     const getDestinationImages = useAction(api.images.getDestinationImages);
 
+    // Trip detail guide for first-time viewers
+    const userSettings = useQuery(api.users.getSettings as any, token ? { token } : "skip") as any;
+    const markDetailGuideSeen = useMutation(api.users.markTripDetailGuideSeen as any);
+
     // Phase 3: Location-based notifications for active trips
     // Reports arrival status to server so cron notifications are gated on physical presence
     const updateLocationStatus = useAuthenticatedMutation(api.trips.updateLocationStatus as any);
@@ -874,6 +879,50 @@ export default function TripDetails() {
     const [selectedFlightIndex, setSelectedFlightIndex] = useState<number>(0);
     const [checkedBaggageSelected, setCheckedBaggageSelected] = useState<boolean>(false);
     const [activeFilter, setActiveFilter] = useState<'all' | 'flights' | 'food' | 'sights' | 'stays' | 'transportation' | 'insights'>('all');
+
+    // ─── Trip detail guide state ───
+    const [detailGuideStep, setDetailGuideStep] = useState(-1);
+    const DETAIL_GUIDE_STEPS: GuideStep[] = [
+        { key: "itinerary", title: t("tripDetailGuide.stepItineraryTitle"), description: t("tripDetailGuide.stepItineraryDesc") },
+        { key: "filters", title: t("tripDetailGuide.stepFiltersTitle"), description: t("tripDetailGuide.stepFiltersDesc") },
+        { key: "activity", title: t("tripDetailGuide.stepActivityTitle"), description: t("tripDetailGuide.stepActivityDesc") },
+        { key: "map", title: t("tripDetailGuide.stepMapTitle"), description: t("tripDetailGuide.stepMapDesc") },
+        { key: "edit", title: t("tripDetailGuide.stepEditTitle"), description: t("tripDetailGuide.stepEditDesc") },
+    ];
+    const detailGuideActive = detailGuideStep >= 0 && detailGuideStep < DETAIL_GUIDE_STEPS.length;
+    const currentDetailGuideKey = detailGuideActive ? DETAIL_GUIDE_STEPS[detailGuideStep].key : null;
+
+    const advanceDetailGuide = useCallback(() => {
+        const next = detailGuideStep + 1;
+        if (next < DETAIL_GUIDE_STEPS.length) {
+            setDetailGuideStep(next);
+        } else {
+            setDetailGuideStep(-1);
+            if (token) {
+                markDetailGuideSeen({ token }).catch(() => {});
+            }
+        }
+    }, [detailGuideStep, DETAIL_GUIDE_STEPS.length, token]);
+
+    const dismissDetailGuide = useCallback(() => {
+        setDetailGuideStep(-1);
+        if (token) {
+            markDetailGuideSeen({ token }).catch(() => {});
+        }
+    }, [token]);
+
+    // Show detail guide when trip has itinerary and user hasn't seen it
+    useEffect(() => {
+        if (
+            userSettings !== undefined &&
+            trip?.itinerary?.dayByDayItinerary?.length > 0 &&
+            !userSettings?.hasSeenTripDetailGuide
+        ) {
+            // Small delay so the content renders first
+            const timer = setTimeout(() => setDetailGuideStep(0), 800);
+            return () => clearTimeout(timer);
+        }
+    }, [userSettings, trip?.itinerary?.dayByDayItinerary]);
 
     useEffect(() => {
         if (trip) {
@@ -1951,6 +2000,11 @@ export default function TripDetails() {
                     </TouchableOpacity>
                 </View>
 
+                {/* Trip detail guide — Map tooltip */}
+                {currentDetailGuideKey === 'map' && (
+                    <TripGuideTooltip step={DETAIL_GUIDE_STEPS[detailGuideStep]} currentIndex={detailGuideStep} totalSteps={DETAIL_GUIDE_STEPS.length} onNext={advanceDetailGuide} onSkip={dismissDetailGuide} />
+                )}
+
                 {/* Filter Chips */}
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterContainer}>
                     <TouchableOpacity 
@@ -2004,6 +2058,11 @@ export default function TripDetails() {
                     </TouchableOpacity>
                 </ScrollView>
 
+                {/* Trip detail guide — Filters tooltip */}
+                {currentDetailGuideKey === 'filters' && (
+                    <TripGuideTooltip step={DETAIL_GUIDE_STEPS[detailGuideStep]} currentIndex={detailGuideStep} totalSteps={DETAIL_GUIDE_STEPS.length} onNext={advanceDetailGuide} onSkip={dismissDetailGuide} />
+                )}
+
                 {/* Content based on active filter */}
                 <View style={styles.itineraryContainer}>
                     {activeFilter === 'all' && trip.itinerary?.dayByDayItinerary?.map((day: any, index: number) => {
@@ -2041,6 +2100,11 @@ export default function TripDetails() {
                                     <Text style={[styles.energyText, { color: energyColor }]}>{energyLevel}</Text>
                                 </View>
                             </View>
+
+                            {/* Trip detail guide — Itinerary tooltip (first day only) */}
+                            {index === 0 && currentDetailGuideKey === 'itinerary' && (
+                                <TripGuideTooltip step={DETAIL_GUIDE_STEPS[detailGuideStep]} currentIndex={detailGuideStep} totalSteps={DETAIL_GUIDE_STEPS.length} onNext={advanceDetailGuide} onSkip={dismissDetailGuide} />
+                            )}
 
                             {day.activities.map((activity: any, actIndex: number) => {
                                 // Get previous activity for directions
@@ -2355,6 +2419,11 @@ export default function TripDetails() {
                                 </View>
                                 );
                             })}
+
+                            {/* Trip detail guide — Activity tooltip (first day only) */}
+                            {index === 0 && currentDetailGuideKey === 'activity' && (
+                                <TripGuideTooltip step={DETAIL_GUIDE_STEPS[detailGuideStep]} currentIndex={detailGuideStep} totalSteps={DETAIL_GUIDE_STEPS.length} onNext={advanceDetailGuide} onSkip={dismissDetailGuide} />
+                            )}
                         </View>
                     );
                 })}
@@ -3418,6 +3487,13 @@ export default function TripDetails() {
                     )}
                 </View>
             </ScrollView>
+
+            {/* Trip detail guide — Edit tooltip */}
+            {currentDetailGuideKey === 'edit' && (
+                <View style={{ position: 'absolute', bottom: 80, left: 0, right: 0 }}>
+                    <TripGuideTooltip step={DETAIL_GUIDE_STEPS[detailGuideStep]} currentIndex={detailGuideStep} totalSteps={DETAIL_GUIDE_STEPS.length} onNext={advanceDetailGuide} onSkip={dismissDetailGuide} />
+                </View>
+            )}
 
             {/* Floating Action Bar */}
             <View style={styles.fabContainer}>

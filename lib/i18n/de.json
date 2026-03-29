@@ -1277,6 +1277,18 @@
     "tipGenerateTitle": "Alles bereit!",
     "tipGenerateDesc": "Drücken Sie die Taste unten, um die KI Ihren perfekten Reiseplan erstellen zu lassen."
   },
+  "tripDetailGuide": {
+    "stepItineraryTitle": "Dein Tag-für-Tag-Plan",
+    "stepItineraryDesc": "Scrolle durch deine KI-generierte Reiseroute mit Aktivitäten, Zeiten und Tipps für jeden Tag.",
+    "stepFiltersTitle": "Nach Kategorie erkunden",
+    "stepFiltersDesc": "Nutze die Tabs um zu Flügen, Essen, Sehenswürdigkeiten, Unterkünften, Transport oder lokalen Insights zu wechseln.",
+    "stepActivityTitle": "Aktivitäten anpassen",
+    "stepActivityDesc": "Halte eine Aktivitätskarte gedrückt, um sie durch einen neuen Vorschlag zu ersetzen oder zu entfernen.",
+    "stepMapTitle": "Auf der Karte ansehen",
+    "stepMapDesc": "Tippe hier, um deine gesamte Route auf einer interaktiven Karte zu erkunden.",
+    "stepEditTitle": "Bearbeiten & neu generieren",
+    "stepEditDesc": "Tippe auf den Stift, um Daten, Budget oder Interessen zu ändern — und generiere deine Reise neu."
+  },
   "stats": {
     "travelStats": "Reisestatistiken",
     "trips": "Reisen",

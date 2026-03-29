@@ -167,6 +167,8 @@ export default defineSchema({
         onboardingCompleted: v.optional(v.boolean()),
         // First trip guide shown on home page for new users
         hasSeenFirstTripGuide: v.optional(v.boolean()),
+        // Trip detail guide shown on first generated trip
+        hasSeenTripDetailGuide: v.optional(v.boolean()),
         // AI data sharing consent (Apple guideline 5.1.1/5.1.2)
         aiDataConsent: v.optional(v.boolean()),
         aiDataConsentDate: v.optional(v.float64()),

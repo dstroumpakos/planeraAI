@@ -447,6 +447,7 @@ export default function CreateTripScreen() {
     
     // @ts-ignore
     const createTrip = useAuthenticatedMutation(api.trips.create as any);
+    const markGuideSeen = useMutation(api.users.markFirstTripGuideSeen as any);
     const { token } = useToken();
     // @ts-ignore
     const userSettings = useQuery(api.users.getSettings as any, token ? { token } : "skip") as any;
@@ -881,6 +882,11 @@ export default function CreateTripScreen() {
                 // Language preference for AI-generated content
                 language: i18n.language || "en",
             });
+            
+            // Mark first-trip guide as seen so it never shows again
+            if (token) {
+                markGuideSeen({ token }).catch(() => {});
+            }
             
             router.push(`/trip/${tripId}`);
             // Reset states after navigation

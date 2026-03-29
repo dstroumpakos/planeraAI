@@ -75,6 +75,7 @@ export default function DealTripScreen() {
   const userPlan = useQuery(api.users.getPlan as any, { token: token || "skip" });
   const createFromDeal = useAuthenticatedMutation(api.trips.createFromDeal as any);
   const updateAiConsent = useMutation(api.users.updateAiConsent as any);
+  const markGuideSeen = useMutation(api.users.markFirstTripGuideSeen as any);
 
   const tripDays = returnDate
     ? Math.ceil((new Date(returnDate).getTime() - new Date(outboundDate).getTime()) / (24 * 60 * 60 * 1000))
@@ -156,6 +157,10 @@ export default function DealTripScreen() {
         language: i18n.language || "en",
       });
 
+      // Mark first-trip guide as seen so it never shows again
+      if (token) {
+        markGuideSeen({ token }).catch(() => {});
+      }
       router.push(`/trip/${tripId}`);
       setTimeout(() => setLoading(false), 500);
     } catch (error: any) {

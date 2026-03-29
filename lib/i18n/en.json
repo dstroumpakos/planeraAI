@@ -1277,6 +1277,18 @@
     "tipGenerateTitle": "You're all set!",
     "tipGenerateDesc": "Press the button below to let AI generate your perfect trip itinerary."
   },
+  "tripDetailGuide": {
+    "stepItineraryTitle": "Your day-by-day plan",
+    "stepItineraryDesc": "Scroll through your AI-generated itinerary with activities, times, and travel tips for each day.",
+    "stepFiltersTitle": "Explore by category",
+    "stepFiltersDesc": "Use these tabs to jump to flights, food, sights, stays, transport, or local insights.",
+    "stepActivityTitle": "Customize activities",
+    "stepActivityDesc": "Long-press any activity card to replace it with a new suggestion or remove it entirely.",
+    "stepMapTitle": "See it on the map",
+    "stepMapDesc": "Tap here to explore your full route on an interactive map.",
+    "stepEditTitle": "Edit & regenerate",
+    "stepEditDesc": "Tap the pencil button to change dates, budget, or interests — then regenerate your trip."
+  },
   "stats": {
     "travelStats": "Travel Stats",
     "trips": "Trips",
