@@ -23,6 +23,8 @@ import { useTranslation } from "react-i18next";
 import { LanguagePickerModal } from "@/components/LanguagePickerModal";
 import { FirstTripPopup } from "@/components/FirstTripGuide";
 import { LowFareRadar } from "@/components/LowFareRadar";
+import StreakWidget from "@/components/StreakWidget";
+import AchievementUnlocked from "@/components/AchievementUnlocked";
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -35,6 +37,8 @@ export default function HomeScreen() {
   const [showLanguagePicker, setShowLanguagePicker] = useState(false);
   const [showFirstTripGuide, setShowFirstTripGuide] = useState(false);
   const markGuideSeen = useMutation(api.users.markFirstTripGuideSeen as any);
+  const checkIn = useMutation(api.streaks.checkIn as any);
+  const [checkedIn, setCheckedIn] = useState(false);
 
   // Debug logging
   useEffect(() => {
@@ -55,6 +59,12 @@ export default function HomeScreen() {
     }
   }, [userSettings]);
 
+  const userPlan = useQuery(api.users.getPlan as any, { token: token || "skip" });
+  const trips = useQuery(api.trips.list as any, { token: token || "skip" });
+  const trendingDestinations = useQuery(api.trips.getTrendingDestinations);
+  const lowFareDeals = useQuery(api.lowFareRadar.getDealsForUser as any, { token: token || "skip" });
+  const surpriseDeal = useQuery(api.lowFareRadar.surpriseMe as any, {});
+
   // Show first trip guide for new users who haven't seen it
   useEffect(() => {
     if (
@@ -67,11 +77,6 @@ export default function HomeScreen() {
       setShowFirstTripGuide(true);
     }
   }, [userSettings, trips, showLanguagePicker]);
-  const userPlan = useQuery(api.users.getPlan as any, { token: token || "skip" });
-  const trips = useQuery(api.trips.list as any, { token: token || "skip" });
-  const trendingDestinations = useQuery(api.trips.getTrendingDestinations);
-  const lowFareDeals = useQuery(api.lowFareRadar.getDealsForUser as any, { token: token || "skip" });
-  const surpriseDeal = useQuery(api.lowFareRadar.surpriseMe as any, {});
   const getImages = useAction(api.images.getDestinationImages);
   const ensureUserPlan = useMutation(api.users.ensureUserPlan as any);
 
@@ -83,6 +88,16 @@ export default function HomeScreen() {
       });
     }
   }, [token, isAuthenticated]);
+
+  // Auto check-in for streaks
+  useEffect(() => {
+    if (token && isAuthenticated && !checkedIn) {
+      setCheckedIn(true);
+      checkIn({ token }).catch((err: any) => {
+        console.error("[HomeScreen] Streak check-in failed:", err);
+      });
+    }
+  }, [token, isAuthenticated, checkedIn]);
 
   const getProfileImageUrl = useQuery(
     api.users.getProfileImageUrl as any,
@@ -224,12 +239,15 @@ export default function HomeScreen() {
               <Text style={[styles.greetingMain, { color: colors.text }]}>{t("home.readyForJourney")}</Text>
             </View>
           </View>
-          <TouchableOpacity 
-            style={styles.creditContainer}
-            onPress={() => router.push("/subscription")}
-          >
-            {getCreditDisplay()}
-          </TouchableOpacity>
+          <View style={styles.headerRight}>
+            <StreakWidget />
+            <TouchableOpacity 
+              style={styles.creditContainer}
+              onPress={() => router.push("/subscription")}
+            >
+              {getCreditDisplay()}
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Search Bar */}
@@ -447,6 +465,7 @@ export default function HomeScreen() {
         )}
       </ScrollView>
     </SafeAreaView>
+    <AchievementUnlocked />
     </>
   );
 }
@@ -518,6 +537,11 @@ const styles = StyleSheet.create({
   greetingMain: {
     fontSize: 16,
     fontWeight: "700",
+  },
+  headerRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   creditContainer: {
     justifyContent: "center",

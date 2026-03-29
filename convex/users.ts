@@ -1124,7 +1124,7 @@ export const deleteAccount = authMutation({
         console.log(`[deleteAccount] Deleted ${pushTokensDeleted + pushTokensDeletedLegacy} pushTokens`);
 
         // 16. Delete the userSettings record itself (must be last)
-        await ctx.db.delete(ctx.user.userId);
+        await ctx.db.delete(ctx.user._id);
         console.log("[deleteAccount] Deleted userSettings record");
 
         // 17. Send account deletion confirmation email

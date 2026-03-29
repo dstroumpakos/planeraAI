@@ -181,6 +181,9 @@ export const create = authMutation({
             language: args.language || "en",
         });
 
+        // Trigger achievement check
+        await ctx.scheduler.runAfter(0, internal.achievements.checkAndUnlock, { userId: ctx.user.userId });
+
         return tripId;
     },
 });

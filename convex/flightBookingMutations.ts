@@ -1,6 +1,7 @@
 import { internalMutation, query } from "./_generated/server";
 import { v } from "convex/values";
 import { authQuery } from "./functions";
+import { internal } from "./_generated/api";
 
 // Validator for flight details
 const flightDetailsValidator = v.object({
@@ -133,6 +134,11 @@ export const saveBooking = internalMutation({
       confirmedAt: args.status === "confirmed" ? Date.now() : undefined,
       departureTimestamp: args.departureTimestamp,
     });
+
+    // Trigger achievement check for the booking owner
+    if (args.status === "confirmed") {
+      await ctx.scheduler.runAfter(0, internal.achievements.checkAndUnlock, { userId: trip.userId });
+    }
 
     return bookingId;
   },

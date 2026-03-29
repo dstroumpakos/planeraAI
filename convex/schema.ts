@@ -170,7 +170,11 @@ export default defineSchema({
         // AI data sharing consent (Apple guideline 5.1.1/5.1.2)
         aiDataConsent: v.optional(v.boolean()),
         aiDataConsentDate: v.optional(v.float64()),
-    }).index("by_user", ["userId"]),
+        // Referral code (unique per user)
+        referralCode: v.optional(v.string()),
+    })
+        .index("by_user", ["userId"])
+        .index("by_referralCode", ["referralCode"]),
 
     insights: defineTable({
         userId: v.string(),
@@ -754,4 +758,71 @@ export default defineSchema({
         .index("by_user", ["userId"])
         .index("by_trip_user", ["tripId", "userId"])
         .index("by_invite_token", ["inviteToken"]),
+
+    // ---- Engagement Features ----
+
+    // User Achievements — unlocked badges/milestones
+    userAchievements: defineTable({
+        userId: v.string(),
+        achievementId: v.string(),
+        unlockedAt: v.float64(),
+        seen: v.optional(v.boolean()),
+    })
+        .index("by_user", ["userId"])
+        .index("by_user_and_achievement", ["userId", "achievementId"]),
+
+    // Wishlist — saved dream destinations
+    wishlist: defineTable({
+        userId: v.string(),
+        destination: v.string(),
+        country: v.optional(v.string()),
+        notes: v.optional(v.string()),
+        targetDateRange: v.optional(v.object({
+            startMonth: v.float64(),
+            startYear: v.float64(),
+            endMonth: v.optional(v.float64()),
+            endYear: v.optional(v.float64()),
+        })),
+        priority: v.optional(v.union(
+            v.literal("dream"),
+            v.literal("planned"),
+            v.literal("someday")
+        )),
+        image: v.optional(v.object({
+            url: v.string(),
+            photographer: v.optional(v.string()),
+        })),
+        dealAlertEnabled: v.optional(v.boolean()),
+        addedAt: v.float64(),
+    })
+        .index("by_user", ["userId"]),
+
+    // User Streaks — daily check-in tracking
+    userStreaks: defineTable({
+        userId: v.string(),
+        currentStreak: v.float64(),
+        longestStreak: v.float64(),
+        lastCheckInDate: v.string(), // "YYYY-MM-DD"
+        streakShieldUsedAt: v.optional(v.float64()),
+        totalCheckIns: v.float64(),
+    })
+        .index("by_user", ["userId"]),
+
+    // Referrals — invite friends reward system
+    referrals: defineTable({
+        referrerId: v.string(),
+        referredUserId: v.optional(v.string()),
+        referralCode: v.string(),
+        status: v.union(
+            v.literal("pending"),
+            v.literal("completed"),
+            v.literal("rewarded")
+        ),
+        rewardType: v.optional(v.string()),
+        createdAt: v.float64(),
+        completedAt: v.optional(v.float64()),
+    })
+        .index("by_referrer", ["referrerId"])
+        .index("by_code", ["referralCode"])
+        .index("by_referred_user", ["referredUserId"]),
 });

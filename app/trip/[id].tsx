@@ -1898,11 +1898,6 @@ export default function TripDetails() {
                         }}
                     >
                         <Ionicons name="people-outline" size={20} color="#1A1A1A" />
-                        {collaborators && collaborators.length > 0 && (
-                            <View style={{ position: 'absolute', top: -4, right: -4, backgroundColor: colors.primary, borderRadius: 8, minWidth: 16, height: 16, justifyContent: 'center', alignItems: 'center' }}>
-                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#000' }}>{collaborators.length}</Text>
-                            </View>
-                        )}
                     </TouchableOpacity>
                     <View style={[styles.aiBadge, { backgroundColor: 'rgba(255,255,255,0.9)' }]}>
                         <Ionicons name="sparkles" size={12} color="#FFE500" />

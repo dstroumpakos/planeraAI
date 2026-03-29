@@ -1,63 +1,23 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Switch, Platform, Alert, ActivityIndicator, KeyboardAvoidingView, Modal, StatusBar } from "react-native";
+﻿import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Platform, Alert, ActivityIndicator, KeyboardAvoidingView, StatusBar } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
-import { useState, useEffect } from "react";
-import { INTERESTS, COUNTRIES } from "@/lib/data";
+import { useState } from "react";
+import { INTERESTS } from "@/lib/data";
 import { AIRPORTS } from "@/lib/airports";
 import * as Haptics from "expo-haptics";
 import { useToken } from "@/lib/useAuthenticatedMutation";
 import { useTranslation } from "react-i18next";
 
-type OnboardingStep = "welcome" | "traveler-choice" | "my-profile" | "add-travelers" | "preferences";
-type TravelerChoice = "just-me" | "me-others" | "skip-profile";
-
-interface TravelerForm {
-  firstName: string;
-  lastName: string;
-  dateOfBirth: string;
-  gender: "male" | "female" | "";
-  passportNumber: string;
-  passportIssuingCountry: string;
-  passportExpiryDate: string;
-  email: string;
-  phoneCountryCode: string;
-  phoneNumber: string;
-}
-
-const emptyForm: TravelerForm = {
-  firstName: "",
-  lastName: "",
-  dateOfBirth: "",
-  gender: "",
-  passportNumber: "",
-  passportIssuingCountry: "",
-  passportExpiryDate: "",
-  email: "",
-  phoneCountryCode: "+1",
-  phoneNumber: "",
-};
+type OnboardingStep = "welcome" | "preferences" | "referral";
 
 export default function Onboarding() {
   const router = useRouter();
   const { t } = useTranslation();
-  const [step, setStep] = useState<OnboardingStep>("preferences");
-  const [travelerChoice, setTravelerChoice] = useState<TravelerChoice>("just-me");
-  const [myProfile, setMyProfile] = useState<TravelerForm>(emptyForm);
+  const [step, setStep] = useState<OnboardingStep>("welcome");
   const [saving, setSaving] = useState(false);
-  const [showCountryPicker, setShowCountryPicker] = useState(false);
-  const [showGenderPicker, setShowGenderPicker] = useState(false);
-  const [countrySearch, setCountrySearch] = useState("");
-  
-  // Additional travelers
-  const [additionalTravelers, setAdditionalTravelers] = useState<TravelerForm[]>([]);
-  const [travelerForm, setTravelerForm] = useState<TravelerForm>(emptyForm);
-  const [showTravelerModal, setShowTravelerModal] = useState(false);
-  const [travelerCountrySearch, setTravelerCountrySearch] = useState("");
-  const [showTravelerCountryPicker, setShowTravelerCountryPicker] = useState(false);
-  const [showTravelerGenderPicker, setShowTravelerGenderPicker] = useState(false);
   
   // Travel preferences
   const [homeAirport, setHomeAirport] = useState("");
@@ -67,21 +27,20 @@ export default function Onboarding() {
   const [skipFlights, setSkipFlights] = useState(false);
   const [skipHotels, setSkipHotels] = useState(false);
   
-  // Track if user skipped profile creation
-  const [skippedProfile, setSkippedProfile] = useState(false);
+  // Referral code
+  const [referralCode, setReferralCode] = useState("");
+  const [referralApplying, setReferralApplying] = useState(false);
+  const [referralResult, setReferralResult] = useState<{ success: boolean; reason?: string } | null>(null);
   
   // Airport autocomplete
   const [showAirportSuggestions, setShowAirportSuggestions] = useState(false);
   const [airportSuggestions, setAirportSuggestions] = useState<typeof AIRPORTS>([]);
   
   // Mutations
-  const createTraveler = useMutation(api.travelers.create);
   const saveTravelPreferences = useMutation(api.users.saveTravelPreferences);
   const completeOnboarding = useMutation(api.users.completeOnboarding);
+  const applyReferral = useMutation(api.referrals.applyReferralCode);
   const { token } = useToken();
-  
-  // Query existing travelers
-  const existingTravelers = useQuery(api.travelers.list as any, token ? { token } : "skip");
 
   const hapticFeedback = () => {
     if (Platform.OS !== "web") {
@@ -90,29 +49,17 @@ export default function Onboarding() {
   };
 
   const getStepNumber = (): number => {
-    // Steps 1 and 2 are hidden due to disabled features
-    // Only preferences step is shown now
-    return 1;
+    switch (step) {
+      case "welcome": return 1;
+      case "preferences": return 2;
+      case "referral": return 3;
+      default: return 1;
+    }
   };
 
   const getTotalSteps = (): number => {
-    // Only preferences step is active
-    return 1;
+    return 3; // welcome, preferences, referral
   };
-
-  const getCountryName = (code: string): string => {
-    return COUNTRIES.find(c => c.code === code)?.name || code;
-  };
-
-  const filteredCountries = COUNTRIES.filter(country =>
-    country.name.toLowerCase().includes(countrySearch.toLowerCase()) ||
-    country.code.toLowerCase().includes(countrySearch.toLowerCase())
-  );
-
-  const filteredTravelerCountries = COUNTRIES.filter(country =>
-    country.name.toLowerCase().includes(travelerCountrySearch.toLowerCase()) ||
-    country.code.toLowerCase().includes(travelerCountrySearch.toLowerCase())
-  );
 
   const searchAirports = (query: string) => {
     if (!query || query.length < 2) {
@@ -138,122 +85,6 @@ export default function Onboarding() {
     setShowAirportSuggestions(false);
     setAirportSuggestions([]);
     hapticFeedback();
-  };
-
-  const validateProfileForm = (form: TravelerForm): string | null => {
-    if (!form.firstName.trim()) return t('onboarding.firstNameRequired');
-    if (!form.lastName.trim()) return t('onboarding.lastNameRequired');
-    if (!form.dateOfBirth) return t('onboarding.dobRequired');
-    if (!form.gender) return t('onboarding.genderRequired');
-    if (!form.passportNumber.trim()) return t('onboarding.passportRequired');
-    if (!form.passportIssuingCountry) return t('onboarding.passportCountryRequired');
-    if (!form.passportExpiryDate) return t('onboarding.passportExpiryRequired');
-
-    const dobRegex = /^\d{4}-\d{2}-\d{2}$/;
-    if (!dobRegex.test(form.dateOfBirth)) return t('onboarding.dobFormat');
-    if (!dobRegex.test(form.passportExpiryDate)) return t('onboarding.passportExpiryFormat');
-
-    const expiryDate = new Date(form.passportExpiryDate);
-    const today = new Date();
-    if (expiryDate < today) return t('onboarding.passportExpired');
-
-    const dob = new Date(form.dateOfBirth);
-    const minDate = new Date();
-    minDate.setFullYear(minDate.getFullYear() - 120);
-    if (dob < minDate || dob > today) return t('onboarding.invalidDob');
-
-    return null;
-  };
-
-  const handleSaveMyProfile = async () => {
-    const error = validateProfileForm(myProfile);
-    if (error) {
-      if (Platform.OS !== "web") {
-        Alert.alert(t('onboarding.missingInfo'), error);
-      } else {
-        alert(error);
-      }
-      return;
-    }
-
-    setSaving(true);
-    try {
-      await createTraveler({
-        token: token || "",
-        firstName: myProfile.firstName.trim(),
-        lastName: myProfile.lastName.trim(),
-        dateOfBirth: myProfile.dateOfBirth,
-        gender: myProfile.gender as "male" | "female",
-        passportNumber: myProfile.passportNumber.trim(),
-        passportIssuingCountry: myProfile.passportIssuingCountry,
-        passportExpiryDate: myProfile.passportExpiryDate,
-        email: myProfile.email.trim() || undefined,
-        phoneCountryCode: myProfile.phoneCountryCode.trim() || undefined,
-        phoneNumber: myProfile.phoneNumber.trim() || undefined,
-        isDefault: true,
-      });
-
-      hapticFeedback();
-      
-      if (travelerChoice === "me-others") {
-        setStep("add-travelers");
-      } else {
-        setStep("preferences");
-      }
-    } catch (error) {
-      console.error("Error saving profile:", error);
-      if (Platform.OS !== "web") {
-        Alert.alert(t('common.error'), t('onboarding.failedSaveProfile'));
-      } else {
-        alert(t('onboarding.failedSaveProfile'));
-      }
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleAddTraveler = async () => {
-    const error = validateProfileForm(travelerForm);
-    if (error) {
-      if (Platform.OS !== "web") {
-        Alert.alert(t('onboarding.missingInfo'), error);
-      } else {
-        alert(error);
-      }
-      return;
-    }
-
-    setSaving(true);
-    try {
-      await createTraveler({
-        token: token || "",
-        firstName: travelerForm.firstName.trim(),
-        lastName: travelerForm.lastName.trim(),
-        dateOfBirth: travelerForm.dateOfBirth,
-        gender: travelerForm.gender as "male" | "female",
-        passportNumber: travelerForm.passportNumber.trim(),
-        passportIssuingCountry: travelerForm.passportIssuingCountry,
-        passportExpiryDate: travelerForm.passportExpiryDate,
-        email: travelerForm.email.trim() || undefined,
-        phoneCountryCode: travelerForm.phoneCountryCode.trim() || undefined,
-        phoneNumber: travelerForm.phoneNumber.trim() || undefined,
-        isDefault: false,
-      });
-
-      setAdditionalTravelers([...additionalTravelers, travelerForm]);
-      setTravelerForm(emptyForm);
-      setShowTravelerModal(false);
-      hapticFeedback();
-    } catch (error) {
-      console.error("Error adding traveler:", error);
-      if (Platform.OS !== "web") {
-        Alert.alert(t('common.error'), t('onboarding.failedAddTraveler'));
-      } else {
-        alert(t('onboarding.failedAddTraveler'));
-      }
-    } finally {
-      setSaving(false);
-    }
   };
 
   const toggleInterest = (interest: string) => {
@@ -286,17 +117,48 @@ export default function Onboarding() {
         skipHotels,
       });
 
-      await completeOnboarding({ token: token || "" });
-
       hapticFeedback();
-      router.replace("/(tabs)");
+      setStep("referral");
     } catch (error) {
-      console.error("Error completing onboarding:", error);
+      console.error("Error saving preferences:", error);
       if (Platform.OS !== "web") {
         Alert.alert(t('common.error'), t('onboarding.failedSavePreferences'));
       } else {
         alert(t('onboarding.failedSavePreferences'));
       }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleApplyReferral = async () => {
+    if (!referralCode.trim()) return;
+    setReferralApplying(true);
+    setReferralResult(null);
+    try {
+      const result = await applyReferral({
+        token: token || "",
+        code: referralCode.trim(),
+      });
+      setReferralResult(result);
+      if (result.success) {
+        hapticFeedback();
+      }
+    } catch (error) {
+      setReferralResult({ success: false, reason: "error" });
+    } finally {
+      setReferralApplying(false);
+    }
+  };
+
+  const handleCompleteOnboarding = async () => {
+    setSaving(true);
+    try {
+      await completeOnboarding({ token: token || "" });
+      hapticFeedback();
+      router.replace("/(tabs)");
+    } catch (error) {
+      console.error("Error completing onboarding:", error);
     } finally {
       setSaving(false);
     }
@@ -354,13 +216,13 @@ export default function Onboarding() {
           <View style={styles.featuresList}>
             <View style={styles.featureItem}>
               <View style={styles.featureIcon}>
-                <Ionicons name="person-outline" size={18} color="#1A1A1A" />
+                <Ionicons name="compass-outline" size={18} color="#1A1A1A" />
               </View>
               <Text style={styles.featureText}>{t('onboarding.createTravelerProfile')}</Text>
             </View>
             <View style={styles.featureItem}>
               <View style={styles.featureIcon}>
-                <Ionicons name="settings-outline" size={18} color="#1A1A1A" />
+                <Ionicons name="options-outline" size={18} color="#1A1A1A" />
               </View>
               <Text style={styles.featureText}>{t('onboarding.setTravelPreferences')}</Text>
             </View>
@@ -376,721 +238,13 @@ export default function Onboarding() {
             style={styles.primaryButton}
             onPress={() => {
               hapticFeedback();
-              setStep("traveler-choice");
+              setStep("preferences");
             }}
           >
             <Text style={styles.primaryButtonText}>{t('onboarding.startSetup')}</Text>
             <Ionicons name="arrow-forward" size={20} color="#FFF" />
           </TouchableOpacity>
         </View>
-      </SafeAreaView>
-      </>
-    );
-  }
-
-  // TRAVELER CHOICE SCREEN
-  if (step === "traveler-choice") {
-    return (
-      <>
-        <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={() => setStep("welcome")}>
-            <Ionicons name="arrow-back" size={24} color="#1A1A1A" />
-          </TouchableOpacity>
-          <ProgressIndicator />
-          <View style={{ width: 40 }} />
-        </View>
-        
-        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-          <Text style={styles.stepTitle}>{t('onboarding.whosTraveling')}</Text>
-          <Text style={styles.stepSubtitle}>
-            {t('onboarding.helpsSetupProfiles')}
-          </Text>
-          
-          <TouchableOpacity
-            style={[styles.choiceCard, travelerChoice === "just-me" && styles.choiceCardActive]}
-            onPress={() => {
-              hapticFeedback();
-              setTravelerChoice("just-me");
-              setSkippedProfile(false);
-            }}
-          >
-            <View style={styles.choiceLeft}>
-              <View style={[styles.choiceIconContainer, travelerChoice === "just-me" && styles.choiceIconContainerActive]}>
-                <Ionicons name="person" size={28} color={travelerChoice === "just-me" ? "#1A1A1A" : "#6B7280"} />
-              </View>
-              <View style={styles.choiceTextContainer}>
-                <View style={styles.choiceTitleRow}>
-                  <Text style={styles.choiceTitle}>{t('onboarding.justMe')}</Text>
-                  <View style={styles.recommendedBadge}>
-                    <Text style={styles.recommendedText}>{t('common.recommended')}</Text>
-                  </View>
-                </View>
-                <Text style={styles.choiceHelper}>{t('onboarding.createPersonalProfile')}</Text>
-              </View>
-            </View>
-            <View style={[styles.radioOuter, travelerChoice === "just-me" && styles.radioOuterActive]}>
-              {travelerChoice === "just-me" && <View style={styles.radioInner} />}
-            </View>
-          </TouchableOpacity>
-          
-          <TouchableOpacity
-            style={[styles.choiceCard, travelerChoice === "me-others" && styles.choiceCardActive]}
-            onPress={() => {
-              hapticFeedback();
-              setTravelerChoice("me-others");
-              setSkippedProfile(false);
-            }}
-          >
-            <View style={styles.choiceLeft}>
-              <View style={[styles.choiceIconContainer, travelerChoice === "me-others" && styles.choiceIconContainerActive]}>
-                <Ionicons name="people" size={28} color={travelerChoice === "me-others" ? "#1A1A1A" : "#6B7280"} />
-              </View>
-              <View style={styles.choiceTextContainer}>
-                <Text style={styles.choiceTitle}>{t('onboarding.mePlusOthers')}</Text>
-                <Text style={styles.choiceHelper}>{t('onboarding.addFamilyFriends')}</Text>
-              </View>
-            </View>
-            <View style={[styles.radioOuter, travelerChoice === "me-others" && styles.radioOuterActive]}>
-              {travelerChoice === "me-others" && <View style={styles.radioInner} />}
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.choiceCard, travelerChoice === "skip-profile" && styles.choiceCardActive]}
-            onPress={() => {
-              hapticFeedback();
-              setTravelerChoice("skip-profile");
-              setSkippedProfile(true);
-              // Auto-enable skip flights and hotels when skipping profile
-              setSkipFlights(true);
-              setSkipHotels(true);
-            }}
-          >
-            <View style={styles.choiceLeft}>
-              <View style={[styles.choiceIconContainer, travelerChoice === "skip-profile" && styles.choiceIconContainerActive]}>
-                <Ionicons name="flash" size={28} color={travelerChoice === "skip-profile" ? "#1A1A1A" : "#6B7280"} />
-              </View>
-              <View style={styles.choiceTextContainer}>
-                <Text style={styles.choiceTitle}>{t('onboarding.skipForNow')}</Text>
-                <Text style={styles.choiceHelper}>{t('onboarding.exploreWithoutBooking')}</Text>
-              </View>
-            </View>
-            <View style={[styles.radioOuter, travelerChoice === "skip-profile" && styles.radioOuterActive]}>
-              {travelerChoice === "skip-profile" && <View style={styles.radioInner} />}
-            </View>
-          </TouchableOpacity>
-
-          {travelerChoice === "skip-profile" && (
-            <View style={styles.warningCard}>
-              <Ionicons name="information-circle" size={20} color="#92400E" />
-              <Text style={styles.warningText}>
-                {t('onboarding.withoutTravelerWarning')}
-              </Text>
-            </View>
-          )}
-
-          <View style={styles.noteCard}>
-            <Ionicons name="bulb-outline" size={20} color="#92400E" />
-            <Text style={styles.noteText}>
-              {travelerChoice === "skip-profile" 
-                ? t('onboarding.canCreateAnytime')
-                : t('onboarding.alwaysCreateFirst')
-              }
-            </Text>
-          </View>
-        </ScrollView>
-        
-        <View style={styles.footer}>
-          <TouchableOpacity
-            style={styles.primaryButton}
-            onPress={() => {
-              hapticFeedback();
-              if (travelerChoice === "skip-profile") {
-                setStep("preferences");
-              } else {
-                setStep("my-profile");
-              }
-            }}
-          >
-            <Text style={styles.primaryButtonText}>{t('common.continue')}</Text>
-            <Ionicons name="arrow-forward" size={20} color="#FFF" />
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-      </>
-    );
-  }
-
-  // MY PROFILE SCREEN
-  if (step === "my-profile") {
-    return (
-      <>
-        <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
-        <SafeAreaView style={styles.container}>
-        <KeyboardAvoidingView 
-          style={{ flex: 1 }} 
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-        >
-          <View style={styles.header}>
-            <TouchableOpacity style={styles.backButton} onPress={() => setStep("traveler-choice")}>
-              <Ionicons name="arrow-back" size={24} color="#1A1A1A" />
-            </TouchableOpacity>
-            <ProgressIndicator />
-            <View style={{ width: 40 }} />
-          </View>
-          
-          <ScrollView style={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            <View style={styles.profileHeader}>
-              <View style={styles.profileAvatarLarge}>
-                <Ionicons name="person" size={32} color="#1A1A1A" />
-              </View>
-              <Text style={styles.stepTitle}>{t('onboarding.myTravelerProfile')}</Text>
-              <Text style={styles.stepSubtitle}>{t('onboarding.enterPassportDetails')}</Text>
-            </View>
-            
-            {/* Personal Information */}
-            <View style={styles.formSection}>
-              <Text style={styles.sectionLabel}>{t('onboarding.personalInformation')}</Text>
-              
-              <View style={styles.inputRow}>
-                <View style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
-                  <Text style={styles.inputLabel}>{t('onboarding.firstName')} <Text style={styles.required}>*</Text></Text>
-                  <TextInput
-                    style={styles.input}
-                    value={myProfile.firstName}
-                    onChangeText={(text) => setMyProfile({ ...myProfile, firstName: text })}
-                    placeholder="John"
-                    placeholderTextColor="#9B9B9B"
-                  />
-                </View>
-                <View style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
-                  <Text style={styles.inputLabel}>{t('onboarding.lastName')} <Text style={styles.required}>*</Text></Text>
-                  <TextInput
-                    style={styles.input}
-                    value={myProfile.lastName}
-                    onChangeText={(text) => setMyProfile({ ...myProfile, lastName: text })}
-                    placeholder="Smith"
-                    placeholderTextColor="#9B9B9B"
-                  />
-                </View>
-              </View>
-              
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>{t('onboarding.dateOfBirth')} <Text style={styles.required}>*</Text></Text>
-                <TextInput
-                  style={styles.input}
-                  value={myProfile.dateOfBirth}
-                  onChangeText={(text) => setMyProfile({ ...myProfile, dateOfBirth: text })}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor="#9B9B9B"
-                  keyboardType="numbers-and-punctuation"
-                />
-              </View>
-              
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>{t('onboarding.gender')} <Text style={styles.required}>*</Text></Text>
-                <View style={styles.genderRow}>
-                  <TouchableOpacity
-                    style={[styles.genderOption, myProfile.gender === "male" && styles.genderOptionActive]}
-                    onPress={() => {
-                      hapticFeedback();
-                      setMyProfile({ ...myProfile, gender: "male" });
-                    }}
-                  >
-                    <Ionicons name="male" size={20} color={myProfile.gender === "male" ? "#1A1A1A" : "#6B7280"} />
-                    <Text style={[styles.genderText, myProfile.gender === "male" && styles.genderTextActive]}>{t('onboarding.male')}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.genderOption, myProfile.gender === "female" && styles.genderOptionActive]}
-                    onPress={() => {
-                      hapticFeedback();
-                      setMyProfile({ ...myProfile, gender: "female" });
-                    }}
-                  >
-                    <Ionicons name="female" size={20} color={myProfile.gender === "female" ? "#1A1A1A" : "#6B7280"} />
-                    <Text style={[styles.genderText, myProfile.gender === "female" && styles.genderTextActive]}>{t('onboarding.female')}</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-            
-            {/* Passport Information */}
-            <View style={styles.formSection}>
-              <Text style={styles.sectionLabel}>{t('onboarding.passportInformation')}</Text>
-              
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>{t('onboarding.passportNumber')} <Text style={styles.required}>*</Text></Text>
-                <TextInput
-                  style={styles.input}
-                  value={myProfile.passportNumber}
-                  onChangeText={(text) => setMyProfile({ ...myProfile, passportNumber: text.toUpperCase() })}
-                  placeholder="AB1234567"
-                  placeholderTextColor="#9B9B9B"
-                  autoCapitalize="characters"
-                />
-              </View>
-              
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>{t('onboarding.issuingCountry')} <Text style={styles.required}>*</Text></Text>
-                <TouchableOpacity
-                  style={styles.selectInput}
-                  onPress={() => setShowCountryPicker(true)}
-                >
-                  <View style={styles.selectInputInner}>
-                    <Ionicons name="flag-outline" size={20} color="#6B7280" />
-                    <Text style={myProfile.passportIssuingCountry ? styles.selectValue : styles.selectPlaceholder}>
-                      {myProfile.passportIssuingCountry ? getCountryName(myProfile.passportIssuingCountry) : t('onboarding.selectCountry')}
-                    </Text>
-                  </View>
-                  <Ionicons name="chevron-down" size={20} color="#6B7280" />
-                </TouchableOpacity>
-              </View>
-              
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>{t('onboarding.expiryDate')} <Text style={styles.required}>*</Text></Text>
-                <TextInput
-                  style={styles.input}
-                  value={myProfile.passportExpiryDate}
-                  onChangeText={(text) => setMyProfile({ ...myProfile, passportExpiryDate: text })}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor="#9B9B9B"
-                  keyboardType="numbers-and-punctuation"
-                />
-              </View>
-            </View>
-            
-            {/* Contact Information */}
-            <View style={styles.formSection}>
-              <Text style={styles.sectionLabel}>{t('onboarding.contactOptional')}</Text>
-              
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>{t('auth.email')}</Text>
-                <TextInput
-                  style={styles.input}
-                  value={myProfile.email}
-                  onChangeText={(text) => setMyProfile({ ...myProfile, email: text })}
-                  placeholder="email@example.com"
-                  placeholderTextColor="#9B9B9B"
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                />
-              </View>
-              
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>{t('onboarding.phoneNumber')}</Text>
-                <View style={styles.phoneInputRow}>
-                  <TextInput
-                    style={styles.phoneCountryCode}
-                    value={myProfile.phoneCountryCode}
-                    onChangeText={(text) => setMyProfile({ ...myProfile, phoneCountryCode: text })}
-                    placeholder="+1"
-                    placeholderTextColor="#9B9B9B"
-                    keyboardType="phone-pad"
-                    maxLength={5}
-                  />
-                  <TextInput
-                    style={styles.phoneNumberInput}
-                    value={myProfile.phoneNumber}
-                    onChangeText={(text) => setMyProfile({ ...myProfile, phoneNumber: text })}
-                    placeholder="555 123 4567"
-                    placeholderTextColor="#9B9B9B"
-                    keyboardType="phone-pad"
-                  />
-                </View>
-              </View>
-            </View>
-          </ScrollView>
-          
-          <View style={styles.footer}>
-            <TouchableOpacity
-              style={[styles.primaryButton, saving && styles.primaryButtonDisabled]}
-              onPress={handleSaveMyProfile}
-              disabled={saving}
-            >
-              {saving ? (
-                <ActivityIndicator color="#FFF" />
-              ) : (
-                <>
-                  <Text style={styles.primaryButtonText}>{t('onboarding.saveAndContinue')}</Text>
-                  <Ionicons name="arrow-forward" size={20} color="#FFF" />
-                </>
-              )}
-            </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
-        
-        {/* Country Picker Modal */}
-        <Modal
-          visible={showCountryPicker}
-          transparent
-          animationType="fade"
-          onRequestClose={() => setShowCountryPicker(false)}
-        >
-          <TouchableOpacity
-            style={styles.pickerOverlay}
-            activeOpacity={1}
-            onPress={() => setShowCountryPicker(false)}
-          >
-            <View style={styles.pickerContainer} onStartShouldSetResponder={() => true}>
-              <View style={styles.pickerHeader}>
-                <Text style={styles.pickerTitle}>{t('onboarding.selectCountryTitle')}</Text>
-                <TouchableOpacity onPress={() => setShowCountryPicker(false)}>
-                  <Ionicons name="close" size={24} color="#1A1A1A" />
-                </TouchableOpacity>
-              </View>
-              <View style={styles.searchInputContainer}>
-                <Ionicons name="search" size={20} color="#6B7280" />
-                <TextInput
-                  style={styles.searchInput}
-                  placeholder={t('onboarding.searchCountries')}
-                  value={countrySearch}
-                  onChangeText={setCountrySearch}
-                  placeholderTextColor="#9B9B9B"
-                  autoFocus
-                />
-              </View>
-              <ScrollView style={styles.pickerList} showsVerticalScrollIndicator={false}>
-                {filteredCountries.map((country) => (
-                  <TouchableOpacity
-                    key={country.code}
-                    style={[styles.pickerOption, myProfile.passportIssuingCountry === country.code && styles.pickerOptionActive]}
-                    onPress={() => {
-                      setMyProfile({ ...myProfile, passportIssuingCountry: country.code });
-                      setShowCountryPicker(false);
-                      setCountrySearch("");
-                      hapticFeedback();
-                    }}
-                  >
-                    <Text style={[styles.pickerOptionText, myProfile.passportIssuingCountry === country.code && styles.pickerOptionTextActive]}>
-                      {country.name}
-                    </Text>
-                    {myProfile.passportIssuingCountry === country.code && (
-                      <Ionicons name="checkmark-circle" size={22} color="#FFE500" />
-                    )}
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </View>
-          </TouchableOpacity>
-        </Modal>
-      </SafeAreaView>
-      </>
-    );
-  }
-
-  // ADD TRAVELERS SCREEN
-  if (step === "add-travelers") {
-    return (
-      <>
-        <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
-        <SafeAreaView style={styles.container}>
-        <KeyboardAvoidingView 
-          style={{ flex: 1 }} 
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-        >
-          <View style={styles.header}>
-            <TouchableOpacity style={styles.backButton} onPress={() => setStep("my-profile")}>
-              <Ionicons name="arrow-back" size={24} color="#1A1A1A" />
-            </TouchableOpacity>
-            <ProgressIndicator />
-            <View style={{ width: 40 }} />
-          </View>
-          
-          <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-            <Text style={styles.stepTitle}>{t('onboarding.addTravelers')}</Text>
-            <Text style={styles.stepSubtitle}>
-              {t('onboarding.addFamilyOrFriends')}
-            </Text>
-            
-            {/* Primary traveler (locked) */}
-            <View style={styles.travelerCard}>
-              <View style={styles.travelerCardLeft}>
-                <View style={styles.travelerAvatar}>
-                  <Text style={styles.travelerAvatarText}>
-                    {myProfile.firstName[0]}{myProfile.lastName[0]}
-                  </Text>
-                </View>
-                <View style={styles.travelerCardInfo}>
-                  <Text style={styles.travelerName}>{myProfile.firstName} {myProfile.lastName}</Text>
-                  <Text style={styles.travelerMeta}>{t('onboarding.primaryTraveler')}</Text>
-                </View>
-              </View>
-              <View style={styles.primaryTravelerBadge}>
-                <Ionicons name="star" size={14} color="#1A1A1A" />
-                <Text style={styles.primaryTravelerBadgeText}>{t('onboarding.me')}</Text>
-              </View>
-            </View>
-            
-            {/* Additional travelers */}
-            {additionalTravelers.map((traveler, index) => (
-              <View key={index} style={styles.travelerCard}>
-                <View style={styles.travelerCardLeft}>
-                  <View style={[styles.travelerAvatar, styles.travelerAvatarSecondary]}>
-                    <Text style={styles.travelerAvatarText}>
-                      {traveler.firstName[0]}{traveler.lastName[0]}
-                    </Text>
-                  </View>
-                  <View style={styles.travelerCardInfo}>
-                    <Text style={styles.travelerName}>{traveler.firstName} {traveler.lastName}</Text>
-                    <Text style={styles.travelerMeta}>{t('onboarding.additionalTraveler')}</Text>
-                  </View>
-                </View>
-                <Ionicons name="checkmark-circle" size={24} color="#22C55E" />
-              </View>
-            ))}
-            
-            {/* Add another traveler button */}
-            <TouchableOpacity
-              style={styles.addTravelerButton}
-              onPress={() => {
-                hapticFeedback();
-                setTravelerForm(emptyForm);
-                setShowTravelerModal(true);
-              }}
-            >
-              <View style={styles.addTravelerIconContainer}>
-                <Ionicons name="add" size={24} color="#1A1A1A" />
-              </View>
-              <Text style={styles.addTravelerText}>{t('onboarding.addAnotherTraveler')}</Text>
-            </TouchableOpacity>
-            
-            <View style={{ height: 100 }} />
-          </ScrollView>
-          
-          <View style={styles.footer}>
-            <TouchableOpacity
-              style={styles.primaryButton}
-              onPress={() => {
-                hapticFeedback();
-                setStep("preferences");
-              }}
-            >
-              <Text style={styles.primaryButtonText}>{t('onboarding.continueToPreferences')}</Text>
-              <Ionicons name="arrow-forward" size={20} color="#FFF" />
-            </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
-        
-        {/* Add Traveler Modal */}
-        <Modal
-          visible={showTravelerModal}
-          animationType="slide"
-          presentationStyle="pageSheet"
-          onRequestClose={() => setShowTravelerModal(false)}
-        >
-          <SafeAreaView style={styles.modalContainer}>
-            <View style={styles.modalHeader}>
-              <TouchableOpacity onPress={() => setShowTravelerModal(false)}>
-                <Text style={styles.modalCancel}>{t('common.cancel')}</Text>
-              </TouchableOpacity>
-              <Text style={styles.modalTitle}>{t('onboarding.addTraveler')}</Text>
-              <TouchableOpacity onPress={handleAddTraveler} disabled={saving}>
-                {saving ? (
-                  <ActivityIndicator size="small" color="#FFE500" />
-                ) : (
-                  <Text style={styles.modalSave}>{t('common.save')}</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-            
-            <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-              <Text style={styles.sectionLabel}>{t('onboarding.personalInformation')}</Text>
-              
-              <View style={styles.inputRow}>
-                <View style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
-                  <Text style={styles.inputLabel}>{t('onboarding.firstName')} <Text style={styles.required}>*</Text></Text>
-                  <TextInput
-                    style={styles.input}
-                    value={travelerForm.firstName}
-                    onChangeText={(text) => setTravelerForm({ ...travelerForm, firstName: text })}
-                    placeholder="John"
-                    placeholderTextColor="#9B9B9B"
-                  />
-                </View>
-                <View style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
-                  <Text style={styles.inputLabel}>{t('onboarding.lastName')} <Text style={styles.required}>*</Text></Text>
-                  <TextInput
-                    style={styles.input}
-                    value={travelerForm.lastName}
-                    onChangeText={(text) => setTravelerForm({ ...travelerForm, lastName: text })}
-                    placeholder="Smith"
-                    placeholderTextColor="#9B9B9B"
-                  />
-                </View>
-              </View>
-              
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>{t('onboarding.dateOfBirth')} <Text style={styles.required}>*</Text></Text>
-                <TextInput
-                  style={styles.input}
-                  value={travelerForm.dateOfBirth}
-                  onChangeText={(text) => setTravelerForm({ ...travelerForm, dateOfBirth: text })}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor="#9B9B9B"
-                  keyboardType="numbers-and-punctuation"
-                />
-              </View>
-              
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>{t('onboarding.gender')} <Text style={styles.required}>*</Text></Text>
-                <View style={styles.genderRow}>
-                  <TouchableOpacity
-                    style={[styles.genderOption, travelerForm.gender === "male" && styles.genderOptionActive]}
-                    onPress={() => setTravelerForm({ ...travelerForm, gender: "male" })}
-                  >
-                    <Ionicons name="male" size={20} color={travelerForm.gender === "male" ? "#1A1A1A" : "#6B7280"} />
-                    <Text style={[styles.genderText, travelerForm.gender === "male" && styles.genderTextActive]}>{t('onboarding.male')}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[styles.genderOption, travelerForm.gender === "female" && styles.genderOptionActive]}
-                    onPress={() => setTravelerForm({ ...travelerForm, gender: "female" })}
-                  >
-                    <Ionicons name="female" size={20} color={travelerForm.gender === "female" ? "#1A1A1A" : "#6B7280"} />
-                    <Text style={[styles.genderText, travelerForm.gender === "female" && styles.genderTextActive]}>{t('onboarding.female')}</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-              
-              <Text style={[styles.sectionLabel, { marginTop: 24 }]}>{t('onboarding.passportInformation')}</Text>
-              
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>{t('onboarding.passportNumber')} <Text style={styles.required}>*</Text></Text>
-                <TextInput
-                  style={styles.input}
-                  value={travelerForm.passportNumber}
-                  onChangeText={(text) => setTravelerForm({ ...travelerForm, passportNumber: text.toUpperCase() })}
-                  placeholder="AB1234567"
-                  placeholderTextColor="#9B9B9B"
-                  autoCapitalize="characters"
-                />
-              </View>
-              
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>{t('onboarding.issuingCountry')} <Text style={styles.required}>*</Text></Text>
-                <TouchableOpacity
-                  style={styles.selectInput}
-                  onPress={() => setShowTravelerCountryPicker(true)}
-                >
-                  <View style={styles.selectInputInner}>
-                    <Ionicons name="flag-outline" size={20} color="#6B7280" />
-                    <Text style={travelerForm.passportIssuingCountry ? styles.selectValue : styles.selectPlaceholder}>
-                      {travelerForm.passportIssuingCountry ? getCountryName(travelerForm.passportIssuingCountry) : t('onboarding.selectCountry')}
-                    </Text>
-                  </View>
-                  <Ionicons name="chevron-down" size={20} color="#6B7280" />
-                </TouchableOpacity>
-              </View>
-              
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>{t('onboarding.expiryDate')} <Text style={styles.required}>*</Text></Text>
-                <TextInput
-                  style={styles.input}
-                  value={travelerForm.passportExpiryDate}
-                  onChangeText={(text) => setTravelerForm({ ...travelerForm, passportExpiryDate: text })}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor="#9B9B9B"
-                  keyboardType="numbers-and-punctuation"
-                />
-              </View>
-              
-              <Text style={[styles.sectionLabel, { marginTop: 24 }]}>{t('onboarding.contactOptional')}</Text>
-              
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>{t('auth.email')}</Text>
-                <TextInput
-                  style={styles.input}
-                  value={travelerForm.email}
-                  onChangeText={(text) => setTravelerForm({ ...travelerForm, email: text })}
-                  placeholder="email@example.com"
-                  placeholderTextColor="#9B9B9B"
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                />
-              </View>
-              
-              <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>{t('onboarding.phoneNumber')}</Text>
-                <View style={styles.phoneInputRow}>
-                  <TextInput
-                    style={styles.phoneCountryCode}
-                    value={travelerForm.phoneCountryCode}
-                    onChangeText={(text) => setTravelerForm({ ...travelerForm, phoneCountryCode: text })}
-                    placeholder="+1"
-                    placeholderTextColor="#9B9B9B"
-                    keyboardType="phone-pad"
-                    maxLength={5}
-                  />
-                  <TextInput
-                    style={styles.phoneNumberInput}
-                    value={travelerForm.phoneNumber}
-                    onChangeText={(text) => setTravelerForm({ ...travelerForm, phoneNumber: text })}
-                    placeholder="555 123 4567"
-                    placeholderTextColor="#9B9B9B"
-                    keyboardType="phone-pad"
-                  />
-                </View>
-              </View>
-              
-              <View style={{ height: 40 }} />
-            </ScrollView>
-            
-            {/* Country Picker for Traveler Modal */}
-            <Modal
-              visible={showTravelerCountryPicker}
-              transparent
-              animationType="fade"
-              onRequestClose={() => setShowTravelerCountryPicker(false)}
-            >
-              <TouchableOpacity
-                style={styles.pickerOverlay}
-                activeOpacity={1}
-                onPress={() => setShowTravelerCountryPicker(false)}
-              >
-                <View style={styles.pickerContainer} onStartShouldSetResponder={() => true}>
-                  <View style={styles.pickerHeader}>
-                    <Text style={styles.pickerTitle}>{t('onboarding.selectCountryTitle')}</Text>
-                    <TouchableOpacity onPress={() => setShowTravelerCountryPicker(false)}>
-                      <Ionicons name="close" size={24} color="#1A1A1A" />
-                    </TouchableOpacity>
-                  </View>
-                  <View style={styles.searchInputContainer}>
-                    <Ionicons name="search" size={20} color="#6B7280" />
-                    <TextInput
-                      style={styles.searchInput}
-                      placeholder={t('onboarding.searchCountries')}
-                      value={travelerCountrySearch}
-                      onChangeText={setTravelerCountrySearch}
-                      placeholderTextColor="#9B9B9B"
-                    />
-                  </View>
-                  <ScrollView style={styles.pickerList} showsVerticalScrollIndicator={false}>
-                    {filteredTravelerCountries.map((country) => (
-                      <TouchableOpacity
-                        key={country.code}
-                        style={[styles.pickerOption, travelerForm.passportIssuingCountry === country.code && styles.pickerOptionActive]}
-                        onPress={() => {
-                          setTravelerForm({ ...travelerForm, passportIssuingCountry: country.code });
-                          setShowTravelerCountryPicker(false);
-                          setTravelerCountrySearch("");
-                          hapticFeedback();
-                        }}
-                      >
-                        <Text style={[styles.pickerOptionText, travelerForm.passportIssuingCountry === country.code && styles.pickerOptionTextActive]}>
-                          {country.name}
-                        </Text>
-                        {travelerForm.passportIssuingCountry === country.code && (
-                          <Ionicons name="checkmark-circle" size={22} color="#FFE500" />
-                        )}
-                      </TouchableOpacity>
-                    ))}
-                  </ScrollView>
-                </View>
-              </TouchableOpacity>
-            </Modal>
-          </SafeAreaView>
-        </Modal>
       </SafeAreaView>
       </>
     );
@@ -1114,8 +268,9 @@ export default function Onboarding() {
           behavior={Platform.OS === "ios" ? "padding" : "height"}
         >
           <View style={styles.header}>
-            {/* Back button hidden - steps 1 and 2 disabled */}
-            <View style={{ width: 40 }} />
+            <TouchableOpacity style={styles.backButton} onPress={() => setStep("welcome")}>
+              <Ionicons name="arrow-back" size={24} color="#1A1A1A" />
+            </TouchableOpacity>
             <ProgressIndicator />
             <View style={{ width: 40 }} />
           </View>
@@ -1321,7 +476,7 @@ export default function Onboarding() {
           
           <View style={styles.footer}>
             <TouchableOpacity
-              style={[styles.primaryButton, styles.finishButton, saving && styles.primaryButtonDisabled]}
+              style={[styles.primaryButton, saving && styles.primaryButtonDisabled]}
               onPress={handleFinishOnboarding}
               disabled={saving}
             >
@@ -1329,14 +484,136 @@ export default function Onboarding() {
                 <ActivityIndicator color="#FFF" />
               ) : (
                 <>
-                  <Ionicons name="checkmark-circle" size={22} color="#FFF" />
-                  <Text style={styles.primaryButtonText}>{t('onboarding.saveAndGoHome')}</Text>
+                  <Text style={styles.primaryButtonText}>{t('onboarding.saveAndContinue')}</Text>
+                  <Ionicons name="arrow-forward" size={20} color="#FFF" />
                 </>
               )}
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
       </SafeAreaView>
+      </>
+    );
+  }
+
+  // REFERRAL CODE SCREEN
+  if (step === "referral") {
+    const getReferralMessage = () => {
+      if (!referralResult) return null;
+      if (referralResult.success) return { text: t('referrals.codeApplied'), type: 'success' as const };
+      switch (referralResult.reason) {
+        case 'already_used': return { text: t('referrals.alreadyUsed'), type: 'error' as const };
+        case 'code_not_found': return { text: t('referrals.codeNotFound'), type: 'error' as const };
+        case 'self_referral': return { text: t('referrals.selfReferral'), type: 'error' as const };
+        default: return { text: t('referrals.invalidCode'), type: 'error' as const };
+      }
+    };
+    const referralMessage = getReferralMessage();
+
+    return (
+      <>
+        <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
+        <SafeAreaView style={styles.container}>
+          <View style={styles.header}>
+            <TouchableOpacity style={styles.backButton} onPress={() => setStep("preferences")}>
+              <Ionicons name="arrow-back" size={24} color="#1A1A1A" />
+            </TouchableOpacity>
+            <ProgressIndicator />
+            <View style={{ width: 40 }} />
+          </View>
+
+          <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+            <View style={styles.preferencesHeader}>
+              <View style={styles.preferencesIconContainer}>
+                <Ionicons name="gift" size={28} color="#1A1A1A" />
+              </View>
+              <Text style={styles.stepTitle}>{t('onboarding.referralTitle')}</Text>
+              <Text style={styles.stepSubtitle}>
+                {t('onboarding.referralSubtitle')}
+              </Text>
+            </View>
+
+            <View style={styles.formSection}>
+              <Text style={styles.sectionLabel}>{t('onboarding.referralCodeLabel')}</Text>
+              <View style={styles.referralInputRow}>
+                <TextInput
+                  style={[styles.input, styles.referralInput]}
+                  placeholder={t('referrals.enterCode')}
+                  value={referralCode}
+                  onChangeText={(text) => {
+                    setReferralCode(text.toUpperCase());
+                    setReferralResult(null);
+                  }}
+                  placeholderTextColor="#9B9B9B"
+                  autoCapitalize="characters"
+                  maxLength={10}
+                />
+                <TouchableOpacity
+                  style={[styles.referralApplyButton, (!referralCode.trim() || referralApplying) && styles.primaryButtonDisabled]}
+                  onPress={handleApplyReferral}
+                  disabled={!referralCode.trim() || referralApplying || referralResult?.success === true}
+                >
+                  {referralApplying ? (
+                    <ActivityIndicator color="#1A1A1A" size="small" />
+                  ) : (
+                    <Text style={styles.referralApplyText}>{t('referrals.apply')}</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+
+              {referralMessage && (
+                <View style={[styles.referralFeedback, referralMessage.type === 'success' ? styles.referralSuccess : styles.referralError]}>
+                  <Ionicons
+                    name={referralMessage.type === 'success' ? 'checkmark-circle' : 'alert-circle'}
+                    size={18}
+                    color={referralMessage.type === 'success' ? '#16A34A' : '#DC2626'}
+                  />
+                  <Text style={[styles.referralFeedbackText, referralMessage.type === 'success' ? styles.referralSuccessText : styles.referralErrorText]}>
+                    {referralMessage.text}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            <View style={styles.infoCard}>
+              <View style={styles.infoIconContainer}>
+                <Ionicons name="sparkles" size={22} color="#1A1A1A" />
+              </View>
+              <View style={styles.infoTextContainer}>
+                <Text style={styles.infoTitle}>{t('onboarding.referralBenefitTitle')}</Text>
+                <Text style={styles.infoText}>
+                  {t('onboarding.referralBenefitDesc')}
+                </Text>
+              </View>
+            </View>
+          </ScrollView>
+
+          <View style={styles.footer}>
+            <TouchableOpacity
+              style={[styles.primaryButton, styles.finishButton, saving && styles.primaryButtonDisabled]}
+              onPress={handleCompleteOnboarding}
+              disabled={saving}
+            >
+              {saving ? (
+                <ActivityIndicator color="#FFF" />
+              ) : (
+                <>
+                  <Ionicons name="checkmark-circle" size={22} color="#FFF" />
+                  <Text style={styles.primaryButtonText}>{t('onboarding.letsGo')}</Text>
+                </>
+              )}
+            </TouchableOpacity>
+            {!referralCode.trim() && !referralResult?.success && (
+              <TouchableOpacity
+                style={styles.skipButton}
+                onPress={handleCompleteOnboarding}
+                disabled={saving}
+              >
+                <Text style={styles.skipButtonText}>{t('onboarding.skipReferral')}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </SafeAreaView>
       </>
     );
   }
@@ -2197,5 +1474,66 @@ const styles = StyleSheet.create({
   },
   toggleDescriptionLocked: {
     color: "#CBD5E1",
+  },
+  
+  // Referral screen
+  referralInputRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  referralInput: {
+    flex: 1,
+    letterSpacing: 2,
+    fontWeight: "700",
+    fontSize: 18,
+    textAlign: "center",
+  },
+  referralApplyButton: {
+    backgroundColor: "#FFE500",
+    borderRadius: 12,
+    paddingHorizontal: 20,
+    justifyContent: "center",
+    alignItems: "center",
+    minWidth: 80,
+  },
+  referralApplyText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#1A1A1A",
+  },
+  referralFeedback: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 12,
+    padding: 12,
+    borderRadius: 10,
+  },
+  referralSuccess: {
+    backgroundColor: "#F0FDF4",
+  },
+  referralError: {
+    backgroundColor: "#FEF2F2",
+  },
+  referralFeedbackText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  referralSuccessText: {
+    color: "#16A34A",
+  },
+  referralErrorText: {
+    color: "#DC2626",
+  },
+  skipButton: {
+    alignItems: "center",
+    paddingVertical: 12,
+    marginTop: 4,
+  },
+  skipButtonText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#6B7280",
   },
 });

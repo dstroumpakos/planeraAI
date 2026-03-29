@@ -3,6 +3,7 @@ import { authMutation, authQuery } from "./functions";
 import { paginationOptsValidator } from "convex/server";
 import { query } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
+import { internal } from "./_generated/api";
 
 // Get user's completed trips (trips where endDate has passed)
 export const getCompletedTrips = authQuery({
@@ -169,6 +170,9 @@ export const create = authMutation({
             moderationStatus: "pending",
             createdAt: Date.now(),
         });
+
+        // Trigger achievement check
+        await ctx.scheduler.runAfter(0, internal.achievements.checkAndUnlock, { userId: ctx.user.userId });
 
         return insightId;
     },

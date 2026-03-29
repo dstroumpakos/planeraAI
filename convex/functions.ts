@@ -69,7 +69,7 @@ function getBearerTokenFromHeaders(ctx: any): string | null {
 
 // ---- AUTH QUERY ----
 // Simple wrapper that validates token before calling the actual query handler
-export const authQuery: any = (config: any) => {
+export const authQuery = (config: any) => {
   // Merge token into args validator
   const argsWithToken = {
     ...config.args,
@@ -116,7 +116,7 @@ export const authQuery: any = (config: any) => {
 
 // ---- AUTH MUTATION ----
 // Simple wrapper that validates token before calling the actual mutation handler
-export const authMutation: any = (config: any) => {
+export const authMutation = (config: any) => {
   // Merge token into args validator
   const argsWithToken = {
     ...config.args,
@@ -156,7 +156,7 @@ export const authMutation: any = (config: any) => {
 
 // ---- AUTH ACTION ----
 // For actions you can pass token OR rely on Authorization header.
-export const authAction: any = customAction(
+export const authAction = customAction(
   action,
   customCtx(async (ctx: any, args: any) => {
     const token = (typeof args?.token === "string" && args.token) || getBearerTokenFromHeaders(ctx);
