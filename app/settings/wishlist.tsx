@@ -8,6 +8,7 @@ import { useToken, useAuthenticatedMutation } from "@/lib/useAuthenticatedMutati
 import { useTheme } from "@/lib/ThemeContext";
 import { useTranslation } from "react-i18next";
 import { useState } from "react";
+import { CITY_TRANSLATIONS, COUNTRY_TRANSLATIONS } from "@/lib/destinationTranslations";
 
 const PRIORITY_OPTIONS = [
   { id: "dream", icon: "sparkles", color: "#F59E0B" },
@@ -41,9 +42,23 @@ export default function Wishlist() {
       Alert.alert(t("common.error"), t("wishlist.enterDestination"));
       return;
     }
+
+    // Translate localized city/country names to English
+    const resolveEnglishName = (input: string, translations: Record<string, Record<string, string>>): string => {
+      const lower = input.trim().toLowerCase();
+      for (const [englishName, langs] of Object.entries(translations)) {
+        if (englishName.toLowerCase() === lower) return englishName;
+        if (Object.values(langs).some(v => v.toLowerCase() === lower)) return englishName;
+      }
+      return input.trim();
+    };
+
+    const destination = resolveEnglishName(newDestination, CITY_TRANSLATIONS);
+    const country = newCountry.trim() ? resolveEnglishName(newCountry, COUNTRY_TRANSLATIONS) : undefined;
+
     const result = await addToWishlist({
-      destination: newDestination.trim(),
-      country: newCountry.trim() || undefined,
+      destination,
+      country,
       notes: newNotes.trim() || undefined,
       priority: newPriority,
     });
