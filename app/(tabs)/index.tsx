@@ -224,7 +224,7 @@ export default function HomeScreen() {
       >
         {/* Header */}
         <View style={styles.header}>
-          <View style={styles.headerLeft}>
+          <View style={styles.headerTopRow}>
             <View style={styles.avatarContainer}>
               {profileImageUrl ? (
                 <Image
@@ -234,24 +234,22 @@ export default function HomeScreen() {
                   transition={200}
                 />
               ) : (
-                <Ionicons name="person-circle" size={48} color={colors.textMuted} />
+                <Ionicons name="person-circle" size={44} color={colors.textMuted} />
               )}
               <View style={[styles.onlineBadge, { backgroundColor: colors.primary, borderColor: colors.background }]} />
             </View>
-            <View style={styles.headerTexts}>
-              <Text style={[styles.greetingSub, { color: colors.textMuted }]}>{getGreeting()}</Text>
-              <Text style={[styles.greetingMain, { color: colors.text }]}>{t("home.readyForJourney")}</Text>
+            <View style={styles.headerRight}>
+              <StreakWidget />
+              <TouchableOpacity 
+                style={styles.creditContainer}
+                onPress={() => router.push("/subscription")}
+              >
+                {getCreditDisplay()}
+              </TouchableOpacity>
             </View>
           </View>
-          <View style={styles.headerRight}>
-            <StreakWidget />
-            <TouchableOpacity 
-              style={styles.creditContainer}
-              onPress={() => router.push("/subscription")}
-            >
-              {getCreditDisplay()}
-            </TouchableOpacity>
-          </View>
+          <Text style={[styles.greetingSub, { color: colors.textMuted }]}>{getGreeting()}</Text>
+          <Text style={[styles.greetingMain, { color: colors.text }]}>{t("home.readyForJourney")}</Text>
         </View>
 
         {/* Search Bar */}
@@ -282,13 +280,6 @@ export default function HomeScreen() {
               <Ionicons name="sparkles" size={20} color="#000000" />
             </View>
             <Text style={[styles.featureText, { color: "#000000" }]}>{t("home.aiTripPlanner")}</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={[styles.featureCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <View style={[styles.featureIcon, { backgroundColor: colors.secondary }]}>
-              <Ionicons name="map-outline" size={20} color={colors.text} />
-            </View>
-            <Text style={[styles.featureText, { color: colors.text }]}>{t("home.multiCityRoute")}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity 
@@ -327,6 +318,13 @@ export default function HomeScreen() {
               <Ionicons name="dice-outline" size={20} color="#FFFFFF" />
             </View>
             <Text style={[styles.featureText, { color: "#FFFFFF" }]}>{t("home.surpriseMe")}</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={[styles.featureCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={[styles.featureIcon, { backgroundColor: colors.secondary }]}>
+              <Ionicons name="map-outline" size={20} color={colors.text} />
+            </View>
+            <Text style={[styles.featureText, { color: colors.text }]}>{t("home.multiCityRoute")}</Text>
           </TouchableOpacity>
         </ScrollView>
 
@@ -511,27 +509,30 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
   header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
     paddingHorizontal: 20,
     paddingTop: 20,
     marginBottom: 24,
   },
+  headerTopRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 10,
+  },
   headerLeft: {
-    flex: 1,
-    marginRight: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
   },
   avatarContainer: {
     position: "relative",
-    width: 48,
-    height: 48,
-    marginBottom: 12,
+    width: 44,
+    height: 44,
   },
   profileImage: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
   },
   onlineBadge: {
     position: "absolute",
@@ -548,9 +549,10 @@ const styles = StyleSheet.create({
   greetingSub: {
     fontSize: 14,
     fontWeight: "500",
+    marginBottom: 2,
   },
   greetingMain: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: "700",
   },
   headerRight: {

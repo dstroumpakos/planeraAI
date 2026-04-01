@@ -1365,7 +1365,12 @@
     "streak_100_title": "Inarrêtable",
     "streak_100_desc": "Maintenez une série de 100 jours",
     "subscriber_title": "Voyageur Premium",
-    "subscriber_desc": "Abonnez-vous à Planera Premium"
+    "subscriber_desc": "Abonnez-vous à Planera Premium",
+    "locationRequired": "L'accès à la localisation est nécessaire pour vérifier que vous avez visité des destinations et débloquer des réalisations de voyage.",
+    "locationDisabledTitle": "Réalisations Désactivées",
+    "locationDisabledDesc": "Activez l'accès à la localisation dans les paramètres de votre appareil pour commencer à gagner des badges de voyage.",
+    "enableLocation": "Activer la Localisation",
+    "openSettings": "Ouvrir les Paramètres"
   },
   "wishlist": {
     "title": "Liste de Souhaits",

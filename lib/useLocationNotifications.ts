@@ -78,7 +78,7 @@ export function useLocationNotifications(
         itinerary?: { dayByDayItinerary?: TripDay[] };
     } | null | undefined,
     enabled: boolean = true,
-    onLocationStatus?: (atDestination: boolean) => void,
+    onLocationStatus?: (atDestination: boolean, coords?: { latitude: number; longitude: number }) => void,
 ) {
     const notifiedActivities = useRef(new Set<string>());
     const locationSub = useRef<Location.LocationSubscription | null>(null);
@@ -156,7 +156,10 @@ export function useLocationNotifications(
                     `[LocationNotif] User is ${Math.round(distanceToDestination / 1000)} km from ${trip!.destination} — too far, skipping notifications`
                 );
                 // Report to server: user is NOT at destination
-                onLocationStatus?.(false);
+                onLocationStatus?.(false, {
+                    latitude: userLocation.coords.latitude,
+                    longitude: userLocation.coords.longitude,
+                });
                 return;
             }
 
@@ -165,7 +168,10 @@ export function useLocationNotifications(
             );
 
             // Report to server: user IS at destination
-            onLocationStatus?.(true);
+            onLocationStatus?.(true, {
+                latitude: userLocation.coords.latitude,
+                longitude: userLocation.coords.longitude,
+            });
 
             // 1. Schedule time-based "next activity" reminders
             for (const activity of todayActivities) {

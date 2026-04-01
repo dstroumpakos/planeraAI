@@ -1365,7 +1365,12 @@
     "streak_100_title": "لا يمكن إيقافه",
     "streak_100_desc": "حافظ على سلسلة 100 يوم",
     "subscriber_title": "مسافر بريميوم",
-    "subscriber_desc": "اشترك في Planera Premium"
+    "subscriber_desc": "اشترك في Planera Premium",
+    "locationRequired": "يلزم الوصول إلى الموقع للتحقق من زيارتك للوجهات وفتح إنجازات السفر.",
+    "locationDisabledTitle": "الإنجازات معطلة",
+    "locationDisabledDesc": "قم بتمكين الوصول إلى الموقع في إعدادات جهازك لبدء كسب شارات السفر.",
+    "enableLocation": "تمكين الموقع",
+    "openSettings": "فتح الإعدادات"
   },
   "wishlist": {
     "title": "قائمة الأمنيات",

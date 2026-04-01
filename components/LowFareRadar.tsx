@@ -84,6 +84,7 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
   const { colors } = useTheme();
   const { t } = useTranslation();
   const [filter, setFilter] = useState<Filter>("all");
+  const [wishlistFilter, setWishlistFilter] = useState<string | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const animValues = useRef<Record<string, Animated.Value>>({});
 
@@ -93,7 +94,7 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
     filter === "recommended"
       ? deals.filter((d) => d.isRecommended || d.matchesPreference)
       : filter === "wishlist"
-        ? deals.filter((d) => d.matchesWishlist)
+        ? deals.filter((d) => d.matchesWishlist && (!wishlistFilter || d.destinationCity.toLowerCase() === wishlistFilter.toLowerCase()))
         : deals;
 
   const getAnimValue = (id: string) => {
@@ -202,14 +203,22 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
             {wishlistWithDeals.map((w) => (
               <TouchableOpacity
                 key={w.destination}
-                style={[styles.wishlistChip, { backgroundColor: "#FF3B82" + "15", borderColor: "#FF3B82" + "30" }]}
-                onPress={() => onPlanFromWishlist?.(w.destination)}
+                style={[styles.wishlistChip, {
+                  backgroundColor: wishlistFilter?.toLowerCase() === w.destination.toLowerCase() ? "#FF3B82" : "#FF3B82" + "15",
+                  borderColor: wishlistFilter?.toLowerCase() === w.destination.toLowerCase() ? "#FF3B82" : "#FF3B82" + "30",
+                }]}
+                onPress={() => {
+                  const isActive = wishlistFilter?.toLowerCase() === w.destination.toLowerCase();
+                  setWishlistFilter(isActive ? null : w.destination);
+                  setFilter("wishlist");
+                }}
                 activeOpacity={0.7}
               >
-                <Text style={[styles.wishlistChipText, { color: "#FF3B82" }]}>
+                <Text style={[styles.wishlistChipText, {
+                  color: wishlistFilter?.toLowerCase() === w.destination.toLowerCase() ? "#FFF" : "#FF3B82",
+                }]}>
                   {homeIata ? `${homeIata} → ` : ""}{w.destination}
                 </Text>
-                <Ionicons name="arrow-forward" size={12} color="#FF3B82" />
               </TouchableOpacity>
             ))}
           </View>
@@ -217,7 +226,12 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
       )}
 
       {/* Filter Tabs */}
-      <View style={styles.filterRow}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.filterRow}
+        contentContainerStyle={styles.filterRowContent}
+      >
         <TouchableOpacity
           style={[
             styles.filterBtn,
@@ -228,7 +242,7 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
                 filter === "all" ? colors.primary : colors.border,
             },
           ]}
-          onPress={() => setFilter("all")}
+          onPress={() => { setFilter("all"); setWishlistFilter(null); }}
         >
           <Text
             style={[
@@ -251,7 +265,7 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
                   filter === "recommended" ? colors.primary : colors.border,
               },
             ]}
-            onPress={() => setFilter("recommended")}
+            onPress={() => { setFilter("recommended"); setWishlistFilter(null); }}
           >
             <Ionicons
               name="star"
@@ -282,7 +296,7 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
                   filter === "wishlist" ? "#FF3B82" : colors.border,
               },
             ]}
-            onPress={() => setFilter("wishlist")}
+            onPress={() => { setFilter("wishlist"); setWishlistFilter(null); }}
           >
             <Ionicons
               name="heart"
@@ -302,7 +316,7 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
             </Text>
           </TouchableOpacity>
         )}
-      </View>
+      </ScrollView>
 
       {/* Deal Cards */}
       <ScrollView
@@ -514,7 +528,7 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
 
               {/* Price Row */}
               <View style={styles.priceRow}>
-                <View>
+                <View style={{ flex: 1 }}>
                   {discount && (
                     <View style={styles.discountRow}>
                       <Text
@@ -554,10 +568,10 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
                       : t("lowFare.oneWay", { defaultValue: "One way" })}
                   </Text>
                 </View>
-                <View style={styles.expandHint}>
+                <View style={[styles.expandHint, { backgroundColor: colors.lightGray || 'rgba(0,0,0,0.05)', borderRadius: 12 }]}>
                   <Ionicons
                     name={isExpanded ? "chevron-up" : "chevron-down"}
-                    size={20}
+                    size={18}
                     color={colors.textMuted}
                   />
                 </View>
@@ -835,10 +849,12 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   filterRow: {
+    marginBottom: 14,
+  },
+  filterRowContent: {
     flexDirection: "row",
     paddingHorizontal: 20,
     gap: 8,
-    marginBottom: 14,
   },
   filterBtn: {
     flexDirection: "row",
@@ -990,7 +1006,9 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   expandHint: {
-    padding: 4,
+    padding: 6,
+    alignItems: "center",
+    justifyContent: "center",
   },
   expandedSection: {
     overflow: "hidden",

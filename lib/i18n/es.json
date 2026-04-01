@@ -1365,7 +1365,12 @@
     "streak_100_title": "Imparable",
     "streak_100_desc": "Mantén una racha de 100 días",
     "subscriber_title": "Viajero Premium",
-    "subscriber_desc": "Suscríbete a Planera Premium"
+    "subscriber_desc": "Suscríbete a Planera Premium",
+    "locationRequired": "Se necesita acceso a la ubicación para verificar que has visitado destinos y desbloquear logros de viaje.",
+    "locationDisabledTitle": "Logros Desactivados",
+    "locationDisabledDesc": "Activa el acceso a la ubicación en los ajustes de tu dispositivo para empezar a ganar insignias de viaje.",
+    "enableLocation": "Activar Ubicación",
+    "openSettings": "Abrir Ajustes"
   },
   "wishlist": {
     "title": "Lista de Deseos",

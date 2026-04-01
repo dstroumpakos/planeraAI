@@ -1,11 +1,12 @@
-import { View, Text, StyleSheet, Modal, TouchableOpacity, Animated } from "react-native";
+import { View, Text, StyleSheet, Modal, TouchableOpacity, Animated, AppState } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useToken, useAuthenticatedMutation } from "@/lib/useAuthenticatedMutation";
 import { useTheme } from "@/lib/ThemeContext";
 import { useTranslation } from "react-i18next";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+import * as Location from "expo-location";
 
 export default function AchievementUnlocked() {
   const { token } = useToken();
@@ -14,12 +15,25 @@ export default function AchievementUnlocked() {
   const [visible, setVisible] = useState(false);
   const [badge, setBadge] = useState<any>(null);
   const scaleAnim = useRef(new Animated.Value(0)).current;
+  const [locationGranted, setLocationGranted] = useState<boolean | null>(null);
+
+  // Check location permission on mount and when app returns to foreground
+  const checkPerm = useCallback(async () => {
+    const { status } = await Location.getForegroundPermissionsAsync();
+    setLocationGranted(status === "granted");
+  }, []);
+
+  useEffect(() => { checkPerm(); }, []);
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (s) => { if (s === "active") checkPerm(); });
+    return () => sub.remove();
+  }, []);
 
   const data = useQuery(api.achievements.getUserAchievements as any, token ? { token } : "skip");
   const markSeen = useAuthenticatedMutation(api.achievements.markAchievementSeen as any);
 
   useEffect(() => {
-    if (!data?.achievements) return;
+    if (!data?.achievements || locationGranted !== true) return;
     const unseen = data.achievements.find((a: any) => a.unlocked && !a.seen);
     if (unseen && !visible) {
       setBadge(unseen);
@@ -31,7 +45,7 @@ export default function AchievementUnlocked() {
         useNativeDriver: true,
       }).start();
     }
-  }, [data?.achievements]);
+  }, [data?.achievements, locationGranted]);
 
   const handleDismiss = async () => {
     if (badge && token) {

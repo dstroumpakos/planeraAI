@@ -83,8 +83,11 @@ export const checkAndUnlock = internalMutation({
       .collect();
     const completedTrips = allTrips.filter((t) => t.status === "completed");
 
+    // Explorer & Globetrotter achievements require server-side GPS verification
+    const verifiedTrips = completedTrips.filter((t: any) => t.locationVerified === true);
+
     const countriesSet = new Set<string>();
-    for (const trip of completedTrips) {
+    for (const trip of verifiedTrips) {
       const dest = trip.destination || "";
       const parts = dest.split(",").map((s: string) => s.trim());
       if (parts.length >= 2) countriesSet.add(parts[parts.length - 1]);
@@ -132,7 +135,7 @@ export const checkAndUnlock = internalMutation({
 
     // Build stat map
     const statMap: Record<string, number> = {
-      totalTrips: completedTrips.length,
+      totalTrips: verifiedTrips.length,
       totalCountries: countriesSet.size,
       totalFlightsBooked: confirmedBookings.length,
       insightsShared: approvedInsights.length,

@@ -18,6 +18,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useAuthenticatedMutation, useToken } from "@/lib/useAuthenticatedMutation";
 import { optimizeUnsplashUrl, IMAGE_SIZES } from "@/lib/imageUtils";
 import * as Haptics from "expo-haptics";
+import * as Location from "expo-location";
 import { useLocationNotifications } from "@/lib/useLocationNotifications";
 import { TripGuideTooltip, GuideStep } from "@/components/FirstTripGuide";
 
@@ -797,14 +798,46 @@ export default function TripDetails() {
     // Phase 3: Location-based notifications for active trips
     // Reports arrival status to server so cron notifications are gated on physical presence
     const updateLocationStatus = useAuthenticatedMutation(api.trips.updateLocationStatus as any);
-    const handleLocationStatus = useCallback((atDestination: boolean) => {
+    const verifyPresence = useAction(api.trips.verifyPresenceAtDestination as any);
+    const handleLocationStatus = useCallback((atDestination: boolean, coords?: { latitude: number; longitude: number }) => {
         if (trip?._id && token) {
             updateLocationStatus({ tripId: trip._id, atDestination }).catch((e: any) =>
                 console.log("[LocationNotif] Failed to update location status:", e)
             );
+            // Send raw coordinates to server for secure GPS verification (achievements)
+            if (coords) {
+                verifyPresence({ token, tripId: trip._id, latitude: coords.latitude, longitude: coords.longitude }).catch((e: any) =>
+                    console.log("[LocationVerify] Failed to verify presence:", e)
+                );
+            }
         }
     }, [trip?._id, token]);
     useLocationNotifications(trip, true, handleLocationStatus);
+
+    // Request location permission with explanation for active trips (needed for achievement verification)
+    useEffect(() => {
+        if (!trip) return;
+        const now = Date.now();
+        const dayMs = 24 * 60 * 60 * 1000;
+        if (now < trip.startDate - dayMs || now > trip.endDate + dayMs) return;
+
+        (async () => {
+            const { status } = await Location.getForegroundPermissionsAsync();
+            if (status === "granted" || status === "denied") return;
+            // First time — show explanation then request
+            Alert.alert(
+                t("achievements.title"),
+                t("achievements.locationRequired"),
+                [
+                    { text: t("common.cancel"), style: "cancel" },
+                    {
+                        text: t("achievements.enableLocation"),
+                        onPress: () => Location.requestForegroundPermissionsAsync(),
+                    },
+                ]
+            );
+        })();
+    }, [trip?._id]);
      
     // V1: AI-generated Top 5 Sights (replaces Viator activities)
     const topSights = useQuery(api.sights.getTopSights, trip ? { tripId: id as Id<"trips"> } : "skip");
@@ -882,6 +915,7 @@ export default function TripDetails() {
 
     // ─── Trip detail guide state ───
     const [detailGuideStep, setDetailGuideStep] = useState(-1);
+    const detailGuideShownRef = useRef(false);
     const DETAIL_GUIDE_STEPS: GuideStep[] = [
         { key: "itinerary", title: t("tripDetailGuide.stepItineraryTitle"), description: t("tripDetailGuide.stepItineraryDesc") },
         { key: "filters", title: t("tripDetailGuide.stepFiltersTitle"), description: t("tripDetailGuide.stepFiltersDesc") },
@@ -898,26 +932,26 @@ export default function TripDetails() {
             setDetailGuideStep(next);
         } else {
             setDetailGuideStep(-1);
-            if (token) {
-                markDetailGuideSeen({ token }).catch(() => {});
-            }
         }
-    }, [detailGuideStep, DETAIL_GUIDE_STEPS.length, token]);
+    }, [detailGuideStep, DETAIL_GUIDE_STEPS.length]);
 
     const dismissDetailGuide = useCallback(() => {
         setDetailGuideStep(-1);
-        if (token) {
-            markDetailGuideSeen({ token }).catch(() => {});
-        }
-    }, [token]);
+    }, []);
 
     // Show detail guide when trip has itinerary and user hasn't seen it
     useEffect(() => {
         if (
+            !detailGuideShownRef.current &&
             userSettings !== undefined &&
             trip?.itinerary?.dayByDayItinerary?.length > 0 &&
             !userSettings?.hasSeenTripDetailGuide
         ) {
+            detailGuideShownRef.current = true;
+            // Mark as seen immediately so it never shows again
+            if (token) {
+                markDetailGuideSeen({ token }).catch(() => {});
+            }
             // Small delay so the content renders first
             const timer = setTimeout(() => setDetailGuideStep(0), 800);
             return () => clearTimeout(timer);

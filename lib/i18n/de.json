@@ -1365,7 +1365,12 @@
     "streak_100_title": "Unaufhaltsam",
     "streak_100_desc": "Halten Sie eine 100-Tage-Serie",
     "subscriber_title": "Premium-Reisender",
-    "subscriber_desc": "Abonnieren Sie Planera Premium"
+    "subscriber_desc": "Abonnieren Sie Planera Premium",
+    "locationRequired": "Standortzugriff wird benötigt, um zu überprüfen, dass Sie Reiseziele besucht haben und Reise-Erfolge freizuschalten.",
+    "locationDisabledTitle": "Erfolge Deaktiviert",
+    "locationDisabledDesc": "Aktivieren Sie den Standortzugriff in Ihren Geräteeinstellungen, um Reise-Abzeichen zu verdienen.",
+    "enableLocation": "Standort Aktivieren",
+    "openSettings": "Einstellungen Öffnen"
   },
   "wishlist": {
     "title": "Wunschliste",

@@ -1365,7 +1365,12 @@
     "streak_100_title": "Unstoppable",
     "streak_100_desc": "Maintain a 100-day streak",
     "subscriber_title": "Premium Traveler",
-    "subscriber_desc": "Subscribe to Planera Premium"
+    "subscriber_desc": "Subscribe to Planera Premium",
+    "locationRequired": "Location access is needed to verify you've visited destinations and unlock travel achievements.",
+    "locationDisabledTitle": "Achievements Disabled",
+    "locationDisabledDesc": "Enable location access in your device settings to start earning travel badges.",
+    "enableLocation": "Enable Location",
+    "openSettings": "Open Settings"
   },
   "wishlist": {
     "title": "Wishlist",

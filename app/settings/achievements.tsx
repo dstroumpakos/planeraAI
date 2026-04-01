@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, StatusBar, Modal } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, StatusBar, Modal, Linking, AppState, Platform } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -7,8 +7,9 @@ import { api } from "@/convex/_generated/api";
 import { useToken, useAuthenticatedMutation } from "@/lib/useAuthenticatedMutation";
 import { useTheme } from "@/lib/ThemeContext";
 import { useTranslation } from "react-i18next";
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { ACHIEVEMENT_CATEGORIES } from "@/convex/helpers/achievements";
+import * as Location from "expo-location";
 
 export default function Achievements() {
   const router = useRouter();
@@ -17,6 +18,38 @@ export default function Achievements() {
   const { t } = useTranslation();
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [selectedBadge, setSelectedBadge] = useState<any>(null);
+  const [locationGranted, setLocationGranted] = useState<boolean | null>(null); // null = loading
+
+  // Check location permission on mount and when app returns from settings
+  const checkLocationPermission = useCallback(async () => {
+    const { status } = await Location.getForegroundPermissionsAsync();
+    setLocationGranted(status === "granted");
+  }, []);
+
+  useEffect(() => {
+    checkLocationPermission();
+  }, []);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (state) => {
+      if (state === "active") checkLocationPermission();
+    });
+    return () => sub.remove();
+  }, []);
+
+  const handleRequestLocation = async () => {
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status === "granted") {
+      setLocationGranted(true);
+    } else {
+      // Already denied once — must go to settings
+      if (Platform.OS === "ios") {
+        Linking.openSettings();
+      } else {
+        Linking.openSettings();
+      }
+    }
+  };
 
   const data = useQuery(api.achievements.getUserAchievements as any, token ? { token } : "skip");
   const markSeen = useAuthenticatedMutation(api.achievements.markAchievementSeen as any);
@@ -47,6 +80,20 @@ export default function Achievements() {
           <Text style={styles.headerTitle}>{t("achievements.title")}</Text>
           <View style={{ width: 24 }} />
         </View>
+
+        {/* Location permission banner */}
+        {locationGranted === false && (
+          <View style={styles.permissionBanner}>
+            <Ionicons name="location-outline" size={28} color={colors.primary} />
+            <View style={{ flex: 1, marginLeft: 12 }}>
+              <Text style={styles.permissionTitle}>{t("achievements.locationDisabledTitle")}</Text>
+              <Text style={styles.permissionDesc}>{t("achievements.locationDisabledDesc")}</Text>
+            </View>
+            <TouchableOpacity style={styles.permissionButton} onPress={handleRequestLocation}>
+              <Text style={styles.permissionButtonText}>{t("achievements.enableLocation")}</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Progress */}
         <View style={styles.progress}>
@@ -103,18 +150,21 @@ export default function Achievements() {
         {/* Badge Grid */}
         <ScrollView style={styles.content} contentContainerStyle={styles.scrollContent}>
           <View style={styles.grid}>
-            {filtered.map((badge: any) => (
+            {filtered.map((badge: any) => {
+              // When location is denied, treat all badges as locked
+              const isUnlocked = locationGranted === false ? false : badge.unlocked;
+              return (
               <TouchableOpacity
                 key={badge.id}
-                style={[styles.badgeCard, !badge.unlocked && styles.badgeCardLocked]}
+                style={[styles.badgeCard, !isUnlocked && styles.badgeCardLocked]}
                 onPress={() => handleBadgeTap(badge)}
               >
-                {!badge.seen && badge.unlocked && <View style={styles.newDot} />}
+                {!badge.seen && isUnlocked && <View style={styles.newDot} />}
                 <View
                   style={[
                     styles.badgeIcon,
                     {
-                      backgroundColor: badge.unlocked
+                      backgroundColor: isUnlocked
                         ? colors.primary + "30"
                         : colors.border,
                     },
@@ -123,17 +173,18 @@ export default function Achievements() {
                   <Ionicons
                     name={badge.icon as any}
                     size={28}
-                    color={badge.unlocked ? colors.primary : colors.textMuted}
+                    color={isUnlocked ? colors.primary : colors.textMuted}
                   />
                 </View>
                 <Text
-                  style={[styles.badgeName, !badge.unlocked && styles.badgeNameLocked]}
+                  style={[styles.badgeName, !isUnlocked && styles.badgeNameLocked]}
                   numberOfLines={2}
                 >
                   {t(badge.titleKey)}
                 </Text>
               </TouchableOpacity>
-            ))}
+              );
+            })}
           </View>
           <View style={{ height: 120 }} />
         </ScrollView>
@@ -201,6 +252,28 @@ const createStyles = (colors: any, isDarkMode: boolean) =>
       paddingVertical: 12,
     },
     headerTitle: { fontSize: 18, fontWeight: "700", color: colors.text },
+
+    permissionBanner: {
+      flexDirection: "row",
+      alignItems: "center",
+      backgroundColor: colors.card,
+      borderRadius: 12,
+      padding: 14,
+      marginHorizontal: 16,
+      marginBottom: 12,
+      borderWidth: 1,
+      borderColor: colors.primary + "40",
+    },
+    permissionTitle: { fontSize: 14, fontWeight: "700", color: colors.text, marginBottom: 2 },
+    permissionDesc: { fontSize: 12, color: colors.textSecondary, lineHeight: 16 },
+    permissionButton: {
+      backgroundColor: colors.primary,
+      borderRadius: 8,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      marginLeft: 8,
+    },
+    permissionButtonText: { fontSize: 12, fontWeight: "600", color: "#fff" },
 
     progress: { paddingHorizontal: 16, marginBottom: 12 },
     progressText: { fontSize: 14, fontWeight: "600", color: colors.text, marginBottom: 8 },

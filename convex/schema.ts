@@ -86,6 +86,9 @@ export default defineSchema({
         // Location-based: tracks whether user is physically at the destination
         userAtDestination: v.optional(v.boolean()),
         lastLocationCheckAt: v.optional(v.float64()),
+        // Server-verified GPS proximity to destination (used for achievement eligibility)
+        locationVerified: v.optional(v.boolean()),
+        locationVerifiedAt: v.optional(v.float64()),
         // Deal-based trip fields (from Low Fare Radar)
         tripType: v.optional(v.union(v.literal("standard"), v.literal("deal"))),
         dealId: v.optional(v.id("lowFareRadar")),

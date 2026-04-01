@@ -1,8 +1,9 @@
 import { v } from "convex/values";
-import { authMutation, authQuery } from "./functions";
+import { authMutation, authQuery, authAction } from "./functions";
 import { internalMutation, internalQuery, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { isSubscriptionActiveWithGrace } from "./helpers/subscription";
+import { getDistanceMeters } from "./helpers/geo";
 
 export const create = authMutation({
     args: {
@@ -729,6 +730,132 @@ export const updateLocationStatus = authMutation({
             lastLocationCheckAt: Date.now(),
         });
         return null;
+    },
+});
+
+// Internal mutation to mark a trip as location-verified (called from verifyPresenceAtDestination action)
+export const markLocationVerified = internalMutation({
+    args: {
+        tripId: v.id("trips"),
+        userId: v.string(),
+    },
+    handler: async (ctx, args) => {
+        const trip = await ctx.db.get(args.tripId);
+        if (!trip || trip.userId !== args.userId) return;
+        if (trip.locationVerified) return; // already verified
+
+        await ctx.db.patch(args.tripId, {
+            locationVerified: true,
+            locationVerifiedAt: Date.now(),
+            userAtDestination: true,
+            lastLocationCheckAt: Date.now(),
+        });
+
+        // Re-evaluate achievements now that a trip is verified
+        await ctx.scheduler.runAfter(0, internal.achievements.checkAndUnlock, {
+            userId: args.userId,
+        });
+    },
+});
+
+// Server-side GPS verification: client sends raw coordinates, server geocodes destination
+// and checks distance. This removes the client from the trust boundary for achievements.
+const MAX_DESTINATION_RADIUS_M = 50_000; // 50 km
+const VERIFICATION_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
+
+export const verifyPresenceAtDestination = authAction({
+    args: {
+        token: v.string(),
+        tripId: v.id("trips"),
+        latitude: v.float64(),
+        longitude: v.float64(),
+    },
+    returns: v.null(),
+    handler: async (ctx: any, args: any) => {
+        const userId = ctx.user.userId;
+
+        // Fetch the trip via internal query
+        const trip = await ctx.runQuery(internal.trips.getTripForVerification, {
+            tripId: args.tripId,
+        });
+        if (!trip || trip.userId !== userId) return null;
+
+        // Already verified — nothing to do
+        if (trip.locationVerified) return null;
+
+        // Rate-limit: skip if checked recently
+        if (trip.lastLocationCheckAt && Date.now() - trip.lastLocationCheckAt < VERIFICATION_COOLDOWN_MS) {
+            return null;
+        }
+
+        // Trip must be within its date range (give 1-day buffer on each side for time zones)
+        const now = Date.now();
+        const dayMs = 24 * 60 * 60 * 1000;
+        if (now < trip.startDate - dayMs || now > trip.endDate + dayMs) {
+            return null;
+        }
+
+        // Server-side geocode the destination via Nominatim
+        const destinations = [];
+        if (trip.destinations && Array.isArray(trip.destinations)) {
+            for (const d of trip.destinations) {
+                destinations.push(`${d.city}, ${d.country}`);
+            }
+        }
+        if (destinations.length === 0 && trip.destination) {
+            destinations.push(trip.destination);
+        }
+
+        // Check against ANY destination (multi-city: one match = verified)
+        for (const dest of destinations) {
+            try {
+                const res = await fetch(
+                    `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(dest)}&limit=1`,
+                    { headers: { "User-Agent": "PlaneraAI/1.0" } }
+                );
+                const data = await res.json();
+                if (!data?.[0]) continue;
+
+                const destLat = parseFloat(data[0].lat);
+                const destLng = parseFloat(data[0].lon);
+                const distance = getDistanceMeters(args.latitude, args.longitude, destLat, destLng);
+
+                if (distance <= MAX_DESTINATION_RADIUS_M) {
+                    // User is at destination — mark verified
+                    await ctx.runMutation(internal.trips.markLocationVerified, {
+                        tripId: args.tripId,
+                        userId,
+                    });
+                    return null;
+                }
+
+                // Respect Nominatim rate limit (1 req/sec)
+                await new Promise((r) => setTimeout(r, 1100));
+            } catch {
+                // Nominatim failure — don't block, just skip this destination
+                continue;
+            }
+        }
+
+        return null;
+    },
+});
+
+// Internal query used by verifyPresenceAtDestination action to read trip data
+export const getTripForVerification = internalQuery({
+    args: { tripId: v.id("trips") },
+    handler: async (ctx, args) => {
+        const trip = await ctx.db.get(args.tripId);
+        if (!trip) return null;
+        return {
+            userId: trip.userId,
+            destination: trip.destination,
+            destinations: trip.destinations,
+            startDate: trip.startDate,
+            endDate: trip.endDate,
+            locationVerified: trip.locationVerified,
+            lastLocationCheckAt: trip.lastLocationCheckAt,
+        };
     },
 });
 
