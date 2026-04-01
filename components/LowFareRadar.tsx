@@ -75,11 +75,12 @@ interface LowFareRadarProps {
   wishlistDestinations?: WishlistDestination[];
   onPlanTrip?: (deal: FlightDeal) => void;
   onPlanFromWishlist?: (destination: string) => void;
+  onBookingClick?: (dealId: string) => void;
 }
 
 type Filter = "all" | "recommended" | "wishlist";
 
-export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip, onPlanFromWishlist }: LowFareRadarProps) {
+export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip, onPlanFromWishlist, onBookingClick }: LowFareRadarProps) {
   const { colors } = useTheme();
   const { t } = useTranslation();
   const [filter, setFilter] = useState<Filter>("all");
@@ -147,6 +148,7 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
 
   const handleBooking = (deal: FlightDeal) => {
     if (deal.bookingUrl) {
+      if (onBookingClick) onBookingClick(deal._id);
       Linking.openURL(deal.bookingUrl);
     }
   };

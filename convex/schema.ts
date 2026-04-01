@@ -719,6 +719,9 @@ export default defineSchema({
         // Travel date range (which months this deal covers)
         travelMonthFrom: v.optional(v.string()),  // "2026-04" format
         travelMonthTo: v.optional(v.string()),     // "2026-06" format
+        // Analytics counters
+        planTripClicks: v.optional(v.float64()),    // trips generated from this deal
+        bookingClicks: v.optional(v.float64()),     // booking URL opens
         // Status
         active: v.boolean(),
         createdAt: v.float64(),

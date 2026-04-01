@@ -38,6 +38,7 @@ export default function HomeScreen() {
   const [showFirstTripGuide, setShowFirstTripGuide] = useState(false);
   const markGuideSeen = useMutation(api.users.markFirstTripGuideSeen as any);
   const checkIn = useMutation(api.streaks.checkIn as any);
+  const trackBookingClick = useMutation(api.lowFareRadar.trackBookingClick as any);
   const [checkedIn, setCheckedIn] = useState(false);
 
   // Debug logging
@@ -367,6 +368,9 @@ export default function HomeScreen() {
                 pathname: "/create-trip",
                 params: { prefilledDestination: destination },
               } as any);
+            }}
+            onBookingClick={(dealId) => {
+              trackBookingClick({ dealId }).catch(() => {});
             }}
           />
         )}

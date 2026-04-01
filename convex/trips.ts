@@ -357,6 +357,11 @@ export const createFromDeal = authMutation({
             language: args.language || "en",
         });
 
+        // Track plan-trip click on the deal
+        await ctx.db.patch(args.dealId, {
+            planTripClicks: (deal.planTripClicks ?? 0) + 1,
+        });
+
         return tripId;
     },
 });

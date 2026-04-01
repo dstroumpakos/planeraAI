@@ -320,6 +320,16 @@
     .deal-status.active { background: #D1FAE5; color: #065F46; }
     .deal-status.inactive { background: #FEE2E2; color: #991B1B; }
     .deal-status.expired { background: #FEE2E2; color: #991B1B; }
+    .deal-analytics {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      font-size: 11px;
+      color: var(--muted);
+      min-width: 50px;
+      text-align: right;
+    }
+    .deal-analytics span { white-space: nowrap; }
     .deal-card.expired {
       border-color: var(--danger);
       border-width: 2px;
@@ -1061,6 +1071,7 @@
     </div>
     <div class="export-row">
       <button class="btn-export" onclick="exportDealsCSV()">📊 Export Deals (.csv)</button>
+      <button class="btn-export" onclick="exportAnalyticsXLSX()">📈 Export Analytics (.xlsx)</button>
       <button class="btn-export" onclick="exportAllCSV()">📦 Export All Data (.csv)</button>
     </div>
     <div id="dealsList"></div>
@@ -1662,6 +1673,10 @@
           (d.dealTag && !isExpired ? '<div class="tag">' + escapeHtml(d.dealTag) + '</div>' : '') +
         '</div>' +
         '<span class="deal-status ' + statusClass + '">' + statusLabel + '</span>' +
+        '<div class="deal-analytics">' +
+          '<span title="Trips generated">\uD83D\uDCCB ' + (d.planTripClicks || 0) + '</span>' +
+          '<span title="Booking clicks">\uD83D\uDD17 ' + (d.bookingClicks || 0) + '</span>' +
+        '</div>' +
         '<div class="deal-actions">' +
           '<button onclick="editDeal(\'' + d._id + '\')" title="Edit">\u270F\uFE0F</button>' +
           (d.bookingUrl ? '<button onclick="refreshDeal(\'' + d._id + '\')" title="Re-scrape &amp; update from URL" id="refresh-' + d._id + '">\uD83D\uDD04</button>' : '') +
@@ -2108,7 +2123,7 @@
   function exportDealsCSV() {
     if (!deals || deals.length === 0) return toast('No deals to export', 'error');
     var now = Date.now();
-    var headers = ['Origin','Origin City','Destination','Destination City','Airline','Flight No','Outbound Date','Departure','Arrival','Duration','Stops','Return Date','Return Departure','Return Arrival','Return Duration','Return Airline','Return Stops','Price/pp','Total Price','Original Price','Currency','Cabin Bag','Checked Bag','Deal Tag','Travel Month From','Travel Month To','Booking URL','Notes','Status','Recommended','Expired','Wishlisted','Expires At'];
+    var headers = ['Origin','Origin City','Destination','Destination City','Airline','Flight No','Outbound Date','Departure','Arrival','Duration','Stops','Return Date','Return Departure','Return Arrival','Return Duration','Return Airline','Return Stops','Price/pp','Total Price','Original Price','Currency','Cabin Bag','Checked Bag','Deal Tag','Travel Month From','Travel Month To','Booking URL','Notes','Status','Recommended','Expired','Wishlisted','Expires At','Trips Generated','Booking Clicks'];
     var rows = deals.map(function(d) {
       var isExpired = d.active && d.expiresAt && d.expiresAt <= now;
       var isWishlisted = wishlistDests.some(function(w) { return w.destination.toLowerCase() === (d.destinationCity || '').toLowerCase(); });
@@ -2126,7 +2141,9 @@
         d.isRecommended ? 'Yes' : 'No',
         isExpired ? 'Yes' : 'No',
         isWishlisted ? 'Yes' : 'No',
-        d.expiresAt ? new Date(d.expiresAt).toISOString() : ''
+        d.expiresAt ? new Date(d.expiresAt).toISOString() : '',
+        d.planTripClicks || 0,
+        d.bookingClicks || 0
       ].map(csvEscape).join(',');
     });
     var csv = headers.join(',') + '\n' + rows.join('\n');
@@ -2178,6 +2195,184 @@
     exportDealsCSV();
     setTimeout(function() { exportAirportsCSV(); }, 300);
     setTimeout(function() { exportWishlistCSV(); }, 600);
+  }
+
+  // ─── Analytics Excel (.xlsx) Export ───
+  function exportAnalyticsXLSX() {
+    if (!deals || deals.length === 0) return toast('No deals to export', 'error');
+    var now = Date.now();
+
+    // Sort by total engagement (trips + clicks) descending
+    var sorted = deals.slice().sort(function(a, b) {
+      return ((b.planTripClicks || 0) + (b.bookingClicks || 0)) - ((a.planTripClicks || 0) + (a.bookingClicks || 0));
+    });
+
+    // Totals
+    var totalTrips = 0, totalClicks = 0;
+    sorted.forEach(function(d) { totalTrips += (d.planTripClicks || 0); totalClicks += (d.bookingClicks || 0); });
+
+    // Build XML Spreadsheet (Excel-compatible)
+    var xml = '<?xml version="1.0" encoding="UTF-8"?>\n' +
+      '<?mso-application progid="Excel.Sheet"?>\n' +
+      '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"' +
+      ' xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">\n' +
+      '<Styles>' +
+        '<Style ss:ID="header"><Font ss:Bold="1" ss:Size="11"/><Interior ss:Color="#E2E8F0" ss:Pattern="Solid"/></Style>' +
+        '<Style ss:ID="num"><NumberFormat ss:Format="0"/></Style>' +
+        '<Style ss:ID="pct"><NumberFormat ss:Format="0.0%"/></Style>' +
+        '<Style ss:ID="price"><NumberFormat ss:Format="#,##0.00"/></Style>' +
+        '<Style ss:ID="total"><Font ss:Bold="1" ss:Size="11"/><Interior ss:Color="#FEF3C7" ss:Pattern="Solid"/></Style>' +
+      '</Styles>\n';
+
+    // Sheet 1: Deal Analytics
+    xml += '<Worksheet ss:Name="Deal Analytics"><Table>\n';
+    // Column widths
+    xml += '<Column ss:Width="60"/><Column ss:Width="100"/><Column ss:Width="60"/><Column ss:Width="100"/>' +
+      '<Column ss:Width="120"/><Column ss:Width="80"/><Column ss:Width="70"/><Column ss:Width="70"/>' +
+      '<Column ss:Width="60"/><Column ss:Width="100"/><Column ss:Width="90"/><Column ss:Width="90"/><Column ss:Width="85"/>\n';
+    // Header row
+    xml += '<Row>' +
+      '<Cell ss:StyleID="header"><Data ss:Type="String">Origin</Data></Cell>' +
+      '<Cell ss:StyleID="header"><Data ss:Type="String">Destination</Data></Cell>' +
+      '<Cell ss:StyleID="header"><Data ss:Type="String">Route</Data></Cell>' +
+      '<Cell ss:StyleID="header"><Data ss:Type="String">Airline</Data></Cell>' +
+      '<Cell ss:StyleID="header"><Data ss:Type="String">Outbound Date</Data></Cell>' +
+      '<Cell ss:StyleID="header"><Data ss:Type="String">Price/pp</Data></Cell>' +
+      '<Cell ss:StyleID="header"><Data ss:Type="String">Currency</Data></Cell>' +
+      '<Cell ss:StyleID="header"><Data ss:Type="String">Status</Data></Cell>' +
+      '<Cell ss:StyleID="header"><Data ss:Type="String">Deal Tag</Data></Cell>' +
+      '<Cell ss:StyleID="header"><Data ss:Type="String">Trips Generated</Data></Cell>' +
+      '<Cell ss:StyleID="header"><Data ss:Type="String">Booking Clicks</Data></Cell>' +
+      '<Cell ss:StyleID="header"><Data ss:Type="String">Total Engagement</Data></Cell>' +
+      '<Cell ss:StyleID="header"><Data ss:Type="String">Conversion Rate</Data></Cell>' +
+    '</Row>\n';
+
+    sorted.forEach(function(d) {
+      var isExpired = d.active && d.expiresAt && d.expiresAt <= now;
+      var status = d.active ? (isExpired ? 'Expired' : 'Active') : 'Inactive';
+      var trips = d.planTripClicks || 0;
+      var clicks = d.bookingClicks || 0;
+      var total = trips + clicks;
+      var convRate = clicks > 0 ? trips / clicks : 0;
+      xml += '<Row>' +
+        '<Cell><Data ss:Type="String">' + xmlEscape(d.origin + ' - ' + d.originCity) + '</Data></Cell>' +
+        '<Cell><Data ss:Type="String">' + xmlEscape(d.destination + ' - ' + d.destinationCity) + '</Data></Cell>' +
+        '<Cell><Data ss:Type="String">' + xmlEscape(d.origin + '→' + d.destination) + '</Data></Cell>' +
+        '<Cell><Data ss:Type="String">' + xmlEscape(d.airline) + '</Data></Cell>' +
+        '<Cell><Data ss:Type="String">' + xmlEscape(d.outboundDate) + '</Data></Cell>' +
+        '<Cell ss:StyleID="price"><Data ss:Type="Number">' + d.price + '</Data></Cell>' +
+        '<Cell><Data ss:Type="String">' + xmlEscape(d.currency) + '</Data></Cell>' +
+        '<Cell><Data ss:Type="String">' + status + '</Data></Cell>' +
+        '<Cell><Data ss:Type="String">' + xmlEscape(d.dealTag || '-') + '</Data></Cell>' +
+        '<Cell ss:StyleID="num"><Data ss:Type="Number">' + trips + '</Data></Cell>' +
+        '<Cell ss:StyleID="num"><Data ss:Type="Number">' + clicks + '</Data></Cell>' +
+        '<Cell ss:StyleID="num"><Data ss:Type="Number">' + total + '</Data></Cell>' +
+        '<Cell ss:StyleID="pct"><Data ss:Type="Number">' + convRate.toFixed(4) + '</Data></Cell>' +
+      '</Row>\n';
+    });
+
+    // Totals row
+    xml += '<Row>' +
+      '<Cell ss:StyleID="total"><Data ss:Type="String">TOTAL</Data></Cell>' +
+      '<Cell/><Cell/><Cell/><Cell/><Cell/><Cell/><Cell/><Cell/>' +
+      '<Cell ss:StyleID="total"><Data ss:Type="Number">' + totalTrips + '</Data></Cell>' +
+      '<Cell ss:StyleID="total"><Data ss:Type="Number">' + totalClicks + '</Data></Cell>' +
+      '<Cell ss:StyleID="total"><Data ss:Type="Number">' + (totalTrips + totalClicks) + '</Data></Cell>' +
+      '<Cell ss:StyleID="total"><Data ss:Type="Number">' + (totalClicks > 0 ? (totalTrips / totalClicks).toFixed(4) : '0') + '</Data></Cell>' +
+    '</Row>\n';
+    xml += '</Table></Worksheet>\n';
+
+    // Sheet 2: Summary by Route
+    var routeMap = {};
+    sorted.forEach(function(d) {
+      var key = d.origin + '→' + d.destination;
+      if (!routeMap[key]) routeMap[key] = { route: key, originCity: d.originCity, destCity: d.destinationCity, deals: 0, trips: 0, clicks: 0, minPrice: d.price, currency: d.currency };
+      routeMap[key].deals++;
+      routeMap[key].trips += (d.planTripClicks || 0);
+      routeMap[key].clicks += (d.bookingClicks || 0);
+      if (d.price < routeMap[key].minPrice) routeMap[key].minPrice = d.price;
+    });
+    var routes = Object.values(routeMap).sort(function(a, b) { return (b.trips + b.clicks) - (a.trips + a.clicks); });
+
+    xml += '<Worksheet ss:Name="By Route"><Table>\n';
+    xml += '<Column ss:Width="80"/><Column ss:Width="120"/><Column ss:Width="120"/><Column ss:Width="70"/>' +
+      '<Column ss:Width="80"/><Column ss:Width="90"/><Column ss:Width="90"/><Column ss:Width="100"/>\n';
+    xml += '<Row>' +
+      '<Cell ss:StyleID="header"><Data ss:Type="String">Route</Data></Cell>' +
+      '<Cell ss:StyleID="header"><Data ss:Type="String">Origin City</Data></Cell>' +
+      '<Cell ss:StyleID="header"><Data ss:Type="String">Destination City</Data></Cell>' +
+      '<Cell ss:StyleID="header"><Data ss:Type="String"># Deals</Data></Cell>' +
+      '<Cell ss:StyleID="header"><Data ss:Type="String">Best Price</Data></Cell>' +
+      '<Cell ss:StyleID="header"><Data ss:Type="String">Trips Generated</Data></Cell>' +
+      '<Cell ss:StyleID="header"><Data ss:Type="String">Booking Clicks</Data></Cell>' +
+      '<Cell ss:StyleID="header"><Data ss:Type="String">Total Engagement</Data></Cell>' +
+    '</Row>\n';
+    routes.forEach(function(r) {
+      xml += '<Row>' +
+        '<Cell><Data ss:Type="String">' + xmlEscape(r.route) + '</Data></Cell>' +
+        '<Cell><Data ss:Type="String">' + xmlEscape(r.originCity) + '</Data></Cell>' +
+        '<Cell><Data ss:Type="String">' + xmlEscape(r.destCity) + '</Data></Cell>' +
+        '<Cell ss:StyleID="num"><Data ss:Type="Number">' + r.deals + '</Data></Cell>' +
+        '<Cell ss:StyleID="price"><Data ss:Type="Number">' + r.minPrice + '</Data></Cell>' +
+        '<Cell ss:StyleID="num"><Data ss:Type="Number">' + r.trips + '</Data></Cell>' +
+        '<Cell ss:StyleID="num"><Data ss:Type="Number">' + r.clicks + '</Data></Cell>' +
+        '<Cell ss:StyleID="num"><Data ss:Type="Number">' + (r.trips + r.clicks) + '</Data></Cell>' +
+      '</Row>\n';
+    });
+    xml += '</Table></Worksheet>\n';
+
+    // Sheet 3: Summary by Airline
+    var airlineMap = {};
+    sorted.forEach(function(d) {
+      var key = d.airline;
+      if (!airlineMap[key]) airlineMap[key] = { airline: key, deals: 0, trips: 0, clicks: 0, avgPrice: 0, totalPrice: 0 };
+      airlineMap[key].deals++;
+      airlineMap[key].trips += (d.planTripClicks || 0);
+      airlineMap[key].clicks += (d.bookingClicks || 0);
+      airlineMap[key].totalPrice += d.price;
+    });
+    var airlines = Object.values(airlineMap).sort(function(a, b) { return (b.trips + b.clicks) - (a.trips + a.clicks); });
+
+    xml += '<Worksheet ss:Name="By Airline"><Table>\n';
+    xml += '<Column ss:Width="150"/><Column ss:Width="70"/><Column ss:Width="80"/>' +
+      '<Column ss:Width="90"/><Column ss:Width="90"/><Column ss:Width="100"/>\n';
+    xml += '<Row>' +
+      '<Cell ss:StyleID="header"><Data ss:Type="String">Airline</Data></Cell>' +
+      '<Cell ss:StyleID="header"><Data ss:Type="String"># Deals</Data></Cell>' +
+      '<Cell ss:StyleID="header"><Data ss:Type="String">Avg Price/pp</Data></Cell>' +
+      '<Cell ss:StyleID="header"><Data ss:Type="String">Trips Generated</Data></Cell>' +
+      '<Cell ss:StyleID="header"><Data ss:Type="String">Booking Clicks</Data></Cell>' +
+      '<Cell ss:StyleID="header"><Data ss:Type="String">Total Engagement</Data></Cell>' +
+    '</Row>\n';
+    airlines.forEach(function(a) {
+      xml += '<Row>' +
+        '<Cell><Data ss:Type="String">' + xmlEscape(a.airline) + '</Data></Cell>' +
+        '<Cell ss:StyleID="num"><Data ss:Type="Number">' + a.deals + '</Data></Cell>' +
+        '<Cell ss:StyleID="price"><Data ss:Type="Number">' + (a.totalPrice / a.deals).toFixed(2) + '</Data></Cell>' +
+        '<Cell ss:StyleID="num"><Data ss:Type="Number">' + a.trips + '</Data></Cell>' +
+        '<Cell ss:StyleID="num"><Data ss:Type="Number">' + a.clicks + '</Data></Cell>' +
+        '<Cell ss:StyleID="num"><Data ss:Type="Number">' + (a.trips + a.clicks) + '</Data></Cell>' +
+      '</Row>\n';
+    });
+    xml += '</Table></Worksheet>\n';
+
+    xml += '</Workbook>';
+
+    var blob = new Blob([xml], { type: 'application/vnd.ms-excel' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'bloom-deal-analytics-' + new Date().toISOString().slice(0, 10) + '.xlsx';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast('Downloaded analytics report', 'success');
+  }
+
+  function xmlEscape(str) {
+    if (str == null) return '';
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
   // SEGMENTS — dynamic UI for connecting flights

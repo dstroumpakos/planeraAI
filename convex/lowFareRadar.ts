@@ -394,6 +394,36 @@ export const getWishlistStats = query({
   },
 });
 
+// ─── Analytics Tracking ───
+
+/** Increment bookingClicks when a user opens the booking URL */
+export const trackBookingClick = mutation({
+  args: {
+    dealId: v.id("lowFareRadar"),
+  },
+  handler: async (ctx, args) => {
+    const deal = await ctx.db.get(args.dealId);
+    if (!deal) return;
+    await ctx.db.patch(args.dealId, {
+      bookingClicks: (deal.bookingClicks ?? 0) + 1,
+    });
+  },
+});
+
+/** Increment planTripClicks when a user generates a trip from a deal */
+export const trackPlanTripClick = mutation({
+  args: {
+    dealId: v.id("lowFareRadar"),
+  },
+  handler: async (ctx, args) => {
+    const deal = await ctx.db.get(args.dealId);
+    if (!deal) return;
+    await ctx.db.patch(args.dealId, {
+      planTripClicks: (deal.planTripClicks ?? 0) + 1,
+    });
+  },
+});
+
 // ─── Helpers ───
 
 function validateAdminKey(key: string) {
