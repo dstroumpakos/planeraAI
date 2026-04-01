@@ -2092,6 +2092,20 @@
   }
 
   // HELPERS
+  function localDateTime(ms) {
+    if (!ms) return '';
+    var d = new Date(ms);
+    var pad = function(n) { return n < 10 ? '0' + n : n; };
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+
+  function localizeLogEntry(entry) {
+    return entry.replace(/\[(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})\]/, function(match, date, time) {
+      var utc = new Date(date + 'T' + time + ':00Z');
+      return '[' + localDateTime(utc.getTime()) + ']';
+    });
+  }
+
   function getCurrSym(c) { return { EUR: '\u20AC', USD: '$', GBP: '\u00A3', SEK: 'kr' }[c] || c; }
 
   function escapeHtml(str) {
@@ -2158,14 +2172,14 @@
         isExpired ? 'Yes' : 'No',
         isWishlisted ? 'Yes' : 'No',
         isDeleted ? 'Yes' : 'No',
-        d.deletedAt ? new Date(d.deletedAt).toISOString().slice(0, 16).replace('T', ' ') : '',
-        d.expiresAt ? new Date(d.expiresAt).toISOString() : '',
+        localDateTime(d.deletedAt),
+        localDateTime(d.expiresAt),
         d.planTripClicks || 0,
         d.bookingClicks || 0,
-        d.createdAt ? new Date(d.createdAt).toISOString().slice(0, 16).replace('T', ' ') : '',
-        d.updatedAt ? new Date(d.updatedAt).toISOString().slice(0, 16).replace('T', ' ') : '',
+        localDateTime(d.createdAt),
+        localDateTime(d.updatedAt),
         d.changeCount || 0,
-        (d.changeLog && d.changeLog.length > 0) ? d.changeLog.join('\n') : ''
+        (d.changeLog && d.changeLog.length > 0) ? d.changeLog.map(function(e) { return localizeLogEntry(e).replace(/\u2192/g, '->').replace(/\u2014/g, '-'); }).join(' | ') : ''
       ].map(csvEscape).join(',');
     });
     var csv = headers.join(',') + '\n' + rows.join('\n');

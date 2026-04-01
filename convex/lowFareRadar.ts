@@ -297,9 +297,9 @@ export const update = mutation({
     const changes: string[] = [];
     for (const field of trackedFields) {
       if (cleanUpdates[field] !== undefined && cleanUpdates[field] !== (existing as any)[field]) {
-        const oldVal = (existing as any)[field] ?? '—';
-        const newVal = cleanUpdates[field] ?? '—';
-        changes.push(`${field}: ${oldVal} → ${newVal}`);
+        const oldVal = (existing as any)[field] ?? '-';
+        const newVal = cleanUpdates[field] ?? '-';
+        changes.push(`${field}: ${oldVal} -> ${newVal}`);
       }
     }
 
@@ -346,7 +346,7 @@ export const deactivate = mutation({
     if (!existing) throw new ConvexError("Deal not found");
     const timestamp = new Date().toISOString().slice(0, 16).replace("T", " ");
     const prevLog: string[] = (existing as any).changeLog || [];
-    const entry = `[${timestamp}] active: true → false`;
+    const entry = `[${timestamp}] active: true -> false`;
     await ctx.db.patch(args.id, {
       active: false,
       updatedAt: Date.now(),
