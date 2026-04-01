@@ -1552,11 +1552,13 @@
     var active = deals.filter(function(d) { return d.active; }).length;
     var recommended = deals.filter(function(d) { return d.isRecommended; }).length;
     var expired = deals.filter(function(d) { return d.active && d.expiresAt && d.expiresAt <= now; }).length;
+    var deleted = deals.filter(function(d) { return !!d.deletedAt; }).length;
     document.getElementById('statsRow').innerHTML =
       '<div class="stat-card"><div class="num">' + deals.length + '</div><div class="label">' + escapeHtml(t('stat_total')) + '</div></div>' +
       '<div class="stat-card"><div class="num" style="color:var(--success)">' + active + '</div><div class="label">' + escapeHtml(t('stat_active')) + '</div></div>' +
       '<div class="stat-card"><div class="num" style="color:#F5A623">' + recommended + '</div><div class="label">' + escapeHtml(t('stat_recommended')) + '</div></div>' +
-      (expired > 0 ? '<div class="stat-card"><div class="num" style="color:var(--danger)">' + expired + '</div><div class="label">' + escapeHtml(t('stat_expired')) + '</div></div>' : '');
+      (expired > 0 ? '<div class="stat-card"><div class="num" style="color:var(--danger)">' + expired + '</div><div class="label">' + escapeHtml(t('stat_expired')) + '</div></div>' : '') +
+      (deleted > 0 ? '<div class="stat-card"><div class="num" style="color:var(--muted)">' + deleted + '</div><div class="label">Deleted</div></div>' : '');
     populateMonthFilter();
   }
 
@@ -1646,12 +1648,13 @@
     }
     container.innerHTML = filteredDeals.map(function(d) {
       var isExpired = d.active && d.expiresAt && d.expiresAt <= now;
+      var isDeleted = !!d.deletedAt;
       var isWishlisted = wishlistDests.some(function(w) {
         return w.destination.toLowerCase() === (d.destinationCity || '').toLowerCase();
       });
-      var statusClass = isExpired ? 'expired' : (d.active ? 'active' : 'inactive');
-      var statusLabel = isExpired ? '⏰ ' + t('deal_expired') : (d.active ? '\u25CF' : '\u25CB');
-      return '<div class="deal-card' + (isExpired ? ' expired' : '') + '">' +
+      var statusClass = isDeleted ? 'expired' : (isExpired ? 'expired' : (d.active ? 'active' : 'inactive'));
+      var statusLabel = isDeleted ? '🗑️ Deleted' : (isExpired ? '⏰ ' + t('deal_expired') : (d.active ? '\u25CF' : '\u25CB'));
+      return '<div class="deal-card' + (isDeleted || isExpired ? ' expired' : '') + '">' +
         '<div class="deal-route">' +
           '<span class="deal-iata">' + escapeHtml(d.origin) + '</span>' +
           '<span class="deal-arrow">\u2192</span>' +
@@ -1663,26 +1666,30 @@
           '</div>' +
           '<div class="dates">' + escapeHtml(d.outboundDate) + ' \u00B7 ' + escapeHtml(d.outboundDeparture) + ' \u2192 ' + escapeHtml(d.outboundArrival) + (d.returnDate ? ' | \u21A9 ' + escapeHtml(d.returnDate) : '') +
           (d.travelMonthFrom ? ' \u00B7 \uD83D\uDCC5 ' + formatMonthRange(d.travelMonthFrom, d.travelMonthTo) : '') +
-          (isExpired ? ' <span class="expired-badge">⏰ ' + escapeHtml(t('deal_expired')) + '</span>' : '') +
+          (isDeleted ? ' <span class="expired-badge">🗑️ Deleted</span>' : (isExpired ? ' <span class="expired-badge">⏰ ' + escapeHtml(t('deal_expired')) + '</span>' : '')) +
           '</div>' +
         '</div>' +
         '<div class="deal-price">' +
           (d.originalPrice ? '<div class="original">' + getCurrSym(d.currency) + d.originalPrice + '</div>' : '') +
-          '<div class="amount"' + (isExpired ? ' style="text-decoration:line-through;color:var(--muted)"' : '') + '>' + getCurrSym(d.currency) + d.price + ' <span style="font-size:11px;font-weight:400;color:var(--muted)">/pp</span></div>' +
+          '<div class="amount"' + (isDeleted || isExpired ? ' style="text-decoration:line-through;color:var(--muted)"' : '') + '>' + getCurrSym(d.currency) + d.price + ' <span style="font-size:11px;font-weight:400;color:var(--muted)">/pp</span></div>' +
           (d.totalPrice ? '<div style="font-size:12px;color:var(--muted);margin-top:2px">' + getCurrSym(d.currency) + d.totalPrice + ' total</div>' : '') +
-          (d.dealTag && !isExpired ? '<div class="tag">' + escapeHtml(d.dealTag) + '</div>' : '') +
+          (d.dealTag && !isExpired && !isDeleted ? '<div class="tag">' + escapeHtml(d.dealTag) + '</div>' : '') +
         '</div>' +
         '<span class="deal-status ' + statusClass + '">' + statusLabel + '</span>' +
         '<div class="deal-analytics">' +
           '<span title="Trips generated">\uD83D\uDCCB ' + (d.planTripClicks || 0) + '</span>' +
           '<span title="Booking clicks">\uD83D\uDD17 ' + (d.bookingClicks || 0) + '</span>' +
+          '<span title="Number of changes">\u270F\uFE0F ' + (d.changeCount || 0) + '</span>' +
         '</div>' +
         '<div class="deal-actions">' +
-          '<button onclick="editDeal(\'' + d._id + '\')" title="Edit">\u270F\uFE0F</button>' +
-          (d.bookingUrl ? '<button onclick="refreshDeal(\'' + d._id + '\')" title="Re-scrape &amp; update from URL" id="refresh-' + d._id + '">\uD83D\uDD04</button>' : '') +
-          '<button onclick="toggleActive(\'' + d._id + '\', ' + !d.active + ')" title="' + (d.active ? 'Pause' : 'Activate') + '">' +
-            (d.active ? '\u23F8\uFE0F' : '\u25B6\uFE0F') +
-          '</button>' +
+          (isDeleted ?
+            '<button onclick="restoreDeal(\'' + d._id + '\')" title="Restore">♻️</button>' :
+            '<button onclick="editDeal(\'' + d._id + '\')" title="Edit">\u270F\uFE0F</button>' +
+            (d.bookingUrl ? '<button onclick="refreshDeal(\'' + d._id + '\')" title="Re-scrape &amp; update from URL" id="refresh-' + d._id + '">\uD83D\uDD04</button>' : '') +
+            '<button onclick="toggleActive(\'' + d._id + '\', ' + !d.active + ')" title="' + (d.active ? 'Pause' : 'Activate') + '">' +
+              (d.active ? '\u23F8\uFE0F' : '\u25B6\uFE0F') +
+            '</button>'
+          ) +
           '<button class="btn-delete" onclick="deleteDeal(\'' + d._id + '\')" title="Delete">\uD83D\uDDD1\uFE0F</button>' +
         '</div>' +
       '</div>';
@@ -1942,6 +1949,13 @@
     }).catch(function(err) { toast('Error: ' + err.message, 'error'); });
   }
 
+  function restoreDeal(id) {
+    convexMutation('lowFareRadar:restore', { adminKey: adminKey, id: id }).then(function() {
+      toast('Deal restored!', 'success');
+      loadDeals();
+    }).catch(function(err) { toast('Error: ' + err.message, 'error'); });
+  }
+
   var refreshingDealId = null;
 
   function refreshDeal(id) {
@@ -2123,10 +2137,12 @@
   function exportDealsCSV() {
     if (!deals || deals.length === 0) return toast('No deals to export', 'error');
     var now = Date.now();
-    var headers = ['Origin','Origin City','Destination','Destination City','Airline','Flight No','Outbound Date','Departure','Arrival','Duration','Stops','Return Date','Return Departure','Return Arrival','Return Duration','Return Airline','Return Stops','Price/pp','Total Price','Original Price','Currency','Cabin Bag','Checked Bag','Deal Tag','Travel Month From','Travel Month To','Booking URL','Notes','Status','Recommended','Expired','Wishlisted','Expires At','Trips Generated','Booking Clicks'];
+    var headers = ['Origin','Origin City','Destination','Destination City','Airline','Flight No','Outbound Date','Departure','Arrival','Duration','Stops','Return Date','Return Departure','Return Arrival','Return Duration','Return Airline','Return Stops','Price/pp','Total Price','Original Price','Currency','Cabin Bag','Checked Bag','Deal Tag','Travel Month From','Travel Month To','Booking URL','Notes','Status','Recommended','Expired','Wishlisted','Deleted','Deleted At','Expires At','Trips Generated','Booking Clicks','Import Date','Change Date','Number of Changes','Change Log'];
     var rows = deals.map(function(d) {
       var isExpired = d.active && d.expiresAt && d.expiresAt <= now;
+      var isDeleted = !!d.deletedAt;
       var isWishlisted = wishlistDests.some(function(w) { return w.destination.toLowerCase() === (d.destinationCity || '').toLowerCase(); });
+      var status = isDeleted ? 'Deleted' : (d.active ? (isExpired ? 'Expired' : 'Active') : 'Inactive');
       return [
         d.origin, d.originCity, d.destination, d.destinationCity,
         d.airline, d.flightNumber || '',
@@ -2137,13 +2153,19 @@
         d.dealTag || '',
         d.travelMonthFrom || '', d.travelMonthTo || '',
         d.bookingUrl || '', d.notes || '',
-        d.active ? (isExpired ? 'Expired' : 'Active') : 'Inactive',
+        status,
         d.isRecommended ? 'Yes' : 'No',
         isExpired ? 'Yes' : 'No',
         isWishlisted ? 'Yes' : 'No',
+        isDeleted ? 'Yes' : 'No',
+        d.deletedAt ? new Date(d.deletedAt).toISOString().slice(0, 16).replace('T', ' ') : '',
         d.expiresAt ? new Date(d.expiresAt).toISOString() : '',
         d.planTripClicks || 0,
-        d.bookingClicks || 0
+        d.bookingClicks || 0,
+        d.createdAt ? new Date(d.createdAt).toISOString().slice(0, 16).replace('T', ' ') : '',
+        d.updatedAt ? new Date(d.updatedAt).toISOString().slice(0, 16).replace('T', ' ') : '',
+        d.changeCount || 0,
+        (d.changeLog && d.changeLog.length > 0) ? d.changeLog.join('\n') : ''
       ].map(csvEscape).join(',');
     });
     var csv = headers.join(',') + '\n' + rows.join('\n');

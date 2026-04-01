@@ -725,8 +725,12 @@ export default defineSchema({
         // Analytics counters
         planTripClicks: v.optional(v.float64()),    // trips generated from this deal
         bookingClicks: v.optional(v.float64()),     // booking URL opens
+        // Change tracking
+        changeCount: v.optional(v.float64()),       // number of times this deal was updated
+        changeLog: v.optional(v.array(v.string())), // human-readable log of changes e.g. ["price 120→99", "airline Ryanair→Aegean"]
         // Status
         active: v.boolean(),
+        deletedAt: v.optional(v.float64()),  // soft-delete timestamp (24h after expiry)
         createdAt: v.float64(),
         updatedAt: v.optional(v.float64()),
     })

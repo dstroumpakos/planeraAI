@@ -1,4 +1,4 @@
-import { query, mutation } from "./_generated/server";
+import { query, mutation, internalMutation } from "./_generated/server";
 import { authQuery } from "./functions";
 import { internal as _internal } from "./_generated/api";
 import { ConvexError, v } from "convex/values";
@@ -29,9 +29,9 @@ export const listActive = query({
         .collect();
     }
 
-    // Filter active + not expired
+    // Filter active + not expired + not soft-deleted
     return deals.filter(
-      (d) => d.active && (!d.expiresAt || d.expiresAt > now)
+      (d) => d.active && !d.deletedAt && (!d.expiresAt || d.expiresAt > now)
     );
   },
 });
@@ -100,9 +100,9 @@ export const getDealsForUser = authQuery({
       wishlistItems.map((i: any) => i.destination.toLowerCase())
     );
 
-    // Filter active deals and include expired ones (marked)
+    // Filter active deals (exclude soft-deleted), include expired ones (marked)
     const enrichedDeals = deals
-      .filter((d: any) => d.active)
+      .filter((d: any) => d.active && !d.deletedAt)
       .map((d: any) => {
         const isExpired = d.expiresAt ? d.expiresAt <= now : false;
         return {
@@ -160,7 +160,7 @@ export const surpriseMe = query({
       .collect();
 
     let eligible = allDeals.filter(
-      (d) => d.active && (!d.expiresAt || d.expiresAt > now)
+      (d) => d.active && !d.deletedAt && (!d.expiresAt || d.expiresAt > now)
     );
 
     if (args.maxPrice !== undefined) {
@@ -285,6 +285,37 @@ export const update = mutation({
     if (cleanUpdates.origin) cleanUpdates.origin = cleanUpdates.origin.toUpperCase();
     if (cleanUpdates.destination) cleanUpdates.destination = cleanUpdates.destination.toUpperCase();
 
+    // Build change log entry
+    const trackedFields = [
+      'origin', 'originCity', 'destination', 'destinationCity',
+      'airline', 'flightNumber', 'outboundDate', 'outboundDeparture', 'outboundArrival',
+      'returnDate', 'returnDeparture', 'returnArrival', 'returnAirline',
+      'price', 'totalPrice', 'originalPrice', 'currency',
+      'cabinBaggage', 'checkedBaggage', 'dealTag', 'bookingUrl',
+      'travelMonthFrom', 'travelMonthTo', 'active',
+    ];
+    const changes: string[] = [];
+    for (const field of trackedFields) {
+      if (cleanUpdates[field] !== undefined && cleanUpdates[field] !== (existing as any)[field]) {
+        const oldVal = (existing as any)[field] ?? '—';
+        const newVal = cleanUpdates[field] ?? '—';
+        changes.push(`${field}: ${oldVal} → ${newVal}`);
+      }
+    }
+
+    if (changes.length > 0) {
+      const timestamp = new Date().toISOString().slice(0, 16).replace('T', ' ');
+      const entry = `[${timestamp}] ${changes.join('; ')}`;
+      const prevLog: string[] = (existing as any).changeLog || [];
+      cleanUpdates.changeLog = [...prevLog, entry];
+      cleanUpdates.changeCount = ((existing as any).changeCount || 0) + 1;
+    }
+
+    // If expiresAt was updated, clear soft-delete (deal is alive again)
+    if (cleanUpdates.expiresAt !== undefined && cleanUpdates.expiresAt !== existing.expiresAt) {
+      cleanUpdates.deletedAt = undefined;
+    }
+
     // Detect price drop for watched destination alerts
     const oldPrice = existing.price;
     const newPrice = cleanUpdates.price;
@@ -317,7 +348,7 @@ export const deactivate = mutation({
   },
 });
 
-/** Delete a deal permanently */
+/** Soft-delete a deal (keeps it in the database) */
 export const remove = mutation({
   args: {
     adminKey: v.string(),
@@ -325,7 +356,44 @@ export const remove = mutation({
   },
   handler: async (ctx, args) => {
     validateAdminKey(args.adminKey);
+    const existing = await ctx.db.get(args.id);
+    if (!existing) throw new ConvexError("Deal not found");
+    await ctx.db.patch(args.id, {
+      active: false,
+      deletedAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+  },
+});
+
+/** Permanently delete a deal from the database (admin only) */
+export const hardDelete = mutation({
+  args: {
+    adminKey: v.string(),
+    id: v.id("lowFareRadar"),
+  },
+  handler: async (ctx, args) => {
+    validateAdminKey(args.adminKey);
     await ctx.db.delete(args.id);
+  },
+});
+
+/** Restore a soft-deleted deal */
+export const restore = mutation({
+  args: {
+    adminKey: v.string(),
+    id: v.id("lowFareRadar"),
+  },
+  handler: async (ctx, args) => {
+    validateAdminKey(args.adminKey);
+    const existing = await ctx.db.get(args.id);
+    if (!existing) throw new ConvexError("Deal not found");
+    if (!existing.deletedAt) throw new ConvexError("Deal is not deleted");
+    await ctx.db.patch(args.id, {
+      active: true,
+      deletedAt: undefined,
+      updatedAt: Date.now(),
+    });
   },
 });
 
@@ -439,3 +507,35 @@ function validateAdminKey(key: string) {
     throw new ConvexError("Unauthorized: invalid admin key");
   }
 }
+
+// ─── Internal: Auto soft-delete expired deals after 24 hours ───
+
+export const softDeleteExpiredDeals = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+    const cutoff = Date.now() - TWENTY_FOUR_HOURS;
+
+    const allDeals = await ctx.db
+      .query("lowFareRadar")
+      .withIndex("by_active", (q) => q.eq("active", true))
+      .collect();
+
+    let count = 0;
+    for (const deal of allDeals) {
+      // Skip already soft-deleted and deals without expiry
+      if (deal.deletedAt || !deal.expiresAt) continue;
+      // If expired more than 24h ago, soft-delete it
+      if (deal.expiresAt <= cutoff) {
+        await ctx.db.patch(deal._id, {
+          active: false,
+          deletedAt: Date.now(),
+          updatedAt: Date.now(),
+        });
+        count++;
+      }
+    }
+
+    return { softDeleted: count };
+  },
+});

@@ -14,4 +14,11 @@ crons.interval(
     internal.notifications.processScheduledNotifications,
 );
 
+// Soft-delete expired deals after 24 hours
+crons.interval(
+    "soft-delete-expired-deals",
+    { hours: 1 },
+    internal.lowFareRadar.softDeleteExpiredDeals,
+);
+
 export default crons;
