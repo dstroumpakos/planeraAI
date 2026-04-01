@@ -74,11 +74,12 @@ interface LowFareRadarProps {
   homeIata?: string | null;
   wishlistDestinations?: WishlistDestination[];
   onPlanTrip?: (deal: FlightDeal) => void;
+  onPlanFromWishlist?: (destination: string) => void;
 }
 
 type Filter = "all" | "recommended" | "wishlist";
 
-export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip }: LowFareRadarProps) {
+export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip, onPlanFromWishlist }: LowFareRadarProps) {
   const { colors } = useTheme();
   const { t } = useTranslation();
   const [filter, setFilter] = useState<Filter>("all");
@@ -197,11 +198,17 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
           </View>
           <View style={styles.wishlistChips}>
             {wishlistWithDeals.map((w) => (
-              <View key={w.destination} style={[styles.wishlistChip, { backgroundColor: "#FF3B82" + "15", borderColor: "#FF3B82" + "30" }]}>
+              <TouchableOpacity
+                key={w.destination}
+                style={[styles.wishlistChip, { backgroundColor: "#FF3B82" + "15", borderColor: "#FF3B82" + "30" }]}
+                onPress={() => onPlanFromWishlist?.(w.destination)}
+                activeOpacity={0.7}
+              >
                 <Text style={[styles.wishlistChipText, { color: "#FF3B82" }]}>
                   {homeIata ? `${homeIata} → ` : ""}{w.destination}
                 </Text>
-              </View>
+                <Ionicons name="arrow-forward" size={12} color="#FF3B82" />
+              </TouchableOpacity>
             ))}
           </View>
         </View>

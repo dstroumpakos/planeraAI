@@ -110,6 +110,20 @@ export const removeFromWishlist = authMutation({
     const userId = ctx.user.userId;
     const item = await ctx.db.get(args.id);
     if (!item || item.userId !== userId) return;
+
+    // Clean up watchedDestinations entry if deal alerts were enabled
+    if (item.dealAlertEnabled) {
+      const existingWatch = await ctx.db
+        .query("watchedDestinations")
+        .withIndex("by_user_destination", (q: any) =>
+          q.eq("userId", userId).eq("destination", item.destination.toLowerCase())
+        )
+        .unique();
+      if (existingWatch) {
+        await ctx.db.delete(existingWatch._id);
+      }
+    }
+
     await ctx.db.delete(args.id);
   },
 });

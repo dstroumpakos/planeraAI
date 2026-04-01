@@ -362,6 +362,12 @@ export default function HomeScreen() {
                 },
               });
             }}
+            onPlanFromWishlist={(destination) => {
+              router.push({
+                pathname: "/create-trip",
+                params: { prefilledDestination: destination },
+              } as any);
+            }}
           />
         )}
 

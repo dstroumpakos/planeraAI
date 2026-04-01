@@ -238,7 +238,7 @@ export default function Wishlist() {
                       onPress={() =>
                         router.push({
                           pathname: "/create-trip",
-                          params: { destination: item.destination },
+                          params: { prefilledDestination: item.destination },
                         } as any)
                       }
                     >
