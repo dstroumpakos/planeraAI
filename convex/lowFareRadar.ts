@@ -344,7 +344,15 @@ export const deactivate = mutation({
     validateAdminKey(args.adminKey);
     const existing = await ctx.db.get(args.id);
     if (!existing) throw new ConvexError("Deal not found");
-    await ctx.db.patch(args.id, { active: false, updatedAt: Date.now() });
+    const timestamp = new Date().toISOString().slice(0, 16).replace("T", " ");
+    const prevLog: string[] = (existing as any).changeLog || [];
+    const entry = `[${timestamp}] active: true → false`;
+    await ctx.db.patch(args.id, {
+      active: false,
+      updatedAt: Date.now(),
+      changeCount: ((existing as any).changeCount || 0) + 1,
+      changeLog: [...prevLog, entry],
+    });
   },
 });
 
@@ -358,10 +366,15 @@ export const remove = mutation({
     validateAdminKey(args.adminKey);
     const existing = await ctx.db.get(args.id);
     if (!existing) throw new ConvexError("Deal not found");
+    const timestamp = new Date().toISOString().slice(0, 16).replace("T", " ");
+    const prevLog: string[] = (existing as any).changeLog || [];
+    const entry = `[${timestamp}] soft-deleted`;
     await ctx.db.patch(args.id, {
       active: false,
       deletedAt: Date.now(),
       updatedAt: Date.now(),
+      changeCount: ((existing as any).changeCount || 0) + 1,
+      changeLog: [...prevLog, entry],
     });
   },
 });
@@ -389,10 +402,15 @@ export const restore = mutation({
     const existing = await ctx.db.get(args.id);
     if (!existing) throw new ConvexError("Deal not found");
     if (!existing.deletedAt) throw new ConvexError("Deal is not deleted");
+    const timestamp = new Date().toISOString().slice(0, 16).replace("T", " ");
+    const prevLog: string[] = (existing as any).changeLog || [];
+    const entry = `[${timestamp}] restored`;
     await ctx.db.patch(args.id, {
       active: true,
       deletedAt: undefined,
       updatedAt: Date.now(),
+      changeCount: ((existing as any).changeCount || 0) + 1,
+      changeLog: [...prevLog, entry],
     });
   },
 });
