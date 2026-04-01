@@ -52,7 +52,7 @@ export const getDealsForUser = authQuery({
       homeAirport = altSettings?.homeAirport;
     }
 
-    if (!homeAirport) return [];
+    if (!homeAirport) return { deals: [], homeIata: null, wishlistDestinations: [] };
 
     const now = Date.now();
 
@@ -65,7 +65,7 @@ export const getDealsForUser = authQuery({
       homeIata = iataMatch[iataMatch.length - 1];
     }
 
-    if (!homeIata) return [];
+    if (!homeIata) return { deals: [], homeIata: null, wishlistDestinations: [] };
 
     // Get deals matching home airport as origin
     let deals = await ctx.db
@@ -87,24 +87,55 @@ export const getDealsForUser = authQuery({
         .filter(Boolean)
     );
 
-    // Filter active, not expired, and enrich with matching info
-    const activeDeals = deals
-      .filter((d: any) => d.active && (!d.expiresAt || d.expiresAt > now))
-      .map((d: any) => ({
-        ...d,
-        matchesPreference: savedDestinations.has(
-          d.destinationCity.toLowerCase()
-        ),
-      }));
+    // Get user's wishlist destinations
+    const wishlistItems = await ctx.db
+      .query("wishlist")
+      .withIndex("by_user", (q: any) => q.eq("userId", userId))
+      .collect();
+    const wishlistDestinations = wishlistItems.map((i: any) => ({
+      destination: i.destination,
+      country: i.country || null,
+    }));
+    const wishlistSet = new Set(
+      wishlistItems.map((i: any) => i.destination.toLowerCase())
+    );
 
-    // Sort: recommended first, then preference-matched, then by price
-    return activeDeals.sort((a: any, b: any) => {
+    // Filter active deals and include expired ones (marked)
+    const enrichedDeals = deals
+      .filter((d: any) => d.active)
+      .map((d: any) => {
+        const isExpired = d.expiresAt ? d.expiresAt <= now : false;
+        return {
+          ...d,
+          isExpired,
+          matchesPreference: savedDestinations.has(
+            d.destinationCity.toLowerCase()
+          ),
+          matchesWishlist: wishlistSet.has(
+            d.destinationCity.toLowerCase()
+          ),
+        };
+      });
+
+    // Sort: non-expired first, then recommended, then wishlist-matched, then preference-matched, then by price
+    const sorted = enrichedDeals.sort((a: any, b: any) => {
+      // Expired deals go to the end
+      if (a.isExpired && !b.isExpired) return 1;
+      if (!a.isExpired && b.isExpired) return -1;
       if (a.isRecommended && !b.isRecommended) return -1;
       if (!a.isRecommended && b.isRecommended) return 1;
+      if (a.matchesWishlist && !b.matchesWishlist) return -1;
+      if (!a.matchesWishlist && b.matchesWishlist) return 1;
       if (a.matchesPreference && !b.matchesPreference) return -1;
       if (!a.matchesPreference && b.matchesPreference) return 1;
       return a.price - b.price;
     });
+
+    return {
+      deals: sorted,
+      homeIata,
+      wishlistDestinations,
+    };
   },
 });
 
@@ -195,6 +226,8 @@ const dealFields = {
   bookingUrl: v.optional(v.string()),
   expiresAt: v.optional(v.float64()),
   notes: v.optional(v.string()),
+  travelMonthFrom: v.optional(v.string()),  // "2026-04" format
+  travelMonthTo: v.optional(v.string()),    // "2026-06" format
 };
 
 /** Create a new low-fare deal (admin only — validated by adminKey) */
@@ -335,6 +368,29 @@ export const getHomeAirports = query({
     }
 
     return Object.values(airportMap).sort((a, b) => b.count - a.count);
+  },
+});
+
+/** Get aggregated wishlist destinations from all users (admin only) */
+export const getWishlistStats = query({
+  args: {
+    adminKey: v.string(),
+  },
+  handler: async (ctx, args) => {
+    validateAdminKey(args.adminKey);
+    const allWishlist = await ctx.db.query("wishlist").collect();
+
+    const destMap: Record<string, { destination: string; country: string | null; count: number }> = {};
+
+    for (const w of allWishlist) {
+      const key = w.destination.toLowerCase();
+      if (!destMap[key]) {
+        destMap[key] = { destination: w.destination, country: (w as any).country || null, count: 0 };
+      }
+      destMap[key].count++;
+    }
+
+    return Object.values(destMap).sort((a, b) => b.count - a.count);
   },
 });
 

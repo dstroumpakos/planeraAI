@@ -60,16 +60,25 @@ interface FlightDeal {
   bookingUrl?: string;
   notes?: string;
   matchesPreference?: boolean;
+  matchesWishlist?: boolean;
+  isExpired?: boolean;
+}
+
+interface WishlistDestination {
+  destination: string;
+  country: string | null;
 }
 
 interface LowFareRadarProps {
   deals: FlightDeal[];
+  homeIata?: string | null;
+  wishlistDestinations?: WishlistDestination[];
   onPlanTrip?: (deal: FlightDeal) => void;
 }
 
-type Filter = "all" | "recommended";
+type Filter = "all" | "recommended" | "wishlist";
 
-export function LowFareRadar({ deals, onPlanTrip }: LowFareRadarProps) {
+export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip }: LowFareRadarProps) {
   const { colors } = useTheme();
   const { t } = useTranslation();
   const [filter, setFilter] = useState<Filter>("all");
@@ -81,7 +90,9 @@ export function LowFareRadar({ deals, onPlanTrip }: LowFareRadarProps) {
   const filteredDeals =
     filter === "recommended"
       ? deals.filter((d) => d.isRecommended || d.matchesPreference)
-      : deals;
+      : filter === "wishlist"
+        ? deals.filter((d) => d.matchesWishlist)
+        : deals;
 
   const getAnimValue = (id: string) => {
     if (!animValues.current[id]) {
@@ -143,6 +154,15 @@ export function LowFareRadar({ deals, onPlanTrip }: LowFareRadarProps) {
     (d) => d.isRecommended || d.matchesPreference
   ).length;
 
+  const wishlistCount = deals.filter((d) => d.matchesWishlist).length;
+
+  // Build a summary of wishlisted destinations that have deals from homeIata
+  const wishlistWithDeals = wishlistDestinations?.filter((w) =>
+    deals.some(
+      (d) => d.destinationCity.toLowerCase() === w.destination.toLowerCase()
+    )
+  ) || [];
+
   return (
     <View style={styles.container}>
       {/* Section Header */}
@@ -158,13 +178,34 @@ export function LowFareRadar({ deals, onPlanTrip }: LowFareRadarProps) {
               {t("lowFare.title", { defaultValue: "Low Fare Radar" })}
             </Text>
             <Text style={[styles.subtitle, { color: colors.textMuted }]}>
-              {t("lowFare.subtitle", {
-                defaultValue: "Best flight deals for you",
-              })}
+              {homeIata
+                ? t("lowFare.subtitleFrom", { defaultValue: `Deals from ${homeIata}`, airport: homeIata })
+                : t("lowFare.subtitle", { defaultValue: "Best flight deals for you" })}
             </Text>
           </View>
         </View>
       </View>
+
+      {/* Wishlist Destinations with Deals */}
+      {wishlistWithDeals.length > 0 && (
+        <View style={[styles.wishlistSummary, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={styles.wishlistSummaryHeader}>
+            <Ionicons name="heart" size={14} color="#FF3B82" />
+            <Text style={[styles.wishlistSummaryTitle, { color: colors.text }]}>
+              {t("lowFare.wishlistDeals", { defaultValue: "Deals to your wishlist" })}
+            </Text>
+          </View>
+          <View style={styles.wishlistChips}>
+            {wishlistWithDeals.map((w) => (
+              <View key={w.destination} style={[styles.wishlistChip, { backgroundColor: "#FF3B82" + "15", borderColor: "#FF3B82" + "30" }]}>
+                <Text style={[styles.wishlistChipText, { color: "#FF3B82" }]}>
+                  {homeIata ? `${homeIata} → ` : ""}{w.destination}
+                </Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      )}
 
       {/* Filter Tabs */}
       <View style={styles.filterRow}>
@@ -221,6 +262,37 @@ export function LowFareRadar({ deals, onPlanTrip }: LowFareRadarProps) {
             </Text>
           </TouchableOpacity>
         )}
+        {wishlistCount > 0 && (
+          <TouchableOpacity
+            style={[
+              styles.filterBtn,
+              {
+                backgroundColor:
+                  filter === "wishlist" ? "#FF3B82" : colors.card,
+                borderColor:
+                  filter === "wishlist" ? "#FF3B82" : colors.border,
+              },
+            ]}
+            onPress={() => setFilter("wishlist")}
+          >
+            <Ionicons
+              name="heart"
+              size={14}
+              color={filter === "wishlist" ? "#FFF" : "#FF3B82"}
+            />
+            <Text
+              style={[
+                styles.filterText,
+                {
+                  color: filter === "wishlist" ? "#FFF" : colors.text,
+                },
+              ]}
+            >
+              {t("lowFare.wishlist", { defaultValue: "Wishlist" })} (
+              {wishlistCount})
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Deal Cards */}
@@ -248,10 +320,15 @@ export function LowFareRadar({ deals, onPlanTrip }: LowFareRadarProps) {
                 styles.card,
                 {
                   backgroundColor: colors.card,
-                  borderColor: deal.matchesPreference
-                    ? colors.primary
-                    : colors.border,
-                  borderWidth: deal.matchesPreference ? 2 : 1,
+                  borderColor: deal.isExpired
+                    ? "#FF3B30"
+                    : deal.matchesWishlist
+                      ? "#FF3B82"
+                      : deal.matchesPreference
+                        ? colors.primary
+                        : colors.border,
+                  borderWidth: deal.isExpired || deal.matchesPreference || deal.matchesWishlist ? 2 : 1,
+                  opacity: deal.isExpired ? 0.7 : 1,
                   width: CARD_WIDTH,
                 },
               ]}
@@ -260,7 +337,20 @@ export function LowFareRadar({ deals, onPlanTrip }: LowFareRadarProps) {
             >
               {/* Tags */}
               <View style={styles.tagRow}>
-                {deal.dealTag && (
+                {deal.isExpired && (
+                  <View
+                    style={[
+                      styles.dealTagBadge,
+                      { backgroundColor: "#FF3B30" },
+                    ]}
+                  >
+                    <Ionicons name="time-outline" size={12} color="#FFF" />
+                    <Text style={styles.dealTagText}>
+                      {t("lowFare.expired", { defaultValue: "Expired" })}
+                    </Text>
+                  </View>
+                )}
+                {deal.dealTag && !deal.isExpired && (
                   <View
                     style={[
                       styles.dealTagBadge,
@@ -269,6 +359,19 @@ export function LowFareRadar({ deals, onPlanTrip }: LowFareRadarProps) {
                   >
                     <Ionicons name="flame" size={12} color="#FFF" />
                     <Text style={styles.dealTagText}>{deal.dealTag}</Text>
+                  </View>
+                )}
+                {deal.matchesWishlist && (
+                  <View
+                    style={[
+                      styles.dealTagBadge,
+                      { backgroundColor: "#FF3B82" },
+                    ]}
+                  >
+                    <Ionicons name="heart" size={12} color="#FFF" />
+                    <Text style={styles.dealTagText}>
+                      {t("lowFare.wishlisted", { defaultValue: "Wishlisted" })}
+                    </Text>
                   </View>
                 )}
                 {deal.isRecommended && (
@@ -628,7 +731,7 @@ export function LowFareRadar({ deals, onPlanTrip }: LowFareRadarProps) {
                   )}
 
                   {/* Booking button */}
-                  {deal.bookingUrl && (
+                  {deal.bookingUrl && !deal.isExpired && (
                     <TouchableOpacity
                       style={[
                         styles.bookBtn,
@@ -645,8 +748,18 @@ export function LowFareRadar({ deals, onPlanTrip }: LowFareRadarProps) {
                     </TouchableOpacity>
                   )}
 
+                  {/* Expired notice */}
+                  {deal.isExpired && (
+                    <View style={styles.expiredNotice}>
+                      <Ionicons name="alert-circle" size={16} color="#FF3B30" />
+                      <Text style={styles.expiredNoticeText}>
+                        {t("lowFare.expiredNotice", { defaultValue: "This deal has expired and is no longer available" })}
+                      </Text>
+                    </View>
+                  )}
+
                   {/* Plan Trip button */}
-                  {onPlanTrip && (
+                  {onPlanTrip && !deal.isExpired && (
                     <TouchableOpacity
                       style={[
                         styles.planTripBtn,
@@ -984,5 +1097,52 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "500",
     marginTop: 1,
+  },
+  wishlistSummary: {
+    marginHorizontal: 20,
+    marginBottom: 14,
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  wishlistSummaryHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 8,
+  },
+  wishlistSummaryTitle: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  wishlistChips: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  wishlistChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  wishlistChipText: {
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  expiredNotice: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    backgroundColor: "#FF3B30" + "12",
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 8,
+  },
+  expiredNoticeText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#FF3B30",
+    flex: 1,
   },
 });

@@ -716,6 +716,9 @@ export default defineSchema({
         bookingUrl: v.optional(v.string()),
         expiresAt: v.optional(v.float64()),
         notes: v.optional(v.string()),
+        // Travel date range (which months this deal covers)
+        travelMonthFrom: v.optional(v.string()),  // "2026-04" format
+        travelMonthTo: v.optional(v.string()),     // "2026-06" format
         // Status
         active: v.boolean(),
         createdAt: v.float64(),

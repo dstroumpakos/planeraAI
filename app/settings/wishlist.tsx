@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, StatusBar, Alert, TextInput, Modal } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, StatusBar, Alert, TextInput, Modal, FlatList, Keyboard } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -7,7 +7,7 @@ import { api } from "@/convex/_generated/api";
 import { useToken, useAuthenticatedMutation } from "@/lib/useAuthenticatedMutation";
 import { useTheme } from "@/lib/ThemeContext";
 import { useTranslation } from "react-i18next";
-import { useState } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { CITY_TRANSLATIONS, COUNTRY_TRANSLATIONS } from "@/lib/destinationTranslations";
 
 const PRIORITY_OPTIONS = [
@@ -33,6 +33,46 @@ export default function Wishlist() {
   const [newNotes, setNewNotes] = useState("");
   const [newPriority, setNewPriority] = useState<"dream" | "planned" | "someday">("someday");
   const [filter, setFilter] = useState<string>("all");
+  const [showCitySuggestions, setShowCitySuggestions] = useState(false);
+  const [showCountrySuggestions, setShowCountrySuggestions] = useState(false);
+
+  const { i18n } = useTranslation();
+  const lang = i18n.language;
+
+  const getLocalizedName = useCallback((englishName: string, translations: Record<string, Record<string, string>>) => {
+    const entry = translations[englishName];
+    if (!entry) return englishName;
+    if (lang === "en") return englishName;
+    return entry[lang] || englishName;
+  }, [lang]);
+
+  const filterSuggestions = useCallback((input: string, translations: Record<string, Record<string, string>>) => {
+    const trimmed = input.trim().toLowerCase();
+    if (trimmed.length < 1) return [];
+    const results: { english: string; display: string }[] = [];
+    for (const [englishName, langs] of Object.entries(translations)) {
+      const display = lang === "en" ? englishName : (langs[lang] || englishName);
+      if (
+        englishName.toLowerCase().startsWith(trimmed) ||
+        display.toLowerCase().startsWith(trimmed) ||
+        Object.values(langs).some(v => v.toLowerCase().startsWith(trimmed))
+      ) {
+        results.push({ english: englishName, display });
+      }
+      if (results.length >= 8) break;
+    }
+    return results;
+  }, [lang]);
+
+  const citySuggestions = useMemo(() =>
+    showCitySuggestions ? filterSuggestions(newDestination, CITY_TRANSLATIONS) : [],
+    [newDestination, showCitySuggestions, filterSuggestions]
+  );
+
+  const countrySuggestions = useMemo(() =>
+    showCountrySuggestions ? filterSuggestions(newCountry, COUNTRY_TRANSLATIONS) : [],
+    [newCountry, showCountrySuggestions, filterSuggestions]
+  );
 
   const items = wishlistData?.items || [];
   const filtered = filter === "all" ? items : items.filter((i: any) => i.priority === filter);
@@ -94,6 +134,8 @@ export default function Wishlist() {
     setNewCountry("");
     setNewNotes("");
     setNewPriority("someday");
+    setShowCitySuggestions(false);
+    setShowCountrySuggestions(false);
   };
 
   const getPriorityInfo = (priority: string) =>
@@ -224,22 +266,76 @@ export default function Wishlist() {
 
             <ScrollView style={styles.modalContent}>
               <Text style={styles.fieldLabel}>{t("wishlist.destinationName")}</Text>
-              <TextInput
-                style={styles.input}
-                placeholder={t("wishlist.destinationPlaceholder")}
-                placeholderTextColor={colors.textMuted}
-                value={newDestination}
-                onChangeText={setNewDestination}
-              />
+              <View style={{ zIndex: 2 }}>
+                <TextInput
+                  style={styles.input}
+                  placeholder={t("wishlist.destinationPlaceholder")}
+                  placeholderTextColor={colors.textMuted}
+                  value={newDestination}
+                  onChangeText={(text) => {
+                    setNewDestination(text);
+                    setShowCitySuggestions(true);
+                  }}
+                  onFocus={() => setShowCitySuggestions(true)}
+                />
+                {citySuggestions.length > 0 && (
+                  <View style={styles.suggestionsContainer}>
+                    {citySuggestions.map((item) => (
+                      <TouchableOpacity
+                        key={item.english}
+                        style={styles.suggestionItem}
+                        onPress={() => {
+                          setNewDestination(item.display);
+                          setShowCitySuggestions(false);
+                          Keyboard.dismiss();
+                        }}
+                      >
+                        <Ionicons name="location-outline" size={16} color={colors.textMuted} />
+                        <Text style={styles.suggestionText}>{item.display}</Text>
+                        {item.display !== item.english && (
+                          <Text style={styles.suggestionSubtext}>{item.english}</Text>
+                        )}
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+              </View>
 
               <Text style={styles.fieldLabel}>{t("wishlist.countryOptional")}</Text>
-              <TextInput
-                style={styles.input}
-                placeholder={t("wishlist.countryPlaceholder")}
-                placeholderTextColor={colors.textMuted}
-                value={newCountry}
-                onChangeText={setNewCountry}
-              />
+              <View style={{ zIndex: 1 }}>
+                <TextInput
+                  style={styles.input}
+                  placeholder={t("wishlist.countryPlaceholder")}
+                  placeholderTextColor={colors.textMuted}
+                  value={newCountry}
+                  onChangeText={(text) => {
+                    setNewCountry(text);
+                    setShowCountrySuggestions(true);
+                  }}
+                  onFocus={() => setShowCountrySuggestions(true)}
+                />
+                {countrySuggestions.length > 0 && (
+                  <View style={styles.suggestionsContainer}>
+                    {countrySuggestions.map((item) => (
+                      <TouchableOpacity
+                        key={item.english}
+                        style={styles.suggestionItem}
+                        onPress={() => {
+                          setNewCountry(item.display);
+                          setShowCountrySuggestions(false);
+                          Keyboard.dismiss();
+                        }}
+                      >
+                        <Ionicons name="flag-outline" size={16} color={colors.textMuted} />
+                        <Text style={styles.suggestionText}>{item.display}</Text>
+                        {item.display !== item.english && (
+                          <Text style={styles.suggestionSubtext}>{item.english}</Text>
+                        )}
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+              </View>
 
               <Text style={styles.fieldLabel}>{t("wishlist.priority")}</Text>
               <View style={styles.priorityRow}>
@@ -401,4 +497,32 @@ const createStyles = (colors: any, isDarkMode: boolean) =>
       marginTop: 24,
     },
     addButtonText: { fontSize: 16, fontWeight: "700", color: colors.text },
+    suggestionsContainer: {
+      backgroundColor: colors.card,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      marginTop: 4,
+      maxHeight: 200,
+      overflow: "hidden",
+    },
+    suggestionItem: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      paddingHorizontal: 14,
+      paddingVertical: 12,
+      borderBottomWidth: StyleSheet.hairlineWidth,
+      borderBottomColor: colors.border,
+    },
+    suggestionText: {
+      fontSize: 15,
+      color: colors.text,
+      fontWeight: "500",
+      flex: 1,
+    },
+    suggestionSubtext: {
+      fontSize: 12,
+      color: colors.textMuted,
+    },
   });

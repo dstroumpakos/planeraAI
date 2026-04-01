@@ -319,6 +319,81 @@
     }
     .deal-status.active { background: #D1FAE5; color: #065F46; }
     .deal-status.inactive { background: #FEE2E2; color: #991B1B; }
+    .deal-status.expired { background: #FEE2E2; color: #991B1B; }
+    .deal-card.expired {
+      border-color: var(--danger);
+      border-width: 2px;
+      opacity: 0.7;
+      background: #FFF5F5;
+    }
+    .deal-card.expired .deal-iata,
+    .deal-card.expired .deal-price .amount {
+      color: var(--muted);
+    }
+    .expired-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: var(--danger);
+      color: #fff;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      margin-left: 6px;
+    }
+    .wishlist-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      background: #FF3B82;
+      color: #fff;
+      padding: 2px 7px;
+      border-radius: 6px;
+      font-size: 10px;
+      font-weight: 700;
+    }
+    .wishlist-section {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .wishlist-section h3 {
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .wishlist-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .wishlist-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 5px 12px;
+      border-radius: 20px;
+      background: #FF3B8215;
+      border: 1px solid #FF3B8230;
+      font-size: 12px;
+      font-weight: 600;
+      color: #FF3B82;
+    }
+    .wishlist-chip .chip-count {
+      background: #FF3B82;
+      color: #fff;
+      font-size: 10px;
+      padding: 1px 5px;
+      border-radius: 10px;
+      font-weight: 700;
+    }
     .deal-actions { display: flex; gap: 4px; }
     .deal-actions button {
       width: 32px; height: 32px;
@@ -658,6 +733,33 @@
       color: var(--muted);
       margin-top: 12px;
     }
+    /* Export buttons */
+    .export-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 16px;
+      flex-wrap: wrap;
+    }
+    .btn-export {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--card);
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      cursor: pointer;
+      transition: all .2s;
+    }
+    .btn-export:hover {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: #000;
+    }
+
     @media (max-width: 600px) {
       .form-grid { grid-template-columns: 1fr; }
       .deal-card { flex-wrap: wrap; }
@@ -924,6 +1026,14 @@
           <label data-i18n="lbl_expires">Expires At</label>
           <input type="datetime-local" id="f-expiresAt">
         </div>
+        <div class="form-group">
+          <label data-i18n="lbl_travel_from">Travel Month From</label>
+          <input type="month" id="f-travelMonthFrom" placeholder="2026-04">
+        </div>
+        <div class="form-group">
+          <label data-i18n="lbl_travel_to">Travel Month To</label>
+          <input type="month" id="f-travelMonthTo" placeholder="2026-06">
+        </div>
         <div class="checkbox-group">
           <input type="checkbox" id="f-isRecommended">
           <label for="f-isRecommended" data-i18n="lbl_recommended">&#11088; Recommended</label>
@@ -942,6 +1052,17 @@
   <!-- Deals List -->
   <div class="content" id="content-list" style="display:none">
     <div class="stats-row" id="statsRow"></div>
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+      <label style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--muted)">Filter by month:</label>
+      <select id="monthFilter" onchange="filterDealsByMonth()" style="padding:8px 14px;border-radius:10px;border:1px solid var(--border);font-size:13px;font-weight:600;min-width:140px">
+        <option value="">All months</option>
+      </select>
+      <span id="monthFilterCount" style="font-size:12px;color:var(--muted)"></span>
+    </div>
+    <div class="export-row">
+      <button class="btn-export" onclick="exportDealsCSV()">📊 Export Deals (.csv)</button>
+      <button class="btn-export" onclick="exportAllCSV()">📦 Export All Data (.csv)</button>
+    </div>
     <div id="dealsList"></div>
   </div>
 
@@ -950,6 +1071,10 @@
     <div class="form-card">
       <div class="form-section-title">&#127968; <span data-i18n="airports_title">User Home Airports</span></div>
       <p style="font-size:13px;color:var(--muted);margin-bottom:16px" data-i18n="airports_subtitle">Airports selected by app users as their home airport</p>
+      <div class="export-row" style="margin-bottom:12px">
+        <button class="btn-export" onclick="exportAirportsCSV()">📊 Export Airports (.csv)</button>
+        <button class="btn-export" onclick="exportWishlistCSV()">❤️ Export Wishlist (.csv)</button>
+      </div>
       <div id="airportsList"></div>
     </div>
   </div>
@@ -1016,6 +1141,13 @@
       stat_total: 'Total',
       stat_active: 'Active',
       stat_recommended: 'Recommended',
+      stat_expired: 'Expired',
+      deal_expired: 'EXPIRED',
+      wishlist_title: 'Wishlisted Destinations',
+      wishlist_subtitle: 'Destinations users have added to their wishlist',
+      wishlist_users: 'users',
+      wishlist_user: 'user',
+      empty_wishlist: 'No wishlisted destinations yet.',
       empty_deals: 'No deals yet. Add your first!',
       empty_connect: 'Connect first',
       lang_toggle: '🇬🇷 EL',
@@ -1050,6 +1182,11 @@
       import_preview_stop: 'stop',
       import_preview_stops: 'stops',
       import_preview_source: 'Source',
+      lbl_travel_from: 'Travel Month From',
+      lbl_travel_to: 'Travel Month To',
+      travel_months: 'Travel',
+      filter_all_months: 'All months',
+      filter_showing: 'showing',
     },
     el: {
       login_title: 'Ραντάρ Χαμηλών Ναύλων',
@@ -1103,6 +1240,13 @@
       stat_total: 'Σύνολο',
       stat_active: 'Ενεργές',
       stat_recommended: 'Προτεινόμενες',
+      stat_expired: 'Ληγμένες',
+      deal_expired: 'ΛΗΓΜΕΝΗ',
+      wishlist_title: 'Προορισμοί Wishlist',
+      wishlist_subtitle: 'Προορισμοί που οι χρήστες πρόσθεσαν στη λίστα τους',
+      wishlist_users: 'χρήστες',
+      wishlist_user: 'χρήστης',
+      empty_wishlist: 'Δεν υπάρχουν wishlist προορισμοί ακόμα.',
       empty_deals: 'Δεν υπάρχουν προσφορές. Προσθέστε την πρώτη!',
       empty_connect: 'Συνδεθείτε πρώτα',
       lang_toggle: '🇬🇧 EN',
@@ -1137,6 +1281,11 @@
       import_preview_stop: 'στάση',
       import_preview_stops: 'στάσεις',
       import_preview_source: 'Πηγή',
+      lbl_travel_from: 'Μήνας Ταξιδιού Από',
+      lbl_travel_to: 'Μήνας Ταξιδιού Έως',
+      travel_months: 'Ταξίδι',
+      filter_all_months: 'Όλοι οι μήνες',
+      filter_showing: 'εμφανίζονται',
     }
   };
 
@@ -1309,7 +1458,8 @@
 
     var optionalText = ['flightNumber', 'outboundDuration', 'returnDate', 'returnDeparture',
       'returnArrival', 'returnDuration', 'returnAirline', 'returnFlightNumber',
-      'cabinBaggage', 'checkedBaggage', 'dealTag', 'bookingUrl', 'notes'];
+      'cabinBaggage', 'checkedBaggage', 'dealTag', 'bookingUrl', 'notes',
+      'travelMonthFrom', 'travelMonthTo'];
     for (var j = 0; j < optionalText.length; j++) {
       var oField = optionalText[j];
       var oVal = document.getElementById('f-' + oField).value.trim();
@@ -1373,8 +1523,12 @@
         '<div class="empty-state"><div class="icon">\uD83D\uDD0C</div><p>' + escapeHtml(t('empty_connect')) + '</p></div>';
       return;
     }
-    convexQuery('lowFareRadar:listAll', { adminKey: adminKey }).then(function(result) {
-      deals = result;
+    var dealsPromise = convexQuery('lowFareRadar:listAll', { adminKey: adminKey });
+    var wishlistPromise = convexQuery('lowFareRadar:getWishlistStats', { adminKey: adminKey }).catch(function(err) { console.warn('[Wishlist] loadDeals error:', err.message || err); return []; });
+    Promise.all([dealsPromise, wishlistPromise]).then(function(results) {
+      deals = results[0];
+      wishlistDests = results[1] || [];
+      console.log('[Wishlist] Loaded', wishlistDests.length, 'wishlisted destinations', wishlistDests);
       renderStats();
       renderDeals();
     }).catch(function(err) {
@@ -1383,12 +1537,72 @@
   }
 
   function renderStats() {
+    var now = Date.now();
     var active = deals.filter(function(d) { return d.active; }).length;
     var recommended = deals.filter(function(d) { return d.isRecommended; }).length;
+    var expired = deals.filter(function(d) { return d.active && d.expiresAt && d.expiresAt <= now; }).length;
     document.getElementById('statsRow').innerHTML =
       '<div class="stat-card"><div class="num">' + deals.length + '</div><div class="label">' + escapeHtml(t('stat_total')) + '</div></div>' +
       '<div class="stat-card"><div class="num" style="color:var(--success)">' + active + '</div><div class="label">' + escapeHtml(t('stat_active')) + '</div></div>' +
-      '<div class="stat-card"><div class="num" style="color:#F5A623">' + recommended + '</div><div class="label">' + escapeHtml(t('stat_recommended')) + '</div></div>';
+      '<div class="stat-card"><div class="num" style="color:#F5A623">' + recommended + '</div><div class="label">' + escapeHtml(t('stat_recommended')) + '</div></div>' +
+      (expired > 0 ? '<div class="stat-card"><div class="num" style="color:var(--danger)">' + expired + '</div><div class="label">' + escapeHtml(t('stat_expired')) + '</div></div>' : '');
+    populateMonthFilter();
+  }
+
+  function formatMonthRange(from, to) {
+    var MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    function fmt(ym) {
+      if (!ym) return '';
+      var parts = ym.split('-');
+      var y = parts[0];
+      var m = parseInt(parts[1], 10);
+      return MONTHS[m - 1] + ' ' + y;
+    }
+    if (!from) return '';
+    if (!to || to === from) return fmt(from);
+    return fmt(from) + ' – ' + fmt(to);
+  }
+
+  function populateMonthFilter() {
+    var sel = document.getElementById('monthFilter');
+    var currentVal = sel.value;
+    var months = {};
+    deals.forEach(function(d) {
+      var from = d.travelMonthFrom || (d.outboundDate ? d.outboundDate.substring(0, 7) : '');
+      var to = d.travelMonthTo || from;
+      if (from) {
+        // Add all months in range
+        var cur = from;
+        var safety = 0;
+        while (cur <= to && safety < 36) {
+          months[cur] = true;
+          // Increment month
+          var parts = cur.split('-');
+          var y = parseInt(parts[0], 10);
+          var m = parseInt(parts[1], 10);
+          m++;
+          if (m > 12) { m = 1; y++; }
+          cur = y + '-' + String(m).padStart(2, '0');
+          safety++;
+        }
+      }
+    });
+    var sorted = Object.keys(months).sort();
+    sel.innerHTML = '<option value="">' + escapeHtml(t('filter_all_months')) + '</option>';
+    sorted.forEach(function(ym) {
+      var opt = document.createElement('option');
+      opt.value = ym;
+      opt.textContent = formatMonthRange(ym, null);
+      sel.appendChild(opt);
+    });
+    // Restore previous selection if still valid
+    if (currentVal && months[currentVal]) {
+      sel.value = currentVal;
+    }
+  }
+
+  function filterDealsByMonth() {
+    renderDeals();
   }
 
   function renderDeals() {
@@ -1397,24 +1611,57 @@
       container.innerHTML = '<div class="empty-state"><div class="icon">\u2708\uFE0F</div><p>' + escapeHtml(t('empty_deals')) + '</p></div>';
       return;
     }
-    container.innerHTML = deals.map(function(d) {
-      return '<div class="deal-card">' +
+    var now = Date.now();
+    var monthFilter = document.getElementById('monthFilter').value;
+    var filteredDeals = deals;
+    if (monthFilter) {
+      filteredDeals = deals.filter(function(d) {
+        var from = d.travelMonthFrom || (d.outboundDate ? d.outboundDate.substring(0, 7) : '');
+        var to = d.travelMonthTo || from;
+        if (!from) return false;
+        return monthFilter >= from && monthFilter <= (to || from);
+      });
+    }
+    // Update filter count
+    var countEl = document.getElementById('monthFilterCount');
+    if (monthFilter) {
+      countEl.textContent = '(' + t('filter_showing') + ' ' + filteredDeals.length + '/' + deals.length + ')';
+    } else {
+      countEl.textContent = '';
+    }
+    if (filteredDeals.length === 0) {
+      container.innerHTML = '<div class="empty-state"><div class="icon">\ud83d\udcc5</div><p>No deals for this month.</p></div>';
+      return;
+    }
+    container.innerHTML = filteredDeals.map(function(d) {
+      var isExpired = d.active && d.expiresAt && d.expiresAt <= now;
+      var isWishlisted = wishlistDests.some(function(w) {
+        return w.destination.toLowerCase() === (d.destinationCity || '').toLowerCase();
+      });
+      var statusClass = isExpired ? 'expired' : (d.active ? 'active' : 'inactive');
+      var statusLabel = isExpired ? '⏰ ' + t('deal_expired') : (d.active ? '\u25CF' : '\u25CB');
+      return '<div class="deal-card' + (isExpired ? ' expired' : '') + '">' +
         '<div class="deal-route">' +
           '<span class="deal-iata">' + escapeHtml(d.origin) + '</span>' +
           '<span class="deal-arrow">\u2192</span>' +
           '<span class="deal-iata">' + escapeHtml(d.destination) + '</span>' +
         '</div>' +
         '<div class="deal-info">' +
-          '<div class="airline">' + escapeHtml(d.airline) + (d.flightNumber ? ' \u00B7 ' + escapeHtml(d.flightNumber) : '') + (d.outboundStops ? ' \u00B7 ' + d.outboundStops + ' stop' + (d.outboundStops > 1 ? 's' : '') : '') + '</div>' +
-          '<div class="dates">' + escapeHtml(d.outboundDate) + ' \u00B7 ' + escapeHtml(d.outboundDeparture) + ' \u2192 ' + escapeHtml(d.outboundArrival) + (d.returnDate ? ' | \u21A9 ' + escapeHtml(d.returnDate) : '') + '</div>' +
+          '<div class="airline">' + escapeHtml(d.airline) + (d.flightNumber ? ' \u00B7 ' + escapeHtml(d.flightNumber) : '') + (d.outboundStops ? ' \u00B7 ' + d.outboundStops + ' stop' + (d.outboundStops > 1 ? 's' : '') : '') +
+          (isWishlisted ? ' <span class="wishlist-badge">❤️ Wishlisted</span>' : '') +
+          '</div>' +
+          '<div class="dates">' + escapeHtml(d.outboundDate) + ' \u00B7 ' + escapeHtml(d.outboundDeparture) + ' \u2192 ' + escapeHtml(d.outboundArrival) + (d.returnDate ? ' | \u21A9 ' + escapeHtml(d.returnDate) : '') +
+          (d.travelMonthFrom ? ' \u00B7 \uD83D\uDCC5 ' + formatMonthRange(d.travelMonthFrom, d.travelMonthTo) : '') +
+          (isExpired ? ' <span class="expired-badge">⏰ ' + escapeHtml(t('deal_expired')) + '</span>' : '') +
+          '</div>' +
         '</div>' +
         '<div class="deal-price">' +
           (d.originalPrice ? '<div class="original">' + getCurrSym(d.currency) + d.originalPrice + '</div>' : '') +
-          '<div class="amount">' + getCurrSym(d.currency) + d.price + ' <span style="font-size:11px;font-weight:400;color:var(--muted)">/pp</span></div>' +
+          '<div class="amount"' + (isExpired ? ' style="text-decoration:line-through;color:var(--muted)"' : '') + '>' + getCurrSym(d.currency) + d.price + ' <span style="font-size:11px;font-weight:400;color:var(--muted)">/pp</span></div>' +
           (d.totalPrice ? '<div style="font-size:12px;color:var(--muted);margin-top:2px">' + getCurrSym(d.currency) + d.totalPrice + ' total</div>' : '') +
-          (d.dealTag ? '<div class="tag">' + escapeHtml(d.dealTag) + '</div>' : '') +
+          (d.dealTag && !isExpired ? '<div class="tag">' + escapeHtml(d.dealTag) + '</div>' : '') +
         '</div>' +
-        '<span class="deal-status ' + (d.active ? 'active' : 'inactive') + '">' + (d.active ? '\u25CF' : '\u25CB') + '</span>' +
+        '<span class="deal-status ' + statusClass + '">' + statusLabel + '</span>' +
         '<div class="deal-actions">' +
           '<button onclick="editDeal(\'' + d._id + '\')" title="Edit">\u270F\uFE0F</button>' +
           (d.bookingUrl ? '<button onclick="refreshDeal(\'' + d._id + '\')" title="Re-scrape &amp; update from URL" id="refresh-' + d._id + '">\uD83D\uDD04</button>' : '') +
@@ -1427,8 +1674,9 @@
     }).join('');
   }
 
-  // AIRPORTS
+  // AIRPORTS & WISHLIST
   var userAirports = [];
+  var wishlistDests = [];
 
   function loadAirports() {
     if (!adminKey) {
@@ -1436,23 +1684,62 @@
         '<div class="empty-state"><div class="icon">\uD83D\uDD0C</div><p>' + escapeHtml(t('empty_connect')) + '</p></div>';
       return;
     }
-    // Load deals in parallel so we can show deal counts per airport
+    // Load deals, airports, and wishlisted destinations in parallel
     var airportsPromise = convexQuery('lowFareRadar:getHomeAirports', { adminKey: adminKey });
     var dealsPromise = deals.length ? Promise.resolve(deals) : convexQuery('lowFareRadar:listAll', { adminKey: adminKey });
-    Promise.all([airportsPromise, dealsPromise]).then(function(results) {
+    var wishlistPromise = convexQuery('lowFareRadar:getWishlistStats', { adminKey: adminKey }).catch(function(err) { console.warn('[Wishlist] loadAirports error:', err.message || err); return []; });
+    Promise.all([airportsPromise, dealsPromise, wishlistPromise]).then(function(results) {
       userAirports = results[0];
       deals = results[1];
+      wishlistDests = results[2] || [];
+      console.log('[Wishlist] Airports tab loaded', wishlistDests.length, 'wishlisted destinations', wishlistDests);
       renderAirports();
     }).catch(function(err) {
       toast('Error: ' + err.message, 'error');
     });
   }
 
+  // Also load wishlist when loading deals list
+  function loadDealsAndWishlist() {
+    if (!adminKey) return;
+    convexQuery('lowFareRadar:getWishlistStats', { adminKey: adminKey }).then(function(result) {
+      wishlistDests = result || [];
+    }).catch(function() { wishlistDests = []; });
+  }
+
   function renderAirports() {
     var container = document.getElementById('airportsList');
-    if (!userAirports || userAirports.length === 0) {
+    if (!userAirports || userAirports.length === 0 && (!wishlistDests || wishlistDests.length === 0)) {
       container.innerHTML = '<div class="empty-state"><div class="icon">\u2708\uFE0F</div><p>' + escapeHtml(t('empty_airports')) + '</p></div>';
       return;
+    }
+
+    var html = '';
+
+    // Wishlisted Destinations section
+    if (wishlistDests && wishlistDests.length > 0) {
+      // Check which wishlisted destinations have deals
+      var destWithDeals = {};
+      if (deals && deals.length) {
+        deals.forEach(function(d) {
+          destWithDeals[d.destinationCity.toLowerCase()] = true;
+        });
+      }
+
+      html += '<div class="wishlist-section">';
+      html += '<h3>❤️ ' + escapeHtml(t('wishlist_title')) + '</h3>';
+      html += '<p style="font-size:13px;color:var(--muted);margin-bottom:12px">' + escapeHtml(t('wishlist_subtitle')) + '</p>';
+      html += '<div class="wishlist-chips">';
+      wishlistDests.forEach(function(w) {
+        var hasDeal = destWithDeals[w.destination.toLowerCase()];
+        html += '<div class="wishlist-chip">';
+        html += escapeHtml(w.destination);
+        if (w.country) html += ' <span style="font-size:10px;color:#FF3B8299">' + escapeHtml(w.country) + '</span>';
+        html += ' <span class="chip-count">' + w.count + '</span>';
+        if (hasDeal) html += ' <span style="font-size:10px">✈️</span>';
+        html += '</div>';
+      });
+      html += '</div></div>';
     }
 
     // Count existing deals per origin airport
@@ -1463,23 +1750,63 @@
       });
     }
 
-    container.innerHTML = userAirports.map(function(a) {
-      var dealCount = dealCountByOrigin[a.code] || 0;
-      var usersLabel = a.count === 1 ? t('airports_user') : t('airports_users');
-      var dealsLabel = dealCount > 0
-        ? '<span class="airport-deals-count" style="background:#D1FAE5;color:#065F46">' + dealCount + ' ' + escapeHtml(t('airports_deals')) + '</span>'
-        : '<span class="airport-deals-count" style="background:#FEE2E2;color:#991B1B">' + escapeHtml(t('airports_no_deals')) + '</span>';
+    // Build wishlisted destinations set for matching
+    var wishlistSet = {};
+    if (wishlistDests && wishlistDests.length) {
+      wishlistDests.forEach(function(w) {
+        wishlistSet[w.destination.toLowerCase()] = w.count;
+      });
+    }
 
-      return '<div class="airport-item">' +
-        '<span class="airport-code">' + escapeHtml(a.code) + '</span>' +
-        '<div class="airport-info">' +
-          '<div class="airport-city">' + escapeHtml(a.city) + '</div>' +
-          '<div class="airport-users">' + a.count + ' ' + escapeHtml(usersLabel) + '</div>' +
-        '</div>' +
-        dealsLabel +
-        '<button class="airport-btn" onclick="createDealFromAirport(\'' + escapeHtml(a.code) + '\', \'' + escapeHtml(a.city).replace(/'/g, "\\'") + '\')">' + escapeHtml(t('airports_create')) + '</button>' +
-      '</div>';
-    }).join('');
+    // Find destinations from deals that match each airport
+    var dealsPerAirport = {};
+    if (deals && deals.length) {
+      deals.forEach(function(d) {
+        if (!dealsPerAirport[d.origin]) dealsPerAirport[d.origin] = [];
+        dealsPerAirport[d.origin].push(d);
+      });
+    }
+
+    if (userAirports && userAirports.length > 0) {
+      html += userAirports.map(function(a) {
+        var dealCount = dealCountByOrigin[a.code] || 0;
+        var usersLabel = a.count === 1 ? t('airports_user') : t('airports_users');
+        var dealsLabel = dealCount > 0
+          ? '<span class="airport-deals-count" style="background:#D1FAE5;color:#065F46">' + dealCount + ' ' + escapeHtml(t('airports_deals')) + '</span>'
+          : '<span class="airport-deals-count" style="background:#FEE2E2;color:#991B1B">' + escapeHtml(t('airports_no_deals')) + '</span>';
+
+        // Show wishlisted destinations that have deals from this airport
+        var airportDeals = dealsPerAirport[a.code] || [];
+        var wishlistMatches = airportDeals.filter(function(d) {
+          return wishlistSet[d.destinationCity.toLowerCase()];
+        });
+        var wishlistInfo = '';
+        if (wishlistMatches.length > 0) {
+          var seen = {};
+          wishlistInfo = '<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">';
+          wishlistMatches.forEach(function(d) {
+            var key = d.destinationCity.toLowerCase();
+            if (seen[key]) return;
+            seen[key] = true;
+            wishlistInfo += '<span class="wishlist-badge" style="font-size:9px">❤️ ' + escapeHtml(d.destinationCity) + ' (' + (wishlistSet[key] || 0) + ')</span>';
+          });
+          wishlistInfo += '</div>';
+        }
+
+        return '<div class="airport-item">' +
+          '<span class="airport-code">' + escapeHtml(a.code) + '</span>' +
+          '<div class="airport-info">' +
+            '<div class="airport-city">' + escapeHtml(a.city) + '</div>' +
+            '<div class="airport-users">' + a.count + ' ' + escapeHtml(usersLabel) + '</div>' +
+            wishlistInfo +
+          '</div>' +
+          dealsLabel +
+          '<button class="airport-btn" onclick="createDealFromAirport(\'' + escapeHtml(a.code) + '\', \'' + escapeHtml(a.city).replace(/'/g, "\\'") + '\')">' + escapeHtml(t('airports_create')) + '</button>' +
+        '</div>';
+      }).join('');
+    }
+
+    container.innerHTML = html;
   }
 
   function createDealFromAirport(code, city) {
@@ -1521,6 +1848,8 @@
     document.getElementById('f-bookingUrl').value = deal.bookingUrl || '';
     document.getElementById('f-notes').value = deal.notes || '';
     document.getElementById('f-isRecommended').checked = !!deal.isRecommended;
+    document.getElementById('f-travelMonthFrom').value = deal.travelMonthFrom || '';
+    document.getElementById('f-travelMonthTo').value = deal.travelMonthTo || '';
 
     // Expires at
     if (deal.expiresAt) {
@@ -1667,6 +1996,8 @@
       returnAirline: d.returnAirline || undefined,
       returnFlightNumber: d.returnFlightNumber || undefined,
       returnStops: typeof d.returnStops === 'number' ? d.returnStops : undefined,
+      travelMonthFrom: d.travelMonthFrom || undefined,
+      travelMonthTo: d.travelMonthTo || undefined,
       cabinBaggage: d.cabinBaggage || undefined,
       checkedBaggage: d.checkedBaggage || undefined,
     };
@@ -1715,7 +2046,8 @@
       'airline', 'flightNumber', 'outboundDate', 'outboundDeparture', 'outboundArrival',
       'outboundDuration', 'returnDate', 'returnDeparture', 'returnArrival', 'returnDuration',
       'returnAirline', 'returnFlightNumber', 'price', 'totalPrice', 'originalPrice',
-      'cabinBaggage', 'checkedBaggage', 'bookingUrl', 'notes', 'expiresAt'];
+      'cabinBaggage', 'checkedBaggage', 'bookingUrl', 'notes', 'expiresAt',
+      'travelMonthFrom', 'travelMonthTo'];
     fields.forEach(function(f) { document.getElementById('f-' + f).value = ''; });
     document.getElementById('f-currency').value = 'EUR';
     document.getElementById('f-dealTag').value = '';
@@ -1745,6 +2077,107 @@
     el.textContent = msg;
     el.className = 'toast ' + type + ' show';
     setTimeout(function() { el.className = 'toast'; }, 3000);
+  }
+
+  // ─── CSV EXPORT ───
+
+  function csvEscape(val) {
+    if (val === null || val === undefined) return '';
+    var s = String(val);
+    if (s.indexOf(',') !== -1 || s.indexOf('"') !== -1 || s.indexOf('\n') !== -1) {
+      return '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
+  }
+
+  function downloadCSV(filename, csvContent) {
+    var BOM = '\uFEFF';
+    var sepHint = 'sep=,\n';
+    var blob = new Blob([BOM + sepHint + csvContent], { type: 'text/csv;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast('Downloaded ' + filename, 'success');
+  }
+
+  function exportDealsCSV() {
+    if (!deals || deals.length === 0) return toast('No deals to export', 'error');
+    var now = Date.now();
+    var headers = ['Origin','Origin City','Destination','Destination City','Airline','Flight No','Outbound Date','Departure','Arrival','Duration','Stops','Return Date','Return Departure','Return Arrival','Return Duration','Return Airline','Return Stops','Price/pp','Total Price','Original Price','Currency','Cabin Bag','Checked Bag','Deal Tag','Travel Month From','Travel Month To','Booking URL','Notes','Status','Recommended','Expired','Wishlisted','Expires At'];
+    var rows = deals.map(function(d) {
+      var isExpired = d.active && d.expiresAt && d.expiresAt <= now;
+      var isWishlisted = wishlistDests.some(function(w) { return w.destination.toLowerCase() === (d.destinationCity || '').toLowerCase(); });
+      return [
+        d.origin, d.originCity, d.destination, d.destinationCity,
+        d.airline, d.flightNumber || '',
+        d.outboundDate, d.outboundDeparture, d.outboundArrival, d.outboundDuration || '', d.outboundStops || 0,
+        d.returnDate || '', d.returnDeparture || '', d.returnArrival || '', d.returnDuration || '', d.returnAirline || '', d.returnStops || 0,
+        d.price, d.totalPrice || '', d.originalPrice || '', d.currency,
+        d.cabinBaggage || '', d.checkedBaggage || '',
+        d.dealTag || '',
+        d.travelMonthFrom || '', d.travelMonthTo || '',
+        d.bookingUrl || '', d.notes || '',
+        d.active ? (isExpired ? 'Expired' : 'Active') : 'Inactive',
+        d.isRecommended ? 'Yes' : 'No',
+        isExpired ? 'Yes' : 'No',
+        isWishlisted ? 'Yes' : 'No',
+        d.expiresAt ? new Date(d.expiresAt).toISOString() : ''
+      ].map(csvEscape).join(',');
+    });
+    var csv = headers.join(',') + '\n' + rows.join('\n');
+    var date = new Date().toISOString().slice(0,10);
+    downloadCSV('bloom-deals-' + date + '.csv', csv);
+  }
+
+  function exportAirportsCSV() {
+    if (!userAirports || userAirports.length === 0) return toast('No airports to export', 'error');
+    var dealCountByOrigin = {};
+    if (deals && deals.length) {
+      deals.forEach(function(d) { dealCountByOrigin[d.origin] = (dealCountByOrigin[d.origin] || 0) + 1; });
+    }
+    var headers = ['IATA Code','City','User Count','Deal Count'];
+    var rows = userAirports.map(function(a) {
+      return [a.code, a.city, a.count, dealCountByOrigin[a.code] || 0].map(csvEscape).join(',');
+    });
+    var csv = headers.join(',') + '\n' + rows.join('\n');
+    var date = new Date().toISOString().slice(0,10);
+    downloadCSV('bloom-airports-' + date + '.csv', csv);
+  }
+
+  function exportWishlistCSV() {
+    if (!wishlistDests || wishlistDests.length === 0) return toast('No wishlist data to export', 'error');
+    var destWithDeals = {};
+    if (deals && deals.length) {
+      deals.forEach(function(d) {
+        if (!destWithDeals[d.destinationCity.toLowerCase()]) destWithDeals[d.destinationCity.toLowerCase()] = [];
+        destWithDeals[d.destinationCity.toLowerCase()].push(d.origin);
+      });
+    }
+    var headers = ['Destination','Country','User Count','Has Deals','Deal Origins'];
+    var rows = wishlistDests.map(function(w) {
+      var key = w.destination.toLowerCase();
+      var origins = destWithDeals[key] || [];
+      var unique = origins.filter(function(v, i, a) { return a.indexOf(v) === i; });
+      return [
+        w.destination, w.country || '', w.count,
+        unique.length > 0 ? 'Yes' : 'No',
+        unique.join(' / ')
+      ].map(csvEscape).join(',');
+    });
+    var csv = headers.join(',') + '\n' + rows.join('\n');
+    var date = new Date().toISOString().slice(0,10);
+    downloadCSV('bloom-wishlist-' + date + '.csv', csv);
+  }
+
+  function exportAllCSV() {
+    exportDealsCSV();
+    setTimeout(function() { exportAirportsCSV(); }, 300);
+    setTimeout(function() { exportWishlistCSV(); }, 600);
   }
 
   // SEGMENTS — dynamic UI for connecting flights
@@ -1943,6 +2376,13 @@
       html += '</div>';
     }
 
+    // Travel months
+    if (data.travelMonthFrom) {
+      html += '<div style="font-size:13px;color:var(--muted);margin-top:4px">';
+      html += '\uD83D\uDCC5 ' + escapeHtml(t('travel_months')) + ': ' + formatMonthRange(data.travelMonthFrom, data.travelMonthTo);
+      html += '</div>';
+    }
+
     // Source
     html += '<div class="preview-source">' + t('import_preview_source') + ': ' + escapeHtml(source || 'unknown') + ' · ' + escapeHtml(data.bookingUrl || '') + '</div>';
 
@@ -2026,6 +2466,10 @@
 
     // Fill booking URL
     document.getElementById('f-bookingUrl').value = d.bookingUrl || '';
+
+    // Fill travel months
+    document.getElementById('f-travelMonthFrom').value = d.travelMonthFrom || '';
+    document.getElementById('f-travelMonthTo').value = d.travelMonthTo || '';
 
     // Update segments UI
     updateSegments('outbound');

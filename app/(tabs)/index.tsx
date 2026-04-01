@@ -62,7 +62,10 @@ export default function HomeScreen() {
   const userPlan = useQuery(api.users.getPlan as any, { token: token || "skip" });
   const trips = useQuery(api.trips.list as any, { token: token || "skip" });
   const trendingDestinations = useQuery(api.trips.getTrendingDestinations);
-  const lowFareDeals = useQuery(api.lowFareRadar.getDealsForUser as any, { token: token || "skip" });
+  const lowFareData = useQuery(api.lowFareRadar.getDealsForUser as any, { token: token || "skip" });
+  const lowFareDeals = lowFareData?.deals || (Array.isArray(lowFareData) ? lowFareData : []);
+  const homeIata = lowFareData?.homeIata || null;
+  const wishlistDestinations = lowFareData?.wishlistDestinations || [];
   const surpriseDeal = useQuery(api.lowFareRadar.surpriseMe as any, {});
 
   // Show first trip guide for new users who haven't seen it
@@ -330,6 +333,8 @@ export default function HomeScreen() {
         {lowFareDeals && lowFareDeals.length > 0 && (
           <LowFareRadar
             deals={lowFareDeals}
+            homeIata={homeIata}
+            wishlistDestinations={wishlistDestinations}
             onPlanTrip={(deal) => {
               router.push({
                 pathname: "/deal-trip",
