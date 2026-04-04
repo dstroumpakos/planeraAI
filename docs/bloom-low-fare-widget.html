@@ -499,9 +499,10 @@
       z-index: 999;
       transform: translateY(100px);
       opacity: 0;
+      pointer-events: none;
       transition: all .3s ease;
     }
-    .toast.show { transform: translateY(0); opacity: 1; }
+    .toast.show { transform: translateY(0); opacity: 1; pointer-events: auto; }
     .toast.success { background: var(--success); }
     .toast.error { background: var(--danger); }
 
@@ -770,6 +771,128 @@
       color: #000;
     }
 
+    /* Filter Bar */
+    .filter-bar {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .filter-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+    .filter-row:last-child { margin-bottom: 0; }
+    .filter-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      color: var(--muted);
+      min-width: 55px;
+    }
+    .filter-pill {
+      padding: 6px 14px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: transparent;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all .15s;
+      color: var(--text);
+      white-space: nowrap;
+    }
+    .filter-pill:hover { background: var(--bg); }
+    .filter-pill.active {
+      background: var(--text);
+      color: #fff;
+      border-color: var(--text);
+    }
+    .filter-pill.active-green {
+      background: #D1FAE5;
+      color: #065F46;
+      border-color: #A7F3D0;
+    }
+    .filter-pill.active-red {
+      background: #FEE2E2;
+      color: #991B1B;
+      border-color: #FECACA;
+    }
+    .filter-pill.active-amber {
+      background: #FEF3C7;
+      color: #92400E;
+      border-color: #FDE68A;
+    }
+    .filter-pill.active-gray {
+      background: #F3F4F6;
+      color: #6B7280;
+      border-color: #E5E7EB;
+    }
+    .filter-pill .pill-count {
+      display: inline-block;
+      background: rgba(0,0,0,.1);
+      padding: 1px 6px;
+      border-radius: 10px;
+      font-size: 10px;
+      font-weight: 700;
+      margin-left: 4px;
+    }
+    .filter-select {
+      padding: 6px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+      background: #fff;
+      cursor: pointer;
+    }
+    .filter-select:focus {
+      outline: none;
+      border-color: var(--primary);
+    }
+    .filter-search {
+      padding: 6px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text);
+      background: #fff;
+      min-width: 120px;
+    }
+    .filter-search:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(255,229,0,.15);
+    }
+    .filter-search::placeholder {
+      color: var(--muted);
+      font-weight: 400;
+    }
+    .filter-summary {
+      font-size: 12px;
+      color: var(--muted);
+      padding: 8px 0 0;
+    }
+    .filter-clear-btn {
+      padding: 4px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: transparent;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      color: var(--muted);
+      transition: all .15s;
+    }
+    .filter-clear-btn:hover { background: #FEE2E2; color: #991B1B; border-color: #FECACA; }
+
     @media (max-width: 600px) {
       .form-grid { grid-template-columns: 1fr; }
       .deal-card { flex-wrap: wrap; }
@@ -778,6 +901,8 @@
       .login-card { padding: 32px 24px; }
       .import-url-row { flex-direction: column; }
       .airport-item { flex-wrap: wrap; }
+      .filter-row { gap: 6px; }
+      .filter-label { min-width: 100%; }
     }
   </style>
 </head>
@@ -1062,13 +1187,59 @@
   <!-- Deals List -->
   <div class="content" id="content-list" style="display:none">
     <div class="stats-row" id="statsRow"></div>
-    <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
-      <label style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--muted)">Filter by month:</label>
-      <select id="monthFilter" onchange="filterDealsByMonth()" style="padding:8px 14px;border-radius:10px;border:1px solid var(--border);font-size:13px;font-weight:600;min-width:140px">
-        <option value="">All months</option>
-      </select>
-      <span id="monthFilterCount" style="font-size:12px;color:var(--muted)"></span>
+
+    <!-- Filter Bar -->
+    <div class="filter-bar" id="filterBar">
+      <!-- Status pills -->
+      <div class="filter-row">
+        <span class="filter-label">Status</span>
+        <button class="filter-pill active" onclick="setStatusFilter('all')" id="fp-all">All</button>
+        <button class="filter-pill" onclick="setStatusFilter('live')" id="fp-live">✈️ Live <span class="pill-count" id="fpc-live">0</span></button>
+        <button class="filter-pill" onclick="setStatusFilter('paused')" id="fp-paused">⏸️ Paused <span class="pill-count" id="fpc-paused">0</span></button>
+        <button class="filter-pill" onclick="setStatusFilter('expired')" id="fp-expired">⏰ Expired <span class="pill-count" id="fpc-expired">0</span></button>
+        <button class="filter-pill" onclick="setStatusFilter('deleted')" id="fp-deleted">🗑️ Deleted <span class="pill-count" id="fpc-deleted">0</span></button>
+        <button class="filter-pill" onclick="setStatusFilter('recommended')" id="fp-recommended">⭐ Recommended <span class="pill-count" id="fpc-recommended">0</span></button>
+        <button class="filter-pill" onclick="setStatusFilter('wishlisted')" id="fp-wishlisted">❤️ Wishlisted <span class="pill-count" id="fpc-wishlisted">0</span></button>
+      </div>
+      <!-- Dropdowns row -->
+      <div class="filter-row">
+        <span class="filter-label">Period</span>
+        <select id="yearFilter" class="filter-select" onchange="applyFilters()">
+          <option value="">All years</option>
+        </select>
+        <select id="monthFilter" class="filter-select" onchange="applyFilters()">
+          <option value="">All months</option>
+        </select>
+      </div>
+      <div class="filter-row">
+        <span class="filter-label">Route</span>
+        <select id="originFilter" class="filter-select" onchange="applyFilters()">
+          <option value="">All origins</option>
+        </select>
+        <select id="destFilter" class="filter-select" onchange="applyFilters()">
+          <option value="">All destinations</option>
+        </select>
+        <select id="airlineFilter" class="filter-select" onchange="applyFilters()">
+          <option value="">All airlines</option>
+        </select>
+        <input type="text" id="searchFilter" class="filter-search" placeholder="🔍 Search deals..." oninput="applyFilters()">
+      </div>
+      <!-- Sort + results -->
+      <div class="filter-row">
+        <span class="filter-label">Sort</span>
+        <select id="sortFilter" class="filter-select" onchange="applyFilters()">
+          <option value="newest">Newest first</option>
+          <option value="oldest">Oldest first</option>
+          <option value="price-asc">Price: low → high</option>
+          <option value="price-desc">Price: high → low</option>
+          <option value="departure">Departure date</option>
+          <option value="clicks">Most popular</option>
+        </select>
+        <button class="filter-clear-btn" onclick="clearAllFilters()">✕ Clear filters</button>
+        <span id="filterSummary" class="filter-summary"></span>
+      </div>
     </div>
+
     <div class="export-row">
       <button class="btn-export" onclick="exportDealsCSV()">📊 Export Deals (.csv)</button>
       <button class="btn-export" onclick="exportAnalyticsCSV()">📈 Export Analytics (.csv)</button>
@@ -1547,19 +1718,85 @@
     });
   }
 
+  // ─── FILTER STATE ───
+  var activeStatusFilter = 'all';
+
+  function getDealStatus(d) {
+    var now = Date.now();
+    if (d.deletedAt) return 'deleted';
+    if (d.active && d.expiresAt && d.expiresAt <= now) return 'expired';
+    if (!d.active) return 'paused';
+    return 'live';
+  }
+
+  function setStatusFilter(status) {
+    activeStatusFilter = status;
+    // Update pill active states
+    var pills = ['all','live','paused','expired','deleted','recommended','wishlisted'];
+    pills.forEach(function(p) {
+      var el = document.getElementById('fp-' + p);
+      if (!el) return;
+      el.classList.remove('active','active-green','active-red','active-amber','active-gray');
+    });
+    var activeEl = document.getElementById('fp-' + status);
+    if (activeEl) {
+      var colorMap = { all:'active', live:'active-green', paused:'active-gray', expired:'active-amber', deleted:'active-red', recommended:'active', wishlisted:'active' };
+      activeEl.classList.add(colorMap[status] || 'active');
+    }
+    applyFilters();
+  }
+
+  function clearAllFilters() {
+    activeStatusFilter = 'all';
+    document.getElementById('yearFilter').value = '';
+    document.getElementById('monthFilter').value = '';
+    document.getElementById('originFilter').value = '';
+    document.getElementById('destFilter').value = '';
+    document.getElementById('airlineFilter').value = '';
+    document.getElementById('searchFilter').value = '';
+    document.getElementById('sortFilter').value = 'newest';
+    setStatusFilter('all');
+  }
+
+  function applyFilters() {
+    renderDeals();
+  }
+
   function renderStats() {
     var now = Date.now();
-    var active = deals.filter(function(d) { return d.active; }).length;
-    var recommended = deals.filter(function(d) { return d.isRecommended; }).length;
-    var expired = deals.filter(function(d) { return d.active && d.expiresAt && d.expiresAt <= now; }).length;
-    var deleted = deals.filter(function(d) { return !!d.deletedAt; }).length;
+    var live = deals.filter(function(d) { return getDealStatus(d) === 'live'; }).length;
+    var paused = deals.filter(function(d) { return getDealStatus(d) === 'paused'; }).length;
+    var expired = deals.filter(function(d) { return getDealStatus(d) === 'expired'; }).length;
+    var deleted = deals.filter(function(d) { return getDealStatus(d) === 'deleted'; }).length;
+    var recommended = deals.filter(function(d) { return d.isRecommended && getDealStatus(d) === 'live'; }).length;
+    var wishlisted = deals.filter(function(d) {
+      return wishlistDests.some(function(w) {
+        return w.destination.toLowerCase() === (d.destinationCity || '').toLowerCase();
+      });
+    }).length;
+
     document.getElementById('statsRow').innerHTML =
-      '<div class="stat-card"><div class="num">' + deals.length + '</div><div class="label">' + escapeHtml(t('stat_total')) + '</div></div>' +
-      '<div class="stat-card"><div class="num" style="color:var(--success)">' + active + '</div><div class="label">' + escapeHtml(t('stat_active')) + '</div></div>' +
-      '<div class="stat-card"><div class="num" style="color:#F5A623">' + recommended + '</div><div class="label">' + escapeHtml(t('stat_recommended')) + '</div></div>' +
-      (expired > 0 ? '<div class="stat-card"><div class="num" style="color:var(--danger)">' + expired + '</div><div class="label">' + escapeHtml(t('stat_expired')) + '</div></div>' : '') +
-      (deleted > 0 ? '<div class="stat-card"><div class="num" style="color:var(--muted)">' + deleted + '</div><div class="label">Deleted</div></div>' : '');
-    populateMonthFilter();
+      '<div class="stat-card" style="cursor:pointer" onclick="setStatusFilter(\'all\')">' +
+        '<div class="num">' + deals.length + '</div><div class="label">' + escapeHtml(t('stat_total')) + '</div></div>' +
+      '<div class="stat-card" style="cursor:pointer" onclick="setStatusFilter(\'live\')">' +
+        '<div class="num" style="color:var(--success)">' + live + '</div><div class="label">' + escapeHtml(t('stat_active')) + '</div></div>' +
+      '<div class="stat-card" style="cursor:pointer" onclick="setStatusFilter(\'recommended\')">' +
+        '<div class="num" style="color:#F5A623">' + recommended + '</div><div class="label">' + escapeHtml(t('stat_recommended')) + '</div></div>' +
+      (expired > 0 ? '<div class="stat-card" style="cursor:pointer" onclick="setStatusFilter(\'expired\')">' +
+        '<div class="num" style="color:var(--danger)">' + expired + '</div><div class="label">' + escapeHtml(t('stat_expired')) + '</div></div>' : '') +
+      (deleted > 0 ? '<div class="stat-card" style="cursor:pointer" onclick="setStatusFilter(\'deleted\')">' +
+        '<div class="num" style="color:var(--muted)">' + deleted + '</div><div class="label">Deleted</div></div>' : '') +
+      (paused > 0 ? '<div class="stat-card" style="cursor:pointer" onclick="setStatusFilter(\'paused\')">' +
+        '<div class="num" style="color:#6B7280">' + paused + '</div><div class="label">Paused</div></div>' : '');
+
+    // Update pill counts
+    var countMap = { live: live, paused: paused, expired: expired, deleted: deleted, recommended: recommended, wishlisted: wishlisted };
+    Object.keys(countMap).forEach(function(k) {
+      var el = document.getElementById('fpc-' + k);
+      if (el) el.textContent = countMap[k];
+    });
+
+    populateFilterDropdowns();
   }
 
   function formatMonthRange(from, to) {
@@ -1576,20 +1813,19 @@
     return fmt(from) + ' – ' + fmt(to);
   }
 
-  function populateMonthFilter() {
-    var sel = document.getElementById('monthFilter');
-    var currentVal = sel.value;
+  function populateFilterDropdowns() {
+    // ─── Month filter ───
+    var monthSel = document.getElementById('monthFilter');
+    var currentMonth = monthSel.value;
     var months = {};
     deals.forEach(function(d) {
       var from = d.travelMonthFrom || (d.outboundDate ? d.outboundDate.substring(0, 7) : '');
       var to = d.travelMonthTo || from;
       if (from) {
-        // Add all months in range
         var cur = from;
         var safety = 0;
         while (cur <= to && safety < 36) {
           months[cur] = true;
-          // Increment month
           var parts = cur.split('-');
           var y = parseInt(parts[0], 10);
           var m = parseInt(parts[1], 10);
@@ -1600,22 +1836,79 @@
         }
       }
     });
-    var sorted = Object.keys(months).sort();
-    sel.innerHTML = '<option value="">' + escapeHtml(t('filter_all_months')) + '</option>';
-    sorted.forEach(function(ym) {
+    var sortedMonths = Object.keys(months).sort();
+    monthSel.innerHTML = '<option value="">' + escapeHtml(t('filter_all_months')) + '</option>';
+    sortedMonths.forEach(function(ym) {
       var opt = document.createElement('option');
       opt.value = ym;
       opt.textContent = formatMonthRange(ym, null);
-      sel.appendChild(opt);
+      monthSel.appendChild(opt);
     });
-    // Restore previous selection if still valid
-    if (currentVal && months[currentVal]) {
-      sel.value = currentVal;
-    }
-  }
+    if (currentMonth && months[currentMonth]) monthSel.value = currentMonth;
 
-  function filterDealsByMonth() {
-    renderDeals();
+    // ─── Year filter ───
+    var yearSel = document.getElementById('yearFilter');
+    var currentYear = yearSel.value;
+    var years = {};
+    deals.forEach(function(d) {
+      var date = d.outboundDate || '';
+      if (date.length >= 4) years[date.substring(0, 4)] = true;
+      if (d.travelMonthFrom && d.travelMonthFrom.length >= 4) years[d.travelMonthFrom.substring(0, 4)] = true;
+    });
+    var sortedYears = Object.keys(years).sort();
+    yearSel.innerHTML = '<option value="">All years</option>';
+    sortedYears.forEach(function(y) {
+      var opt = document.createElement('option');
+      opt.value = y;
+      opt.textContent = y;
+      yearSel.appendChild(opt);
+    });
+    if (currentYear && years[currentYear]) yearSel.value = currentYear;
+
+    // ─── Origin filter ───
+    var originSel = document.getElementById('originFilter');
+    var currentOrigin = originSel.value;
+    var origins = {};
+    deals.forEach(function(d) { if (d.origin) origins[d.origin] = d.originCity || d.origin; });
+    var sortedOrigins = Object.keys(origins).sort();
+    originSel.innerHTML = '<option value="">All origins</option>';
+    sortedOrigins.forEach(function(o) {
+      var opt = document.createElement('option');
+      opt.value = o;
+      opt.textContent = o + ' – ' + origins[o];
+      originSel.appendChild(opt);
+    });
+    if (currentOrigin && origins[currentOrigin]) originSel.value = currentOrigin;
+
+    // ─── Destination filter ───
+    var destSel = document.getElementById('destFilter');
+    var currentDest = destSel.value;
+    var dests = {};
+    deals.forEach(function(d) { if (d.destination) dests[d.destination] = d.destinationCity || d.destination; });
+    var sortedDests = Object.keys(dests).sort();
+    destSel.innerHTML = '<option value="">All destinations</option>';
+    sortedDests.forEach(function(o) {
+      var opt = document.createElement('option');
+      opt.value = o;
+      opt.textContent = o + ' – ' + dests[o];
+      destSel.appendChild(opt);
+    });
+    if (currentDest && dests[currentDest]) destSel.value = currentDest;
+
+    // ─── Airline filter ───
+    var airlineSel = document.getElementById('airlineFilter');
+    var currentAirline = airlineSel.value;
+    var airlines = {};
+    deals.forEach(function(d) { if (d.airline) airlines[d.airline] = true; });
+    var sortedAirlines = Object.keys(airlines).sort();
+    airlineSel.innerHTML = '<option value="">All airlines</option>';
+    sortedAirlines.forEach(function(a) {
+      var opt = document.createElement('option');
+      opt.value = a;
+      opt.textContent = a;
+      airlineSel.appendChild(opt);
+    });
+    if (currentAirline && airlines[currentAirline]) airlineSel.value = currentAirline;
   }
 
   function renderDeals() {
@@ -1625,25 +1918,100 @@
       return;
     }
     var now = Date.now();
+
+    // ─── Apply all filters ───
     var monthFilter = document.getElementById('monthFilter').value;
-    var filteredDeals = deals;
-    if (monthFilter) {
-      filteredDeals = deals.filter(function(d) {
+    var yearFilter = document.getElementById('yearFilter').value;
+    var originFilter = document.getElementById('originFilter').value;
+    var destFilter = document.getElementById('destFilter').value;
+    var airlineFilter = document.getElementById('airlineFilter').value;
+    var searchFilter = (document.getElementById('searchFilter').value || '').toLowerCase().trim();
+    var sortFilter = document.getElementById('sortFilter').value;
+
+    var filteredDeals = deals.filter(function(d) {
+      var status = getDealStatus(d);
+
+      // Status filter (default "all" hides deleted)
+      if (activeStatusFilter === 'all') {
+        if (status === 'deleted') return false;
+      } else if (activeStatusFilter === 'live') {
+        if (status !== 'live') return false;
+      } else if (activeStatusFilter === 'paused') {
+        if (status !== 'paused') return false;
+      } else if (activeStatusFilter === 'expired') {
+        if (status !== 'expired') return false;
+      } else if (activeStatusFilter === 'deleted') {
+        if (status !== 'deleted') return false;
+      } else if (activeStatusFilter === 'recommended') {
+        if (!d.isRecommended || status === 'deleted') return false;
+      } else if (activeStatusFilter === 'wishlisted') {
+        var isW = wishlistDests.some(function(w) {
+          return w.destination.toLowerCase() === (d.destinationCity || '').toLowerCase();
+        });
+        if (!isW || status === 'deleted') return false;
+      }
+
+      // Year filter
+      if (yearFilter) {
+        var dealYear = (d.outboundDate || '').substring(0, 4);
+        var travelYear = (d.travelMonthFrom || '').substring(0, 4);
+        if (dealYear !== yearFilter && travelYear !== yearFilter) return false;
+      }
+
+      // Month filter
+      if (monthFilter) {
         var from = d.travelMonthFrom || (d.outboundDate ? d.outboundDate.substring(0, 7) : '');
         var to = d.travelMonthTo || from;
         if (!from) return false;
-        return monthFilter >= from && monthFilter <= (to || from);
-      });
-    }
-    // Update filter count
-    var countEl = document.getElementById('monthFilterCount');
-    if (monthFilter) {
-      countEl.textContent = '(' + t('filter_showing') + ' ' + filteredDeals.length + '/' + deals.length + ')';
+        if (!(monthFilter >= from && monthFilter <= (to || from))) return false;
+      }
+
+      // Origin filter
+      if (originFilter && d.origin !== originFilter) return false;
+
+      // Destination filter
+      if (destFilter && d.destination !== destFilter) return false;
+
+      // Airline filter
+      if (airlineFilter && d.airline !== airlineFilter) return false;
+
+      // Text search
+      if (searchFilter) {
+        var haystack = [
+          d.origin, d.originCity, d.destination, d.destinationCity,
+          d.airline, d.flightNumber, d.dealTag, d.notes
+        ].filter(Boolean).join(' ').toLowerCase();
+        if (haystack.indexOf(searchFilter) === -1) return false;
+      }
+
+      return true;
+    });
+
+    // ─── Sort ───
+    filteredDeals.sort(function(a, b) {
+      switch (sortFilter) {
+        case 'oldest': return a.createdAt - b.createdAt;
+        case 'price-asc': return a.price - b.price;
+        case 'price-desc': return b.price - a.price;
+        case 'departure':
+          return (a.outboundDate || '').localeCompare(b.outboundDate || '');
+        case 'clicks':
+          return ((b.planTripClicks || 0) + (b.bookingClicks || 0)) - ((a.planTripClicks || 0) + (a.bookingClicks || 0));
+        default: return b.createdAt - a.createdAt; // newest
+      }
+    });
+
+    // ─── Filter summary ───
+    var summaryEl = document.getElementById('filterSummary');
+    var anyFilterActive = activeStatusFilter !== 'all' || monthFilter || yearFilter || originFilter || destFilter || airlineFilter || searchFilter;
+    if (anyFilterActive) {
+      summaryEl.textContent = 'Showing ' + filteredDeals.length + ' of ' + deals.length + ' deals';
     } else {
-      countEl.textContent = '';
+      summaryEl.textContent = 'Showing ' + filteredDeals.length + ' live deals (' + deals.length + ' total, deleted hidden)';
     }
+
     if (filteredDeals.length === 0) {
-      container.innerHTML = '<div class="empty-state"><div class="icon">\ud83d\udcc5</div><p>No deals for this month.</p></div>';
+      container.innerHTML = '<div class="empty-state"><div class="icon">\ud83d\udcc5</div><p>No deals match your filters.</p></div>';
       return;
     }
     container.innerHTML = filteredDeals.map(function(d) {
@@ -1688,9 +2056,9 @@
             (d.bookingUrl ? '<button onclick="refreshDeal(\'' + d._id + '\')" title="Re-scrape &amp; update from URL" id="refresh-' + d._id + '">\uD83D\uDD04</button>' : '') +
             '<button onclick="toggleActive(\'' + d._id + '\', ' + !d.active + ')" title="' + (d.active ? 'Pause' : 'Activate') + '">' +
               (d.active ? '\u23F8\uFE0F' : '\u25B6\uFE0F') +
-            '</button>'
+            '</button>' +
+            '<button class="btn-delete" onclick="deleteDeal(\'' + d._id + '\')" title="Delete">\uD83D\uDDD1\uFE0F</button>'
           ) +
-          '<button class="btn-delete" onclick="deleteDeal(\'' + d._id + '\')" title="Delete">\uD83D\uDDD1\uFE0F</button>' +
         '</div>' +
       '</div>';
     }).join('');
@@ -1950,8 +2318,10 @@
   }
 
   function restoreDeal(id) {
+    if (!confirm('Restore this deal? It will be re-activated with a 7-day expiry extension.')) return;
+    toast('Restoring deal...', 'success');
     convexMutation('lowFareRadar:restore', { adminKey: adminKey, id: id }).then(function() {
-      toast('Deal restored!', 'success');
+      toast('Deal restored & re-activated!', 'success');
       loadDeals();
     }).catch(function(err) { toast('Error: ' + err.message, 'error'); });
   }

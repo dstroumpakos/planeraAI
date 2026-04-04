@@ -405,9 +405,16 @@ export const restore = mutation({
     const timestamp = new Date().toISOString().slice(0, 16).replace("T", " ");
     const prevLog: string[] = (existing as any).changeLog || [];
     const entry = `[${timestamp}] restored`;
+
+    // Extend expiresAt by 7 days so the deal doesn't immediately appear expired
+    // and the cron doesn't re-delete it
+    const SEVEN_DAYS = 7 * 24 * 60 * 60 * 1000;
+    const newExpiresAt = existing.expiresAt ? Date.now() + SEVEN_DAYS : undefined;
+
     await ctx.db.patch(args.id, {
       active: true,
       deletedAt: undefined,
+      ...(newExpiresAt !== undefined ? { expiresAt: newExpiresAt } : {}),
       updatedAt: Date.now(),
       changeCount: ((existing as any).changeCount || 0) + 1,
       changeLog: [...prevLog, entry],
