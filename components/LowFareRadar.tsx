@@ -140,11 +140,13 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
     return symbols[currency] || currency;
   };
 
-  const getDiscount = (deal: FlightDeal) => {
-    if (!deal.originalPrice || deal.originalPrice <= deal.price) return null;
-    return Math.round(
-      ((deal.originalPrice - deal.price) / deal.originalPrice) * 100
+  const getPriceChange = (deal: FlightDeal) => {
+    if (!deal.originalPrice || deal.originalPrice === deal.price) return null;
+    const percent = Math.round(
+      Math.abs(deal.originalPrice - deal.price) / deal.originalPrice * 100
     );
+    if (deal.price < deal.originalPrice) return { type: "drop" as const, percent };
+    return { type: "increase" as const, percent };
   };
 
   const handleBooking = (deal: FlightDeal) => {
@@ -327,7 +329,7 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
         decelerationRate="fast"
       >
         {filteredDeals.map((deal) => {
-          const discount = getDiscount(deal);
+          const priceChange = getPriceChange(deal);
           const animValue = getAnimValue(deal._id);
           const isExpanded = expandedIds.has(deal._id);
 
@@ -529,7 +531,7 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
               {/* Price Row */}
               <View style={styles.priceRow}>
                 <View style={{ flex: 1 }}>
-                  {discount && (
+                  {priceChange && priceChange.type === "drop" && (
                     <View style={styles.discountRow}>
                       <Text
                         style={[
@@ -541,7 +543,25 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
                         {deal.originalPrice}
                       </Text>
                       <View style={styles.discountBadge}>
-                        <Text style={styles.discountText}>-{discount}%</Text>
+                        <Ionicons name="trending-down" size={12} color="#FFF" />
+                        <Text style={styles.discountText}>-{priceChange.percent}%</Text>
+                      </View>
+                    </View>
+                  )}
+                  {priceChange && priceChange.type === "increase" && (
+                    <View style={styles.discountRow}>
+                      <Text
+                        style={[
+                          styles.previousPrice,
+                          { color: colors.textMuted },
+                        ]}
+                      >
+                        {getCurrencySymbol(deal.currency)}
+                        {deal.originalPrice}
+                      </Text>
+                      <View style={styles.increaseBadge}>
+                        <Ionicons name="trending-up" size={12} color="#FFF" />
+                        <Text style={styles.increaseText}>+{priceChange.percent}%</Text>
                       </View>
                     </View>
                   )}
@@ -986,12 +1006,33 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
   discountBadge: {
-    backgroundColor: "#FF3B30",
+    backgroundColor: "#34C759",
+    flexDirection: "row",
+    alignItems: "center",
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 6,
+    gap: 3,
   },
   discountText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#FFF",
+  },
+  previousPrice: {
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  increaseBadge: {
+    backgroundColor: "#FF9500",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    gap: 3,
+  },
+  increaseText: {
     fontSize: 11,
     fontWeight: "700",
     color: "#FFF",
