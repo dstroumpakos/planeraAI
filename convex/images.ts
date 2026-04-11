@@ -66,6 +66,13 @@ async function fetchUnsplashImage(query: string): Promise<UnsplashImage | null> 
 
     const data = await response.json() as UnsplashSearchResponse;
     if (!data.results || data.results.length === 0) {
+      // Fallback: if query contains a comma (e.g. "Bologna, BLG"), retry with just the city name
+      if (query.includes(",")) {
+        const cityOnly = query.split(",")[0].trim();
+        if (cityOnly) {
+          return fetchUnsplashImage(cityOnly);
+        }
+      }
       return null;
     }
 

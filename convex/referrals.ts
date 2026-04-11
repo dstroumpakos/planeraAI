@@ -34,10 +34,10 @@ export const generateReferralCode = authMutation({
     // Generate unique 8-char alphanumeric code
     const code = generateCode();
 
-    // Verify uniqueness
+    // Verify uniqueness against userSettings (where codes are stored)
     const existing = await ctx.db
-      .query("referrals")
-      .withIndex("by_code", (q: any) => q.eq("referralCode", code))
+      .query("userSettings")
+      .withIndex("by_referralCode", (q: any) => q.eq("referralCode", code))
       .unique();
     // Extremely unlikely collision, but regenerate if needed
     const finalCode = existing ? generateCode() : code;
@@ -61,13 +61,12 @@ export const getReferralStats = authQuery({
       (r: any) => r.status === "completed" || r.status === "rewarded"
     );
     const pending = referrals.filter((r: any) => r.status === "pending");
-    const rewarded = referrals.filter((r: any) => r.status === "rewarded");
 
     return {
       totalInvited: referrals.length,
       totalCompleted: completed.length,
       totalPending: pending.length,
-      totalRewardsEarned: rewarded.length,
+      totalRewardsEarned: completed.length,
       referrals: referrals.map((r: any) => ({
         status: r.status,
         createdAt: r.createdAt,
@@ -124,7 +123,7 @@ export const applyReferralCode = authMutation({
     });
 
     // Award referrer: +1 trip credit
-    const referrerPlan = await ctx.db
+    let referrerPlan = await ctx.db
       .query("userPlans")
       .withIndex("by_user", (q: any) => q.eq("userId", referrer.userId))
       .unique();
@@ -132,16 +131,30 @@ export const applyReferralCode = authMutation({
       await ctx.db.patch(referrerPlan._id, {
         tripCredits: (referrerPlan.tripCredits || 0) + 1,
       });
+    } else {
+      await ctx.db.insert("userPlans", {
+        userId: referrer.userId,
+        plan: "free",
+        tripsGenerated: 0,
+        tripCredits: 2, // 1 default + 1 referral reward
+      });
     }
 
     // Award referee (current user): +1 trip credit
-    const userPlan = await ctx.db
+    let userPlan = await ctx.db
       .query("userPlans")
       .withIndex("by_user", (q: any) => q.eq("userId", userId))
       .unique();
     if (userPlan) {
       await ctx.db.patch(userPlan._id, {
         tripCredits: (userPlan.tripCredits || 0) + 1,
+      });
+    } else {
+      await ctx.db.insert("userPlans", {
+        userId: userId,
+        plan: "free",
+        tripsGenerated: 0,
+        tripCredits: 2, // 1 default + 1 referral reward
       });
     }
 

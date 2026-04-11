@@ -22,6 +22,7 @@ import AIConsentModal from "@/components/AIConsentModal";
 import { useTranslation } from "react-i18next";
 import { Id } from "@/convex/_generated/dataModel";
 import { useMutation } from "convex/react";
+import { AIRPORTS } from "@/lib/airports";
 
 const LOCAL_EXPERIENCES = [
   { id: "local-food", labelKey: "createTrip.localFood", icon: "restaurant" as const },
@@ -147,6 +148,9 @@ export default function DealTripScreen() {
     setLoading(true);
 
     try {
+      const destinationCountry = AIRPORTS.find(a => a.code === destination)?.country;
+      const originCountry = AIRPORTS.find(a => a.code === origin)?.country;
+
       const tripId = await createFromDeal({
         dealId: dealId as Id<"lowFareRadar">,
         budgetTotal: Number(budgetTotal),
@@ -155,6 +159,8 @@ export default function DealTripScreen() {
         localExperiences,
         skipHotel,
         language: i18n.language || "en",
+        destinationCountry,
+        originCountry,
       });
 
       // Mark first-trip guide as seen so it never shows again

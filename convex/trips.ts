@@ -200,6 +200,8 @@ export const createFromDeal = authMutation({
         localExperiences: v.optional(v.array(v.string())),
         skipHotel: v.optional(v.boolean()),
         language: v.optional(v.string()),
+        destinationCountry: v.optional(v.string()),
+        originCountry: v.optional(v.string()),
     },
     returns: v.id("trips"),
     handler: async (ctx: any, args: any) => {
@@ -298,8 +300,12 @@ export const createFromDeal = authMutation({
             dealId: deal._id,
         };
 
-        const origin = `${deal.originCity}, ${deal.origin}`;
-        const destination = `${deal.destinationCity}, ${deal.destination}`;
+        const origin = args.originCountry
+            ? `${deal.originCity}, ${args.originCountry}`
+            : deal.originCity;
+        const destination = args.destinationCountry
+            ? `${deal.destinationCity}, ${args.destinationCountry}`
+            : deal.destinationCity;
 
         const tripId = await ctx.db.insert("trips", {
             userId: ctx.user.userId,
