@@ -36,3 +36,9 @@ Bloom is a full-stack Expo/React Native travel planning app with a Convex backen
 - All 6 language files in `lib/i18n/` must stay in sync
 - Add English first, then all other languages
 - Arabic (ar) is RTL — consider layout implications
+
+### Google Repo Sync
+- A separate Google/Android variant lives at `C:\Users\nioni\Desktop\Bloom-planeraAI_google`
+- After ANY code change in this repo, the same change must be applied to the Google repo
+- Most files are identical and can be copied directly; IAP-related files (lib/iap.ts, lib/useIAP.ts, convex/users.ts, app/subscription.tsx, convex/schema.ts) diverge — apply logic changes manually
+- See the `google-sync` skill for full details and divergence map
