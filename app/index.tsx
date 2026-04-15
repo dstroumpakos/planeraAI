@@ -77,16 +77,6 @@ export default function Index() {
         console.log("[Index] Auth state - isAuthenticated:", isAuthenticated, "isLoading:", isLoading);
     }, [isAuthenticated, isLoading]);
 
-    // Add timeout for auth loading
-    useEffect(() => {
-        const timer = setTimeout(() => {
-            if (oauthLoading === "anonymous") {
-                console.log("Auth loading timeout - forcing redirect");
-                setOauthLoading(null);
-            }
-        }, 10000);
-        return () => clearTimeout(timer);
-    }, [oauthLoading]);
 
     const handleEmailAuth = async () => {
         if (!email || !password || (isSignUp && !name)) {
@@ -189,26 +179,6 @@ export default function Index() {
         }
     };
 
-    const handleAnonymousSignIn = async () => {
-        setOauthLoading("anonymous");
-        try {
-            const result = await authClient.signIn.anonymous();
-            if (result.error) {
-                Alert.alert(t('common.error'), result.error.message || t('auth.anonymousSignInFailed'));
-                setOauthLoading(null);
-            } else {
-                // Success - navigate after a brief delay to let auth state update
-                console.log("[Index] Anonymous Sign-In successful, redirecting...");
-                setOauthLoading(null);
-                setTimeout(() => {
-                    router.replace("/onboarding");
-                }, 2000);  // Increased to 2 seconds
-            }
-        } catch (error: any) {
-            Alert.alert(t('common.error'), error.message || t('auth.anonymousSignInFailed'));
-            setOauthLoading(null);
-        }
-    };
 
     const onboardingData = [
         {
@@ -780,23 +750,7 @@ const styles = StyleSheet.create({
         fontWeight: "700",
         color: COLORS.text,
     },
-    guestButton: {
-        backgroundColor: "transparent",
-        paddingVertical: 16,
-        paddingHorizontal: 24,
-        borderRadius: 14,
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "center",
-        borderWidth: 1,
-        borderColor: COLORS.border,
-        borderStyle: "dashed",
-    },
-    guestButtonText: {
-        fontSize: 16,
-        fontWeight: "600",
-        color: COLORS.textSecondary,
-    },
+
     memberText: {
         fontSize: 14,
         color: COLORS.textSecondary,

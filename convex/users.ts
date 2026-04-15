@@ -286,6 +286,8 @@ export const getSettings = authQuery({
       tripReminders: v.optional(v.boolean()),
       aiDataConsent: v.optional(v.boolean()),
       aiDataConsentDate: v.optional(v.float64()),
+      hasSeenFirstTripGuide: v.optional(v.boolean()),
+      hasSeenTripDetailGuide: v.optional(v.boolean()),
     }),
     handler: async (ctx: any) => {
         const settings = await ctx.db
@@ -320,6 +322,8 @@ export const getSettings = authQuery({
                 tripReminders: undefined,
                 aiDataConsent: undefined,
                 aiDataConsentDate: undefined,
+                hasSeenFirstTripGuide: undefined,
+                hasSeenTripDetailGuide: undefined,
             };
         }
 
@@ -354,6 +358,8 @@ export const getSettings = authQuery({
             tripReminders: settings.tripReminders,
             aiDataConsent: settings.aiDataConsent,
             aiDataConsentDate: settings.aiDataConsentDate,
+            hasSeenFirstTripGuide: settings.hasSeenFirstTripGuide,
+            hasSeenTripDetailGuide: settings.hasSeenTripDetailGuide,
         };
     },
 });
