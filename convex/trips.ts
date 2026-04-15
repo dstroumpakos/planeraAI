@@ -202,6 +202,8 @@ export const createFromDeal = authMutation({
         language: v.optional(v.string()),
         destinationCountry: v.optional(v.string()),
         originCountry: v.optional(v.string()),
+        destinationCityFallback: v.optional(v.string()),
+        originCityFallback: v.optional(v.string()),
     },
     returns: v.id("trips"),
     handler: async (ctx: any, args: any) => {
@@ -300,12 +302,16 @@ export const createFromDeal = authMutation({
             dealId: deal._id,
         };
 
+        // Use city names; fall back to frontend-passed names if AI extraction left them empty
+        const effectiveOriginCity = deal.originCity || args.originCityFallback || deal.origin;
+        const effectiveDestCity = deal.destinationCity || args.destinationCityFallback || deal.destination;
+
         const origin = args.originCountry
-            ? `${deal.originCity}, ${args.originCountry}`
-            : deal.originCity;
+            ? `${effectiveOriginCity}, ${args.originCountry}`
+            : effectiveOriginCity;
         const destination = args.destinationCountry
-            ? `${deal.destinationCity}, ${args.destinationCountry}`
-            : deal.destinationCity;
+            ? `${effectiveDestCity}, ${args.destinationCountry}`
+            : effectiveDestCity;
 
         const tripId = await ctx.db.insert("trips", {
             userId: ctx.user.userId,

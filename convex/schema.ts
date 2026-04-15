@@ -93,9 +93,17 @@ export default defineSchema({
         tripType: v.optional(v.union(v.literal("standard"), v.literal("deal"))),
         dealId: v.optional(v.id("lowFareRadar")),
         dealFlightData: v.optional(v.any()),
+        // Share Card fields — for generating Instagram-story-style trip cards
+        tripCardId: v.optional(v.string()), // PLN-BCN-2026-4F8A format
+        shareCardPhoto: v.optional(v.object({
+            url: v.string(),
+            photographer: v.string(),
+            photographerUsername: v.optional(v.string()),
+        })),
     })
         .index("by_user", ["userId"])
-        .index("by_status", ["status"]),
+        .index("by_status", ["status"])
+        .index("by_tripCardId", ["tripCardId"]),
 
     userPlans: defineTable({
         userId: v.string(),

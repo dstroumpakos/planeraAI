@@ -21,6 +21,7 @@ import * as Haptics from "expo-haptics";
 import * as Location from "expo-location";
 import { useLocationNotifications } from "@/lib/useLocationNotifications";
 import { TripGuideTooltip, GuideStep } from "@/components/FirstTripGuide";
+import ShareTripCard, { ShareTripCardHandle } from "@/components/ShareTripCard";
 
 // Sanitize location titles for maps deep links by stripping descriptions, ratings, etc.
 const cleanLocationTitle = (title: string): string => {
@@ -916,6 +917,7 @@ export default function TripDetails() {
     // ─── Trip detail guide state ───
     const [detailGuideStep, setDetailGuideStep] = useState(-1);
     const detailGuideShownRef = useRef(false);
+    const shareCardRef = useRef<ShareTripCardHandle>(null);
     const DETAIL_GUIDE_STEPS: GuideStep[] = [
         { key: "itinerary", title: t("tripDetailGuide.stepItineraryTitle"), description: t("tripDetailGuide.stepItineraryDesc") },
         { key: "filters", title: t("tripDetailGuide.stepFiltersTitle"), description: t("tripDetailGuide.stepFiltersDesc") },
@@ -1954,6 +1956,12 @@ export default function TripDetails() {
                         <Ionicons name="chevron-back" size={24} color="#1A1A1A" />
                     </TouchableOpacity>
                     <View style={{ flex: 1 }} />
+                    <TouchableOpacity 
+                        style={[styles.iconButton, { backgroundColor: 'rgba(245,166,35,0.95)', borderRadius: 20, marginRight: 8 }]}
+                        onPress={() => shareCardRef.current?.generateAndShare()}
+                    >
+                        <Ionicons name="image-outline" size={20} color="#FFFFFF" />
+                    </TouchableOpacity>
                     <TouchableOpacity 
                         style={[styles.iconButton, { backgroundColor: 'rgba(255,255,255,0.9)', borderRadius: 20, marginRight: 8 }]}
                         onPress={async () => {
@@ -3909,6 +3917,12 @@ export default function TripDetails() {
                     </KeyboardAvoidingView>
                 </SafeAreaView>
             </Modal>
+
+            {/* Share Trip Card — hidden off-screen, captured on demand */}
+            <ShareTripCard
+                ref={shareCardRef}
+                trip={trip}
+            />
         </View>
     );
 }

@@ -41,6 +41,8 @@ import type * as passwordReset from "../passwordReset.js";
 import type * as passwordResetDb from "../passwordResetDb.js";
 import type * as postmark from "../postmark.js";
 import type * as referrals from "../referrals.js";
+import type * as shareCards from "../shareCards.js";
+import type * as shareCardsAction from "../shareCardsAction.js";
 import type * as sights from "../sights.js";
 import type * as sightsAction from "../sightsAction.js";
 import type * as stats from "../stats.js";
@@ -94,6 +96,8 @@ declare const fullApi: ApiFromModules<{
   passwordResetDb: typeof passwordResetDb;
   postmark: typeof postmark;
   referrals: typeof referrals;
+  shareCards: typeof shareCards;
+  shareCardsAction: typeof shareCardsAction;
   sights: typeof sights;
   sightsAction: typeof sightsAction;
   stats: typeof stats;

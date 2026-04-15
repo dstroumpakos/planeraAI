@@ -150,6 +150,8 @@ export default function DealTripScreen() {
     try {
       const destinationCountry = AIRPORTS.find(a => a.code === destination)?.country;
       const originCountry = AIRPORTS.find(a => a.code === origin)?.country;
+      const destinationCityFromAirports = AIRPORTS.find(a => a.code === destination)?.city;
+      const originCityFromAirports = AIRPORTS.find(a => a.code === origin)?.city;
 
       const tripId = await createFromDeal({
         dealId: dealId as Id<"lowFareRadar">,
@@ -161,6 +163,8 @@ export default function DealTripScreen() {
         language: i18n.language || "en",
         destinationCountry,
         originCountry,
+        destinationCityFallback: destinationCityFromAirports,
+        originCityFallback: originCityFromAirports,
       });
 
       // Mark first-trip guide as seen so it never shows again
