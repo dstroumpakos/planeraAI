@@ -848,4 +848,44 @@ export default defineSchema({
         .index("by_referrer", ["referrerId"])
         .index("by_code", ["referralCode"])
         .index("by_referred_user", ["referredUserId"]),
+
+    // Aggregated trip data for SEO itinerary generation (web)
+    tripAggregations: defineTable({
+        destinationKey: v.string(),
+        destination: v.string(),
+        country: v.optional(v.string()),
+        durationDays: v.float64(),
+        tripIds: v.array(v.id("trips")),
+        count: v.float64(),
+        lastUpdated: v.float64(),
+    })
+        .index("by_destination_key", ["destinationKey"]),
+
+    // Published SEO itinerary pages (web)
+    publishedItineraries: defineTable({
+        slug: v.string(),
+        destination: v.string(),
+        country: v.string(),
+        continent: v.string(),
+        durationDays: v.float64(),
+        title: v.string(),
+        metaDescription: v.string(),
+        intro: v.string(),
+        budgetLevel: v.string(),
+        budgetPerDayEur: v.float64(),
+        bestFor: v.array(v.string()),
+        bestSeason: v.string(),
+        heroImage: v.string(),
+        days: v.any(),
+        practicalInfo: v.any(),
+        faqs: v.array(v.object({
+            question: v.string(),
+            answer: v.string(),
+        })),
+        relatedItineraries: v.array(v.string()),
+        sourceTripCount: v.float64(),
+        lastAggregated: v.float64(),
+    })
+        .index("by_slug", ["slug"])
+        .index("by_destination", ["destination"]),
 });
