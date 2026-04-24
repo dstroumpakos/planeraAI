@@ -58,6 +58,7 @@ import type * as tripsActions from "../tripsActions.js";
 import type * as users from "../users.js";
 import type * as watchedDestinations from "../watchedDestinations.js";
 import type * as wishlist from "../wishlist.js";
+import type * as worldPrint from "../worldPrint.js";
 
 import type {
   ApiFromModules,
@@ -116,6 +117,7 @@ declare const fullApi: ApiFromModules<{
   users: typeof users;
   watchedDestinations: typeof watchedDestinations;
   wishlist: typeof wishlist;
+  worldPrint: typeof worldPrint;
 }>;
 
 /**
