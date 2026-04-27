@@ -74,7 +74,11 @@
           "color": "#1B3F92",
           "sounds": []
         }
-      ]
+      ],
+      "expo-localization",
+      "@react-native-community/datetimepicker",
+      "expo-image",
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true
