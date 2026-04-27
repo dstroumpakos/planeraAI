@@ -320,6 +320,18 @@ export default function HomeScreen() {
             <Text style={[styles.featureText, { color: "#FFFFFF" }]}>{t("home.surpriseMe")}</Text>
           </TouchableOpacity>
 
+          <TouchableOpacity
+            style={[styles.featureCard, { backgroundColor: "#0B1736", borderColor: "#0B1736" }]}
+            onPress={() => router.push("/worldprint" as any)}
+          >
+            <View style={[styles.featureIcon, { backgroundColor: "rgba(255,255,255,0.18)" }]}>
+              <Ionicons name="globe-outline" size={20} color="#FFFFFF" />
+            </View>
+            <Text style={[styles.featureText, { color: "#FFFFFF" }]}>
+              {t("home.worldprint", { defaultValue: "WorldPrint" })}
+            </Text>
+          </TouchableOpacity>
+
           <TouchableOpacity style={[styles.featureCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <View style={[styles.featureIcon, { backgroundColor: colors.secondary }]}>
               <Ionicons name="map-outline" size={20} color={colors.text} />
