@@ -798,14 +798,17 @@ Include specific activities, restaurants, and attractions for each day. Format a
 
 Make sure prices are realistic for ${trip.destination} and aligned with the ${budgetGuidance.budgetTier.toUpperCase()} budget tier. Distribute spending evenly across days. Museums typically cost €10-25, skip-the-line adds €5-15. Tours cost €20-80. Restaurants show average meal cost per person.`;
                     
-                    // For longer trips or trips with time constraints, we need more tokens
-                    // Base: 16000 tokens, +2500 per day, extra buffer for time-aware prompts
+                    // For longer trips or trips with time constraints, we need more tokens.
+                    // Non-Latin scripts (Greek, Arabic, etc.) tokenize ~1.5-2x larger than English,
+                    // so we bump the budget to avoid truncation on those languages.
                     const hasTimeConstraints = arrivalTime || departureTime;
-                    const baseTokens = hasTimeConstraints ? 20000 : 16000;
-                    const tokensPerDay = hasTimeConstraints ? 3000 : 2500;
+                    const isNonLatinLang = /^(el|ar|ru|zh|ja|ko|he)$/.test(contentLanguage);
+                    const langMultiplier = isNonLatinLang ? 1.6 : 1;
+                    const baseTokens = Math.round((hasTimeConstraints ? 20000 : 16000) * langMultiplier);
+                    const tokensPerDay = Math.round((hasTimeConstraints ? 3000 : 2500) * langMultiplier);
                     const maxTokens = Math.min(100000, Math.max(baseTokens, tripDays * tokensPerDay));
                     
-                    console.log(`📝 Using maxTokens: ${maxTokens} (days: ${tripDays}, timeConstraints: ${hasTimeConstraints})`);
+                    console.log(`📝 Using maxTokens: ${maxTokens} (days: ${tripDays}, timeConstraints: ${hasTimeConstraints}, lang: ${contentLanguage}, nonLatin: ${isNonLatinLang})`);
                     
                     // Build system prompt with time-awareness and budget awareness
                     const budgetSystemNote = budgetGuidance.budgetTier === 'low'
@@ -830,7 +833,7 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                             { role: "system", content: systemPrompt },
                             { role: "user", content: itineraryPrompt },
                         ],
-                        model: "gpt-5.2",
+                        model: "gpt-5.5",
                         response_format: { type: "json_object" },
                         max_completion_tokens: maxTokens,
                     });
@@ -2789,7 +2792,7 @@ Return a single JSON object (NOT an array) with the replacement activity:
                 { role: "system", content: `You are a travel planner. Return only valid JSON for a single activity.${lang !== "en" ? ` Write all content in ${langName}.` : ""}` },
                 { role: "user", content: prompt },
             ],
-            model: "gpt-5.2",
+            model: "gpt-5.5",
             response_format: { type: "json_object" },
             max_completion_tokens: 1000,
         });

@@ -17,11 +17,51 @@ import {
   formatConditionsForDisplay,
 } from "./flights/duffelExtras";
 
+async function requireUserId(ctx: any, token: string): Promise<string> {
+  if (!token || typeof token !== "string") {
+    throw new Error("Authentication required");
+  }
+  const session: any = await ctx.runQuery(
+    internal.authNativeDb.getSessionByToken,
+    { token }
+  );
+  if (!session || (session.expiresAt && session.expiresAt < Date.now())) {
+    throw new Error("Authentication required");
+  }
+  return session.userId as string;
+}
+
+async function requireTripOwner(
+  ctx: any,
+  userId: string,
+  tripId: Id<"trips">
+): Promise<void> {
+  const trip: any = await ctx.runQuery(
+    internal.flightBookingMutations.getTripForOwnerCheck,
+    { tripId }
+  );
+  if (!trip) throw new Error("Trip not found");
+  if (trip.userId !== userId) throw new Error("Forbidden");
+}
+
+async function requireDraftOwner(
+  ctx: any,
+  userId: string,
+  draftId: Id<"flightBookingDrafts">
+): Promise<void> {
+  const draft: any = await ctx.runQuery(internal.bookingDraftMutations.getDraft, {
+    draftId,
+  });
+  if (!draft) throw new Error("Booking draft not found");
+  if (draft.userId !== userId) throw new Error("Forbidden");
+}
+
 // ============================================================================
 // Create a new booking draft after offer selection
 // ============================================================================
 export const createDraft = action({
   args: {
+    token: v.string(),
     tripId: v.id("trips"),
     offerId: v.string(),
     travelers: v.array(v.object({
@@ -112,6 +152,8 @@ export const createDraft = action({
     | { success: false; error: string }
   > => {
     try {
+      const userId = await requireUserId(ctx, args.token);
+      await requireTripOwner(ctx, userId, args.tripId);
       console.log(`📝 Creating booking draft for offer ${args.offerId}...`);
 
       // Fetch the offer with extras info
@@ -277,6 +319,7 @@ export const createDraft = action({
 // ============================================================================
 export const fetchSeatMaps = action({
   args: {
+    token: v.string(),
     offerId: v.string(),
   },
   returns: v.union(
@@ -317,6 +360,7 @@ export const fetchSeatMaps = action({
   ),
   handler: async (ctx: any, args: any) => {
     try {
+      await requireUserId(ctx, args.token);
       const seatMaps = await getSeatMaps(args.offerId);
 
       if (!seatMaps || seatMaps.length === 0) {
@@ -371,6 +415,7 @@ export const fetchSeatMaps = action({
 // ============================================================================
 export const completeBooking = action({
   args: {
+    token: v.string(),
     draftId: v.id("flightBookingDrafts"),
     paymentIntentId: v.optional(v.string()),
   },
@@ -389,6 +434,8 @@ export const completeBooking = action({
   ),
   handler: async (ctx: any, args: any) => {
     try {
+      const userId = await requireUserId(ctx, args.token);
+      await requireDraftOwner(ctx, userId, args.draftId);
       // Get the draft
       const draft = await ctx.runQuery(internal.bookingDraftMutations.getDraft, {
         draftId: args.draftId,

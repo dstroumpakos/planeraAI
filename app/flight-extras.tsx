@@ -23,6 +23,7 @@ import { Id } from "@/convex/_generated/dataModel";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { useToken } from "@/lib/useAuthenticatedMutation";
 import { useTranslation } from "react-i18next";
 
 const colors = {
@@ -97,6 +98,7 @@ export default function FlightExtrasScreen() {
   const updateSeats = useMutation(api.bookingDraftMutations.updateSeatSelections);
   const acknowledgePolicy = useMutation(api.bookingDraftMutations.acknowledgePolicy);
   const fetchSeatMaps = useAction(api.bookingDraft.fetchSeatMaps);
+  const { token } = useToken();
 
   let flightInfo: any = null;
   try {
@@ -123,7 +125,7 @@ export default function FlightExtrasScreen() {
 
     setLoadingSeats(true);
     try {
-      const result = await fetchSeatMaps({ offerId });
+      const result = await fetchSeatMaps({ token: token!, offerId });
       if (result.success) {
         setSeatMaps(result.seatMaps);
       } else {

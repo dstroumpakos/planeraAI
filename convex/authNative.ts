@@ -4,6 +4,7 @@ import { action } from "./_generated/server";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import * as jose from "jose";
+import * as crypto from "crypto";
 
 // Google's JWKS URL
 const GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs";
@@ -112,11 +113,15 @@ console.log("[AuthNative] Apple token decoded (pre-verify):", {
       issuer: "https://appleid.apple.com",
     } as any);
     
-    // Custom audience validation to accept both production and development
-    // Accept production bundle ID or Expo dev client audience
-    const validAudiences = [appleBundleId, "host.exp.Exponent"];
+    // Custom audience validation. Only accept the production bundle ID by default.
+    // The Expo Go audience ("host.exp.Exponent") is permitted ONLY when
+    // CONVEX_ALLOW_EXPO_GO_AUTH=1 is set (development convenience).
+    const validAudiences = [appleBundleId];
+    if (process.env.CONVEX_ALLOW_EXPO_GO_AUTH === "1") {
+      validAudiences.push("host.exp.Exponent");
+    }
     if (!validAudiences.includes(payload.aud as string)) {
-      throw new Error(`Invalid aud claim: ${payload.aud}. Expected one of: ${validAudiences.join(", ")}`);
+      throw new Error(`Invalid aud claim: ${payload.aud}`);
     }
     
     console.log("[AuthNative] Apple token verified:", {
@@ -141,14 +146,38 @@ console.log("[AuthNative] Apple token decoded (pre-verify):", {
   }
 }
 
-// Generate a secure session token
+// Generate a cryptographically secure session token (256 bits of entropy)
 function generateSessionToken(): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let token = "";
-  for (let i = 0; i < 64; i++) {
-    token += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return token;
+  // 32 random bytes -> base64url -> ~43 chars, 256 bits entropy
+  return crypto.randomBytes(32).toString("base64url");
+}
+
+// Constant-time string comparison to prevent timing attacks
+function timingSafeEqualString(a: string, b: string): boolean {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+}
+
+// Hash a password with PBKDF2-SHA512 + per-user random salt.
+// Format: pbkdf2$<iterations>$<saltHex>$<hashHex>
+const PBKDF2_ITER = 210_000;
+const PBKDF2_KEYLEN = 64;
+function hashPassword(password: string): string {
+  const salt = crypto.randomBytes(16);
+  const hash = crypto.pbkdf2Sync(password, salt, PBKDF2_ITER, PBKDF2_KEYLEN, "sha512");
+  return `pbkdf2$${PBKDF2_ITER}$${salt.toString("hex")}$${hash.toString("hex")}`;
+}
+function verifyPassword(password: string, stored: string): boolean {
+  if (!stored || typeof stored !== "string") return false;
+  const parts = stored.split("$");
+  if (parts.length !== 4 || parts[0] !== "pbkdf2") return false;
+  const iter = parseInt(parts[1], 10);
+  if (!Number.isFinite(iter) || iter < 10_000) return false;
+  const salt = Buffer.from(parts[2], "hex");
+  const expected = Buffer.from(parts[3], "hex");
+  const computed = crypto.pbkdf2Sync(password, salt, iter, expected.length, "sha512");
+  return crypto.timingSafeEqual(expected, computed);
 }
 
 // Result type from upsertUserAndCreateSession
@@ -207,6 +236,11 @@ export const signInWithGoogle = action({
           success: false,
           error: "Invalid token: missing user identifier",
         };
+      }
+
+      // Refuse unverified Google emails to prevent account squatting/takeover.
+      if (claims.email && claims.email_verified === false) {
+        return { success: false, error: "Email is not verified by Google." };
       }
       
       // Generate a session token
@@ -368,8 +402,8 @@ export const signInAnonymous = action({
     console.log("[AuthNative] signInAnonymous called");
 
     try {
-      // Generate a unique anonymous user ID
-      const anonymousId = `anon_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
+      // Generate a unique anonymous user ID using a crypto-secure random suffix
+      const anonymousId = `anon_${Date.now()}_${crypto.randomBytes(12).toString("base64url")}`;
       const sessionToken = generateSessionToken();
 
       const result: UpsertResult = await ctx.runMutation(
@@ -431,17 +465,73 @@ export const signInWithEmail = action({
     });
 
     try {
-      // For MVP, we'll create/get a user based on email
-      // In production, you'd want proper password hashing and verification
+      const email = args.email.toLowerCase().trim();
+      const password = args.password;
+
+      // Strict input validation
+      if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return { success: false, error: "Invalid email address." };
+      }
+      if (typeof password !== "string" || password.length < 8) {
+        return { success: false, error: "Password must be at least 8 characters." };
+      }
+      if (password.length > 256) {
+        return { success: false, error: "Password too long." };
+      }
+
+      // Look up existing email/password user (if any)
+      const existing: {
+        _id: any;
+        userId: string;
+        email?: string;
+        authProvider?: string;
+        passwordHash?: string;
+      } | null = await ctx.runQuery(
+        internal.authNativeDb.getEmailUser,
+        { email }
+      );
+
+      // Block sign-in if the email already belongs to an OAuth-only account.
+      if (existing && existing.authProvider && existing.authProvider !== "email") {
+        return {
+          success: false,
+          error: "This email is registered with another sign-in method.",
+        };
+      }
+
+      let isNewUser = false;
+
+      if (args.isSignUp) {
+        if (existing && existing.passwordHash) {
+          return { success: false, error: "An account with this email already exists." };
+        }
+        // Hash the new password (PBKDF2 + per-user random salt)
+        const passwordHash = hashPassword(password);
+        await ctx.runMutation(internal.authNativeDb.createOrUpgradeEmailUser, {
+          email,
+          name: args.name,
+          passwordHash,
+        });
+        isNewUser = !existing;
+      } else {
+        // Sign-in path: must have an existing user with a password set
+        if (!existing || !existing.passwordHash) {
+          // Generic error to prevent account enumeration
+          return { success: false, error: "Invalid email or password." };
+        }
+        if (!verifyPassword(password, existing.passwordHash)) {
+          return { success: false, error: "Invalid email or password." };
+        }
+      }
+
       const sessionToken = generateSessionToken();
 
-      // Use email as the provider user ID (unique identifier)
       const result: UpsertResult = await ctx.runMutation(
         internal.authNativeDb.upsertUserAndCreateSession,
         {
           provider: "email",
-          providerUserId: args.email.toLowerCase(),
-          email: args.email.toLowerCase(),
+          providerUserId: email,
+          email,
           name: args.name,
           picture: undefined,
           sessionToken,
@@ -455,15 +545,13 @@ export const signInWithEmail = action({
       });
 
       // Send welcome email to new users
-      if (result.isNewUser && args.email) {
+      if ((isNewUser || result.isNewUser) && email) {
         try {
           await ctx.runAction(internal.postmark.sendWelcomeEmail, {
-            to: args.email.toLowerCase(),
+            to: email,
             name: args.name || "Traveler",
           });
-          console.log("[AuthNative] Welcome email sent to:", args.email);
         } catch (emailError) {
-          // Log but don't fail the signup if email fails
           console.error("[AuthNative] Failed to send welcome email:", emailError);
         }
       }
@@ -472,12 +560,12 @@ export const signInWithEmail = action({
         success: true,
         token: result.token,
         user: result.user,
-        isNewUser: result.isNewUser,
+        isNewUser: isNewUser || result.isNewUser,
       };
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
       console.error("[AuthNative] Email sign-in failed:", errorMessage);
-      return { success: false, error: errorMessage };
+      return { success: false, error: "Sign-in failed. Please try again." };
     }
   },
 });
@@ -536,9 +624,8 @@ export const validateSession = action({
       };
     } catch (error) {
       console.error("[AuthNative] validateSession error:", error);
-      // If DB lookup fails, still return success based on token format
-      // The client has a valid token stored, don't force logout
-      return { success: true };
+      // Fail closed: if validation cannot be completed, treat as unauthenticated.
+      return { success: false };
     }
   },
 });

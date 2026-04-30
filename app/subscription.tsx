@@ -1,7 +1,7 @@
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, Platform, ActivityIndicator, Linking } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation, useQuery, useAction } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useToken } from "@/lib/useAuthenticatedMutation";
 import { useState, useEffect } from "react";
@@ -16,11 +16,11 @@ export default function SubscriptionScreen() {
     const { token } = useToken();
     const { t } = useTranslation();
     
-    // Convex mutations for processing purchases
-    // @ts-ignore - API types may not include these yet
-    const processApplePurchase = useMutation(api.users.processApplePurchase);
-    // @ts-ignore
-    const restoreApplePurchases = useMutation(api.users.restoreApplePurchases);
+    // SECURITY: All entitlement grants now go through the verified Apple
+    // receipt action. The legacy mutations were removed because they trusted
+    // client-supplied productId/transactionId without server-side proof.
+    // @ts-ignore - API types may not include this yet on first deploy
+    const verifyApplePurchase = useAction(api.iapVerify.verifyAndApplyApplePurchase);
     const userPlan = useQuery(api.users.getPlan as any, token ? { token } : "skip");
     
     // IAP hook for real Apple StoreKit purchases
@@ -109,13 +109,19 @@ export default function SubscriptionScreen() {
             }
 
             if (result.success && result.transactionId) {
-                // Process the purchase on our backend
-                await processApplePurchase({
+                if (!result.receipt) {
+                    throw new Error("Missing App Store receipt — purchase cannot be verified.");
+                }
+                // Verify the receipt with Apple, then apply entitlement server-side
+                const verifyRes: any = await verifyApplePurchase({
                     token,
                     productId: result.productId!,
                     transactionId: result.transactionId,
                     receipt: result.receipt,
                 });
+                if (!verifyRes?.success) {
+                    throw new Error(verifyRes?.error || "Could not verify purchase with Apple.");
+                }
 
                 if (Platform.OS !== "web") {
                     if (selectedPlan === "single") {
@@ -136,14 +142,19 @@ export default function SubscriptionScreen() {
                     const successfulRestores = restoreResults.filter(r => r.success && r.transactionId);
                     
                     if (successfulRestores.length > 0) {
-                        await restoreApplePurchases({
-                            token,
-                            purchases: successfulRestores.map(r => ({
-                                productId: r.productId!,
-                                transactionId: r.transactionId!,
-                                receipt: r.receipt,
-                            })),
-                        });
+                        for (const r of successfulRestores) {
+                            if (!r.receipt) continue;
+                            try {
+                                await verifyApplePurchase({
+                                    token,
+                                    productId: r.productId!,
+                                    transactionId: r.transactionId!,
+                                    receipt: r.receipt,
+                                });
+                            } catch (e) {
+                                console.warn("[Subscription] Restore verify failed for", r.productId, e);
+                            }
+                        }
                         Alert.alert(
                             t('subscription.subscriptionRestored') + " ✓",
                             t('subscription.alreadyActiveRestored')
@@ -188,15 +199,20 @@ export default function SubscriptionScreen() {
             const successfulRestores = results.filter(r => r.success && r.transactionId);
             
             if (successfulRestores.length > 0) {
-                // Send to backend
-                await restoreApplePurchases({
-                    token,
-                    purchases: successfulRestores.map(r => ({
-                        productId: r.productId!,
-                        transactionId: r.transactionId!,
-                        receipt: r.receipt,
-                    })),
-                });
+                // Verify each restored receipt with Apple before granting anything
+                for (const r of successfulRestores) {
+                    if (!r.receipt) continue;
+                    try {
+                        await verifyApplePurchase({
+                            token,
+                            productId: r.productId!,
+                            transactionId: r.transactionId!,
+                            receipt: r.receipt,
+                        });
+                    } catch (e) {
+                        console.warn("[Subscription] Restore verify failed for", r.productId, e);
+                    }
+                }
 
                 Alert.alert(
                     t('subscription.purchasesRestored') + " ✓",

@@ -22,6 +22,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useTheme } from "@/lib/ThemeContext";
 import { useTranslation } from "react-i18next";
+import { useToken } from "@/lib/useAuthenticatedMutation";
 
 const colors = {
   background: "#FFFDF7",
@@ -68,6 +69,7 @@ export default function FlightOfferDetailsScreen() {
   const [draftId, setDraftId] = useState<Id<"flightBookingDrafts"> | null>(null);
 
   const createDraft = useAction(api.bookingDraft.createDraft);
+  const { token } = useToken();
 
   // Parse travelers from params
   let travelers: TravelerParam[] = [];
@@ -95,6 +97,7 @@ export default function FlightOfferDetailsScreen() {
       setError(null);
 
       const result = await createDraft({
+        token: token!,
         tripId,
         offerId,
         travelers: travelers.map(t => ({

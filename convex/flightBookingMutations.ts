@@ -1,7 +1,20 @@
-import { internalMutation, query } from "./_generated/server";
+import { internalMutation, internalQuery, query } from "./_generated/server";
 import { v } from "convex/values";
 import { authQuery } from "./functions";
 import { internal } from "./_generated/api";
+
+/**
+ * SECURITY: Internal query for actions to verify trip ownership without
+ * leaking trip data. Returns only the userId that owns the trip.
+ */
+export const getTripForOwnerCheck = internalQuery({
+  args: { tripId: v.id("trips") },
+  handler: async (ctx, args) => {
+    const trip = await ctx.db.get(args.tripId);
+    if (!trip) return null;
+    return { userId: trip.userId };
+  },
+});
 
 // Validator for flight details
 const flightDetailsValidator = v.object({

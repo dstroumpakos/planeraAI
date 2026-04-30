@@ -15,6 +15,7 @@ import { useRouter } from "expo-router";
 import { useQuery, useAction, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import { useConvexAuth } from "@/lib/auth-components";
 import { useToken } from "@/lib/useAuthenticatedMutation";
 import { ImageWithAttribution } from "@/components/ImageWithAttribution";
@@ -265,25 +266,40 @@ export default function HomeScreen() {
           </View>
         </TouchableOpacity>
 
-        {/* Feature Cards */}
+        {/* Feature Cards - Instagram story style */}
         <ScrollView 
           horizontal 
           showsHorizontalScrollIndicator={false} 
           style={styles.featuresScroll}
           contentContainerStyle={styles.featuresContent}
         >
-          <TouchableOpacity 
-            style={[styles.featureCard, { backgroundColor: colors.primary, borderColor: colors.primary }]}
+          <TouchableOpacity
+            style={styles.storyButton}
             onPress={() => router.push("/create-trip")}
+            activeOpacity={0.8}
           >
-            <View style={[styles.featureIcon, styles.featureIconPrimary]}>
-              <Ionicons name="sparkles" size={20} color="#000000" />
-            </View>
-            <Text style={[styles.featureText, { color: "#000000" }]}>{t("home.aiTripPlanner")}</Text>
+            <LinearGradient
+              colors={["#FEDA77", "#F58529", "#DD2A7B", "#8134AF", "#515BD4"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.storyRing}
+            >
+              <View style={[styles.storyAvatar, { backgroundColor: colors.primary }]}>
+                <Ionicons name="sparkles" size={26} color="#000000" />
+              </View>
+            </LinearGradient>
+            <Text
+              style={[styles.storyLabel, { color: colors.text }]}
+              numberOfLines={3}
+              adjustsFontSizeToFit
+              minimumFontScale={0.85}
+            >
+              {t("home.aiTripPlanner")}
+            </Text>
           </TouchableOpacity>
 
-          <TouchableOpacity 
-            style={[styles.featureCard, { backgroundColor: "#FF6B35", borderColor: "#FF6B35" }]}
+          <TouchableOpacity
+            style={styles.storyButton}
             onPress={() => {
               if (surpriseDeal) {
                 router.push({
@@ -313,30 +329,79 @@ export default function HomeScreen() {
                 });
               }
             }}
+            activeOpacity={0.8}
           >
-            <View style={[styles.featureIcon, { backgroundColor: "rgba(255,255,255,0.25)" }]}>
-              <Ionicons name="dice-outline" size={20} color="#FFFFFF" />
-            </View>
-            <Text style={[styles.featureText, { color: "#FFFFFF" }]}>{t("home.surpriseMe")}</Text>
+            <LinearGradient
+              colors={["#FEDA77", "#F58529", "#DD2A7B", "#8134AF", "#515BD4"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.storyRing}
+            >
+              <View style={[styles.storyAvatar, { backgroundColor: "#FF6B35" }]}>
+                <Ionicons name="dice-outline" size={26} color="#FFFFFF" />
+              </View>
+            </LinearGradient>
+            <Text
+              style={[styles.storyLabel, { color: colors.text }]}
+              numberOfLines={3}
+              adjustsFontSizeToFit
+              minimumFontScale={0.85}
+            >
+              {t("home.surpriseMe")}
+            </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={[styles.featureCard, { backgroundColor: "#0B1736", borderColor: "#0B1736" }]}
+            style={styles.storyButton}
             onPress={() => router.push("/worldprint" as any)}
+            activeOpacity={0.8}
           >
-            <View style={[styles.featureIcon, { backgroundColor: "rgba(255,255,255,0.18)" }]}>
-              <Ionicons name="globe-outline" size={20} color="#FFFFFF" />
-            </View>
-            <Text style={[styles.featureText, { color: "#FFFFFF" }]}>
+            <LinearGradient
+              colors={["#FEDA77", "#F58529", "#DD2A7B", "#8134AF", "#515BD4"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.storyRing}
+            >
+              <View style={[styles.storyAvatar, { backgroundColor: "#0B1736" }]}>
+                <Ionicons name="globe-outline" size={26} color="#FFFFFF" />
+              </View>
+            </LinearGradient>
+            <Text
+              style={[styles.storyLabel, { color: colors.text }]}
+              numberOfLines={3}
+              adjustsFontSizeToFit
+              minimumFontScale={0.85}
+            >
               {t("home.worldprint", { defaultValue: "WorldPrint" })}
             </Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={[styles.featureCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <View style={[styles.featureIcon, { backgroundColor: colors.secondary }]}>
-              <Ionicons name="map-outline" size={20} color={colors.text} />
+          <TouchableOpacity style={styles.storyButton} activeOpacity={0.8} disabled>
+            <View>
+              <LinearGradient
+                colors={["#FEDA77", "#F58529", "#DD2A7B", "#8134AF", "#515BD4"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.storyRing}
+              >
+                <View style={[styles.storyAvatar, { backgroundColor: colors.card, opacity: 0.85 }]}>
+                  <Ionicons name="map-outline" size={26} color={colors.text} />
+                </View>
+              </LinearGradient>
+              <View style={styles.comingSoonBadge}>
+                <Text style={styles.comingSoonText}>
+                  {t("home.comingSoon", { defaultValue: "Coming soon" })}
+                </Text>
+              </View>
             </View>
-            <Text style={[styles.featureText, { color: colors.text }]}>{t("home.multiCityRoute")}</Text>
+            <Text
+              style={[styles.storyLabel, { color: colors.text }]}
+              numberOfLines={3}
+              adjustsFontSizeToFit
+              minimumFontScale={0.85}
+            >
+              {t("home.multiCityRoute")}
+            </Text>
           </TouchableOpacity>
         </ScrollView>
 
@@ -624,32 +689,59 @@ const styles = StyleSheet.create({
   },
   featuresContent: {
     paddingHorizontal: 20,
-    gap: 12,
+    paddingTop: 6,
+    gap: 14,
+    alignItems: "flex-start",
   },
-  featureCard: {
-    flexDirection: "row",
+  storyButton: {
+    width: 92,
     alignItems: "center",
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 16,
-    gap: 8,
-    borderWidth: 1,
-    boxShadow: "0px 2px 8px rgba(0, 0, 0, 0.05)",
-    elevation: 2,
+    paddingTop: 8,
   },
-  featureIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+  storyRing: {
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    alignItems: "center",
     justifyContent: "center",
+    padding: 3,
+  },
+  storyAvatar: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
     alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
   },
-  featureIconPrimary: {
-    backgroundColor: "rgba(255,255,255,0.4)",
-  },
-  featureText: {
-    fontSize: 14,
+  storyLabel: {
+    marginTop: 8,
+    fontSize: 11,
+    lineHeight: 14,
     fontWeight: "600",
+    textAlign: "center",
+  },
+  comingSoonBadge: {
+    position: "absolute",
+    top: -6,
+    right: 0,
+    backgroundColor: "#FF3B30",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: "#FFFFFF",
+    minWidth: 28,
+    alignItems: "center",
+    zIndex: 2,
+    elevation: 3,
+  },
+  comingSoonText: {
+    color: "#FFFFFF",
+    fontSize: 9,
+    fontWeight: "700",
+    letterSpacing: 0.2,
   },
   sectionContainer: {
     marginBottom: 24,

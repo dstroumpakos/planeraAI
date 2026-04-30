@@ -160,7 +160,7 @@ export default function FlightBookingScreen() {
       }
 
       try {
-        const result = await getFlightOffer({ offerId });
+        const result = await getFlightOffer({ token: token!, offerId });
         if (result.valid) {
           setOfferValid(true);
           setPriceInfo({
@@ -275,6 +275,7 @@ export default function FlightBookingScreen() {
       // For test mode with Duffel Airways, we can directly create the booking
       // The balance payment will be used automatically in sandbox
       const result = await createBooking({
+        token: token!,
         offerId,
         tripId: tripId as Id<"trips">,
         passengers: passengers.map((p, index) => ({

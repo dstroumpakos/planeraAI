@@ -1,4 +1,4 @@
-{
+﻿{
   "common": {
     "loading": "Laden...",
     "error": "Fehler",
@@ -179,6 +179,7 @@
     "whereToGo": "Wohin möchten Sie reisen?",
     "aiTripPlanner": "KI-Reiseplaner",
     "multiCityRoute": "Multi-City-Route",
+    "comingSoon": "Demnächst",
     "surpriseMe": "Überrasch mich!",
     "trendingNow": "Im Trend",
     "myTrips": "Meine Reisen",
@@ -981,6 +982,16 @@
     "accommodationComingSoon": "Hotel- und Unterkunftsbuchung wird bald verfügbar sein. Wir arbeiten daran, Ihnen die besten Optionen zu bieten!",
     "gettingAroundDest": "Fortbewegung in {{destination}}",
     "localTransportRecommend": "Wir empfehlen lokale Taxis, Rideshare-Apps (Uber/Bolt) oder öffentliche Verkehrsmittel. Überprüfen Sie Google Maps für die besten Routen.",
+    "transportHeroSubtitle": "Clevere Wege durch die Stadt — passend zu deiner Reise.",
+    "proTipLabel": "Profi-Tipp",
+    "transportProTip": "Tageskarten lohnen sich meist ab 3 Fahrten. Rechne nach, bevor du Einzeltickets kaufst.",
+    "openMapsShort": "Karten",
+    "openRideshareApps": "Fahrdienste",
+    "transportHeroSubtitle": "Clevere Wege durch die Stadt — passend zu deiner Reise.",
+    "proTipLabel": "Profi-Tipp",
+    "transportProTip": "Tageskarten lohnen sich meist ab 3 Fahrten. Rechne nach, bevor du Einzeltickets kaufst.",
+    "openMapsShort": "Karten",
+    "openRideshareApps": "Fahrdienste",
     "transportOption": "Transportoption",
     "transit": "Nahverkehr",
     "singleTicketPrice": "Einzelfahrt: €{{price}}",

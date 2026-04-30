@@ -3333,106 +3333,289 @@ export default function TripDetails() {
                         </View>
                     )}
 
-                    {activeFilter === 'transportation' && (
-                        <View>
-                            <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('tripDetail.gettingAround')}</Text>
-                            {trip.itinerary?.transportation && trip.itinerary.transportation.length > 0 ? (
-                                trip.itinerary.transportation.map((option: any, index: number) => (
-                                    <View key={index} style={[styles.card, { backgroundColor: colors.card }]}>
-                                        <View style={styles.row}>
-                                            <View style={styles.flightInfo}>
-                                                <View style={styles.transportHeader}>
-                                                    <Ionicons 
-                                                        name={
-                                                            option.type === 'car_rental' ? 'car' :
-                                                            option.type === 'taxi' ? 'car-sport' :
-                                                            option.type === 'rideshare' ? 'phone-portrait' :
-                                                            option.type === 'public_transport' ? 'bus' :
-                                                            'navigate'
-                                                        } 
-                                                        size={24} 
-                                                        color={colors.text} 
-                                                    />
-                                                    <Text style={[styles.cardTitle, { color: colors.text }]}>
-                                                        {option.provider || option.type || t('tripDetail.transportOption')}
-                                                        {option.service ? ` - ${option.service}` : ''}
-                                                    </Text>
-                                                </View>
-                                                
-                                                {option.type === 'public_transport' && option.options ? (
-                                                    <View>
-                                                        {option.options.map((opt: any, i: number) => (
-                                                            <View key={i} style={[styles.transportOption, { backgroundColor: colors.secondary }]}>
-                                                                <Text style={[styles.transportMode, { color: colors.text }]}>{opt.mode || t('tripDetail.transit')}</Text>
-                                                                {opt.description && (
-                                                                    <Text style={[styles.transportDesc, { color: colors.textMuted }]}>{opt.description}</Text>
-                                                                )}
-                                                                {(opt.singleTicketPrice || opt.dayPassPrice) && (
-                                                                    <Text style={[styles.transportPrice, { color: colors.primary }]}>
-                                                                        {opt.singleTicketPrice ? t('tripDetail.singleTicketPrice', { price: opt.singleTicketPrice }) : ''}
-                                                                        {opt.singleTicketPrice && opt.dayPassPrice ? ' | ' : ''}
-                                                                        {opt.dayPassPrice ? t('tripDetail.dayPassPrice', { price: opt.dayPassPrice }) : ''}
-                                                                    </Text>
-                                                                )}
-                                                            </View>
-                                                        ))}
-                                                    </View>
-                                                ) : (
-                                                    <View>
-                                                        {option.description && (
-                                                            <Text style={[styles.cardSubtitle, { color: colors.textMuted }]}>{option.description}</Text>
-                                                        )}
-                                                        {option.estimatedPrice && (
-                                                            <Text style={[styles.price, { color: colors.primary }]}>
-                                                                {option.estimatedPrice}
-                                                            </Text>
-                                                        )}
-                                                        {option.features && option.features.length > 0 && (
-                                                            <View style={styles.amenitiesContainer}>
-                                                                {option.features.map((feature: string, i: number) => (
-                                                                    <View key={i} style={[styles.amenityBadge, { backgroundColor: colors.secondary }]}>
-                                                                        <Text style={[styles.amenityText, { color: colors.text }]}>{feature}</Text>
-                                                                    </View>
-                                                                ))}
-                                                            </View>
-                                                        )}
-                                                    </View>
-                                                )}
-                                            </View>
-                                        </View>
-                                        {option.bookingUrl && (
-                                            <TouchableOpacity 
-                                                style={[styles.bookButton, { backgroundColor: colors.primary }]}
-                                                onPress={() => Linking.openURL(option.bookingUrl)}
-                                            >
-                                                <Text style={[styles.bookButtonText, { color: colors.text }]}>{t('tripDetail.bookNow')}</Text>
-                                            </TouchableOpacity>
-                                        )}
+                    {activeFilter === 'transportation' && (() => {
+                        // Visual metadata per transport type (color-coded tiles)
+                        const getTransportMeta = (type?: string): { icon: any; tint: string; label: string } => {
+                            switch (type) {
+                                case 'car_rental':       return { icon: 'car-outline',          tint: '#22C55E', label: t('tripDetail.transportOption') };
+                                case 'taxi':             return { icon: 'car-sport-outline',    tint: '#F59E0B', label: t('tripDetail.transportOption') };
+                                case 'rideshare':        return { icon: 'phone-portrait-outline', tint: '#A855F7', label: t('tripDetail.transportOption') };
+                                case 'public_transport': return { icon: 'bus-outline',          tint: '#3B82F6', label: t('tripDetail.transportOption') };
+                                case 'bike':
+                                case 'bicycle':          return { icon: 'bicycle-outline',      tint: '#10B981', label: t('tripDetail.transportOption') };
+                                case 'walk':             return { icon: 'walk-outline',         tint: '#64748B', label: t('tripDetail.transportOption') };
+                                default:                 return { icon: 'navigate-outline',     tint: '#0EA5E9', label: t('tripDetail.transportOption') };
+                            }
+                        };
+                        const transportSubModeIcon = (mode?: string): any => {
+                            const m = (mode || '').toLowerCase();
+                            if (m.includes('metro') || m.includes('subway') || m.includes('underground')) return 'subway-outline';
+                            if (m.includes('tram')) return 'train-outline';
+                            if (m.includes('train') || m.includes('rail')) return 'train-outline';
+                            if (m.includes('ferry') || m.includes('boat')) return 'boat-outline';
+                            if (m.includes('bus')) return 'bus-outline';
+                            return 'git-branch-outline';
+                        };
+                        const transportOptions = trip.itinerary?.transportation || [];
+
+                        return (
+                            <View>
+                                {/* Hero header */}
+                                <View style={styles.transportHeroV2}>
+                                    <View style={[styles.transportHeroIcon, { backgroundColor: '#3B82F622' }]}>
+                                        <Ionicons name="navigate" size={20} color="#3B82F6" />
                                     </View>
-                                ))
-                            ) : (
-                                <View style={[styles.card, { backgroundColor: colors.card }]}>
-                                    <View style={styles.skippedSection}>
-                                        <Ionicons name="car-outline" size={32} color={colors.textMuted} />
-                                        <Text style={[styles.skippedTitle, { color: colors.text }]}>{t('tripDetail.gettingAroundDest', { destination: trip.destination })}</Text>
-                                        <Text style={[styles.skippedText, { color: colors.textMuted }]}>
+                                    <View style={{ flex: 1, minWidth: 0 }}>
+                                        <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 2 }]}>
+                                            {t('tripDetail.gettingAround')} · {trip.destination}
+                                        </Text>
+                                        <Text style={[styles.transportSectionSubtitle, { color: colors.textMuted }]}>
+                                            {t('tripDetail.transportHeroSubtitle')}
+                                        </Text>
+                                    </View>
+                                </View>
+
+                                {/* Pro tip callout — only when transport options exist */}
+                                {transportOptions.length > 0 && (
+                                    <View
+                                        style={[
+                                            styles.transportProTipBox,
+                                            {
+                                                backgroundColor: isDarkMode ? 'rgba(245, 158, 11, 0.12)' : 'rgba(245, 158, 11, 0.10)',
+                                                borderColor: isDarkMode ? 'rgba(245, 158, 11, 0.30)' : 'rgba(245, 158, 11, 0.25)',
+                                            },
+                                        ]}
+                                    >
+                                        <Ionicons name="bulb" size={18} color="#F59E0B" />
+                                        <View style={{ flex: 1, minWidth: 0 }}>
+                                            <Text style={[styles.transportProTipLabel, { color: '#F59E0B' }]}>
+                                                {t('tripDetail.proTipLabel')}
+                                            </Text>
+                                            <Text style={[styles.transportProTipText, { color: colors.text }]}>
+                                                {t('tripDetail.transportProTip')}
+                                            </Text>
+                                        </View>
+                                    </View>
+                                )}
+
+                                {transportOptions.length > 0 ? (
+                                    <View style={{ gap: 14 }}>
+                                        {transportOptions.map((option: any, index: number) => {
+                                            const meta = getTransportMeta(option.type);
+                                            const titleText =
+                                                option.provider
+                                                    ? `${option.provider}${option.service ? ` · ${option.service}` : ''}`
+                                                    : (option.type
+                                                        ? String(option.type).replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())
+                                                        : t('tripDetail.transportOption'));
+                                            return (
+                                                <View
+                                                    key={index}
+                                                    style={[
+                                                        styles.transportCardV2,
+                                                        { backgroundColor: colors.card, borderColor: colors.border },
+                                                    ]}
+                                                >
+                                                    {/* Header */}
+                                                    <View style={styles.transportCardHeaderV2}>
+                                                        <View style={[styles.transportIconTile, { backgroundColor: meta.tint + '22' }]}>
+                                                            <Ionicons name={meta.icon} size={22} color={meta.tint} />
+                                                        </View>
+                                                        <View style={{ flex: 1, minWidth: 0 }}>
+                                                            <Text
+                                                                style={[styles.transportCardTitleV2, { color: colors.text }]}
+                                                                numberOfLines={1}
+                                                            >
+                                                                {titleText}
+                                                            </Text>
+                                                            {option.type && (
+                                                                <Text style={[styles.transportCardKicker, { color: meta.tint }]}>
+                                                                    {String(option.type).replace(/_/g, ' ').toUpperCase()}
+                                                                </Text>
+                                                            )}
+                                                        </View>
+                                                        {option.estimatedPrice && (
+                                                            <View style={[styles.transportEstimateTag, { backgroundColor: colors.secondary }]}>
+                                                                <Text style={[styles.transportEstimateText, { color: colors.text }]}>
+                                                                    {option.estimatedPrice}
+                                                                </Text>
+                                                            </View>
+                                                        )}
+                                                    </View>
+
+                                                    {/* Description */}
+                                                    {option.description && option.type !== 'public_transport' && (
+                                                        <Text style={[styles.transportBodyV2, { color: colors.textMuted }]}>
+                                                            {option.description}
+                                                        </Text>
+                                                    )}
+
+                                                    {/* Public transport sub-options */}
+                                                    {option.type === 'public_transport' && option.options && option.options.length > 0 && (
+                                                        <View style={{ marginTop: 14, gap: 12 }}>
+                                                            {option.options.map((opt: any, i: number) => {
+                                                                const hasBothPrices = !!opt.singleTicketPrice && !!opt.dayPassPrice;
+                                                                return (
+                                                                    <View
+                                                                        key={i}
+                                                                        style={[
+                                                                            styles.transportSubOptionV2,
+                                                                            { borderColor: colors.border, backgroundColor: isDarkMode ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)' },
+                                                                        ]}
+                                                                    >
+                                                                        <View style={styles.transportSubOptionHeader}>
+                                                                            <View style={[styles.transportSubIconChip, { backgroundColor: meta.tint + '1A' }]}>
+                                                                                <Ionicons name={transportSubModeIcon(opt.mode)} size={14} color={meta.tint} />
+                                                                            </View>
+                                                                            <Text style={[styles.transportSubModeV2, { color: colors.text }]}>
+                                                                                {opt.mode || t('tripDetail.transit')}
+                                                                            </Text>
+                                                                        </View>
+                                                                        {opt.description && (
+                                                                            <Text style={[styles.transportSubDescV2, { color: colors.textMuted }]}>
+                                                                                {opt.description}
+                                                                            </Text>
+                                                                        )}
+                                                                        {(opt.singleTicketPrice || opt.dayPassPrice) && (
+                                                                            <View style={styles.transportPriceChipsRow}>
+                                                                                {opt.singleTicketPrice && (
+                                                                                    <View style={[styles.transportPriceChip, { borderColor: colors.border, backgroundColor: colors.card }]}>
+                                                                                        <Ionicons name="ticket-outline" size={12} color={colors.textMuted} />
+                                                                                        <Text style={[styles.transportPriceChipText, { color: colors.text }]}>
+                                                                                            {t('tripDetail.singleTicketPrice', { price: opt.singleTicketPrice })}
+                                                                                        </Text>
+                                                                                    </View>
+                                                                                )}
+                                                                                {opt.dayPassPrice && (
+                                                                                    <View
+                                                                                        style={[
+                                                                                            styles.transportPriceChip,
+                                                                                            hasBothPrices
+                                                                                                ? { borderColor: meta.tint, backgroundColor: meta.tint + '14' }
+                                                                                                : { borderColor: colors.border, backgroundColor: colors.card },
+                                                                                        ]}
+                                                                                    >
+                                                                                        <Ionicons name="calendar-outline" size={12} color={hasBothPrices ? meta.tint : colors.textMuted} />
+                                                                                        <Text style={[styles.transportPriceChipText, { color: colors.text }]}>
+                                                                                            {t('tripDetail.dayPassPrice', { price: opt.dayPassPrice })}
+                                                                                        </Text>
+                                                                                        {hasBothPrices && (
+                                                                                            <View style={[styles.transportBestValueBadge, { backgroundColor: meta.tint }]}>
+                                                                                                <Text style={styles.transportBestValueText}>
+                                                                                                    {t('subscription.bestValue')}
+                                                                                                </Text>
+                                                                                            </View>
+                                                                                        )}
+                                                                                    </View>
+                                                                                )}
+                                                                            </View>
+                                                                        )}
+                                                                    </View>
+                                                                );
+                                                            })}
+                                                        </View>
+                                                    )}
+
+                                                    {/* Features for non-public-transport */}
+                                                    {option.type !== 'public_transport' && option.features && option.features.length > 0 && (
+                                                        <View style={styles.transportFeaturesRow}>
+                                                            {option.features.map((feature: string, i: number) => (
+                                                                <View
+                                                                    key={i}
+                                                                    style={[styles.transportFeaturePill, { borderColor: colors.border }]}
+                                                                >
+                                                                    <Ionicons name="checkmark" size={12} color={meta.tint} />
+                                                                    <Text style={[styles.transportFeaturePillText, { color: colors.text }]}>
+                                                                        {feature}
+                                                                    </Text>
+                                                                </View>
+                                                            ))}
+                                                        </View>
+                                                    )}
+
+                                                    {/* CTA */}
+                                                    {option.bookingUrl && (
+                                                        <TouchableOpacity
+                                                            style={[styles.transportCtaV2, { backgroundColor: colors.text }]}
+                                                            onPress={() => Linking.openURL(option.bookingUrl)}
+                                                            activeOpacity={0.85}
+                                                        >
+                                                            <Text style={[styles.transportCtaTextV2, { color: colors.card }]}>
+                                                                {t('tripDetail.bookNow')}
+                                                            </Text>
+                                                            <Ionicons name="arrow-forward" size={16} color={colors.card} />
+                                                        </TouchableOpacity>
+                                                    )}
+                                                </View>
+                                            );
+                                        })}
+                                    </View>
+                                ) : (
+                                    <View style={[styles.transportEmptyV2, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                                        <View style={[styles.transportEmptyIconV2, { backgroundColor: '#3B82F622' }]}>
+                                            <Ionicons name="navigate-outline" size={28} color="#3B82F6" />
+                                        </View>
+                                        <Text style={[styles.transportEmptyTitleV2, { color: colors.text }]}>
+                                            {t('tripDetail.gettingAroundDest', { destination: trip.destination })}
+                                        </Text>
+                                        <Text style={[styles.transportEmptyTextV2, { color: colors.textMuted }]}>
                                             {t('tripDetail.localTransportRecommend')}
                                         </Text>
-                                        <TouchableOpacity 
-                                            style={[styles.generateSightsButton, { backgroundColor: colors.primary, marginTop: 16 }]}
+
+                                        {/* Quick action chips */}
+                                        <View style={styles.transportQuickActionsRow}>
+                                            <TouchableOpacity
+                                                style={[styles.transportQuickAction, { borderColor: colors.border, backgroundColor: isDarkMode ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)' }]}
+                                                onPress={() => {
+                                                    const q = encodeURIComponent(`public transport ${trip.destination}`);
+                                                    Linking.openURL(`https://www.google.com/maps/search/${q}`);
+                                                }}
+                                                activeOpacity={0.85}
+                                            >
+                                                <View style={[styles.transportQuickActionIcon, { backgroundColor: '#3B82F622' }]}>
+                                                    <Ionicons name="map-outline" size={18} color="#3B82F6" />
+                                                </View>
+                                                <Text style={[styles.transportQuickActionText, { color: colors.text }]}>
+                                                    {t('tripDetail.openMapsShort')}
+                                                </Text>
+                                            </TouchableOpacity>
+                                            <TouchableOpacity
+                                                style={[styles.transportQuickAction, { borderColor: colors.border, backgroundColor: isDarkMode ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)' }]}
+                                                onPress={() => {
+                                                    const q = encodeURIComponent(`uber ride ${trip.destination}`);
+                                                    Linking.openURL(`https://m.uber.com/looking?drop[0]=${encodeURIComponent(trip.destination)}`).catch(() =>
+                                                        Linking.openURL(`https://www.google.com/search?q=${q}`)
+                                                    );
+                                                }}
+                                                activeOpacity={0.85}
+                                            >
+                                                <View style={[styles.transportQuickActionIcon, { backgroundColor: '#A855F722' }]}>
+                                                    <Ionicons name="car-sport-outline" size={18} color="#A855F7" />
+                                                </View>
+                                                <Text style={[styles.transportQuickActionText, { color: colors.text }]}>
+                                                    {t('tripDetail.openRideshareApps')}
+                                                </Text>
+                                            </TouchableOpacity>
+                                        </View>
+
+                                        <TouchableOpacity
+                                            style={[styles.transportEmptyCta, { backgroundColor: colors.text }]}
                                             onPress={() => {
                                                 const searchQuery = encodeURIComponent(`public transport ${trip.destination}`);
                                                 Linking.openURL(`https://www.google.com/maps/search/${searchQuery}`);
                                             }}
+                                            activeOpacity={0.85}
                                         >
-                                            <Ionicons name="navigate" size={18} color={colors.text} />
-                                            <Text style={[styles.generateSightsButtonText, { color: colors.text }]}>{t('tripDetail.openInGoogleMaps')}</Text>
+                                            <Ionicons name="map-outline" size={18} color={colors.card} />
+                                            <Text style={[styles.transportEmptyCtaText, { color: colors.card }]}>
+                                                {t('tripDetail.openInGoogleMaps')}
+                                            </Text>
                                         </TouchableOpacity>
                                     </View>
-                                </View>
-                            )}
-                        </View>
-                    )}
+                                )}
+                            </View>
+                        );
+                    })()}
 
                     {/* Traveler Insights Section */}
                     {activeFilter === 'insights' && (
@@ -5237,6 +5420,251 @@ const styles = StyleSheet.create({
         fontWeight: "600",
         color: "#14B8A6",
         marginTop: 6,
+    },
+    // ─── Transportation tab — redesigned (V2) ───────────────────────────────
+    transportSectionHeader: {
+        marginBottom: 18,
+    },
+    transportSectionSubtitle: {
+        fontSize: 13,
+        fontWeight: "500",
+    },
+    transportHeroV2: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+        marginBottom: 14,
+    },
+    transportHeroIcon: {
+        width: 40,
+        height: 40,
+        borderRadius: 12,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    transportProTipBox: {
+        flexDirection: "row",
+        gap: 10,
+        padding: 12,
+        borderRadius: 12,
+        borderWidth: 1,
+        marginBottom: 16,
+        alignItems: "flex-start",
+    },
+    transportProTipLabel: {
+        fontSize: 11,
+        fontWeight: "800",
+        letterSpacing: 0.6,
+        textTransform: "uppercase",
+        marginBottom: 2,
+    },
+    transportProTipText: {
+        fontSize: 13,
+        lineHeight: 18,
+        fontWeight: "500",
+    },
+    transportBestValueBadge: {
+        marginLeft: 4,
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: 4,
+    },
+    transportBestValueText: {
+        fontSize: 9,
+        fontWeight: "800",
+        letterSpacing: 0.6,
+        color: "#FFFFFF",
+    },
+    transportQuickActionsRow: {
+        flexDirection: "row",
+        gap: 10,
+        marginBottom: 16,
+        width: "100%",
+    },
+    transportQuickAction: {
+        flex: 1,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        paddingVertical: 12,
+        paddingHorizontal: 12,
+        borderRadius: 12,
+        borderWidth: 1,
+    },
+    transportQuickActionIcon: {
+        width: 30,
+        height: 30,
+        borderRadius: 8,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    transportQuickActionText: {
+        fontSize: 13,
+        fontWeight: "700",
+        flex: 1,
+    },
+    transportCardV2: {
+        borderRadius: 16,
+        borderWidth: 1,
+        padding: 16,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.04,
+        shadowRadius: 8,
+        elevation: 1,
+    },
+    transportCardHeaderV2: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+    },
+    transportIconTile: {
+        width: 44,
+        height: 44,
+        borderRadius: 12,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    transportCardTitleV2: {
+        fontSize: 15,
+        fontWeight: "700",
+        letterSpacing: -0.2,
+    },
+    transportCardKicker: {
+        fontSize: 10,
+        fontWeight: "700",
+        letterSpacing: 0.8,
+        marginTop: 2,
+    },
+    transportEstimateTag: {
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 999,
+    },
+    transportEstimateText: {
+        fontSize: 12,
+        fontWeight: "700",
+    },
+    transportBodyV2: {
+        fontSize: 13,
+        lineHeight: 19,
+        marginTop: 12,
+    },
+    transportSubOptionV2: {
+        borderRadius: 12,
+        borderWidth: 1,
+        padding: 12,
+    },
+    transportSubOptionHeader: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+    },
+    transportSubIconChip: {
+        width: 24,
+        height: 24,
+        borderRadius: 8,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    transportSubModeV2: {
+        fontSize: 13,
+        fontWeight: "700",
+        flex: 1,
+    },
+    transportSubDescV2: {
+        fontSize: 12,
+        lineHeight: 17,
+        marginTop: 6,
+    },
+    transportPriceChipsRow: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: 6,
+        marginTop: 10,
+    },
+    transportPriceChip: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 5,
+        paddingHorizontal: 9,
+        paddingVertical: 5,
+        borderRadius: 999,
+        borderWidth: 1,
+    },
+    transportPriceChipText: {
+        fontSize: 11,
+        fontWeight: "600",
+    },
+    transportFeaturesRow: {
+        flexDirection: "row",
+        flexWrap: "wrap",
+        gap: 6,
+        marginTop: 12,
+    },
+    transportFeaturePill: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 999,
+        borderWidth: 1,
+    },
+    transportFeaturePillText: {
+        fontSize: 11,
+        fontWeight: "600",
+    },
+    transportCtaV2: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 6,
+        paddingVertical: 12,
+        borderRadius: 10,
+        marginTop: 14,
+    },
+    transportCtaTextV2: {
+        fontSize: 14,
+        fontWeight: "700",
+    },
+    transportEmptyV2: {
+        alignItems: "center",
+        padding: 28,
+        borderRadius: 16,
+        borderWidth: 1,
+    },
+    transportEmptyIconV2: {
+        width: 64,
+        height: 64,
+        borderRadius: 18,
+        alignItems: "center",
+        justifyContent: "center",
+        marginBottom: 16,
+    },
+    transportEmptyTitleV2: {
+        fontSize: 16,
+        fontWeight: "700",
+        textAlign: "center",
+        marginBottom: 6,
+    },
+    transportEmptyTextV2: {
+        fontSize: 13,
+        lineHeight: 19,
+        textAlign: "center",
+        marginBottom: 18,
+    },
+    transportEmptyCta: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        paddingHorizontal: 18,
+        paddingVertical: 12,
+        borderRadius: 10,
+    },
+    transportEmptyCtaText: {
+        fontSize: 14,
+        fontWeight: "700",
     },
     bookButton: {
         backgroundColor: "#14B8A6",

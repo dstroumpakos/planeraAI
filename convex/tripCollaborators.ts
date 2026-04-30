@@ -3,12 +3,12 @@ import { v } from "convex/values";
 import { authQuery, authMutation } from "./functions";
 
 function generateInviteToken(): string {
-    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    let token = "";
-    for (let i = 0; i < 24; i++) {
-        token += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return token;
+    // 144 bits of entropy via WebCrypto, base64url-encoded.
+    const bytes = new Uint8Array(18);
+    (globalThis as any).crypto.getRandomValues(bytes);
+    let bin = "";
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 /** List collaborators for a trip */

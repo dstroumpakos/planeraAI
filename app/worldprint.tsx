@@ -21,7 +21,7 @@ import {
   Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, Stack } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery, useMutation } from "convex/react";
 import * as Haptics from "expo-haptics";
@@ -31,7 +31,8 @@ import { LinearGradient } from "expo-linear-gradient";
 import { api } from "@/convex/_generated/api";
 import { useToken, useAuthenticatedMutation } from "@/lib/useAuthenticatedMutation";
 import { useTheme } from "@/lib/ThemeContext";
-import WorldGlobe, { GlobeVisit } from "@/components/WorldGlobe";
+import WorldGlobe, { GlobeVisit, WorldGlobeHandle } from "@/components/WorldGlobe";
+import ShareWorldPrintCard, { ShareWorldPrintCardHandle } from "@/components/ShareWorldPrintCard";
 import { SIGNATURE_COLORS } from "@/lib/worldPrintQuests";
 
 export default function WorldPrintScreen() {
@@ -54,10 +55,19 @@ export default function WorldPrintScreen() {
   const setSigColor = useAuthenticatedMutation(
     api.worldPrint.setSignatureColor as any
   );
+  const seedDemo = useAuthenticatedMutation(
+    api.worldPrint.seedDemoVisits as any
+  );
+  const clearVisits = useAuthenticatedMutation(
+    api.worldPrint.clearMyVisits as any
+  );
 
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [selectedCity, setSelectedCity] = useState<string | null>(null);
   const [claiming, setClaiming] = useState<string | null>(null);
+  const [globeSnapshot, setGlobeSnapshot] = useState<string | null>(null);
+  const shareCardRef = React.useRef<ShareWorldPrintCardHandle>(null);
+  const globeRef = React.useRef<WorldGlobeHandle>(null);
 
   // On first mount, trigger profile creation + auto-import from completed trips
   useEffect(() => {
@@ -73,6 +83,11 @@ export default function WorldPrintScreen() {
     if (!data?.visits) return [];
     return data.visits as GlobeVisit[];
   }, [data?.visits]);
+
+  const hasGpsVisits = useMemo(
+    () => (data?.visits ?? []).some((v: any) => v?.verifiedSource === "gps"),
+    [data?.visits]
+  );
 
   const signatureColor = data?.profile?.signatureColor ?? "#F59E0B";
   const stats = data?.stats ?? { totalCities: 0, totalCountries: 0, totalPlanned: 0 };
@@ -106,21 +121,41 @@ export default function WorldPrintScreen() {
   );
 
   const handleShare = useCallback(async () => {
-    if (!publicCode) return;
-    const url = `https://planera.app/globe/${publicCode}`;
     await Haptics.selectionAsync();
     try {
-      await Share.share({
-        message: t("worldprint.shareMessage", {
-          defaultValue: `My WorldPrint: ${stats.totalCities} cities, ${stats.totalCountries} countries. ${url}`,
-          cities: stats.totalCities,
-          countries: stats.totalCountries,
-          url,
-        }),
-        url,
-      });
+      // Capture the live globe canvas first so the card has a real hero image.
+      const snapshot = await globeRef.current?.captureSnapshot(2500);
+      if (snapshot) {
+        setGlobeSnapshot(snapshot);
+        // Allow React to flush the new image into the off-screen card before capture.
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      await shareCardRef.current?.share();
     } catch {}
-  }, [publicCode, stats, t]);
+  }, []);
+
+  // Build the data passed to the share card
+  const shareCardData = useMemo(() => {
+    const claimedQuestCount = (quests as any[]).filter(
+      (q: any) => q?.status === "claimed" || q?.claimed
+    ).length;
+    const recentVisits = [...(visits as any[])]
+      .filter((v) => v?.status === "verified" || v?.status === "holographic")
+      .sort((a, b) => (b?.verifiedAt ?? 0) - (a?.verifiedAt ?? 0))
+      .slice(0, 6);
+    return {
+      totalCities: stats.totalCities ?? 0,
+      totalCountries: stats.totalCountries ?? 0,
+      totalQuests: claimedQuestCount,
+      signatureColor,
+      publicCode,
+      topCities: recentVisits.map((v: any) => ({
+        name: v?.city?.name ?? "",
+        country: v?.city?.country ?? "",
+      })),
+      globeImage: globeSnapshot,
+    };
+  }, [stats, quests, visits, signatureColor, publicCode, globeSnapshot]);
 
   const handleSetColor = useCallback(
     async (hex: string) => {
@@ -143,10 +178,21 @@ export default function WorldPrintScreen() {
 
   return (
     <View style={styles.root}>
+      <Stack.Screen
+        options={{
+          headerShown: false,
+          gestureEnabled: false,
+          fullScreenGestureEnabled: false,
+        }}
+      />
       <StatusBar barStyle="light-content" backgroundColor="#050A14" />
+
+      {/* Off-screen share card — captured to PNG when the user taps share */}
+      <ShareWorldPrintCard ref={shareCardRef} data={shareCardData} />
 
       {/* The globe is the background of the whole screen */}
       <WorldGlobe
+        ref={globeRef}
         visits={visits}
         signatureColor={signatureColor}
         dimLevel={dimLevel}
@@ -180,13 +226,65 @@ export default function WorldPrintScreen() {
             {t("worldprint.subtitle", { defaultValue: "Your living globe" })}
           </Text>
         </View>
-        <TouchableOpacity
-          style={styles.iconButton}
-          onPress={handleShare}
-          hitSlop={10}
-        >
-          <Ionicons name="share-outline" size={22} color="#F8FAFC" />
-        </TouchableOpacity>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          {visits.length === 0 ? (
+            <TouchableOpacity
+              style={styles.iconButton}
+              hitSlop={10}
+              onPress={async () => {
+                try {
+                  const res = await seedDemo({});
+                  await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                  Alert.alert(
+                    t("worldprint.demoSeeded", { defaultValue: "Demo cities added" }),
+                    `+${res?.added ?? 0}`
+                  );
+                } catch (e: any) {
+                  Alert.alert("Error", e?.message ?? "Failed to seed demo");
+                }
+              }}
+            >
+              <Ionicons name="sparkles" size={20} color="#FBBF24" />
+            </TouchableOpacity>
+          ) : (
+            !hasGpsVisits && (
+            <TouchableOpacity
+              style={styles.iconButton}
+              hitSlop={10}
+              onPress={() => {
+                Alert.alert(
+                  t("worldprint.clearTitle", { defaultValue: "Clear all visits?" }),
+                  t("worldprint.clearBody", {
+                    defaultValue: "Remove every city from your WorldPrint.",
+                  }),
+                  [
+                    { text: t("common.cancel", { defaultValue: "Cancel" }), style: "cancel" },
+                    {
+                      text: t("worldprint.clear", { defaultValue: "Clear" }),
+                      style: "destructive",
+                      onPress: async () => {
+                        try {
+                          await clearVisits({});
+                          await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                        } catch {}
+                      },
+                    },
+                  ]
+                );
+              }}
+            >
+              <Ionicons name="trash-outline" size={20} color="#F87171" />
+            </TouchableOpacity>
+            )
+          )}
+          <TouchableOpacity
+            style={styles.iconButton}
+            onPress={handleShare}
+            hitSlop={10}
+          >
+            <Ionicons name="share-outline" size={22} color="#F8FAFC" />
+          </TouchableOpacity>
+        </View>
       </SafeAreaView>
 
       {/* Bottom content: stats + quests */}

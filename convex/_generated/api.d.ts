@@ -33,6 +33,7 @@ import type * as helpers_achievements from "../helpers/achievements.js";
 import type * as helpers_geo from "../helpers/geo.js";
 import type * as helpers_subscription from "../helpers/subscription.js";
 import type * as helpers_unsplash from "../helpers/unsplash.js";
+import type * as iapVerify from "../iapVerify.js";
 import type * as images from "../images.js";
 import type * as insights from "../insights.js";
 import type * as lowFareRadar from "../lowFareRadar.js";
@@ -92,6 +93,7 @@ declare const fullApi: ApiFromModules<{
   "helpers/geo": typeof helpers_geo;
   "helpers/subscription": typeof helpers_subscription;
   "helpers/unsplash": typeof helpers_unsplash;
+  iapVerify: typeof iapVerify;
   images: typeof images;
   insights: typeof insights;
   lowFareRadar: typeof lowFareRadar;

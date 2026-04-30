@@ -110,7 +110,7 @@ IMPORTANT: The latitude and longitude MUST be the exact coordinates of each sigh
                     { role: "system", content: `You are a travel expert providing informational recommendations. Return only valid JSON.${isNonEnglish ? ` All text content in the response must be written in ${languageName}. Keep JSON field names in English.` : ''}` },
                     { role: "user", content: prompt },
                 ],
-                model: "gpt-5.2",
+                model: "gpt-5.5",
                 response_format: { type: "json_object" },
             });
             

@@ -110,8 +110,12 @@ export const upsertUserAndCreateSession = internalMutation({
       console.log("[AuthNativeDb] Created user plan:", newPlanId);
     }
     
-    // Generate session ID
-    const sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    // Generate session ID using a crypto-strong random suffix.
+    // (V8 runtime exposes WebCrypto via globalThis.crypto.)
+    const rand = new Uint8Array(12);
+    (globalThis as any).crypto.getRandomValues(rand);
+    const randSuffix = Buffer.from(rand).toString("base64url");
+    const sessionId = `session_${Date.now()}_${randSuffix}`;
     console.log("[AuthNativeDb] Generated sessionId:", sessionId);
     
     // Save session to database
@@ -172,5 +176,84 @@ export const getUserSettings = internalQuery({
       .withIndex("by_user", (q) => q.eq("userId", args.userId))
       .unique();
     return settings;
+  },
+});
+
+/**
+ * Look up the email/password user record by email (used by signInWithEmail
+ * to verify password hashes). Returns the minimum data needed.
+ */
+export const getEmailUser = internalQuery({
+  args: { email: v.string() },
+  returns: v.union(
+    v.object({
+      _id: v.id("userSettings"),
+      userId: v.string(),
+      email: v.optional(v.string()),
+      authProvider: v.optional(v.string()),
+      passwordHash: v.optional(v.string()),
+    }),
+    v.null()
+  ),
+  handler: async (ctx, args) => {
+    const email = args.email.toLowerCase();
+    const userId = `email:${email}`;
+    const settings = await ctx.db
+      .query("userSettings")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .unique();
+    if (!settings) return null;
+    return {
+      _id: settings._id,
+      userId: settings.userId,
+      email: settings.email,
+      authProvider: settings.authProvider,
+      passwordHash: settings.passwordHash,
+    };
+  },
+});
+
+/**
+ * Create a new email/password user, or upgrade an existing record by setting
+ * a passwordHash. Used by signInWithEmail signup path.
+ */
+export const createOrUpgradeEmailUser = internalMutation({
+  args: {
+    email: v.string(),
+    name: v.optional(v.string()),
+    passwordHash: v.string(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const email = args.email.toLowerCase();
+    const userId = `email:${email}`;
+    const existing = await ctx.db
+      .query("userSettings")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .unique();
+    if (existing) {
+      const patch: Record<string, any> = {
+        passwordHash: args.passwordHash,
+        authProvider: "email",
+      };
+      if (!existing.email) patch.email = email;
+      if (!existing.name && args.name) patch.name = args.name;
+      await ctx.db.patch(existing._id, patch);
+    } else {
+      await ctx.db.insert("userSettings", {
+        userId,
+        email,
+        name: args.name,
+        passwordHash: args.passwordHash,
+        authProvider: "email",
+        onboardingCompleted: false,
+        darkMode: false,
+        pushNotifications: true,
+        emailNotifications: true,
+        language: "en",
+        currency: "USD",
+      });
+    }
+    return null;
   },
 });

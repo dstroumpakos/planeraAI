@@ -9,16 +9,22 @@ import {
   Alert,
   ActivityIndicator,
   StatusBar,
+  Platform,
 } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { INTERESTS } from "@/lib/data";
 import { useTheme } from "@/lib/ThemeContext";
 import { useAuthenticatedMutation, useToken } from "@/lib/useAuthenticatedMutation";
 import AIConsentModal from "@/components/AIConsentModal";
+import OptimizedImage from "@/components/OptimizedImage";
+import { useDestinationImage } from "@/lib/useImages";
+import { matchCityFromDestination } from "@/lib/worldCities";
+import { Image as ExpoImage } from "expo-image";
 import { useTranslation } from "react-i18next";
 import { Id } from "@/convex/_generated/dataModel";
 import { useMutation } from "convex/react";
@@ -77,6 +83,15 @@ export default function DealTripScreen() {
   const createFromDeal = useAuthenticatedMutation(api.trips.createFromDeal as any);
   const updateAiConsent = useMutation(api.users.updateAiConsent as any);
   const markGuideSeen = useMutation(api.users.markFirstTripGuideSeen as any);
+
+  const { image: destImage } = useDestinationImage(destinationCity);
+  const destCountryCode = React.useMemo(() => {
+    const match = matchCityFromDestination(destinationCity || "");
+    return match?.countryCode?.toLowerCase() || null;
+  }, [destinationCity]);
+  const countryOutlineUrl = destCountryCode
+    ? `https://raw.githubusercontent.com/djaiss/mapsicon/master/all/${destCountryCode}/vector.svg`
+    : null;
 
   const tripDays = returnDate
     ? Math.ceil((new Date(returnDate).getTime() - new Date(outboundDate).getTime()) / (24 * 60 * 60 * 1000))
@@ -189,12 +204,17 @@ export default function DealTripScreen() {
 
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="chevron-back" size={24} color={colors.text} />
+        <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Ionicons name="chevron-back" size={22} color={colors.text} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>
-          {t("dealTrip.title", { defaultValue: "Plan Your Trip" })}
-        </Text>
+        <View style={{ alignItems: "center", flex: 1 }}>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>
+            {t("dealTrip.title", { defaultValue: "Plan Your Trip" })}
+          </Text>
+          <Text style={[styles.headerSubtitle, { color: colors.textMuted }]} numberOfLines={1}>
+            {originCity} → {destinationCity}
+          </Text>
+        </View>
         <View style={{ width: 40 }} />
       </View>
 
@@ -205,119 +225,183 @@ export default function DealTripScreen() {
       >
         {/* Flight Deal Card (locked) */}
         <View style={[styles.dealCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          {destImage?.url ? (
+            <View style={styles.dealCardBgWrap} pointerEvents="none">
+              <OptimizedImage
+                source={destImage.url}
+                style={styles.dealCardBgImage}
+                size="MEDIUM"
+              />
+              <LinearGradient
+                colors={[
+                  isDarkMode ? "rgba(0,0,0,0.55)" : "rgba(255,255,255,0.55)",
+                  isDarkMode ? "rgba(0,0,0,0.92)" : "rgba(255,255,255,0.95)",
+                  colors.card,
+                ]}
+                locations={[0, 0.55, 1]}
+                style={StyleSheet.absoluteFill}
+              />
+            </View>
+          ) : null}
+          <LinearGradient
+            colors={[colors.primary + "22", "transparent"]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.dealCardGlow}
+            pointerEvents="none"
+          />
+          {countryOutlineUrl ? (
+            <ExpoImage
+              source={countryOutlineUrl}
+              style={styles.dealCardOutline}
+              contentFit="contain"
+              tintColor={colors.primary}
+              pointerEvents="none"
+            />
+          ) : null}
           <View style={styles.dealBadgeRow}>
-            <View style={[styles.dealBadge, { backgroundColor: colors.primary }]}>
+            <LinearGradient
+              colors={[colors.primary, "#34C759"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.dealBadge}
+            >
               <Ionicons name="pulse" size={12} color="#000" />
               <Text style={styles.dealBadgeText}>
                 {t("dealTrip.fromRadar", { defaultValue: "Low Fare Radar" })}
               </Text>
+            </LinearGradient>
+            <View style={styles.lockedPill}>
+              <Ionicons name="lock-closed" size={11} color={colors.textMuted} />
+              <Text style={[styles.lockedText, { color: colors.textMuted }]}>
+                {t("dealTrip.locked", { defaultValue: "Locked" })}
+              </Text>
             </View>
-            <Ionicons name="lock-closed" size={14} color={colors.textMuted} />
           </View>
 
           {/* Outbound Flight */}
-          <Text style={[styles.flightLabel, { color: colors.textMuted }]}>
+          <Text style={[styles.flightLabel, { color: colors.primary }]}>
             {t("dealTrip.outbound", { defaultValue: "Outbound" })}
           </Text>
           <View style={styles.routeRow}>
             <View style={styles.routePoint}>
               <Text style={[styles.iataCode, { color: colors.text }]}>{origin}</Text>
-              <Text style={[styles.cityLabel, { color: colors.textMuted }]}>{originCity}</Text>
+              <Text style={[styles.cityLabel, { color: colors.textMuted }]} numberOfLines={1}>{originCity}</Text>
             </View>
             <View style={styles.routeLine}>
-              <View style={[styles.routeDash, { backgroundColor: colors.border }]} />
-              <Ionicons name="airplane" size={18} color={colors.primary} />
-              <View style={[styles.routeDash, { backgroundColor: colors.border }]} />
+              <View style={[styles.routeBar, { backgroundColor: colors.primary + "30" }]}>
+                <View style={[styles.routeBarFill, { backgroundColor: colors.primary }]} />
+              </View>
+              <View style={[styles.planeChip, { backgroundColor: colors.primary }]}>
+                <Ionicons name="airplane" size={14} color="#000" />
+              </View>
+              <View style={[styles.routeBar, { backgroundColor: colors.primary + "30" }]}>
+                <View style={[styles.routeBarFill, { backgroundColor: colors.primary, alignSelf: "flex-end" }]} />
+              </View>
             </View>
             <View style={[styles.routePoint, { alignItems: "flex-end" }]}>
               <Text style={[styles.iataCode, { color: colors.text }]}>{destination}</Text>
-              <Text style={[styles.cityLabel, { color: colors.textMuted }]}>{destinationCity}</Text>
+              <Text style={[styles.cityLabel, { color: colors.textMuted }]} numberOfLines={1}>{destinationCity}</Text>
             </View>
           </View>
-          <View style={styles.flightDetails}>
-            <View style={styles.flightDetailItem}>
-              <Ionicons name="calendar-outline" size={14} color={colors.textMuted} />
-              <Text style={[styles.flightDetailText, { color: colors.text }]}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.flightDetails}
+          >
+            <View style={[styles.flightDetailItem, { backgroundColor: colors.background }]}>
+              <Ionicons name="calendar-outline" size={13} color={colors.textMuted} />
+              <Text style={[styles.flightDetailText, { color: colors.text }]} numberOfLines={1}>
                 {formatDate(outboundDate)}
               </Text>
             </View>
-            <View style={styles.flightDetailItem}>
-              <Ionicons name="time-outline" size={14} color={colors.textMuted} />
-              <Text style={[styles.flightDetailText, { color: colors.text }]}>
+            <View style={[styles.flightDetailItem, { backgroundColor: colors.background }]}>
+              <Ionicons name="time-outline" size={13} color={colors.textMuted} />
+              <Text style={[styles.flightDetailText, { color: colors.text }]} numberOfLines={1}>
                 {outboundDeparture} → {outboundArrival}
               </Text>
             </View>
-            <View style={styles.flightDetailItem}>
-              <Ionicons name="business-outline" size={14} color={colors.textMuted} />
-              <Text style={[styles.flightDetailText, { color: colors.text }]}>{airline}</Text>
+            <View style={[styles.flightDetailItem, { backgroundColor: colors.background }]}>
+              <Ionicons name="business-outline" size={13} color={colors.textMuted} />
+              <Text style={[styles.flightDetailText, { color: colors.text }]} numberOfLines={1}>{airline}</Text>
             </View>
             {outboundStops > 0 && (
-              <View style={styles.flightDetailItem}>
-                <Ionicons name="git-branch-outline" size={14} color={colors.primary} />
-                <Text style={[styles.flightDetailText, { color: colors.primary, fontWeight: "600" }]}>
+              <View style={[styles.flightDetailItem, { backgroundColor: colors.primary + "18" }]}>
+                <Ionicons name="git-branch-outline" size={13} color={colors.primary} />
+                <Text style={[styles.flightDetailText, { color: colors.primary, fontWeight: "700" }]} numberOfLines={1}>
                   {outboundStops} stop{outboundStops > 1 ? "s" : ""}
                   {outboundSegments ? ` via ${outboundSegments.slice(0, -1).map((s: any) => s.arrivalAirport).join(", ")}` : ""}
                 </Text>
               </View>
             )}
-          </View>
+          </ScrollView>
 
           {/* Return Flight */}
           {returnDate && returnDeparture && returnArrival ? (
             <>
               <View style={[styles.flightDivider, { borderColor: colors.border }]} />
-              <Text style={[styles.flightLabel, { color: colors.textMuted }]}>
+              <Text style={[styles.flightLabel, { color: colors.primary }]}>
                 {t("dealTrip.return", { defaultValue: "Return" })}
               </Text>
               <View style={styles.routeRow}>
                 <View style={styles.routePoint}>
                   <Text style={[styles.iataCode, { color: colors.text }]}>{destination}</Text>
-                  <Text style={[styles.cityLabel, { color: colors.textMuted }]}>{destinationCity}</Text>
+                  <Text style={[styles.cityLabel, { color: colors.textMuted }]} numberOfLines={1}>{destinationCity}</Text>
                 </View>
                 <View style={styles.routeLine}>
-                  <View style={[styles.routeDash, { backgroundColor: colors.border }]} />
-                  <Ionicons name="airplane" size={18} color={colors.primary} style={{ transform: [{ scaleX: -1 }] }} />
-                  <View style={[styles.routeDash, { backgroundColor: colors.border }]} />
+                  <View style={[styles.routeBar, { backgroundColor: colors.primary + "30" }]}>
+                    <View style={[styles.routeBarFill, { backgroundColor: colors.primary }]} />
+                  </View>
+                  <View style={[styles.planeChip, { backgroundColor: colors.primary }]}>
+                    <Ionicons name="airplane" size={14} color="#000" style={{ transform: [{ scaleX: -1 }] }} />
+                  </View>
+                  <View style={[styles.routeBar, { backgroundColor: colors.primary + "30" }]}>
+                    <View style={[styles.routeBarFill, { backgroundColor: colors.primary, alignSelf: "flex-end" }]} />
+                  </View>
                 </View>
                 <View style={[styles.routePoint, { alignItems: "flex-end" }]}>
                   <Text style={[styles.iataCode, { color: colors.text }]}>{origin}</Text>
-                  <Text style={[styles.cityLabel, { color: colors.textMuted }]}>{originCity}</Text>
+                  <Text style={[styles.cityLabel, { color: colors.textMuted }]} numberOfLines={1}>{originCity}</Text>
                 </View>
               </View>
-              <View style={styles.flightDetails}>
-                <View style={styles.flightDetailItem}>
-                  <Ionicons name="calendar-outline" size={14} color={colors.textMuted} />
-                  <Text style={[styles.flightDetailText, { color: colors.text }]}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.flightDetails}
+              >
+                <View style={[styles.flightDetailItem, { backgroundColor: colors.background }]}>
+                  <Ionicons name="calendar-outline" size={13} color={colors.textMuted} />
+                  <Text style={[styles.flightDetailText, { color: colors.text }]} numberOfLines={1}>
                     {formatDate(returnDate)}
                   </Text>
                 </View>
-                <View style={styles.flightDetailItem}>
-                  <Ionicons name="time-outline" size={14} color={colors.textMuted} />
-                  <Text style={[styles.flightDetailText, { color: colors.text }]}>
+                <View style={[styles.flightDetailItem, { backgroundColor: colors.background }]}>
+                  <Ionicons name="time-outline" size={13} color={colors.textMuted} />
+                  <Text style={[styles.flightDetailText, { color: colors.text }]} numberOfLines={1}>
                     {returnDeparture} → {returnArrival}
                   </Text>
                 </View>
-                <View style={styles.flightDetailItem}>
-                  <Ionicons name="business-outline" size={14} color={colors.textMuted} />
-                  <Text style={[styles.flightDetailText, { color: colors.text }]}>
+                <View style={[styles.flightDetailItem, { backgroundColor: colors.background }]}>
+                  <Ionicons name="business-outline" size={13} color={colors.textMuted} />
+                  <Text style={[styles.flightDetailText, { color: colors.text }]} numberOfLines={1}>
                     {returnAirline || airline}
                   </Text>
                 </View>
                 {returnStops > 0 && (
-                  <View style={styles.flightDetailItem}>
-                    <Ionicons name="git-branch-outline" size={14} color={colors.primary} />
-                    <Text style={[styles.flightDetailText, { color: colors.primary, fontWeight: "600" }]}>
+                  <View style={[styles.flightDetailItem, { backgroundColor: colors.primary + "18" }]}>
+                    <Ionicons name="git-branch-outline" size={13} color={colors.primary} />
+                    <Text style={[styles.flightDetailText, { color: colors.primary, fontWeight: "700" }]} numberOfLines={1}>
                       {returnStops} stop{returnStops > 1 ? "s" : ""}
                       {returnSegments ? ` via ${returnSegments.slice(0, -1).map((s: any) => s.arrivalAirport).join(", ")}` : ""}
                     </Text>
                   </View>
                 )}
-              </View>
+              </ScrollView>
             </>
           ) : null}
 
-          <View style={styles.priceRow}>
-            <View>
+          <View style={[styles.priceRow, { borderTopColor: colors.border }]}>
+            <View style={{ flex: 1 }}>
               <Text style={[styles.dealPrice, { color: colors.text }]}>
                 {getCurrencySymbol(currency)}{price}
                 <Text style={[styles.dealPriceNote, { color: colors.textMuted }]}> /pp</Text>
@@ -328,19 +412,27 @@ export default function DealTripScreen() {
                 </Text>
               )}
             </View>
-            <Text style={[styles.dealPriceNote, { color: colors.textMuted }]}>
-              {tripDays} {t("dealTrip.days", { defaultValue: "days" })}
-            </Text>
+            <View style={[styles.daysBadge, { backgroundColor: colors.primary + "20", borderColor: colors.primary + "40" }]}>
+              <Ionicons name="calendar" size={12} color="#000" />
+              <Text style={[styles.daysBadgeText, { color: "#000" }]}>
+                {tripDays} {t("dealTrip.days", { defaultValue: "days" })}
+              </Text>
+            </View>
           </View>
         </View>
 
         {/* Budget */}
         <View style={styles.section}>
-          <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
-            {t("createTrip.budget", { defaultValue: "BUDGET" })}
-          </Text>
+          <View style={styles.sectionHeaderRow}>
+            <Ionicons name="wallet-outline" size={14} color={colors.primary} />
+            <Text style={[styles.sectionLabel, { color: colors.text }]}>
+              {t("createTrip.budget", { defaultValue: "Budget" })}
+            </Text>
+          </View>
           <View style={[styles.inputRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Text style={[styles.currencyPrefix, { color: colors.text }]}>€</Text>
+            <View style={[styles.currencyChip, { backgroundColor: colors.primary + "20" }]}>
+              <Text style={[styles.currencyPrefix, { color: colors.primary }]}>€</Text>
+            </View>
             <TextInput
               style={[styles.budgetInput, { color: colors.text }]}
               value={budgetTotal}
@@ -359,20 +451,32 @@ export default function DealTripScreen() {
 
         {/* Travelers */}
         <View style={styles.section}>
-          <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
-            {t("createTrip.travelers", { defaultValue: "TRAVELERS" })}
-          </Text>
-          <View style={styles.travelerRow}>
+          <View style={styles.sectionHeaderRow}>
+            <Ionicons name="people-outline" size={14} color={colors.primary} />
+            <Text style={[styles.sectionLabel, { color: colors.text }]}>
+              {t("createTrip.travelers", { defaultValue: "Travelers" })}
+            </Text>
+          </View>
+          <View style={[styles.travelerCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <TouchableOpacity
-              style={[styles.travelerBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
+              style={[styles.travelerBtn, { backgroundColor: colors.background, borderColor: colors.border, opacity: travelerCount <= 1 ? 0.4 : 1 }]}
               onPress={() => setTravelerCount(Math.max(1, travelerCount - 1))}
+              disabled={travelerCount <= 1}
             >
               <Ionicons name="remove" size={20} color={colors.text} />
             </TouchableOpacity>
-            <Text style={[styles.travelerCount, { color: colors.text }]}>{travelerCount}</Text>
+            <View style={{ alignItems: "center" }}>
+              <Text style={[styles.travelerCount, { color: colors.text }]}>{travelerCount}</Text>
+              <Text style={[styles.travelerHint, { color: colors.textMuted }]}>
+                {travelerCount === 1
+                  ? t("createTrip.traveler", { defaultValue: "traveler" })
+                  : t("createTrip.travelers", { defaultValue: "travelers" }).toLowerCase()}
+              </Text>
+            </View>
             <TouchableOpacity
-              style={[styles.travelerBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
+              style={[styles.travelerBtn, { backgroundColor: colors.background, borderColor: colors.border, opacity: travelerCount >= 12 ? 0.4 : 1 }]}
               onPress={() => setTravelerCount(Math.min(12, travelerCount + 1))}
+              disabled={travelerCount >= 12}
             >
               <Ionicons name="add" size={20} color={colors.text} />
             </TouchableOpacity>
@@ -381,9 +485,12 @@ export default function DealTripScreen() {
 
         {/* Interests */}
         <View style={styles.section}>
-          <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
-            {t("createTrip.interests", { defaultValue: "INTERESTS" })}
-          </Text>
+          <View style={styles.sectionHeaderRow}>
+            <Ionicons name="heart-outline" size={14} color={colors.primary} />
+            <Text style={[styles.sectionLabel, { color: colors.text }]}>
+              {t("createTrip.interests", { defaultValue: "Interests" })}
+            </Text>
+          </View>
           <View style={styles.chipGrid}>
             {INTERESTS.map((interest) => {
               const selected = interests.includes(interest);
@@ -398,7 +505,9 @@ export default function DealTripScreen() {
                     },
                   ]}
                   onPress={() => toggleInterest(interest)}
+                  activeOpacity={0.8}
                 >
+                  {selected && <Ionicons name="checkmark-circle" size={14} color="#000" />}
                   <Text style={[styles.chipText, { color: selected ? "#000" : colors.text }]}>
                     {t(`interests.${interest.toLowerCase()}`, { defaultValue: interest })}
                   </Text>
@@ -410,9 +519,12 @@ export default function DealTripScreen() {
 
         {/* Local Experiences */}
         <View style={styles.section}>
-          <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>
-            {t("createTrip.localExperiences", { defaultValue: "LOCAL EXPERIENCES" })}
-          </Text>
+          <View style={styles.sectionHeaderRow}>
+            <Ionicons name="sparkles-outline" size={14} color={colors.primary} />
+            <Text style={[styles.sectionLabel, { color: colors.text }]}>
+              {t("createTrip.localExperiences", { defaultValue: "Local Experiences" })}
+            </Text>
+          </View>
           <View style={styles.chipGrid}>
             {LOCAL_EXPERIENCES.map((exp) => {
               const selected = localExperiences.includes(exp.id);
@@ -427,8 +539,9 @@ export default function DealTripScreen() {
                     },
                   ]}
                   onPress={() => toggleLocalExperience(exp.id)}
+                  activeOpacity={0.8}
                 >
-                  <Ionicons name={exp.icon} size={14} color={selected ? "#000" : colors.text} />
+                  <Ionicons name={exp.icon} size={14} color={selected ? "#000" : colors.primary} />
                   <Text style={[styles.chipText, { color: selected ? "#000" : colors.text }]}>
                     {t(exp.labelKey, { defaultValue: exp.id })}
                   </Text>
@@ -445,22 +558,28 @@ export default function DealTripScreen() {
       {/* Bottom CTA */}
       <View style={[styles.bottomBar, { backgroundColor: colors.background, borderTopColor: colors.border }]}>
         <TouchableOpacity
-          style={[styles.generateBtn, { backgroundColor: colors.text }, loading && styles.generateBtnDisabled]}
           onPress={() => handleSubmit()}
           disabled={loading}
+          activeOpacity={0.9}
+          style={[styles.generateBtnWrap, loading && styles.generateBtnDisabled]}
         >
-          {loading ? (
-            <ActivityIndicator color={colors.background} />
-          ) : (
-            <>
-              <View style={[styles.sparkleIcon, { backgroundColor: colors.primary }]}>
-                <Ionicons name="sparkles" size={18} color="#000" />
-              </View>
-              <Text style={[styles.generateBtnText, { color: colors.background }]}>
-                {t("dealTrip.generate", { defaultValue: "Generate Itinerary" })}
-              </Text>
-            </>
-          )}
+          <LinearGradient
+            colors={[colors.primary, "#34C759"]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.generateBtn}
+          >
+            {loading ? (
+              <ActivityIndicator color="#000" />
+            ) : (
+              <>
+                <Ionicons name="sparkles" size={20} color="#000" />
+                <Text style={styles.generateBtnText}>
+                  {t("dealTrip.generate", { defaultValue: "Generate Itinerary" })}
+                </Text>
+              </>
+            )}
+          </LinearGradient>
         </TouchableOpacity>
       </View>
 
@@ -497,12 +616,21 @@ const styles = StyleSheet.create({
   backBtn: {
     width: 40,
     height: 40,
+    borderRadius: 14,
+    borderWidth: 1,
     justifyContent: "center",
     alignItems: "center",
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: "700",
+    fontSize: 17,
+    fontWeight: "800",
+    letterSpacing: -0.2,
+  },
+  headerSubtitle: {
+    fontSize: 12,
+    fontWeight: "600",
+    marginTop: 2,
+    maxWidth: 220,
   },
   scroll: {
     flex: 1,
@@ -511,31 +639,96 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 8,
   },
+
+  // ===== Deal Card =====
   dealCard: {
-    borderRadius: 20,
-    padding: 16,
+    borderRadius: 24,
+    padding: 18,
     borderWidth: 1,
-    marginBottom: 24,
+    marginBottom: 28,
+    overflow: "hidden",
+    position: "relative",
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOpacity: 0.08,
+        shadowRadius: 16,
+        shadowOffset: { width: 0, height: 6 },
+      },
+      android: { elevation: 4 },
+    }),
+  },
+  dealCardGlow: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 140,
+  },
+  dealCardBgWrap: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 220,
+    overflow: "hidden",
+  },
+  dealCardBgImage: {
+    width: "100%",
+    height: "100%",
+  },
+  dealCardOutline: {
+    position: "absolute",
+    top: 16,
+    right: -30,
+    width: 220,
+    height: 220,
+    opacity: 0.18,
+    transform: [{ rotate: "-8deg" }],
   },
   dealBadgeRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 12,
+    marginBottom: 14,
   },
   dealBadge: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-    gap: 4,
+    paddingVertical: 5,
+    borderRadius: 999,
+    gap: 5,
   },
   dealBadgeText: {
-    fontSize: 11,
-    fontWeight: "700",
+    fontSize: 10,
+    fontWeight: "800",
     color: "#000",
     textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  lockedPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    backgroundColor: "rgba(127,127,127,0.12)",
+  },
+  lockedText: {
+    fontSize: 10,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  flightLabel: {
+    fontSize: 10,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.7,
+    marginBottom: 10,
+    opacity: 0.9,
   },
   routeRow: {
     flexDirection: "row",
@@ -548,94 +741,154 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   iataCode: {
-    fontSize: 22,
-    fontWeight: "800",
-    letterSpacing: 1,
+    fontSize: 24,
+    fontWeight: "900",
+    letterSpacing: 0.5,
   },
   cityLabel: {
     fontSize: 12,
-    fontWeight: "500",
-    marginTop: 2,
+    fontWeight: "600",
+    marginTop: 3,
   },
   routeLine: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 8,
+    gap: 4,
+    paddingHorizontal: 10,
   },
-  routeDash: {
-    height: 1,
-    width: 24,
+  routeBar: {
+    height: 2,
+    width: 22,
+    borderRadius: 1,
+    overflow: "hidden",
   },
-  flightLabel: {
-    fontSize: 11,
-    fontWeight: "700",
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-    marginBottom: 8,
+  routeBarFill: {
+    height: 2,
+    width: "60%",
+    borderRadius: 1,
+  },
+  planeChip: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    justifyContent: "center",
+    alignItems: "center",
   },
   flightDivider: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    marginVertical: 12,
+    marginVertical: 14,
   },
   flightDetails: {
+    flexDirection: "row",
+    alignItems: "center",
     gap: 6,
-    marginBottom: 12,
+    paddingRight: 4,
+    paddingBottom: 14,
   },
   flightDetailItem: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
   },
   flightDetailText: {
-    fontSize: 13,
-    fontWeight: "500",
+    fontSize: 12,
+    fontWeight: "600",
   },
   priceRow: {
     flexDirection: "row",
-    alignItems: "baseline",
+    alignItems: "flex-end",
+    justifyContent: "space-between",
     gap: 8,
+    paddingTop: 14,
+    borderTopWidth: 1,
   },
   dealPrice: {
-    fontSize: 24,
-    fontWeight: "800",
+    fontSize: 28,
+    fontWeight: "900",
+    letterSpacing: -0.6,
   },
   dealPriceNote: {
-    fontSize: 13,
-    fontWeight: "500",
+    fontSize: 12,
+    fontWeight: "600",
   },
+  daysBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  daysBadgeText: {
+    fontSize: 12,
+    fontWeight: "800",
+    letterSpacing: 0.2,
+  },
+
+  // ===== Sections =====
   section: {
     marginBottom: 24,
   },
-  sectionLabel: {
-    fontSize: 12,
-    fontWeight: "700",
-    letterSpacing: 1,
+  sectionHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
     marginBottom: 10,
   },
+  sectionLabel: {
+    fontSize: 12,
+    fontWeight: "800",
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+  },
+
+  // ===== Budget input =====
   inputRow: {
     flexDirection: "row",
     alignItems: "center",
     borderWidth: 1,
-    borderRadius: 14,
-    paddingHorizontal: 16,
-    height: 52,
+    borderRadius: 16,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  currencyChip: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 10,
   },
   currencyPrefix: {
     fontSize: 18,
-    fontWeight: "700",
-    marginRight: 8,
+    fontWeight: "800",
   },
   budgetInput: {
     flex: 1,
     fontSize: 18,
-    fontWeight: "600",
+    fontWeight: "700",
+    paddingVertical: 10,
   },
   budgetHint: {
     fontSize: 12,
-    fontWeight: "500",
-    marginTop: 6,
+    fontWeight: "600",
+    marginTop: 8,
     marginLeft: 4,
+  },
+
+  // ===== Travelers =====
+  travelerCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    borderRadius: 18,
+    borderWidth: 1,
   },
   travelerRow: {
     flexDirection: "row",
@@ -651,17 +904,27 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   travelerCount: {
-    fontSize: 24,
-    fontWeight: "800",
+    fontSize: 26,
+    fontWeight: "900",
     minWidth: 30,
     textAlign: "center",
+    letterSpacing: -0.5,
   },
+  travelerHint: {
+    fontSize: 11,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+    marginTop: 2,
+  },
+
+  // ===== Toggle (skip hotel etc.) =====
   toggleRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     padding: 16,
-    borderRadius: 14,
+    borderRadius: 16,
     borderWidth: 1,
     marginBottom: 24,
   },
@@ -673,7 +936,7 @@ const styles = StyleSheet.create({
   },
   toggleLabel: {
     fontSize: 14,
-    fontWeight: "600",
+    fontWeight: "700",
   },
   checkbox: {
     width: 24,
@@ -683,6 +946,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
+
+  // ===== Chips =====
   chipGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -693,38 +958,55 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 14,
     paddingVertical: 10,
-    borderRadius: 20,
+    borderRadius: 999,
     borderWidth: 1,
     gap: 6,
   },
   chipText: {
     fontSize: 13,
-    fontWeight: "600",
+    fontWeight: "700",
   },
+
+  // ===== Bottom CTA =====
   bottomBar: {
     position: "absolute",
     bottom: 0,
     left: 0,
     right: 0,
     paddingHorizontal: 20,
-    paddingVertical: 16,
-    paddingBottom: 32,
+    paddingVertical: 14,
+    paddingBottom: 28,
     borderTopWidth: 1,
+  },
+  generateBtnWrap: {
+    borderRadius: 20,
+    overflow: "hidden",
+    ...Platform.select({
+      ios: {
+        shadowColor: "#34C759",
+        shadowOpacity: 0.35,
+        shadowRadius: 14,
+        shadowOffset: { width: 0, height: 6 },
+      },
+      android: { elevation: 6 },
+    }),
   },
   generateBtn: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 12,
+    gap: 10,
     paddingVertical: 18,
-    borderRadius: 18,
+    borderRadius: 20,
   },
   generateBtnDisabled: {
     opacity: 0.7,
   },
   generateBtnText: {
-    fontSize: 17,
-    fontWeight: "700",
+    fontSize: 16,
+    fontWeight: "800",
+    color: "#000",
+    letterSpacing: -0.2,
   },
   sparkleIcon: {
     width: 36,

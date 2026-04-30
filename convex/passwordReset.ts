@@ -39,11 +39,22 @@ function generateSecureCode(): string {
 }
 
 /**
- * Hash a password for storage
+ * Hash a password for storage.
+ *
+ * SECURITY: Uses PBKDF2-SHA512 with a per-user random salt and a high
+ * iteration count. The previous implementation derived a 16-byte "salt"
+ * from the first 4 chars of the password itself, which made every hash
+ * trivially brute-forceable and identical for identical passwords.
+ *
+ * Format: pbkdf2$<iterations>$<saltHex>$<hashHex>
  */
+const PBKDF2_ITER = 210_000;
+const PBKDF2_KEYLEN = 64;
+
 function hashPassword(password: string): string {
-    const salt = crypto.createHash("sha256").update(password.slice(0, 4)).digest("hex").slice(0, 16);
-    return crypto.createHash("sha256").update(salt + password).digest("hex");
+    const salt = crypto.randomBytes(16);
+    const hash = crypto.pbkdf2Sync(password, salt, PBKDF2_ITER, PBKDF2_KEYLEN, "sha512");
+    return `pbkdf2$${PBKDF2_ITER}$${salt.toString("hex")}$${hash.toString("hex")}`;
 }
 
 /**

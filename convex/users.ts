@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { authMutation, authQuery } from "./functions";
+import { internalMutation } from "./_generated/server";
 import { isSubscriptionActiveWithGrace, BILLING_GRACE_PERIOD_MS } from "./helpers/subscription";
 
 // Simple token validation query for actions
@@ -95,33 +96,13 @@ export const upgradeToPremium = authMutation({
         token: v.string(),
         planType: v.optional(v.union(v.literal("monthly"), v.literal("yearly"))),
     },
-    handler: async (ctx: any, args: any) => {
-        const userPlan = await ctx.db
-            .query("userPlans")
-            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
-            .unique();
-
-        // Set subscription duration based on plan type
-        const planType = args.planType ?? "monthly";
-        const durationDays = planType === "yearly" ? 365 : 30;
-        const subscriptionExpiresAt = Date.now() + (durationDays * 24 * 60 * 60 * 1000);
-
-        if (userPlan) {
-            await ctx.db.patch(userPlan._id, { 
-                plan: "premium",
-                subscriptionExpiresAt,
-                subscriptionType: planType,
-            });
-        } else {
-            await ctx.db.insert("userPlans", {
-                userId: ctx.user.userId,
-                plan: "premium",
-                tripsGenerated: 0,
-                tripCredits: 0,
-                subscriptionExpiresAt,
-                subscriptionType: planType,
-            });
-        }
+    handler: async (_ctx: any, _args: any) => {
+        // SECURITY: Premium can ONLY be granted via verified IAP receipts in
+        // `processApplePurchase`. Any direct client-callable upgrade path is a
+        // free-premium exploit, so this endpoint is intentionally disabled.
+        throw new Error(
+            "Direct upgrade is disabled. Premium is granted only through verified Apple In-App Purchases."
+        );
     },
 });
 
@@ -131,29 +112,13 @@ export const purchaseTripPack = authMutation({
         token: v.string(),
         pack: v.union(v.literal("single"), v.literal("triple"), v.literal("ten")),
     },
-    handler: async (ctx: any, args: any) => {
-        const creditsToAdd = args.pack === "single" ? 1 : args.pack === "triple" ? 3 : 10;
-
-        const userPlan = await ctx.db
-            .query("userPlans")
-            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
-            .unique();
-
-        if (userPlan) {
-            const currentCredits = userPlan.tripCredits ?? 0;
-            await ctx.db.patch(userPlan._id, { 
-                tripCredits: currentCredits + creditsToAdd,
-            });
-        } else {
-            await ctx.db.insert("userPlans", {
-                userId: ctx.user.userId,
-                plan: "free",
-                tripsGenerated: 0,
-                tripCredits: creditsToAdd,
-            });
-        }
-
-        return { creditsAdded: creditsToAdd };
+    handler: async (_ctx: any, _args: any) => {
+        // SECURITY: Trip credits can ONLY be added via verified IAP receipts.
+        // Granting credits from a client-trusted call would let any user farm
+        // unlimited trips for free, so this endpoint is intentionally disabled.
+        throw new Error(
+            "Direct trip-pack purchase is disabled. Credits are granted only through verified Apple In-App Purchases."
+        );
     },
 });
 
@@ -774,7 +739,20 @@ const PRODUCT_IDS = {
     SINGLE_TRIP: "com.planeraaitravelplanner.trip.single",
 };
 
-// Process Apple IAP purchase (called after successful StoreKit purchase)
+/**
+ * SECURITY: Legacy entitlement-granting endpoint.
+ *
+ * The original implementation trusted the client-supplied {productId,
+ * transactionId} pair and granted Premium / trip credits without ever
+ * verifying the App Store receipt. That was a free-premium exploit.
+ *
+ * The verified flow is now `iapVerify.verifyAndApplyApplePurchase` which
+ * calls Apple's verifyReceipt endpoint and only grants what Apple confirms.
+ *
+ * This mutation is kept (and intentionally short-circuited) for backward
+ * compatibility with old client builds. Older clients will surface a clear
+ * error and prompt the user to update; entitlements are never granted here.
+ */
 export const processApplePurchase = authMutation({
     args: {
         token: v.string(),
@@ -782,94 +760,18 @@ export const processApplePurchase = authMutation({
         transactionId: v.string(),
         receipt: v.optional(v.string()),
     },
-    handler: async (ctx: any, args: any) => {
-        const { productId, transactionId, receipt } = args;
-        
-        console.log(`[IAP] Processing purchase: ${productId}, txn: ${transactionId}`);
-
-        // Check if this transaction was already processed (idempotency)
-        const existingTx = await ctx.db
-            .query("iapTransactions")
-            .withIndex("by_transaction", (q: any) => q.eq("transactionId", transactionId))
-            .first();
-        
-        if (existingTx) {
-            console.log(`[IAP] Transaction ${transactionId} already processed`);
-            return { success: true, alreadyProcessed: true };
-        }
-
-        // Record the transaction
-        await ctx.db.insert("iapTransactions", {
-            userId: ctx.user.userId,
-            productId,
-            transactionId,
-            receipt: receipt || "",
-            processedAt: Date.now(),
-            status: "completed",
-        });
-
-        // Get or create user plan
-        let userPlan = await ctx.db
-            .query("userPlans")
-            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
-            .unique();
-
-        if (!userPlan) {
-            // Create new user plan
-            const planId = await ctx.db.insert("userPlans", {
-                userId: ctx.user.userId,
-                plan: "free",
-                tripsGenerated: 0,
-                tripCredits: 0,
-            });
-            userPlan = await ctx.db.get(planId);
-            if (!userPlan) {
-                throw new Error("Failed to create user plan");
-            }
-        }
-
-        // Process based on product type
-        if (productId === PRODUCT_IDS.YEARLY) {
-            // Yearly subscription - 365 days
-            const subscriptionExpiresAt = Date.now() + (365 * 24 * 60 * 60 * 1000);
-            await ctx.db.patch(userPlan._id, {
-                plan: "premium",
-                subscriptionExpiresAt,
-                subscriptionType: "yearly",
-                lastTransactionId: transactionId,
-            });
-            console.log(`[IAP] Yearly subscription activated until ${new Date(subscriptionExpiresAt).toISOString()}`);
-            return { success: true, type: "subscription", expiresAt: subscriptionExpiresAt };
-        }
-        
-        if (productId === PRODUCT_IDS.MONTHLY) {
-            // Monthly subscription - 30 days
-            const subscriptionExpiresAt = Date.now() + (30 * 24 * 60 * 60 * 1000);
-            await ctx.db.patch(userPlan._id, {
-                plan: "premium",
-                subscriptionExpiresAt,
-                subscriptionType: "monthly",
-                lastTransactionId: transactionId,
-            });
-            console.log(`[IAP] Monthly subscription activated until ${new Date(subscriptionExpiresAt).toISOString()}`);
-            return { success: true, type: "subscription", expiresAt: subscriptionExpiresAt };
-        }
-        
-        if (productId === PRODUCT_IDS.SINGLE_TRIP) {
-            // Consumable - add 1 trip credit
-            const currentCredits = userPlan.tripCredits ?? 0;
-            await ctx.db.patch(userPlan._id, {
-                tripCredits: currentCredits + 1,
-            });
-            console.log(`[IAP] Single trip credit added. New total: ${currentCredits + 1}`);
-            return { success: true, type: "credit", creditsAdded: 1, totalCredits: currentCredits + 1 };
-        }
-
-        throw new Error(`Unknown product ID: ${productId}`);
+    handler: async (_ctx: any, _args: any) => {
+        throw new Error(
+            "Outdated client. Please update the app — purchases are now verified with Apple before entitlements are granted."
+        );
     },
 });
 
-// Restore purchases (called when user taps Restore Purchases)
+/**
+ * SECURITY: Same reasoning as `processApplePurchase` above. Restores must be
+ * verified against Apple. The verified flow is `iapVerify.verifyAndApplyApplePurchase`
+ * which the client should call once per restored receipt.
+ */
 export const restoreApplePurchases = authMutation({
     args: {
         token: v.string(),
@@ -879,93 +781,103 @@ export const restoreApplePurchases = authMutation({
             receipt: v.optional(v.string()),
         })),
     },
-    handler: async (ctx: any, args: any) => {
-        const { purchases } = args;
-        console.log(`[IAP] Restoring ${purchases.length} purchases`);
+    handler: async (_ctx: any, _args: any) => {
+        throw new Error(
+            "Outdated client. Please update the app — restored purchases are now verified with Apple."
+        );
+    },
+});
 
-        let restoredSubscription = false;
-        let restoredCredits = 0;
+/**
+ * Internal mutation called by `iapVerify.verifyAndApplyApplePurchase` after the
+ * receipt has been verified with Apple. The action passes a server-derived
+ * `expiresAt` for subscriptions (never trust client timestamps).
+ */
+export const applyVerifiedApplePurchase = internalMutation({
+    args: {
+        userId: v.string(),
+        productId: v.string(),
+        transactionId: v.string(),
+        receipt: v.string(),
+        expiresAt: v.optional(v.float64()),
+    },
+    returns: v.object({
+        success: v.boolean(),
+        alreadyProcessed: v.optional(v.boolean()),
+        type: v.optional(v.string()),
+        expiresAt: v.optional(v.float64()),
+        creditsAdded: v.optional(v.float64()),
+        totalCredits: v.optional(v.float64()),
+    }),
+    handler: async (ctx, args) => {
+        const { userId, productId, transactionId, receipt, expiresAt } = args;
 
-        for (const purchase of purchases) {
-            // Check if transaction already processed
-            const existingTx = await ctx.db
-                .query("iapTransactions")
-                .withIndex("by_transaction", (q: any) => q.eq("transactionId", purchase.transactionId))
-                .first();
+        // Idempotency: ignore replays of the same transaction
+        const existingTx = await ctx.db
+            .query("iapTransactions")
+            .withIndex("by_transaction", (q) => q.eq("transactionId", transactionId))
+            .first();
 
-            if (existingTx) {
-                console.log(`[IAP] Transaction ${purchase.transactionId} already processed, skipping`);
-                continue;
+        if (existingTx) {
+            // If a different user is trying to claim this transaction, refuse.
+            if (existingTx.userId !== userId) {
+                throw new Error("Transaction belongs to a different account.");
             }
+            return { success: true, alreadyProcessed: true };
+        }
 
-            // Record the restored transaction
-            await ctx.db.insert("iapTransactions", {
-                userId: ctx.user.userId,
-                productId: purchase.productId,
-                transactionId: purchase.transactionId,
-                receipt: purchase.receipt || "",
-                processedAt: Date.now(),
-                status: "restored",
+        await ctx.db.insert("iapTransactions", {
+            userId,
+            productId,
+            transactionId,
+            receipt,
+            processedAt: Date.now(),
+            status: "completed",
+        });
+
+        let userPlan = await ctx.db
+            .query("userPlans")
+            .withIndex("by_user", (q) => q.eq("userId", userId))
+            .unique();
+
+        if (!userPlan) {
+            const planId = await ctx.db.insert("userPlans", {
+                userId,
+                plan: "free",
+                tripsGenerated: 0,
+                tripCredits: 0,
             });
-
-            // Only restore subscriptions (not consumables that were already used)
-            if (purchase.productId === PRODUCT_IDS.YEARLY || purchase.productId === PRODUCT_IDS.MONTHLY) {
-                restoredSubscription = true;
-            }
+            userPlan = await ctx.db.get(planId);
+            if (!userPlan) throw new Error("Failed to create user plan");
         }
 
-        if (restoredSubscription) {
-            // Get or create user plan
-            let userPlan = await ctx.db
-                .query("userPlans")
-                .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
-                .unique();
-
-            if (!userPlan) {
-                const planId = await ctx.db.insert("userPlans", {
-                    userId: ctx.user.userId,
-                    plan: "free",
-                    tripsGenerated: 0,
-                    tripCredits: 0,
-                });
-                userPlan = await ctx.db.get(planId);
-                if (!userPlan) {
-                    throw new Error("Failed to create user plan");
-                }
+        if (productId === PRODUCT_IDS.YEARLY || productId === PRODUCT_IDS.MONTHLY) {
+            if (!expiresAt || expiresAt < Date.now()) {
+                throw new Error("Verified subscription has no future expiry.");
             }
-
-            // Find the latest subscription purchase (last in array = most recent)
-            const subscriptionPurchases = purchases.filter(
-                (p: { productId: string; transactionId: string; receipt?: string }) => 
-                    p.productId === PRODUCT_IDS.YEARLY || p.productId === PRODUCT_IDS.MONTHLY
-            );
-            const subscriptionPurchase = subscriptionPurchases.length > 0 
-                ? subscriptionPurchases[subscriptionPurchases.length - 1] 
-                : null;
-
-            if (subscriptionPurchase) {
-                const isYearly = subscriptionPurchase.productId === PRODUCT_IDS.YEARLY;
-                const durationDays = isYearly ? 365 : 30;
-                const subscriptionExpiresAt = Date.now() + (durationDays * 24 * 60 * 60 * 1000);
-
-                await ctx.db.patch(userPlan._id, {
-                    plan: "premium",
-                    subscriptionExpiresAt,
-                    subscriptionType: isYearly ? "yearly" : "monthly",
-                    lastTransactionId: subscriptionPurchase.transactionId,
-                });
-                console.log(`[IAP] Subscription restored until ${new Date(subscriptionExpiresAt).toISOString()}`);
-            }
+            await ctx.db.patch(userPlan._id, {
+                plan: "premium",
+                subscriptionExpiresAt: expiresAt,
+                subscriptionType: productId === PRODUCT_IDS.YEARLY ? "yearly" : "monthly",
+                lastTransactionId: transactionId,
+            });
+            return { success: true, type: "subscription", expiresAt };
         }
 
-        return {
-            success: true,
-            restoredSubscription,
-            restoredCredits,
-            message: restoredSubscription 
-                ? "Your subscription has been restored!" 
-                : "No active subscriptions found to restore.",
-        };
+        if (productId === PRODUCT_IDS.SINGLE_TRIP) {
+            const currentCredits = userPlan.tripCredits ?? 0;
+            await ctx.db.patch(userPlan._id, {
+                tripCredits: currentCredits + 1,
+            });
+            return {
+                success: true,
+                type: "credit",
+                creditsAdded: 1,
+                totalCredits: currentCredits + 1,
+            };
+        }
+
+        throw new Error(`Unknown product ID: ${productId}`);
     },
 });
 

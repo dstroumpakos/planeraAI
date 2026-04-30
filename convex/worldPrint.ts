@@ -147,6 +147,7 @@ export const ensureProfile = authMutation({
             status: desiredStatus,
             tripId: trip._id,
             verifiedAt: now,
+            verifiedSource: "trip",
           });
           addedCount++;
         } else if (
@@ -157,6 +158,7 @@ export const ensureProfile = authMutation({
           await ctx.db.patch(existing._id, {
             status: "verified",
             verifiedAt: now,
+            verifiedSource: existing.verifiedSource ?? "trip",
           });
         }
       }
@@ -204,6 +206,7 @@ export const getMyWorldPrint = authQuery({
           status: v.status,
           tripId: v.tripId ?? null,
           verifiedAt: v.verifiedAt,
+          verifiedSource: v.verifiedSource ?? null,
         };
       })
       .filter(Boolean);
@@ -356,6 +359,113 @@ export const removeVisit = authMutation({
     }
     await ctx.db.delete(args.visitId);
     return { success: true };
+  },
+});
+
+// ---- GPS check-in ----
+// Strongest verification path: the user is physically near a city we know.
+//
+// We accept device coordinates from the client and validate that they fall
+// within `MAX_CHECKIN_KM` of the nearest city in WORLD_CITIES. Distance is
+// computed with the haversine formula. If a match is found, we upsert a
+// `worldPrintVisits` row with status "verified" and `verifiedSource: "gps"`.
+//
+// Notes on trust:
+//  - This is still client-supplied data and can be spoofed on a rooted device.
+//    For most users it's far harder to fake than just creating a past trip.
+//  - We persist the coordinates so we can audit / reverse if abuse appears.
+const MAX_CHECKIN_KM = 50;
+
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number) {
+  const R = 6371; // earth radius (km)
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+export const checkInAtLocation = authMutation({
+  args: {
+    lat: v.float64(),
+    lng: v.float64(),
+  },
+  handler: async (ctx: any, args: any) => {
+    const userId: string = ctx.user.userId;
+    if (
+      typeof args.lat !== "number" ||
+      typeof args.lng !== "number" ||
+      Math.abs(args.lat) > 90 ||
+      Math.abs(args.lng) > 180
+    ) {
+      throw new ConvexError("Invalid coordinates");
+    }
+
+    // Find the nearest city in our catalog.
+    let nearest: { city: any; km: number } | null = null;
+    for (const c of WORLD_CITIES) {
+      const km = haversineKm(args.lat, args.lng, c.lat, c.lng);
+      if (!nearest || km < nearest.km) nearest = { city: c, km };
+    }
+    if (!nearest || nearest.km > MAX_CHECKIN_KM) {
+      throw new ConvexError(
+        nearest
+          ? `You're too far from ${nearest.city.name} (${Math.round(nearest.km)} km away). Get within ${MAX_CHECKIN_KM} km to check in.`
+          : "No nearby city found in catalog."
+      );
+    }
+
+    const city = nearest.city;
+    const now = Date.now();
+
+    // Upsert the visit as verified-by-GPS.
+    const existing = await ctx.db
+      .query("worldPrintVisits")
+      .withIndex("by_user_and_city", (q: any) =>
+        q.eq("userId", userId).eq("cityId", city.id)
+      )
+      .unique();
+
+    let wasNew = false;
+    if (existing) {
+      await ctx.db.patch(existing._id, {
+        status: "verified",
+        verifiedAt: now,
+        verifiedSource: "gps",
+        lastCheckInLat: args.lat,
+        lastCheckInLng: args.lng,
+      });
+    } else {
+      await ctx.db.insert("worldPrintVisits", {
+        userId,
+        cityId: city.id,
+        countryCode: city.countryCode,
+        status: "verified",
+        verifiedAt: now,
+        verifiedSource: "gps",
+        lastCheckInLat: args.lat,
+        lastCheckInLng: args.lng,
+      });
+      wasNew = true;
+    }
+
+    // Touch profile activity so the globe doesn't dim.
+    const profile = await getOrCreateProfileDoc(ctx, userId);
+    await ctx.db.patch(profile._id, { lastActivityAt: now });
+
+    return {
+      success: true,
+      wasNew,
+      city: {
+        id: city.id,
+        name: city.name,
+        country: city.country,
+        countryCode: city.countryCode,
+      },
+      distanceKm: Math.round(nearest.km * 10) / 10,
+    };
   },
 });
 
@@ -514,5 +624,149 @@ export const getCityCatalog = query({
       lng: c.lng,
       region: c.region,
     }));
+  },
+});
+
+// ---- Demo / seed: populate the current user's WorldPrint with sample cities ----
+// Useful for testing how the globe looks. Idempotent — won't duplicate visits.
+// Safe in prod: it only writes to the calling user's own data.
+
+export const seedDemoVisits = authMutation({
+  args: {},
+  handler: async (ctx: any, _args: any) => {
+    const userId: string = ctx.user.userId;
+    await getOrCreateProfileDoc(ctx, userId);
+
+    const verifiedIds = [
+      "london-gb",
+      "paris-fr",
+      "rome-it",
+      "barcelona-es",
+      "amsterdam-nl",
+      "athens-gr",
+      "santorini-gr",
+      "istanbul-tr",
+      "nyc-us",
+      "tokyo-jp",
+      "bangkok-th",
+      "dubai-ae",
+    ];
+    const plannedIds = [
+      "reykjavik-is",
+      "kyoto-jp",
+      "marrakech-ma",
+      "rio-br",
+    ];
+
+    let added = 0;
+    const now = Date.now();
+
+    for (const cityId of [...verifiedIds, ...plannedIds]) {
+      const city = getCityById(cityId);
+      if (!city) continue;
+      const existing = await ctx.db
+        .query("worldPrintVisits")
+        .withIndex("by_user_and_city", (q: any) =>
+          q.eq("userId", userId).eq("cityId", cityId)
+        )
+        .unique();
+      if (existing) continue;
+
+      const status = verifiedIds.includes(cityId) ? "verified" : "planned";
+      await ctx.db.insert("worldPrintVisits", {
+        userId,
+        cityId,
+        countryCode: city.countryCode,
+        status,
+        verifiedAt: now,
+      });
+      added++;
+    }
+
+    const profile = await ctx.db
+      .query("worldPrintProfile")
+      .withIndex("by_user", (q: any) => q.eq("userId", userId))
+      .unique();
+    if (profile) {
+      await ctx.db.patch(profile._id, { lastActivityAt: now });
+    }
+
+    return { added };
+  },
+});
+
+// ---- Demo / clear: wipe the current user's WorldPrint visits ----
+
+export const clearMyVisits = authMutation({
+  args: {},
+  handler: async (ctx: any, _args: any) => {
+    const userId: string = ctx.user.userId;
+    const visits = await ctx.db
+      .query("worldPrintVisits")
+      .withIndex("by_user", (q: any) => q.eq("userId", userId))
+      .collect();
+    for (const v of visits) {
+      await ctx.db.delete(v._id);
+    }
+    return { removed: visits.length };
+  },
+});
+
+// ---- Demo / public seed: create a fixed showcase WorldPrint with code DEMO01 ----
+// One-shot, idempotent; no auth required. Safe to run repeatedly.
+export const seedDemoShowcase = mutation({
+  args: {},
+  handler: async (ctx: any) => {
+    const DEMO_CODE = "DEMO01";
+    const DEMO_USER = "__demo_showcase__";
+
+    let profile = await ctx.db
+      .query("worldPrintProfile")
+      .withIndex("by_public_code", (q: any) => q.eq("publicCode", DEMO_CODE))
+      .unique();
+
+    if (!profile) {
+      const id = await ctx.db.insert("worldPrintProfile", {
+        userId: DEMO_USER,
+        signatureColor: deterministicSignatureColor(DEMO_USER),
+        claimedQuestIds: [],
+        lifetimeQuestsCompleted: 0,
+        lastActivityAt: Date.now(),
+        publicCode: DEMO_CODE,
+        createdAt: Date.now(),
+      });
+      profile = await ctx.db.get(id);
+    }
+
+    const verifiedIds = [
+      "london-gb", "paris-fr", "rome-it", "barcelona-es", "amsterdam-nl",
+      "athens-gr", "santorini-gr", "istanbul-tr", "nyc-us", "tokyo-jp",
+      "bangkok-th", "dubai-ae",
+    ];
+    const plannedIds = ["reykjavik-is", "kyoto-jp", "marrakech-ma", "rio-br"];
+
+    let added = 0;
+    const now = Date.now();
+    for (const cityId of [...verifiedIds, ...plannedIds]) {
+      const city = getCityById(cityId);
+      if (!city) continue;
+      const existing = await ctx.db
+        .query("worldPrintVisits")
+        .withIndex("by_user_and_city", (q: any) =>
+          q.eq("userId", DEMO_USER).eq("cityId", cityId)
+        )
+        .unique();
+      if (existing) continue;
+      await ctx.db.insert("worldPrintVisits", {
+        userId: DEMO_USER,
+        cityId,
+        countryCode: city.countryCode,
+        status: verifiedIds.includes(cityId) ? "verified" : "planned",
+        verifiedAt: now,
+      });
+      added++;
+    }
+
+    return { publicCode: DEMO_CODE, added };
   },
 });

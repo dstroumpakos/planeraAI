@@ -1,4 +1,4 @@
-{
+﻿{
   "common": {
     "loading": "جاري التحميل...",
     "error": "خطأ",
@@ -179,6 +179,7 @@
     "whereToGo": "إلى أين تريد أن تذهب؟",
     "aiTripPlanner": "مخطط الرحلات بالذكاء الاصطناعي",
     "multiCityRoute": "مسار متعدد المدن",
+    "comingSoon": "قريباً",
     "surpriseMe": "فاجئني!",
     "trendingNow": "الرائج الآن",
     "myTrips": "رحلاتي",
@@ -981,6 +982,16 @@
     "accommodationComingSoon": "حجز الفنادق وأماكن الإقامة سيتوفر قريباً. نحن نعمل بجد لنقدم لك أفضل الخيارات!",
     "gettingAroundDest": "التنقل في {{destination}}",
     "localTransportRecommend": "ننصح باستخدام سيارات الأجرة المحلية أو تطبيقات النقل (Uber/Bolt) أو وسائل النقل العام. تحقق من خرائط Google لأفضل المسارات.",
+    "transportHeroSubtitle": "طرق ذكية للتنقل — مختارة لرحلتك.",
+    "proTipLabel": "نصيحة",
+    "transportProTip": "تذاكر اليوم الكامل عادة ما توفر المال بعد 3 رحلات أو أكثر. احسب قبل شراء التذاكر الفردية.",
+    "openMapsShort": "الخرائط",
+    "openRideshareApps": "تطبيقات النقل",
+    "transportHeroSubtitle": "طرق ذكية للتنقل — مختارة لرحلتك.",
+    "proTipLabel": "نصيحة",
+    "transportProTip": "تذاكر اليوم الكامل عادة ما توفر المال بعد 3 رحلات أو أكثر. احسب قبل شراء التذاكر الفردية.",
+    "openMapsShort": "الخرائط",
+    "openRideshareApps": "تطبيقات النقل",
     "transportOption": "خيار النقل",
     "transit": "النقل العام",
     "singleTicketPrice": "تذكرة واحدة: €{{price}}",

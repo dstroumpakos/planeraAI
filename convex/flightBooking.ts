@@ -3,20 +3,40 @@
 import { action } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
-import { makeFunctionReference } from "convex/server";
 import { getOffer, createPaymentIntent, createOrder, extractFlightDetails } from "./flights/duffel";
 import { Id } from "./_generated/dataModel";
 
-// Create typed function reference for booking links to avoid circular reference
-const createBookingLinkRef = makeFunctionReference<
-  "mutation",
-  { bookingId: Id<"flightBookings">; expiresInDays?: number },
-  { token: string; expiresAt: number }
->("bookingLinks:createBookingLink");
+/**
+ * SECURITY: Resolve a session token to a userId. Throws if invalid/expired.
+ * Convex actions cannot run as `authAction` here because this file is
+ * `"use node"`; instead we look up the session via an internal query.
+ */
+async function requireUserId(ctx: any, token: string): Promise<string> {
+  if (!token || typeof token !== "string") {
+    throw new Error("Authentication required");
+  }
+  const session: any = await ctx.runQuery(
+    internal.authNativeDb.getSessionByToken,
+    { token }
+  );
+  if (!session || (session.expiresAt && session.expiresAt < Date.now())) {
+    throw new Error("Authentication required");
+  }
+  return session.userId as string;
+}
+
+async function requireTripOwner(ctx: any, userId: string, tripId: Id<"trips">): Promise<void> {
+  const trip: any = await ctx.runQuery(internal.flightBookingMutations.getTripForOwnerCheck, {
+    tripId,
+  });
+  if (!trip) throw new Error("Trip not found");
+  if (trip.userId !== userId) throw new Error("Forbidden");
+}
 
 // Get flight offer details to verify it's still valid
 export const getFlightOffer = action({
   args: {
+    token: v.string(),
     offerId: v.string(),
   },
   returns: v.union(
@@ -35,6 +55,7 @@ export const getFlightOffer = action({
   ),
   handler: async (ctx, args) => {
     try {
+      await requireUserId(ctx, args.token);
       const offer = await getOffer(args.offerId);
       
       if (!offer) {
@@ -68,6 +89,7 @@ export const getFlightOffer = action({
 // Initialize payment - creates a Payment Intent and returns client token for card collection
 export const initializePayment = action({
   args: {
+    token: v.string(),
     offerId: v.string(),
   },
   returns: v.union(
@@ -85,6 +107,7 @@ export const initializePayment = action({
   ),
   handler: async (ctx, args) => {
     try {
+      await requireUserId(ctx, args.token);
       // Get the offer to know the amount
       const offer = await getOffer(args.offerId);
       
@@ -121,6 +144,7 @@ export const initializePayment = action({
 // Create a booking after payment is confirmed (for test mode, we can skip payment)
 export const createFlightBooking = action({
   args: {
+    token: v.string(),
     offerId: v.string(),
     tripId: v.id("trips"),
     passengers: v.array(
@@ -163,6 +187,8 @@ export const createFlightBooking = action({
   ),
   handler: async (ctx, args) => {
     try {
+      const userId = await requireUserId(ctx, args.token);
+      await requireTripOwner(ctx, userId, args.tripId);
       // Get the offer first
       const offer = await getOffer(args.offerId);
       if (!offer) {
@@ -237,10 +263,13 @@ export const createFlightBooking = action({
       let bookingUrl: string | undefined;
       try {
         console.log(`🔗 Creating secure booking link for booking ${bookingId}...`);
-        const linkResult: { token: string; expiresAt: number } = await ctx.runMutation(createBookingLinkRef, {
-          bookingId,
-          expiresInDays: 365, // 1 year expiration for booking links
-        });
+        const linkResult: { token: string; expiresAt: number } = await ctx.runMutation(
+          internal.bookingLinks.createBookingLink,
+          {
+            bookingId,
+            expiresInDays: 365, // 1 year expiration for booking links
+          }
+        );
         bookingUrl = `https://planeraai.app/booking/?token=${linkResult.token}`;
         console.log(`🔗 Booking link created: ${bookingUrl}`);
       } catch (linkError) {

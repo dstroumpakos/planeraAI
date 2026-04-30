@@ -239,6 +239,12 @@ defaultConfig.resolver.sourceExts = [
   ),
 ];
 
+// Register .html so we can `require()` static HTML assets (e.g. WorldPrint globe).
+defaultConfig.resolver.assetExts = [
+  ...defaultConfig.resolver.assetExts.filter((ext) => ext !== "html"),
+  "html",
+];
+
 // =================================================================================
 // FINAL EXPORT
 // =================================================================================

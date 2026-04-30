@@ -22,6 +22,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { useTranslation } from "react-i18next";
+import { useToken } from "@/lib/useAuthenticatedMutation";
 
 const colors = {
   background: "#FFFDF7",
@@ -56,6 +57,7 @@ export default function FlightReviewScreen() {
 
   const draft = useQuery(api.bookingDraftMutations.getBookingDraft, { draftId });
   const completeBooking = useAction(api.bookingDraft.completeBooking);
+  const { token } = useToken();
 
   let flightInfo: any = null;
   try {
@@ -73,6 +75,7 @@ export default function FlightReviewScreen() {
 
     try {
       const result = await completeBooking({
+        token: token!,
         draftId,
         // In production, you'd pass paymentIntentId here after collecting payment
       });

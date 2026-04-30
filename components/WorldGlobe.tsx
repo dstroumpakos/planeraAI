@@ -1,14 +1,14 @@
 /**
- * WorldGlobe — the interactive map that visualizes a user's WorldPrint.
+ * WorldGlobe — true 3D rotating globe via WebView + globe.gl.
  *
- * Uses react-native-maps with a dark "night globe" style. Verified cities
- * glow in the user's signature color; planned cities glow dimmer; claimed
- * (unverified) ones are ghostly dots.
+ * Renders an HTML canvas inside a WebView. The same `GlobeVisit` props
+ * are forwarded to JS via postMessage so the screen code is unchanged.
  */
 
-import React, { useMemo, useRef } from "react";
-import { View, StyleSheet, Text, Platform } from "react-native";
-import MapView, { Marker, PROVIDER_DEFAULT, Region } from "react-native-maps";
+import React, { useEffect, useRef, useState, forwardRef, useImperativeHandle } from "react";
+import { StyleSheet, View, Platform } from "react-native";
+import { WebView, WebViewMessageEvent } from "react-native-webview";
+import { Asset } from "expo-asset";
 
 export type GlobeVisit = {
   cityId: string;
@@ -26,157 +26,160 @@ export type GlobeVisit = {
 type Props = {
   visits: GlobeVisit[];
   signatureColor: string;
-  // 0 = fully bright, 1 = completely dim (from the streak dim logic).
   dimLevel?: number;
   onCityPress?: (cityId: string) => void;
-  initialRegion?: Region;
   style?: any;
 };
 
-// Dark "night earth" custom style — minimal, landmass-first, for the globe feel.
-const NIGHT_STYLE = [
-  { elementType: "geometry", stylers: [{ color: "#0B1220" }] },
-  { elementType: "labels", stylers: [{ visibility: "off" }] },
-  { featureType: "administrative", elementType: "geometry", stylers: [{ color: "#1E2A3A" }] },
-  { featureType: "administrative.country", elementType: "geometry.stroke", stylers: [{ color: "#2A3A55" }] },
-  { featureType: "landscape", stylers: [{ color: "#111B2E" }] },
-  { featureType: "poi", stylers: [{ visibility: "off" }] },
-  { featureType: "road", stylers: [{ visibility: "off" }] },
-  { featureType: "transit", stylers: [{ visibility: "off" }] },
-  { featureType: "water", elementType: "geometry", stylers: [{ color: "#050A14" }] },
-];
-
-function statusOpacity(status: GlobeVisit["status"], dimLevel: number): number {
-  const base =
-    status === "holographic" ? 1 :
-    status === "verified" ? 1 :
-    status === "planned" ? 0.55 :
-    0.25;
-  return Math.max(0.1, base * (1 - dimLevel));
+export interface WorldGlobeHandle {
+  /** Capture the current globe canvas as a base64 data URL (PNG). */
+  captureSnapshot: (timeoutMs?: number) => Promise<string | null>;
 }
 
-function statusSize(status: GlobeVisit["status"]): number {
-  if (status === "holographic") return 20;
-  if (status === "verified") return 16;
-  if (status === "planned") return 12;
-  return 10;
-}
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const GLOBE_HTML = require("../assets/globe/globe.html");
 
-export default function WorldGlobe({
-  visits,
-  signatureColor,
-  dimLevel = 0,
-  onCityPress,
-  initialRegion,
-  style,
-}: Props) {
-  const mapRef = useRef<MapView>(null);
+const WorldGlobe = forwardRef<WorldGlobeHandle, Props>(function WorldGlobe(
+  { visits, signatureColor, dimLevel = 0, onCityPress, style },
+  ref
+) {
+  const webRef = useRef<WebView>(null);
+  const readyRef = useRef(false);
+  const [htmlUri, setHtmlUri] = useState<string | null>(null);
+  const pendingSnapshotsRef = useRef<
+    Map<string, { resolve: (v: string | null) => void; timer: any }>
+  >(new Map());
 
-  const region: Region = useMemo(() => {
-    if (initialRegion) return initialRegion;
-    if (visits.length === 0) {
-      return { latitude: 20, longitude: 0, latitudeDelta: 120, longitudeDelta: 120 };
+  // Resolve the bundled HTML file to a local URI we can load.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const asset = Asset.fromModule(GLOBE_HTML);
+        await asset.downloadAsync();
+        if (!cancelled) setHtmlUri(asset.localUri || asset.uri);
+      } catch {
+        if (!cancelled) setHtmlUri(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Push state into the webview whenever inputs change (after ready).
+  const pushState = () => {
+    if (!webRef.current || !readyRef.current) return;
+    const payload = JSON.stringify({
+      type: "setState",
+      visits,
+      signatureColor,
+      dimLevel,
+    });
+    const escaped = JSON.stringify(payload);
+    webRef.current.injectJavaScript(
+      `(function(){try{window.postMessage(${escaped}, '*');document.dispatchEvent(new MessageEvent('message',{data:${escaped}}));}catch(e){};true;})();`
+    );
+  };
+
+  useEffect(() => {
+    pushState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visits, signatureColor, dimLevel]);
+
+  const handleMessage = (e: WebViewMessageEvent) => {
+    let msg: any;
+    try {
+      msg = JSON.parse(e.nativeEvent.data);
+    } catch {
+      return;
     }
-    // Center on average, with big delta for globe feel
-    const avgLat = visits.reduce((s, v) => s + v.city.lat, 0) / visits.length;
-    const avgLng = visits.reduce((s, v) => s + v.city.lng, 0) / visits.length;
-    return { latitude: avgLat, longitude: avgLng, latitudeDelta: 100, longitudeDelta: 100 };
-  }, [visits, initialRegion]);
+    if (msg?.type === "ready") {
+      readyRef.current = true;
+      pushState();
+    } else if (msg?.type === "cityPress" && msg.cityId) {
+      onCityPress?.(msg.cityId);
+    } else if (msg?.type === "log") {
+      // eslint-disable-next-line no-console
+      console.log("[WorldGlobe]", msg.level || "log", ...(msg.args || []));
+    } else if (msg?.type === "error") {
+      // eslint-disable-next-line no-console
+      console.warn("[WorldGlobe error]", msg.message, msg.source, msg.line);
+    } else if (msg?.type === "snapshot") {
+      const pending = pendingSnapshotsRef.current.get(msg.requestId);
+      if (pending) {
+        clearTimeout(pending.timer);
+        pendingSnapshotsRef.current.delete(msg.requestId);
+        pending.resolve(msg.error ? null : msg.dataUrl ?? null);
+      }
+    }
+  };
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      captureSnapshot: (timeoutMs = 2500) =>
+        new Promise<string | null>((resolve) => {
+          if (!webRef.current || !readyRef.current) {
+            resolve(null);
+            return;
+          }
+          const requestId = `snap_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+          const timer = setTimeout(() => {
+            pendingSnapshotsRef.current.delete(requestId);
+            resolve(null);
+          }, timeoutMs);
+          pendingSnapshotsRef.current.set(requestId, { resolve, timer });
+          const payload = JSON.stringify({ type: "snapshot", requestId });
+          const escaped = JSON.stringify(payload);
+          webRef.current.injectJavaScript(
+            `(function(){try{window.postMessage(${escaped}, '*');document.dispatchEvent(new MessageEvent('message',{data:${escaped}}));}catch(e){};true;})();`
+          );
+        }),
+    }),
+    []
+  );
+
+  if (!htmlUri) {
+    return <View style={[styles.container, style, { backgroundColor: "#050A14" }]} />;
+  }
 
   return (
     <View style={[styles.container, style]}>
-      <MapView
-        ref={mapRef}
-        provider={PROVIDER_DEFAULT}
-        style={styles.map}
-        initialRegion={region}
-        customMapStyle={NIGHT_STYLE}
-        showsCompass={false}
-        showsScale={false}
-        showsUserLocation={false}
-        showsMyLocationButton={false}
-        toolbarEnabled={false}
-        rotateEnabled={true}
-        pitchEnabled={false}
-        mapType={Platform.OS === "ios" ? "mutedStandard" : "standard"}
-      >
-        {visits.map((v) => {
-          const opacity = statusOpacity(v.status, dimLevel);
-          const size = statusSize(v.status);
-          const color = v.status === "claimed" ? "#94A3B8" : signatureColor;
-          return (
-            <Marker
-              key={v.cityId}
-              coordinate={{ latitude: v.city.lat, longitude: v.city.lng }}
-              onPress={() => onCityPress?.(v.cityId)}
-              anchor={{ x: 0.5, y: 0.5 }}
-              tracksViewChanges={false}
-            >
-              <View style={styles.markerWrap}>
-                {/* Outer glow */}
-                <View
-                  style={[
-                    styles.glow,
-                    {
-                      width: size * 2.2,
-                      height: size * 2.2,
-                      borderRadius: size * 1.1,
-                      backgroundColor: color,
-                      opacity: opacity * 0.25,
-                    },
-                  ]}
-                />
-                {/* Core dot */}
-                <View
-                  style={[
-                    styles.dot,
-                    {
-                      width: size,
-                      height: size,
-                      borderRadius: size / 2,
-                      backgroundColor: color,
-                      opacity,
-                      borderColor:
-                        v.status === "holographic" ? "#FFFFFF" : "rgba(255,255,255,0.4)",
-                      borderWidth: v.status === "holographic" ? 2 : 1,
-                    },
-                  ]}
-                />
-              </View>
-            </Marker>
-          );
-        })}
-      </MapView>
-
-      {/* Corner overlay: dim-level hint */}
-      {dimLevel > 0.3 && (
-        <View style={styles.dimHint} pointerEvents="none">
-          <Text style={styles.dimHintText}>Your globe is fading ✦</Text>
-        </View>
-      )}
+      <WebView
+        ref={webRef}
+        source={{ uri: htmlUri }}
+        style={styles.web}
+        originWhitelist={["*"]}
+        javaScriptEnabled
+        domStorageEnabled
+        allowFileAccess
+        allowFileAccessFromFileURLs
+        allowUniversalAccessFromFileURLs
+        mixedContentMode="always"
+        onMessage={handleMessage}
+        scrollEnabled={false}
+        bounces={false}
+        overScrollMode="never"
+        androidLayerType="hardware"
+        setSupportMultipleWindows={false}
+        textZoom={100}
+        contentMode={Platform.OS === "ios" ? ("mobile" as any) : undefined}
+      />
     </View>
   );
-}
+});
+
+export default WorldGlobe;
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#050A14" },
-  map: { ...StyleSheet.absoluteFillObject },
-  markerWrap: { alignItems: "center", justifyContent: "center" },
-  glow: { position: "absolute" },
-  dot: {},
-  dimHint: {
-    position: "absolute",
-    top: 12,
-    alignSelf: "center",
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 20,
-    backgroundColor: "rgba(0,0,0,0.45)",
+  container: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "#050A14",
+    overflow: "hidden",
   },
-  dimHintText: {
-    color: "#CBD5E1",
-    fontSize: 12,
-    fontWeight: "600",
-    letterSpacing: 0.5,
+  web: {
+    flex: 1,
+    backgroundColor: "#050A14",
   },
 });

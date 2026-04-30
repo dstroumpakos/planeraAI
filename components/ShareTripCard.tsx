@@ -17,7 +17,7 @@ import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import ViewShot, { captureRef } from "react-native-view-shot";
 import * as Sharing from "expo-sharing";
-import { File, Paths } from "expo-file-system/next";
+import { File, Paths } from "expo-file-system";
 import * as MediaLibrary from "expo-media-library";
 import { api } from "../convex/_generated/api";
 import { Id } from "../convex/_generated/dataModel";

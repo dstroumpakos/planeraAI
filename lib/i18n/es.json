@@ -1,4 +1,4 @@
-{
+﻿{
   "common": {
     "loading": "Cargando...",
     "error": "Error",
@@ -179,6 +179,7 @@
     "whereToGo": "¿A dónde quieres ir?",
     "aiTripPlanner": "Planificador IA de Viajes",
     "multiCityRoute": "Ruta Multi-Ciudad",
+    "comingSoon": "Próximamente",
     "surpriseMe": "¡Sorpréndeme!",
     "trendingNow": "Tendencia Ahora",
     "myTrips": "Mis Viajes",
@@ -976,6 +977,16 @@
     "accommodationComingSoon": "La reserva de hoteles y alojamiento estará disponible próximamente. ¡Estamos trabajando para ofrecerte las mejores opciones!",
     "gettingAroundDest": "Cómo Moverse en {{destination}}",
     "localTransportRecommend": "Recomendamos usar taxis locales, aplicaciones de transporte compartido (Uber/Bolt) o transporte público. Consulta Google Maps para las mejores rutas.",
+    "transportHeroSubtitle": "Formas inteligentes de moverte — elegidas para tu viaje.",
+    "proTipLabel": "Consejo",
+    "transportProTip": "Los abonos de día suelen merecer la pena tras 3+ trayectos. Haz cuentas antes de comprar billetes sueltos.",
+    "openMapsShort": "Mapas",
+    "openRideshareApps": "VTC",
+    "transportHeroSubtitle": "Formas inteligentes de moverte — elegidas para tu viaje.",
+    "proTipLabel": "Consejo",
+    "transportProTip": "Los abonos de día suelen merecer la pena tras 3+ trayectos. Haz cuentas antes de comprar billetes sueltos.",
+    "openMapsShort": "Mapas",
+    "openRideshareApps": "VTC",
     "transportOption": "Opción de Transporte",
     "transit": "Transporte Público",
     "singleTicketPrice": "Individual: €{{price}}",

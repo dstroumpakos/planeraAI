@@ -1,4 +1,4 @@
-import { mutation, internalQuery } from "./_generated/server";
+import { mutation, internalMutation, internalQuery } from "./_generated/server";
 import { v } from "convex/values";
 
 // Flight item structure for the flights array
@@ -131,9 +131,18 @@ export const getBookingByToken = internalQuery({
 });
 
 /**
- * Create a booking link (for generating shareable links)
+ * Create a booking link.
+ *
+ * SECURITY: This is now an internal mutation. The legacy public mutation was
+ * exploitable: anyone with a Convex deployment URL could call it with any
+ * `Id<"flightBookings">` and mint a permanent token that exposed the
+ * passenger names, route, PNR, and total price of someone else's booking.
+ *
+ * The booking flow now invokes this from the verified booking action only,
+ * after auth + ownership checks have passed. (See `flightBooking.ts` and
+ * `bookingDraft.ts`.)
  */
-export const createBookingLink = mutation({
+export const createBookingLink = internalMutation({
     args: {
         bookingId: v.id("flightBookings"),
         expiresInDays: v.optional(v.number()),
@@ -162,13 +171,14 @@ export const createBookingLink = mutation({
 });
 
 /**
- * Generate a secure random token
+ * Generate a secure random token (192 bits of entropy, base64url-encoded).
  */
 function generateSecureToken(): string {
-    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    let token = "";
-    for (let i = 0; i < 32; i++) {
-        token += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return token;
+    // V8 runtime exposes WebCrypto via globalThis.crypto
+    const bytes = new Uint8Array(24);
+    (globalThis as any).crypto.getRandomValues(bytes);
+    let bin = "";
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    // base64url
+    return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }

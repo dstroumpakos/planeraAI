@@ -1,4 +1,4 @@
-{
+﻿{
   "common": {
     "loading": "Chargement...",
     "error": "Erreur",
@@ -179,6 +179,7 @@
     "whereToGo": "Où voulez-vous aller ?",
     "aiTripPlanner": "Planificateur IA de Voyages",
     "multiCityRoute": "Itinéraire Multi-Villes",
+    "comingSoon": "Bientôt disponible",
     "surpriseMe": "Surprenez-moi !",
     "trendingNow": "Tendances Actuelles",
     "myTrips": "Mes Voyages",
@@ -981,6 +982,16 @@
     "accommodationComingSoon": "La réservation d'hôtels et d'hébergements sera bientôt disponible. Nous travaillons dur pour vous proposer les meilleures options !",
     "gettingAroundDest": "Se Déplacer à {{destination}}",
     "localTransportRecommend": "Nous recommandons d'utiliser les taxis locaux, les applications de VTC (Uber/Bolt) ou les transports en commun. Consultez Google Maps pour les meilleurs itinéraires.",
+    "transportHeroSubtitle": "Des moyens malins de se déplacer — choisis pour votre voyage.",
+    "proTipLabel": "Astuce",
+    "transportProTip": "Le pass journée devient rentable au-delà de 3 trajets. Faites le calcul avant d'acheter des tickets à l'unité.",
+    "openMapsShort": "Plans",
+    "openRideshareApps": "VTC",
+    "transportHeroSubtitle": "Des moyens malins de se déplacer — choisis pour votre voyage.",
+    "proTipLabel": "Astuce",
+    "transportProTip": "Le pass journée devient rentable au-delà de 3 trajets. Faites le calcul avant d'acheter des tickets à l'unité.",
+    "openMapsShort": "Plans",
+    "openRideshareApps": "VTC",
     "transportOption": "Option de Transport",
     "transit": "Transit",
     "singleTicketPrice": "Ticket : €{{price}}",

@@ -1,0 +1,858 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
+<title>WorldPrint Globe</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; background: #03060F;
+    overflow: hidden; height: 100%; width: 100%;
+    -webkit-touch-callout: none; -webkit-user-select: none; user-select: none;
+  }
+  #stage { position: absolute; inset: 0; }
+  #stage canvas { outline: none; touch-action: none; }
+  #loading {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: #93C5FD; font: 600 13px -apple-system, system-ui, sans-serif;
+    letter-spacing: 0.06em; text-transform: uppercase;
+    background: radial-gradient(ellipse at center, #0B1736 0%, #03060F 70%);
+    transition: opacity 600ms ease;
+    pointer-events: none;
+  }
+  #loading.hidden { opacity: 0; }
+  .label {
+    color: #F8FAFC;
+    font: 600 11px -apple-system, system-ui, sans-serif;
+    background: rgba(11,23,54,0.85);
+    border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 6px;
+    padding: 3px 8px;
+    pointer-events: none;
+    transform: translate(-50%, -160%);
+    white-space: nowrap;
+    letter-spacing: 0.02em;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="loading">Calibrating globe…</div>
+
+<!-- High-quality 3D libs -->
+<script src="https://unpkg.com/three@0.158.0/build/three.min.js"></script>
+<script src="https://unpkg.com/globe.gl@2.32.6/dist/globe.gl.min.js"></script>
+
+<script>
+(function () {
+  const post = (msg) => {
+    try { window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify(msg)); }
+    catch (e) {}
+  };
+
+  // Forward errors + logs to RN so we can see them in Metro
+  window.addEventListener('error', (e) => {
+    post({ type: 'error', message: e.message, source: e.filename, line: e.lineno });
+    const l = document.getElementById('loading');
+    if (l) l.textContent = 'Error: ' + e.message;
+  });
+  ['log','warn','error'].forEach((lvl) => {
+    const orig = console[lvl];
+    console[lvl] = function () {
+      try { post({ type: 'log', level: lvl, args: Array.from(arguments).map(String) }); } catch (e) {}
+      orig.apply(console, arguments);
+    };
+  });
+
+  // Sanity check: did the libs load?
+  if (typeof THREE === 'undefined') {
+    post({ type: 'error', message: 'three.js failed to load from CDN' });
+    document.getElementById('loading').textContent = 'three.js failed to load (no internet?)';
+    post({ type: 'ready' });
+    return;
+  }
+  if (typeof Globe === 'undefined') {
+    post({ type: 'error', message: 'globe.gl failed to load from CDN' });
+    document.getElementById('loading').textContent = 'globe.gl failed to load (no internet?)';
+    post({ type: 'ready' });
+    return;
+  }
+
+  const state = {
+    visits: [],
+    signatureColor: '#F59E0B',
+    dimLevel: 0,
+    visitedISO: new Set(),
+  };
+
+  // Earth textures — 8K Solar System Scope (CC BY 4.0) with 2K fallback.
+  const TEXTURES = {
+    night:    'https://www.solarsystemscope.com/textures/download/8k_earth_nightmap.jpg',
+    day:      'https://www.solarsystemscope.com/textures/download/8k_earth_daymap.jpg',
+    bump:     'https://unpkg.com/three-globe@2.31.0/example/img/earth-topology.png',
+    specular: 'https://unpkg.com/three-globe@2.31.0/example/img/earth-water.png',
+  };
+  const TEXTURES_FALLBACK = {
+    night: 'https://unpkg.com/three-globe@2.31.0/example/img/earth-night.jpg',
+    day:   'https://unpkg.com/three-globe@2.31.0/example/img/earth-blue-marble.jpg',
+  };
+
+  // Country borders source — GeoJSON FeatureCollection of all countries.
+  const COUNTRIES_URL = 'https://raw.githubusercontent.com/vasturiano/globe.gl/master/example/datasets/ne_110m_admin_0_countries.geojson';
+
+  // Daytime if the device's local time is between 06:00 and 18:00.
+  const isDayTime = () => {
+    const h = new Date().getHours();
+    return h >= 6 && h < 18;
+  };
+  const dayMode = isDayTime();
+
+  // Match the page bg to the time of day so the globe blends nicely.
+  document.body.style.background = dayMode ? '#0E1F3F' : '#03060F';
+
+  function colorForVisit(v) {
+    if (v.status === 'verified' || v.status === 'holographic') return state.signatureColor;
+    if (v.status === 'planned') return '#94A3B8';
+    return 'rgba(203,213,225,0.55)';
+  }
+
+  function altitudeForVisit(v) {
+    return v.status === 'holographic' ? 0.22 : v.status === 'verified' ? 0.10 : 0.05;
+  }
+
+  function radiusForVisit(v) {
+    return v.status === 'holographic' ? 0.55 : v.status === 'verified' ? 0.42 : 0.26;
+  }
+
+  // Build the globe
+  const globe = Globe({
+    rendererConfig: {
+      antialias: true,
+      alpha: true,
+      // Required so we can read back pixels for share-card snapshots
+      preserveDrawingBuffer: true,
+    },
+  })(document.getElementById('stage'))
+    .backgroundColor('rgba(0,0,0,0)')
+    .globeImageUrl(dayMode ? TEXTURES.day : TEXTURES.night)
+    .bumpImageUrl(TEXTURES.bump)
+    .showAtmosphere(true)
+    .atmosphereColor(dayMode ? '#7DB9FF' : '#3b82f6')
+    .atmosphereAltitude(dayMode ? 0.18 : 0.22)
+    .pointOfView({ lat: 25, lng: 0, altitude: 2.5 }, 0);
+
+  // 8K textures can take a few seconds — fall back to 2K if they fail to load.
+  (function preflightTexture() {
+    const url = dayMode ? TEXTURES.day : TEXTURES.night;
+    const img = new Image();
+    let done = false;
+    const fallback = () => {
+      if (done) return;
+      done = true;
+      console.log('Using 2K fallback texture');
+      globe.globeImageUrl(dayMode ? TEXTURES_FALLBACK.day : TEXTURES_FALLBACK.night);
+    };
+    img.onload = () => { done = true; };
+    img.onerror = fallback;
+    img.src = url;
+    setTimeout(fallback, 6000);
+  })();
+
+  // Country borders — outlined polygons projected onto the globe.
+  let countryFeatures = null;
+  fetch(COUNTRIES_URL)
+    .then((r) => r.json())
+    .then((geo) => {
+      countryFeatures = geo.features;
+      globe
+        .polygonsData(geo.features)
+        .polygonAltitude(0.006)
+        .polygonCapColor((feat) => {
+          if (state.visitedISO.has(feat.properties.ISO_A2)) {
+            const rgb = hexToRgb(state.signatureColor);
+            return `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0.18)`;
+          }
+          return 'rgba(0,0,0,0)';
+        })
+        .polygonSideColor(() => 'rgba(0,0,0,0)')
+        .polygonStrokeColor(() => (dayMode ? 'rgba(15,23,42,0.55)' : 'rgba(148,163,184,0.45)'))
+        .polygonsTransitionDuration(600);
+
+      // Compute centroid + bbox-area for each country and feed the labels layer.
+      // Larger countries get bigger labels; tiny island nations get filtered out
+      // so the globe doesn't get visually cluttered.
+      const labels = geo.features
+        .map((f) => {
+          const c = computeCentroid(f.geometry);
+          if (!c) return null;
+          const area = bboxArea(f.geometry);
+          // Display name (NAME is in English) — uppercase reads better as a label
+          const name = (f.properties.NAME || f.properties.NAME_EN || '').toUpperCase();
+          if (!name) return null;
+          return { name, lat: c.lat, lng: c.lng, area };
+        })
+        .filter((d) => d && d.area > 4); // drop micro-states for legibility
+      // Scale label size proportional to country bbox area (clamped)
+      labels.forEach((d) => {
+        d.size = Math.max(0.7, Math.min(2.4, Math.sqrt(d.area) * 0.15));
+      });
+      console.log('Country labels:', labels.length);
+      globe
+        .labelsData(labels)
+        .labelSize((d) => d.size);
+    })
+    .catch((e) => console.warn('Failed to load borders:', e.message));
+
+  // Hide the loader after a max wait, regardless of texture state
+  const hideLoader = () => {
+    const l = document.getElementById('loading');
+    if (l) { l.classList.add('hidden'); setTimeout(() => l.remove(), 700); }
+  };
+  setTimeout(hideLoader, 4000);
+
+  // Once the globe material is loaded, enhance it: physically-based shading,
+  // specular highlights on water, and a subtle emissive city-lights glow.
+  globe.onGlobeReady(() => {
+    try {
+      const earth = globe.globeMaterial();
+      const renderer = globe.renderer();
+      const maxAniso = renderer.capabilities.getMaxAnisotropy
+        ? renderer.capabilities.getMaxAnisotropy()
+        : 16;
+
+      // Make the renderer itself produce a sharper image
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 3));
+      if ('outputColorSpace' in renderer) {
+        renderer.outputColorSpace = THREE.SRGBColorSpace || 'srgb';
+      } else if ('outputEncoding' in renderer) {
+        renderer.outputEncoding = THREE.sRGBEncoding;
+      }
+      if ('toneMapping' in renderer) {
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = dayMode ? 1.05 : 1.15;
+      }
+
+      // Crisp diffuse map
+      if (earth.map) {
+        earth.map.anisotropy = maxAniso;
+        earth.map.minFilter = THREE.LinearMipmapLinearFilter;
+        earth.map.magFilter = THREE.LinearFilter;
+        earth.map.generateMipmaps = true;
+        if ('colorSpace' in earth.map) earth.map.colorSpace = THREE.SRGBColorSpace;
+        else if ('encoding' in earth.map) earth.map.encoding = THREE.sRGBEncoding;
+        earth.map.needsUpdate = true;
+      }
+
+      const loader = new THREE.TextureLoader();
+      loader.crossOrigin = 'anonymous';
+
+      // Specular map for water shine
+      loader.load(TEXTURES.specular, (specTex) => {
+        specTex.anisotropy = maxAniso;
+        specTex.minFilter = THREE.LinearMipmapLinearFilter;
+        specTex.magFilter = THREE.LinearFilter;
+        if (earth.specularMap !== undefined) {
+          earth.specularMap = specTex;
+          earth.specular = new THREE.Color(dayMode ? '#3A4A6A' : '#1B2A4E');
+          earth.shininess = dayMode ? 26 : 18;
+          earth.needsUpdate = true;
+        }
+      });
+
+      // Crisper bump map — also anisotropic
+      if (earth.bumpMap) {
+        earth.bumpMap.anisotropy = maxAniso;
+        earth.bumpMap.minFilter = THREE.LinearMipmapLinearFilter;
+        earth.bumpMap.magFilter = THREE.LinearFilter;
+        earth.bumpMap.generateMipmaps = true;
+        earth.bumpMap.needsUpdate = true;
+      }
+
+      // Slight self-emissive so the night side still reads
+      if (earth.emissive !== undefined) {
+        if (dayMode) {
+          earth.emissive = new THREE.Color('#000000');
+          earth.emissiveIntensity = 0;
+        } else {
+          earth.emissive = new THREE.Color('#0a1530');
+          earth.emissiveIntensity = 0.55;
+        }
+      }
+      // Higher bump scale gives more relief detail on close zoom
+      earth.bumpScale = dayMode ? 14 : 10;
+    } catch (e) {}
+
+    // Lighting — replace the default with a richer 3-light setup.
+    try {
+      const scene = globe.scene();
+      // Remove existing lights
+      scene.children
+        .filter((c) => c.isLight)
+        .forEach((l) => scene.remove(l));
+
+      // Soft ambient
+      scene.add(new THREE.AmbientLight(dayMode ? 0xC8DCFF : 0x6B8AFF, dayMode ? 0.85 : 0.35));
+      // Key light — simulated sun
+      const sun = new THREE.DirectionalLight(0xFFEED1, dayMode ? 1.1 : 1.4);
+      sun.position.set(-1, 0.6, 1.2);
+      scene.add(sun);
+      // Rim light — cool blue rim around the globe
+      const rim = new THREE.DirectionalLight(0x4A7BFF, dayMode ? 0.3 : 0.6);
+      rim.position.set(1, -0.4, -1);
+      scene.add(rim);
+    } catch (e) {}
+
+    // Hide loader
+    const loading = document.getElementById('loading');
+    if (loading) {
+      loading.classList.add('hidden');
+      setTimeout(() => loading.remove(), 700);
+    }
+  });
+  const ctrls = globe.controls();
+  ctrls.autoRotate = true;
+  ctrls.autoRotateSpeed = 0.32;
+  ctrls.enableDamping = true;
+  ctrls.dampingFactor = 0.08;
+  ctrls.rotateSpeed = 0.5;
+  ctrls.minDistance = 180;
+  ctrls.maxDistance = 600;
+  ctrls.enablePan = false;
+
+  let rotateTimeout = null;
+  const stopRotate = () => {
+    ctrls.autoRotate = false;
+    if (rotateTimeout) clearTimeout(rotateTimeout);
+    rotateTimeout = setTimeout(() => { ctrls.autoRotate = true; }, 4000);
+  };
+  ctrls.addEventListener('start', stopRotate);
+
+  // Make labels scale with camera distance so they stay readable at every zoom.
+  // Globe radius defaults to 100; ctrls.minDistance=180 (closest), maxDistance=600 (farthest).
+  // We scale label sizes inversely with distance so they stay roughly constant in screen-space,
+  // with a slight bias so labels still feel a bit smaller when zoomed way in.
+  const updateLabelZoom = () => {
+    if (!globe.labelsData || !globe.camera) return;
+    const cam = globe.camera();
+    const dist = cam.position.length();
+    // distance ~180..600. Map to a scale factor ~0.45..1.6
+    const t = Math.max(0, Math.min(1, (dist - 180) / (600 - 180)));
+    const zoomScale = 0.45 + t * 1.15;
+    globe.labelSize((d) => (d.size || 1) * zoomScale);
+  };
+  ctrls.addEventListener('change', updateLabelZoom);
+
+  // Pulsing rings for verified cities
+  globe
+    .ringColor(() => (t) => `rgba(${hexToRgb(state.signatureColor).join(',')},${1 - t})`)
+    .ringMaxRadius(2.4)
+    .ringPropagationSpeed(1.4)
+    .ringRepeatPeriod(1500);
+
+  // City markers — a classic flag-pin: a thin metallic pole sticking out of
+  // the globe surface, with a small rectangular flag attached at the top
+  // showing the country flag image. Heroes (verified / holographic) get a
+  // taller pole, larger flag, and a glowing base halo.
+  //
+  // Performance: we keep a flat list of active pins so the per-frame loop
+  // doesn't walk the entire scene tree. Old pins are removed from the list
+  // when globe.gl disposes them via customLayerData updates.
+  const _activePins = [];
+  globe
+    .customLayerData([])
+    .customThreeObject((d) => {
+      const group = new THREE.Group();
+
+      const isHero = d.status === 'verified' || d.status === 'holographic';
+      const color = new THREE.Color(d.color);
+
+      // ── Pin pole ──
+      // Cylinder is Y-up by default. We rotate the whole group so its local
+      // +Z points radially outward; here we orient the pole along +Z.
+      const poleHeight = isHero ? 4.4 : 3.0;
+      const poleRadius = isHero ? 0.09 : 0.07;
+      const pole = new THREE.Mesh(
+        new THREE.CylinderGeometry(poleRadius, poleRadius, poleHeight, 8),
+        new THREE.MeshPhongMaterial({
+          color: 0xC8D0DA,
+          specular: 0xFFFFFF,
+          shininess: 80,
+        })
+      );
+      pole.rotation.x = Math.PI / 2;
+      pole.position.z = poleHeight / 2;
+      group.add(pole);
+
+      // ── Pinhead bead at the tip ──
+      const bead = new THREE.Mesh(
+        new THREE.SphereGeometry(poleRadius * 1.8, 8, 8),
+        new THREE.MeshPhongMaterial({
+          color: color.clone().multiplyScalar(1.1),
+          specular: 0xFFFFFF,
+          shininess: 120,
+          emissive: color,
+          emissiveIntensity: 0.35,
+        })
+      );
+      bead.position.z = poleHeight;
+      group.add(bead);
+
+      // ── Base halo on the surface ──
+      const baseGlow = new THREE.Mesh(
+        new THREE.SphereGeometry(isHero ? 0.55 : 0.34, 10, 10),
+        new THREE.MeshBasicMaterial({
+          color,
+          transparent: true,
+          opacity: 0.7,
+          depthWrite: false,
+        })
+      );
+      group.add(baseGlow);
+
+      if (isHero) {
+        const halo = new THREE.Mesh(
+          new THREE.SphereGeometry(1.1, 14, 14),
+          new THREE.MeshBasicMaterial({
+            color,
+            transparent: true,
+            opacity: 0.18,
+            depthWrite: false,
+          })
+        );
+        group.add(halo);
+      }
+
+      // ── Flag attached at the top of the pole ──
+      // Sized like a real pin-flag: roughly 3:2 aspect, attached at one short
+      // edge to the pole. Few segments are enough for a believable wave.
+      const flagW = isHero ? 3.2 : 2.4;
+      const flagH = isHero ? 2.0 : 1.5;
+      const segs = 6;
+      const flagGeo = new THREE.PlaneGeometry(flagW, flagH, segs, 1);
+      // Shift so the left edge is at x=0 (attached to the pole).
+      flagGeo.translate(flagW / 2, 0, 0);
+
+      const flagTex = makeFlagTexture(d.countryCode, d.name, isHero);
+      const flagMat = new THREE.MeshBasicMaterial({
+        map: flagTex,
+        side: THREE.DoubleSide,
+        transparent: true,
+      });
+      const flag = new THREE.Mesh(flagGeo, flagMat);
+      flag.frustumCulled = false;
+
+      // Position the flag near the top of the pole, slightly below the bead.
+      flag.position.set(0, 0, poleHeight - flagH * 0.25);
+
+      // Pre-compute and cache per-vertex base positions + normalized width.
+      const posAttr = flagGeo.attributes.position;
+      const vCount = posAttr.count;
+      const widths = new Float32Array(vCount);
+      const baseY = new Float32Array(vCount);
+      const baseZ = new Float32Array(vCount);
+      for (let i = 0; i < vCount; i++) {
+        widths[i] = posAttr.getX(i) / flagW;
+        baseY[i] = posAttr.getY(i);
+        baseZ[i] = posAttr.getZ(i);
+      }
+      flag.userData = {
+        isPinFlag: true,
+        widths,
+        baseY,
+        baseZ,
+        phase: Math.random() * Math.PI * 2,
+        isHero,
+      };
+      group.add(flag);
+
+      // Track for fast per-frame iteration.
+      group.userData = { isPinGroup: true, isHero, baseColor: color, flag };
+      _activePins.push(group);
+
+      // When globe.gl removes this group, drop it from the active list.
+      group.addEventListener && group.addEventListener('removed', () => {
+        const i = _activePins.indexOf(group);
+        if (i >= 0) _activePins.splice(i, 1);
+      });
+      return group;
+    })
+    .customThreeObjectUpdate((obj, d) => {
+      // Place the group on the surface at the right lat/lng, oriented so its
+      // local +Z points radially outward from the globe center.
+      const coords = globe.getCoords(d.lat, d.lng, 0);
+      obj.position.set(coords.x, coords.y, coords.z);
+      obj.lookAt(new THREE.Vector3(0, 0, 0));
+      obj.rotateY(Math.PI);
+    });
+
+  // Curved arcs connecting verified cities chronologically (= "your journey")
+  globe
+    .arcsData([])
+    .arcStartLat('startLat').arcStartLng('startLng')
+    .arcEndLat('endLat').arcEndLng('endLng')
+    .arcColor((d) => [`rgba(${hexToRgb(state.signatureColor).join(',')},0.05)`, `rgba(${hexToRgb(state.signatureColor).join(',')},0.85)`])
+    .arcStroke(0.35)
+    .arcAltitudeAutoScale(0.45)
+    .arcDashLength(0.5)
+    .arcDashGap(2)
+    .arcDashAnimateTime(4500)
+    .arcsTransitionDuration(800);
+
+  // HTML labels for hero cities (verified/holographic) — only the top few
+  globe
+    .htmlElementsData([])
+    .htmlLat('lat').htmlLng('lng')
+    .htmlAltitude(0.14)
+    .htmlElement((d) => {
+      const el = document.createElement('div');
+      el.className = 'label';
+      el.textContent = d.name;
+      return el;
+    });
+
+  // 3D country name labels — drawn directly on the globe surface.
+  globe
+    .labelsData([])
+    .labelLat((d) => d.lat)
+    .labelLng((d) => d.lng)
+    .labelText((d) => d.name)
+    .labelSize((d) => d.size || 1.2)
+    .labelDotRadius(0)
+    .labelAltitude(0.012)
+    .labelColor(() => (dayMode ? 'rgba(15,23,42,0.92)' : 'rgba(255,255,255,0.95)'))
+    .labelResolution(3)
+    .labelIncludeDot(false);
+
+  // Resize handling
+  function fit() {
+    globe.width(window.innerWidth).height(window.innerHeight);
+  }
+  fit();
+  window.addEventListener('resize', fit);
+  window.addEventListener('orientationchange', fit);
+
+  function roundRectPath(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+  }
+
+  // Cache of loaded flag <img>s keyed by ISO-2 code (lowercase). The PNGs come
+  // from flagcdn.com which serves a wide rectangular flag for every ISO code.
+  const _flagImageCache = new Map();
+  function loadFlagImage(cc) {
+    if (!cc) return null;
+    const key = cc.toLowerCase();
+    if (_flagImageCache.has(key)) return _flagImageCache.get(key);
+    const entry = { img: new Image(), loaded: false, failed: false, listeners: [] };
+    entry.img.crossOrigin = 'anonymous';
+    entry.img.onload = () => {
+      entry.loaded = true;
+      entry.listeners.forEach((cb) => { try { cb(); } catch (e) {} });
+      entry.listeners.length = 0;
+    };
+    entry.img.onerror = () => {
+      entry.failed = true;
+      entry.listeners.forEach((cb) => { try { cb(); } catch (e) {} });
+      entry.listeners.length = 0;
+    };
+    entry.img.src = 'https://flagcdn.com/w320/' + key + '.png';
+    _flagImageCache.set(key, entry);
+    return entry;
+  }
+
+  // Builds a CanvasTexture for a pin-flag — a clean rectangular country flag
+  // image with a thin border. The flag PNG loads asynchronously; the texture
+  // is redrawn and flagged for update once the image arrives. Cached by
+  // `${cc}|${hero}`. The `name` arg is unused now but kept for cache-key
+  // back-compat with earlier callers.
+  const _flagTexCache = new Map();
+  function makeFlagTexture(cc, _name, isHero) {
+    const key = (cc || '') + '|' + (isHero ? '1' : '0');
+    if (_flagTexCache.has(key)) return _flagTexCache.get(key);
+
+    // 3:2 aspect — matches the PlaneGeometry used for the flag mesh.
+    const W = 384, H = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    const tex = new THREE.CanvasTexture(canvas);
+
+    const draw = () => {
+      ctx.clearRect(0, 0, W, H);
+
+      const flag = cc ? loadFlagImage(cc) : null;
+      if (flag && flag.loaded) {
+        ctx.drawImage(flag.img, 0, 0, W, H);
+      } else {
+        // Placeholder: solid colored rect with the country code.
+        const grad = ctx.createLinearGradient(0, 0, 0, H);
+        grad.addColorStop(0, '#1E3A8A');
+        grad.addColorStop(1, '#0F172A');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = '#F8FAFC';
+        ctx.font = 'bold 96px -apple-system,system-ui,sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText((cc || '?').toUpperCase(), W / 2, H / 2);
+      }
+
+      // Subtle inner border to give the flag a printed-edge feel.
+      ctx.lineWidth = 6;
+      ctx.strokeStyle = isHero ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.25)';
+      ctx.strokeRect(3, 3, W - 6, H - 6);
+
+      tex.needsUpdate = true;
+    };
+
+    draw();
+
+    // If the flag image is still loading, redraw once it arrives.
+    const flagEntry = cc ? loadFlagImage(cc) : null;
+    if (flagEntry && !flagEntry.loaded && !flagEntry.failed) {
+      flagEntry.listeners.push(draw);
+    }
+
+    tex.anisotropy = 8;
+    if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace;
+    else if ('encoding' in tex) tex.encoding = THREE.sRGBEncoding;
+    _flagTexCache.set(key, tex);
+    return tex;
+  }
+
+  // Per-frame animation for the pin-flags:
+  //  • billboards each pin around its local radial axis (+Z) so the flag
+  //    surface faces the camera regardless of globe rotation.
+  //  • applies a subtle wave deformation to the flag's vertices, with the
+  //    amplitude rising from 0 at the pole edge to max at the trailing edge.
+  //
+  // Perf notes:
+  //  - We iterate _activePins (a flat array), not scene.traverse(), so cost is
+  //    O(N pins) instead of O(N scene nodes).
+  //  - The wave geometry update only runs at ~30fps and only for pins that are
+  //    facing the camera (dot(pinNormal, camDir) > 0) and within zoom range.
+  //  - Billboarding still runs every frame because it's cheap.
+  const _zAxis = new THREE.Vector3(0, 0, 1);
+  let _lastWaveTime = 0;
+  function animateBeacons() {
+    try {
+      const now = performance.now();
+      const t = now / 1000;
+      const cam = globe.camera && globe.camera();
+      if (cam && _activePins.length) {
+        const camWorld = new THREE.Vector3();
+        cam.getWorldPosition(camWorld);
+        const camDist = camWorld.length();
+        // Skip waves entirely when zoomed far out — they're not visible anyway.
+        const wavesEnabled = camDist < 420;
+        // Throttle wave updates to ~30fps.
+        const doWaves = wavesEnabled && (now - _lastWaveTime > 33);
+        if (doWaves) _lastWaveTime = now;
+
+        const localCam = new THREE.Vector3();
+        const pinWorld = new THREE.Vector3();
+        const camDir = new THREE.Vector3();
+
+        for (let i = 0; i < _activePins.length; i++) {
+          const group = _activePins[i];
+          if (!group || !group.parent) continue;
+
+          // Billboard around local +Z so the flag faces the camera.
+          localCam.copy(camWorld);
+          group.worldToLocal(localCam);
+          const angle = Math.atan2(localCam.y, localCam.x);
+          group.rotateOnAxis(_zAxis, angle);
+
+          if (!doWaves) continue;
+
+          // Skip waves on pins that face away from the camera.
+          group.getWorldPosition(pinWorld);
+          camDir.copy(camWorld).sub(pinWorld);
+          if (pinWorld.dot(camDir) < 0) continue; // back of globe
+
+          const flag = group.userData && group.userData.flag;
+          if (!flag) continue;
+          const u = flag.userData;
+          const pos = flag.geometry.attributes.position;
+          const widths = u.widths;
+          const baseY = u.baseY;
+          const baseZ = u.baseZ;
+          const phase = u.phase;
+          const amp = u.isHero ? 0.18 : 0.12;
+          for (let j = 0; j < pos.count; j++) {
+            const w = widths[j];
+            const wave = Math.sin(t * 4 + phase + w * 6) * amp * w;
+            const curl = Math.sin(t * 3 + phase + w * 5) * (amp * 0.4) * w;
+            pos.setY(j, baseY[j] + curl);
+            pos.setZ(j, baseZ[j] + wave);
+          }
+          pos.needsUpdate = true;
+        }
+      }
+    } catch (e) {}
+    requestAnimationFrame(animateBeacons);
+  }
+  requestAnimationFrame(animateBeacons);
+
+  // Hex → RGB helper
+  function hexToRgb(hex) {
+    const h = hex.replace('#', '');
+    const n = parseInt(h.length === 3 ? h.split('').map((c) => c + c).join('') : h, 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+
+  // Returns { lat, lng } for the geometric centroid of a GeoJSON polygon /
+  // multipolygon. Uses the largest ring by bbox area for multipolygons (so
+  // labels for e.g. the USA land in the contiguous states, not a tiny island).
+  function computeCentroid(geometry) {
+    if (!geometry) return null;
+    const ringsToConsider = [];
+    if (geometry.type === 'Polygon') {
+      ringsToConsider.push(geometry.coordinates[0]);
+    } else if (geometry.type === 'MultiPolygon') {
+      // Pick the polygon with the largest bbox area (mainland)
+      let best = null;
+      let bestArea = -1;
+      for (const poly of geometry.coordinates) {
+        const ring = poly[0];
+        const a = ringBboxArea(ring);
+        if (a > bestArea) { bestArea = a; best = ring; }
+      }
+      if (best) ringsToConsider.push(best);
+    }
+    if (!ringsToConsider.length) return null;
+    const ring = ringsToConsider[0];
+    let sx = 0, sy = 0, n = 0;
+    for (const [lng, lat] of ring) { sx += lng; sy += lat; n++; }
+    if (!n) return null;
+    return { lat: sy / n, lng: sx / n };
+  }
+
+  function ringBboxArea(ring) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const [x, y] of ring) {
+      if (x < minX) minX = x; if (x > maxX) maxX = x;
+      if (y < minY) minY = y; if (y > maxY) maxY = y;
+    }
+    return (maxX - minX) * (maxY - minY);
+  }
+
+  function bboxArea(geometry) {
+    if (!geometry) return 0;
+    if (geometry.type === 'Polygon') return ringBboxArea(geometry.coordinates[0]);
+    if (geometry.type === 'MultiPolygon') {
+      let total = 0;
+      for (const poly of geometry.coordinates) total += ringBboxArea(poly[0]);
+      return total;
+    }
+    return 0;
+  }
+
+  function applyVisits() {
+    const points = state.visits.map((v) => ({
+      cityId: v.cityId,
+      lat: v.city.lat,
+      lng: v.city.lng,
+      name: v.city.name,
+      country: v.city.country,
+      countryCode: v.city.countryCode,
+      status: v.status,
+      altitude: altitudeForVisit(v),
+      color: colorForVisit(v),
+    }));
+
+    // Track visited country ISO codes so polygon highlights work.
+    state.visitedISO = new Set(
+      state.visits
+        .filter((v) => v.status === 'verified' || v.status === 'holographic')
+        .map((v) => (v.city.countryCode || '').toUpperCase())
+    );
+    // Re-trigger polygon styling so the highlight refreshes
+    if (countryFeatures) {
+      globe.polygonsData([...countryFeatures]);
+    }
+
+    globe.customLayerData(points);
+
+    // Pulse rings only for verified / holographic
+    const ringPoints = points
+      .filter((p) => p.status === 'verified' || p.status === 'holographic')
+      .map((p) => ({ lat: p.lat, lng: p.lng }));
+    globe.ringsData(ringPoints);
+
+    // Build journey arcs connecting verified cities pairwise
+    const verified = points.filter((p) => p.status === 'verified' || p.status === 'holographic');
+    const arcs = [];
+    for (let i = 0; i < verified.length - 1; i++) {
+      arcs.push({
+        startLat: verified[i].lat,
+        startLng: verified[i].lng,
+        endLat: verified[i + 1].lat,
+        endLng: verified[i + 1].lng,
+      });
+    }
+    globe.arcsData(arcs);
+
+    // City names are now rendered on the flag billboard at the top of each
+    // beacon, so the separate HTML name chips are no longer needed.
+    globe.htmlElementsData([]);
+
+    // Add raycasting click on custom layer points
+    // (globe.gl exposes onCustomLayerClick)
+    globe.onCustomLayerClick((d) => {
+      if (d && d.cityId) post({ type: 'cityPress', cityId: d.cityId });
+    });
+  }
+
+  function handleMessage(raw) {
+    let msg;
+    try { msg = JSON.parse(raw); } catch (e) { return; }
+    if (!msg || !msg.type) return;
+
+    if (msg.type === 'setState') {
+      if (Array.isArray(msg.visits)) state.visits = msg.visits;
+      if (typeof msg.signatureColor === 'string') state.signatureColor = msg.signatureColor;
+      if (typeof msg.dimLevel === 'number') state.dimLevel = msg.dimLevel;
+
+      // Tint atmosphere subtly toward signature color (mixed with deep blue for legibility)
+      const rgb = hexToRgb(state.signatureColor);
+      const blended = `rgb(${Math.round(rgb[0] * 0.4 + 30 * 0.6)},${Math.round(rgb[1] * 0.4 + 100 * 0.6)},${Math.round(rgb[2] * 0.4 + 200 * 0.6)})`;
+      globe.atmosphereColor(blended);
+      applyVisits();
+    } else if (msg.type === 'focus' && msg.lat != null && msg.lng != null) {
+      globe.pointOfView({ lat: msg.lat, lng: msg.lng, altitude: 1.6 }, 1400);
+    } else if (msg.type === 'snapshot') {
+      try {
+        // Force a fresh render so the canvas buffer is current, then read pixels.
+        const renderer = globe.renderer();
+        const scene = globe.scene();
+        const camera = globe.camera();
+        renderer.render(scene, camera);
+        const dataUrl = renderer.domElement.toDataURL('image/png');
+        post({ type: 'snapshot', requestId: msg.requestId, dataUrl });
+      } catch (err) {
+        post({ type: 'snapshot', requestId: msg.requestId, error: err.message || String(err) });
+      }
+    }
+  }
+
+  window.addEventListener('message', (e) => handleMessage(e.data));
+  document.addEventListener('message', (e) => handleMessage(e.data));
+
+  post({ type: 'ready' });
+})();
+</script>
+</body>
+</html>
