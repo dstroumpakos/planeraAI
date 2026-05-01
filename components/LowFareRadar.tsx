@@ -363,10 +363,11 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.cardsContainer}
-        snapToInterval={CARD_WIDTH + 12}
+        snapToInterval={CARD_WIDTH + 14}
+        snapToAlignment="start"
         decelerationRate="fast"
         onMomentumScrollEnd={(e) => {
-          const idx = Math.round(e.nativeEvent.contentOffset.x / (CARD_WIDTH + 12));
+          const idx = Math.round(e.nativeEvent.contentOffset.x / (CARD_WIDTH + 14));
           if (idx !== lastActiveIndexRef.current) {
             lastActiveIndexRef.current = idx;
             const deal = filteredDeals[idx];
@@ -390,11 +391,7 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
 
           const expandedHeight = animValue.interpolate({
             inputRange: [0, 1],
-            outputRange: [
-              0,
-              260 +
-                ((deal.outboundStops ?? 0) + (deal.returnStops ?? 0)) * 60,
-            ],
+            outputRange: [0, 2000],
           });
 
           return (
@@ -759,9 +756,8 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
               </View>
 
               {/* Expanded Details */}
-              <Animated.View
-                style={[styles.expandedSection, { height: expandedHeight }]}
-              >
+              {isExpanded && (
+                <View style={styles.expandedSection}>
                 <View style={styles.expandedContent}>
                   {/* Baggage info */}
                   <View style={styles.detailSection}>
@@ -941,7 +937,8 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
                     </TouchableOpacity>
                   )}
                 </View>
-              </Animated.View>
+                </View>
+              )}
             </TouchableOpacity>
           );
         })}
@@ -1042,10 +1039,10 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   cardsContainer: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 32,
     gap: 14,
-    paddingRight: 32,
     paddingVertical: 4,
+    alignItems: "flex-start",
   },
   card: {
     borderRadius: 24,
@@ -1272,9 +1269,9 @@ const styles = StyleSheet.create({
     opacity: 0.85,
   },
   baggageRow: {
-    flexDirection: "row",
-    gap: 8,
-    flexWrap: "wrap",
+    flexDirection: "column",
+    gap: 6,
+    alignItems: "stretch",
   },
   baggageItem: {
     flexDirection: "row",
@@ -1283,10 +1280,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 12,
+    alignSelf: "flex-start",
+    maxWidth: "100%",
   },
   baggageText: {
     fontSize: 13,
     fontWeight: "700",
+    flex: 1,
+    flexShrink: 1,
   },
   returnRow: {
     gap: 4,

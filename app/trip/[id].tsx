@@ -7,7 +7,7 @@ import { Id } from "@/convex/_generated/dataModel";
 import { api } from "@/convex/_generated/api";
 import { Ionicons } from "@expo/vector-icons";
 import FontAwesome from "@expo/vector-icons/FontAwesome";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { BlurView } from "expo-blur";
 import { useDestinationImage } from "@/lib/useImages";
@@ -763,6 +763,7 @@ const getAirportCode = (codeOrCity: string | undefined): string => {
 export default function TripDetails() {
     const { id } = useLocalSearchParams();
     const router = useRouter();
+    const insets = useSafeAreaInsets();
     const { t, i18n } = useTranslation();
     const { colors, isDarkMode } = useTheme();
     const { token } = useToken();
@@ -1997,7 +1998,7 @@ export default function TripDetails() {
                 </View>
             </SafeAreaView>
 
-            <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+            <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: 32 + insets.bottom }]} showsVerticalScrollIndicator={false}>
                 {/* Map Preview with Title Overlay */}
                 <View style={styles.mapPreviewContainer} pointerEvents="box-none">
                     {destinationImage ? (
