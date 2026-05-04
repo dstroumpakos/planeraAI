@@ -194,6 +194,18 @@ export const getStats = query({
                 };
             })
         );
+
+        // Last 10 newly registered users
+        const recentUsers = [...allUserSettings]
+            .sort((a: any, b: any) => (b._creationTime || 0) - (a._creationTime || 0))
+            .slice(0, 10)
+            .map((u: any) => ({
+                userId: u.userId,
+                name: u.name || "Unknown",
+                email: u.email || "Unknown",
+                image: u.image,
+                createdAt: u._creationTime,
+            }));
         
         return {
             pendingInsightsCount: pendingInsights.length,
@@ -209,6 +221,7 @@ export const getStats = query({
             topTripDestinations,
             mostLikedInsights,
             mostActiveUsers,
+            recentUsers,
         };
     },
 });

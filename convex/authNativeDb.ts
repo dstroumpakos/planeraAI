@@ -111,10 +111,12 @@ export const upsertUserAndCreateSession = internalMutation({
     }
     
     // Generate session ID using a crypto-strong random suffix.
-    // (V8 runtime exposes WebCrypto via globalThis.crypto.)
+    // (V8 runtime exposes WebCrypto via globalThis.crypto, but no Buffer.)
     const rand = new Uint8Array(12);
     (globalThis as any).crypto.getRandomValues(rand);
-    const randSuffix = Buffer.from(rand).toString("base64url");
+    const randSuffix = Array.from(rand)
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
     const sessionId = `session_${Date.now()}_${randSuffix}`;
     console.log("[AuthNativeDb] Generated sessionId:", sessionId);
     

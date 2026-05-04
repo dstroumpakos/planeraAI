@@ -21,4 +21,13 @@ crons.interval(
     internal.lowFareRadar.softDeleteExpiredDeals,
 );
 
+// Watchdog: mark trips stuck in "generating" (>10 min) as failed.
+// Catches Convex platform-level transient errors that prevent the
+// generate action from ever running.
+crons.interval(
+    "fail-stuck-generating-trips",
+    { minutes: 5 },
+    internal.trips.failStuckGeneratingTrips,
+);
+
 export default crons;
