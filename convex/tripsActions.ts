@@ -573,12 +573,18 @@ export const generate = internalAction({
             console.log(`   - Activities: ${activities.length} options`);
             console.log(`   - Restaurants: ${restaurants.length} options`);
 
+            // Heartbeat after parallel fetch (keeps Convex scheduler aware the
+            // action is still alive across long async work).
+            console.log("📍 STEP 1/5 complete: parallel data fetch");
+            await ctx.runMutation(internal.trips.heartbeatGeneration, { tripId });
+
             // 5. Generate transportation options (sync, fast)
             console.log("🚗 Generating transportation options...");
             const transportation = generateTransportationOptions(trip.destination, origin, trip.travelerCount ?? trip.travelers ?? 1);
             console.log(`✅ Transportation ready: ${transportation.length} options`);
 
             // 6. Generate day-by-day itinerary with OpenAI
+            console.log("📍 STEP 2/5 starting: OpenAI itinerary generation");
             console.log("📝 Generating itinerary with OpenAI...");
             let dayByDayItinerary;
             if (hasOpenAIKey) {
@@ -873,9 +879,16 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                             console.log(`✅ Supplemented to ${dayByDayItinerary.length} days`);
                         }
                         
+                        // Heartbeat after the long OpenAI call.
+                        console.log("📍 STEP 2/5 complete: OpenAI returned itinerary");
+                        await ctx.runMutation(internal.trips.heartbeatGeneration, { tripId });
+
                         // Merge TripAdvisor data into restaurant activities
+                        console.log("📍 STEP 3/5 starting: merge TripAdvisor restaurant data");
                         dayByDayItinerary = await mergeRestaurantDataIntoItinerary(dayByDayItinerary, restaurants, trip.destination);
-                        
+                        console.log("📍 STEP 3/5 complete: TripAdvisor merge");
+                        await ctx.runMutation(internal.trips.heartbeatGeneration, { tripId });
+
                         // POST-PROCESSING: Enforce arrival day buffer
                         // Even if the AI ignores the prompt, we fix Day 1 activities that start too early
                         if (timeAwareGuidance.firstDayStartTime && dayByDayItinerary.length > 0) {
@@ -908,6 +921,8 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                 dayByDayItinerary = generateBasicItinerary(trip, activities, restaurants);
             }
 
+            console.log("📍 STEP 4/5 complete: post-processing finished");
+
             const result = {
                 flights,
                 hotels,
@@ -918,6 +933,7 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                estimatedDailyExpenses: calculateDailyExpenses(Number(trip.budgetTotal)),
             };
 
+            console.log("📍 STEP 5/5 starting: write itinerary to DB");
             console.log("✅ Trip generation complete!");
 
             await ctx.runMutation(internal.trips.updateItinerary, {
@@ -925,6 +941,7 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                 itinerary: result,
                 status: "completed",
             });
+            console.log("📍 STEP 5/5 complete: itinerary saved");
 
             // Send push notification that trip is ready
             await ctx.runAction(internal.notifications.sendPushNotification, {

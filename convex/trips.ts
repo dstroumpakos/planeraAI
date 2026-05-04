@@ -473,6 +473,23 @@ export const updateItinerary = internalMutation({
 });
 
 /**
+ * Heartbeat: tiny no-op mutation called between major steps of the
+ * generation action. Writing to Convex periodically prevents the
+ * scheduler from incorrectly marking a long-running Node action as
+ * dead and triggering spurious retries (the source of "Transient
+ * error 0ms" log entries).
+ */
+export const heartbeatGeneration = internalMutation({
+    args: { tripId: v.id("trips") },
+    returns: v.null(),
+    handler: async (ctx: any, args: any) => {
+        // No-op patch — touches the row without changing meaningful state.
+        await ctx.db.patch(args.tripId, {});
+        return null;
+    },
+});
+
+/**
  * Watchdog: marks trips stuck in "generating" status as "failed".
  *
  * Scheduled trip generation actions can fail at the Convex platform level
