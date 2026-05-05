@@ -509,6 +509,23 @@ export const failStuckGeneratingTrips = internalMutation({
         const STUCK_THRESHOLD_MS = 10 * 60 * 1000; // 10 minutes
         const cutoff = Date.now() - STUCK_THRESHOLD_MS;
 
+        // Cheap early-exit: if no trips are currently "generating", skip all work.
+        // This keeps the watchdog effectively free when the app is idle.
+        const firstGenerating = await ctx.db
+            .query("trips")
+            .withIndex("by_status", (q: any) => q.eq("status", "generating"))
+            .first();
+
+        if (!firstGenerating) {
+            return { scanned: 0, failed: 0 };
+        }
+
+        // Second early-exit: if the oldest "generating" trip is younger than the
+        // threshold, no trip can possibly be stuck yet — skip the full scan.
+        if (firstGenerating._creationTime >= cutoff) {
+            return { scanned: 0, failed: 0 };
+        }
+
         const stuckTrips = await ctx.db
             .query("trips")
             .withIndex("by_status", (q: any) => q.eq("status", "generating"))
