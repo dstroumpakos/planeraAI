@@ -45,3 +45,4 @@ yarn-error.*
 # Deal extractor tools (admin-only, not needed for app builds)
 scripts/flight-deal-extractor/
 convex/dealExtractor.ts
+convex-logs-tmp.txt

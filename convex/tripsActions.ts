@@ -833,16 +833,36 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                     const systemPrompt = timeAwareGuidance.skipLastDay
                         ? `You are a travel itinerary planner. Return only valid JSON. Always include realistic prices and booking information for activities. IMPORTANT: Generate ${effectiveTripDays} days of activities (Days 1-${effectiveTripDays}). Day ${tripDays} is departure day with no activities. Respect arrival and departure time constraints.${budgetSystemNote} The traveler's budget tier is ${budgetGuidance.budgetTier.toUpperCase()} (€${budgetGuidance.dailyBudgetPerPerson}/person/day). All recommendations must respect this budget.${languageInstruction}`
                         : `You are a travel itinerary planner. Return only valid JSON. Always include realistic prices and booking information for activities. IMPORTANT: You must generate the complete itinerary for ALL ${tripDays} days requested. If arrival/departure times are specified, adjust activities accordingly - fewer activities on partial days.${budgetSystemNote} The traveler's budget tier is ${budgetGuidance.budgetTier.toUpperCase()} (€${budgetGuidance.dailyBudgetPerPerson}/person/day). All recommendations must respect this budget.${languageInstruction}`;
-                    
-                    const completion = await openai.chat.completions.create({
-                        messages: [
-                            { role: "system", content: systemPrompt },
-                            { role: "user", content: itineraryPrompt },
-                        ],
-                        model: "gpt-5.5",
-                        response_format: { type: "json_object" },
-                        max_completion_tokens: maxTokens,
-                    });
+
+                    // Hard timeout on the OpenAI call. Convex Node actions are killed
+                    // after ~10 minutes total wall-clock time. We cap the OpenAI call
+                    // at 8 minutes so there is always headroom for post-processing
+                    // (TripAdvisor merge, image lookups, DB write). If the call exceeds
+                    // 8 minutes we abort it and fall back to the basic itinerary —
+                    // better to deliver a usable trip than to leave the user stuck.
+                    const OPENAI_TIMEOUT_MS = 8 * 60 * 1000;
+                    const openAIController = new AbortController();
+                    const openAITimeoutId = setTimeout(
+                        () => openAIController.abort(),
+                        OPENAI_TIMEOUT_MS,
+                    );
+                    let completion;
+                    try {
+                        completion = await openai.chat.completions.create(
+                            {
+                                messages: [
+                                    { role: "system", content: systemPrompt },
+                                    { role: "user", content: itineraryPrompt },
+                                ],
+                                model: "gpt-5.5",
+                                response_format: { type: "json_object" },
+                                max_completion_tokens: maxTokens,
+                            },
+                            { signal: openAIController.signal },
+                        );
+                    } finally {
+                        clearTimeout(openAITimeoutId);
+                    }
 
                     console.log("🔍 OpenAI response:", JSON.stringify(completion.choices[0], null, 2));
                     
@@ -883,10 +903,31 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                         console.log("📍 STEP 2/5 complete: OpenAI returned itinerary");
                         await ctx.runMutation(internal.trips.heartbeatGeneration, { tripId });
 
-                        // Merge TripAdvisor data into restaurant activities
+                        // Merge TripAdvisor data into restaurant activities.
+                        // This step does sequential TripAdvisor API calls and can stall
+                        // if the upstream is slow. Wrap in a hard timeout so we never
+                        // block trip completion on enrichment.
                         console.log("📍 STEP 3/5 starting: merge TripAdvisor restaurant data");
-                        dayByDayItinerary = await mergeRestaurantDataIntoItinerary(dayByDayItinerary, restaurants, trip.destination);
-                        console.log("📍 STEP 3/5 complete: TripAdvisor merge");
+                        const MERGE_TIMEOUT_MS = 45_000;
+                        try {
+                            dayByDayItinerary = await Promise.race([
+                                mergeRestaurantDataIntoItinerary(dayByDayItinerary, restaurants, trip.destination),
+                                new Promise<never>((_, reject) =>
+                                    setTimeout(
+                                        () => reject(new Error("TripAdvisor merge timed out")),
+                                        MERGE_TIMEOUT_MS,
+                                    ),
+                                ),
+                            ]);
+                            console.log("📍 STEP 3/5 complete: TripAdvisor merge");
+                        } catch (mergeErr) {
+                            console.warn(
+                                "⚠️ TripAdvisor merge skipped (timeout or error):",
+                                mergeErr instanceof Error ? mergeErr.message : mergeErr,
+                            );
+                            // Keep the un-enriched OpenAI itinerary — better to complete
+                            // the trip than leave it stuck in "generating".
+                        }
                         await ctx.runMutation(internal.trips.heartbeatGeneration, { tripId });
 
                         // POST-PROCESSING: Enforce arrival day buffer
