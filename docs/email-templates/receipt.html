@@ -1,0 +1,192 @@
+<!--
+  Postmark template alias: receipt
+  Subject:   ✈ You're booked: {{outbound_depart_airport}} → {{outbound_arrive_airport}} · {{pnr}}
+  Preheader: Your seat is confirmed. Confirmation {{pnr}} — total {{total_paid}}.
+  Variables (all strings):
+    product_url, product_name,
+    pnr, airline,
+    outbound_date, outbound_depart_time, outbound_depart_airport, outbound_stops, outbound_arrive_time, outbound_arrive_airport, outbound_flight_number,
+    return_date, return_depart_time, return_depart_airport, return_stops, return_arrive_time, return_arrive_airport, return_flight_number,
+    passenger_name, total_paid,
+    view_booking_url, download_pdf_url, add_to_calendar_url,
+    company_name, company_address,
+    receipt_id, date,
+    support_url
+  Note: For one-way trips, return_* fields will be empty strings. The Mustachio {{#return_date}}...{{/return_date}} block hides the return section automatically when empty.
+-->
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="x-apple-disable-message-reformatting" />
+<meta name="color-scheme" content="light" />
+<meta name="supported-color-schemes" content="light" />
+<title>You're booked — {{pnr}}</title>
+<!--[if mso]><style>table,td,div,h1,p{font-family:Arial,sans-serif!important}</style><![endif]-->
+</head>
+<body style="margin:0;padding:0;background:#FAF9F6;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;visibility:hidden;mso-hide:all;font-size:1px;color:#FAF9F6;line-height:1px;">
+✈️ Your seat is confirmed. Confirmation {{pnr}} — total {{total_paid}}.
+</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FAF9F6;">
+  <tr><td align="center" style="padding:32px 16px;">
+    <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background:#FFFFFF;border-radius:20px;box-shadow:0 4px 24px rgba(26,26,26,0.06);overflow:hidden;">
+
+      <tr><td style="padding:32px 40px 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+          <tr>
+            <td style="vertical-align:middle;">
+              <a href="{{product_url}}" style="text-decoration:none;display:inline-block;"><img src="https://planeraai.app/logo.png" alt="{{product_name}}" width="130" style="display:block;width:130px;max-width:130px;height:auto;border:0;outline:none;text-decoration:none;" /></a>
+            </td>
+            <td align="right" style="vertical-align:middle;">
+              <p style="margin:0;font-size:12px;color:#8A8A8A;">Receipt {{receipt_id}}</p>
+              <p style="margin:2px 0 0;font-size:12px;color:#8A8A8A;">{{date}}</p>
+            </td>
+          </tr>
+        </table>
+      </td></tr>
+
+      <!-- Hero -->
+      <tr><td style="padding:24px 40px 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <p style="margin:0 0 8px;font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#8A8A8A;">Booking confirmed ✈</p>
+        <h1 style="margin:0 0 8px;font-size:30px;line-height:1.2;font-weight:800;color:#1A1A1A;letter-spacing:-0.8px;">You're going to {{outbound_arrive_airport}}.</h1>
+        <p style="margin:0 0 24px;font-size:16px;line-height:1.6;color:#4A4A4A;">Your seat is locked in. This email is your receipt — keep it handy.</p>
+      </td></tr>
+
+      <!-- PNR + total card -->
+      <tr><td style="padding:0 40px 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#1A1A1A;border-radius:16px;">
+          <tr><td style="padding:22px 24px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td style="vertical-align:top;">
+                  <p style="margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#FFE500;">Confirmation</p>
+                  <p style="margin:0;font-size:24px;font-weight:800;letter-spacing:4px;color:#FFFFFF;font-family:'SF Mono',Menlo,Consolas,monospace;">{{pnr}}</p>
+                  <p style="margin:6px 0 0;font-size:12px;color:#9B9B9B;">{{airline}}</p>
+                </td>
+                <td align="right" style="vertical-align:top;">
+                  <p style="margin:0;font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#9B9B9B;">Total paid</p>
+                  <p style="margin:4px 0 0;font-size:22px;font-weight:800;color:#FFFFFF;letter-spacing:-0.5px;">{{total_paid}}</p>
+                </td>
+              </tr>
+            </table>
+          </td></tr>
+        </table>
+      </td></tr>
+
+      <!-- Primary CTA -->
+      <tr><td align="center" style="padding:0 40px 12px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+          <tr><td align="center" style="border-radius:999px;background:#FFE500;">
+            <a href="{{view_booking_url}}" style="display:inline-block;padding:14px 32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;font-weight:800;color:#1A1A1A;text-decoration:none;border-radius:999px;letter-spacing:0.2px;">View booking in {{product_name}}</a>
+          </td></tr>
+        </table>
+      </td></tr>
+
+      <!-- Secondary actions -->
+      <tr><td align="center" style="padding:0 40px 28px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <a href="{{add_to_calendar_url}}" style="font-size:13px;font-weight:600;color:#1A1A1A;text-decoration:underline;margin:0 12px;">📅 Add to calendar</a>
+        <span style="color:#D5D2CB;">·</span>
+        <a href="{{download_pdf_url}}" style="font-size:13px;font-weight:600;color:#1A1A1A;text-decoration:underline;margin:0 12px;">📄 Download PDF</a>
+      </td></tr>
+
+      <!-- Outbound -->
+      <tr><td style="padding:0 40px 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <p style="margin:0 0 12px;font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#1A1A1A;">Itinerary</p>
+
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FAF9F6;border-radius:14px;margin-bottom:12px;">
+          <tr><td style="padding:18px 22px;">
+            <p style="margin:0 0 12px;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#8A8A8A;">Outbound · {{outbound_date}}</p>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td width="42%" style="vertical-align:top;">
+                  <p style="margin:0;font-size:26px;font-weight:800;color:#1A1A1A;letter-spacing:-0.5px;line-height:1;">{{outbound_depart_time}}</p>
+                  <p style="margin:6px 0 0;font-size:13px;color:#1A1A1A;font-weight:600;">{{outbound_depart_airport}}</p>
+                </td>
+                <td width="16%" align="center" style="vertical-align:middle;">
+                  <p style="margin:0;font-size:18px;color:#FFE500;line-height:1;">✈</p>
+                  <p style="margin:6px 0 0;font-size:11px;color:#8A8A8A;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">{{outbound_stops}}</p>
+                </td>
+                <td width="42%" align="right" style="vertical-align:top;">
+                  <p style="margin:0;font-size:26px;font-weight:800;color:#1A1A1A;letter-spacing:-0.5px;line-height:1;">{{outbound_arrive_time}}</p>
+                  <p style="margin:6px 0 0;font-size:13px;color:#1A1A1A;font-weight:600;">{{outbound_arrive_airport}}</p>
+                </td>
+              </tr>
+            </table>
+            <p style="margin:14px 0 0;padding-top:14px;border-top:1px dashed #E8E6E1;font-size:13px;color:#4A4A4A;">{{airline}} · Flight <strong style="color:#1A1A1A;">{{outbound_flight_number}}</strong></p>
+          </td></tr>
+        </table>
+
+        <!-- Return (only if present) -->
+        {{#return_date}}
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FAF9F6;border-radius:14px;margin-bottom:12px;">
+          <tr><td style="padding:18px 22px;">
+            <p style="margin:0 0 12px;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#8A8A8A;">Return · {{return_date}}</p>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td width="42%" style="vertical-align:top;">
+                  <p style="margin:0;font-size:26px;font-weight:800;color:#1A1A1A;letter-spacing:-0.5px;line-height:1;">{{return_depart_time}}</p>
+                  <p style="margin:6px 0 0;font-size:13px;color:#1A1A1A;font-weight:600;">{{return_depart_airport}}</p>
+                </td>
+                <td width="16%" align="center" style="vertical-align:middle;">
+                  <p style="margin:0;font-size:18px;color:#FFE500;line-height:1;">✈</p>
+                  <p style="margin:6px 0 0;font-size:11px;color:#8A8A8A;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">{{return_stops}}</p>
+                </td>
+                <td width="42%" align="right" style="vertical-align:top;">
+                  <p style="margin:0;font-size:26px;font-weight:800;color:#1A1A1A;letter-spacing:-0.5px;line-height:1;">{{return_arrive_time}}</p>
+                  <p style="margin:6px 0 0;font-size:13px;color:#1A1A1A;font-weight:600;">{{return_arrive_airport}}</p>
+                </td>
+              </tr>
+            </table>
+            <p style="margin:14px 0 0;padding-top:14px;border-top:1px dashed #E8E6E1;font-size:13px;color:#4A4A4A;">{{airline}} · Flight <strong style="color:#1A1A1A;">{{return_flight_number}}</strong></p>
+          </td></tr>
+        </table>
+        {{/return_date}}
+      </td></tr>
+
+      <!-- Passenger + receipt summary -->
+      <tr><td style="padding:8px 40px 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+          <tr>
+            <td width="50%" style="vertical-align:top;padding-right:8px;">
+              <p style="margin:0 0 6px;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#8A8A8A;">Passenger</p>
+              <p style="margin:0;font-size:15px;font-weight:700;color:#1A1A1A;">{{passenger_name}}</p>
+            </td>
+            <td width="50%" align="right" style="vertical-align:top;padding-left:8px;">
+              <p style="margin:0 0 6px;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#8A8A8A;">Receipt ID</p>
+              <p style="margin:0;font-size:13px;font-weight:600;color:#1A1A1A;font-family:'SF Mono',Menlo,Consolas,monospace;">{{receipt_id}}</p>
+            </td>
+          </tr>
+        </table>
+      </td></tr>
+
+      <!-- Check-in tip -->
+      <tr><td style="padding:24px 40px 8px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FFFBE0;border-radius:14px;border-left:4px solid #FFE500;">
+          <tr><td style="padding:18px 22px;">
+            <p style="margin:0 0 6px;font-size:14px;font-weight:700;color:#1A1A1A;">⏰ Check in 24h before takeoff</p>
+            <p style="margin:0;font-size:14px;line-height:1.6;color:#4A4A4A;">Use confirmation <strong style="color:#1A1A1A;">{{pnr}}</strong> + your last name on the {{airline}} website or app.</p>
+          </td></tr>
+        </table>
+      </td></tr>
+
+      <!-- Cross-sell -->
+      <tr><td style="padding:24px 40px 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <p style="margin:0 0 8px;font-size:16px;font-weight:700;color:#1A1A1A;">Now plan the days around it</p>
+        <p style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#4A4A4A;">Open {{product_name}} to build a smart day-by-day itinerary, save can't-miss spots, and share it with your travel crew.</p>
+        <a href="{{product_url}}" style="display:inline-block;font-size:14px;font-weight:700;color:#1A1A1A;text-decoration:underline;">Build my itinerary →</a>
+      </td></tr>
+
+      <!-- Footer -->
+      <tr><td style="padding:32px 40px;border-top:1px solid #EFEDE7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;text-align:center;">
+        <p style="margin:0 0 10px;font-size:13px;color:#4A4A4A;">Questions about your booking? <a href="{{support_url}}" style="color:#1A1A1A;font-weight:600;text-decoration:underline;">Contact support</a></p>
+        <p style="margin:0 0 4px;font-size:13px;color:#1A1A1A;font-weight:600;">{{company_name}} — travel smarter, plan better.</p>
+        <p style="margin:0;font-size:12px;color:#9B9B9B;">{{company_address}}</p>
+      </td></tr>
+
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>

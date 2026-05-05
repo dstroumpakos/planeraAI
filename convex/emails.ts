@@ -323,133 +323,142 @@ function generateFlightConfirmationEmail(booking: {
 }): { html: string; text: string } {
   const airlineName = booking.outboundFlight.airline;
   const isRoundTrip = !!booking.returnFlight;
+  const year = new Date().getFullYear();
+  const firstName = (booking.passengers[0]?.givenName || "Traveler").split(" ")[0];
+  const route = `${booking.outboundFlight.origin} → ${booking.outboundFlight.destination}${isRoundTrip ? " → " + booking.outboundFlight.origin : ""}`;
 
-  // Generate passengers HTML
-  const passengersHtml = booking.passengers
-    .map(p => `<p>👤 <strong>${p.givenName.toUpperCase()} ${p.familyName.toUpperCase()}</strong></p>`)
+  // Helper: render a single flight leg as a structured "ticket" row
+  const renderLeg = (label: string, leg: NonNullable<typeof booking.outboundFlight>) => `
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FAF9F6;border-radius:14px;margin-bottom:12px;">
+          <tr><td style="padding:18px 22px;">
+            <p style="margin:0 0 12px;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#8A8A8A;">${label} · ${formatEmailDate(leg.departureDate)}</p>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td width="42%" style="vertical-align:top;">
+                  <p style="margin:0;font-size:30px;font-weight:800;color:#1A1A1A;letter-spacing:-1px;line-height:1;">${leg.origin}</p>
+                  <p style="margin:6px 0 0;font-size:14px;color:#1A1A1A;font-weight:600;">${leg.departure || ""}</p>
+                  <p style="margin:2px 0 0;font-size:12px;color:#8A8A8A;">${leg.departureAirport || ""}</p>
+                </td>
+                <td width="16%" align="center" style="vertical-align:middle;">
+                  <p style="margin:0;font-size:18px;color:#FFE500;line-height:1;">✈</p>
+                  <p style="margin:6px 0 0;font-size:11px;color:#8A8A8A;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Direct</p>
+                </td>
+                <td width="42%" align="right" style="vertical-align:top;">
+                  <p style="margin:0;font-size:30px;font-weight:800;color:#1A1A1A;letter-spacing:-1px;line-height:1;">${leg.destination}</p>
+                  <p style="margin:6px 0 0;font-size:14px;color:#1A1A1A;font-weight:600;">${leg.arrival || ""}</p>
+                  <p style="margin:2px 0 0;font-size:12px;color:#8A8A8A;">${leg.arrivalAirport || ""}</p>
+                </td>
+              </tr>
+            </table>
+            <p style="margin:14px 0 0;padding-top:14px;border-top:1px dashed #E8E6E1;font-size:13px;color:#4A4A4A;">${leg.airline} · Flight <strong style="color:#1A1A1A;">${leg.flightNumber}</strong>${leg.cabinClass ? ` · ${leg.cabinClass}` : ""}</p>
+          </td></tr>
+        </table>`;
+
+  const passengersList = booking.passengers
+    .map(p => `<p style="margin:0 0 6px;font-size:15px;color:#1A1A1A;">✓ <strong>${p.givenName.toUpperCase()} ${p.familyName.toUpperCase()}</strong></p>`)
     .join("");
 
-  // Return flight card HTML
-  const returnFlightHtml = booking.returnFlight
-    ? `
-      <div style="border:1px solid #e5e7eb;border-radius:10px;padding:16px;">
-        <strong>Return · ${formatEmailDate(booking.returnFlight.departureDate)}</strong>
-        <p style="margin:8px 0 0;">
-          <strong>${booking.returnFlight.departure} ${booking.returnFlight.origin}</strong> → <strong>${booking.returnFlight.arrival} ${booking.returnFlight.destination}</strong><br/>
-          Direct · ${booking.returnFlight.airline} · ${booking.returnFlight.flightNumber}
-        </p>
-      </div>
-    `
-    : "";
-
-  const html = `<!DOCTYPE html>
-<html lang="en">
+  const html = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
 <head>
-<meta charset="UTF-8" />
-<title>Booking Confirmed</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="x-apple-disable-message-reformatting" />
+<meta name="color-scheme" content="light" />
+<meta name="supported-color-schemes" content="light" />
+<title>You're booked — ${route}</title>
+<!--[if mso]><style>table,td,div,h1,p{font-family:Arial,sans-serif!important}</style><![endif]-->
 </head>
-
-<body style="margin:0;padding:0;background:#f5f7fb;font-family:Arial,Helvetica,sans-serif;">
-
-<table width="100%" cellpadding="0" cellspacing="0" style="padding:24px 0;">
-<tr>
-<td align="center">
-
-<table width="600" cellpadding="0" cellspacing="0"
-style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,0.08);">
-
-<!-- Header -->
-<tr>
-<td style="background:#0b1220;padding:24px;text-align:center;">
-<h1 style="margin:0;color:#ffffff;font-size:22px;">✈️ Booking Confirmed</h1>
-<p style="margin:6px 0 0;color:#c7d2fe;font-size:14px;">
-Your flight has been successfully booked
-</p>
-</td>
-</tr>
-
-<!-- PNR -->
-<tr>
-<td style="padding:24px;text-align:center;">
-<p style="margin:0;color:#6b7280;font-size:13px;">Airline Booking Reference</p>
-<h2 style="margin:6px 0;letter-spacing:3px;">${booking.bookingReference}</h2>
-<p style="margin:0;color:#9ca3af;">${airlineName}</p>
-</td>
-</tr>
-
-<!-- Info -->
-<tr>
-<td style="padding:0 24px 24px;">
-<div style="background:#f1f5f9;border-radius:10px;padding:16px;font-size:14px;">
-<strong>ℹ️ Check-in Required</strong>
-<p style="margin:8px 0 0;color:#475569;">
-Check-in is completed on the ${airlineName} website or mobile app using your
-booking reference (PNR) and last name.
-</p>
+<body style="margin:0;padding:0;background:#FAF9F6;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;visibility:hidden;mso-hide:all;font-size:1px;color:#FAF9F6;line-height:1px;">
+✈️ ${booking.bookingReference} — your seat is locked in. Tap to view your full itinerary anytime.
 </div>
-</td>
-</tr>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FAF9F6;">
+  <tr><td align="center" style="padding:32px 16px;">
+    <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background:#FFFFFF;border-radius:20px;box-shadow:0 4px 24px rgba(26,26,26,0.06);overflow:hidden;">
 
-<!-- Itinerary -->
-<tr>
-<td style="padding:0 24px 24px;">
-<h3 style="margin-bottom:12px;">${isRoundTrip ? "Round Trip" : "One Way"} Flight Itinerary</h3>
+      <!-- Brand header -->
+      <tr><td style="padding:32px 40px 0;">
+        <a href="https://planeraai.app" style="text-decoration:none;display:inline-block;"><img src="https://planeraai.app/logo.png" alt="Planera" width="140" style="display:block;width:140px;max-width:140px;height:auto;border:0;outline:none;text-decoration:none;" /></a>
+      </td></tr>
 
-<div style="border:1px solid #e5e7eb;border-radius:10px;padding:16px;margin-bottom:12px;">
-<strong>Outbound · ${formatEmailDate(booking.outboundFlight.departureDate)}</strong>
-<p style="margin:8px 0 0;">
-<strong>${booking.outboundFlight.departure} ${booking.outboundFlight.origin}</strong> → <strong>${booking.outboundFlight.arrival} ${booking.outboundFlight.destination}</strong><br/>
-Direct · ${booking.outboundFlight.airline} · ${booking.outboundFlight.flightNumber}
-</p>
-</div>
+      <!-- Hero -->
+      <tr><td style="padding:24px 40px 8px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <p style="margin:0 0 8px;font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#8A8A8A;">Booking confirmed ✈</p>
+        <h1 style="margin:0 0 8px;font-size:30px;line-height:1.2;font-weight:800;color:#1A1A1A;letter-spacing:-0.8px;">${firstName}, you're going to ${booking.outboundFlight.destination}.</h1>
+        <p style="margin:0 0 24px;font-size:16px;line-height:1.6;color:#4A4A4A;">Your seat is locked in. Save this email — it's your proof of booking.</p>
+      </td></tr>
 
-${returnFlightHtml}
+      <!-- PNR ticket-stub card -->
+      <tr><td style="padding:0 40px 24px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#1A1A1A;border-radius:16px;">
+          <tr><td style="padding:22px 24px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td style="vertical-align:top;">
+                  <p style="margin:0 0 4px;font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#FFE500;">Confirmation</p>
+                  <p style="margin:0;font-size:26px;font-weight:800;letter-spacing:4px;color:#FFFFFF;font-family:'SF Mono',Menlo,Consolas,monospace;">${booking.bookingReference}</p>
+                  <p style="margin:6px 0 0;font-size:12px;color:#9B9B9B;">${airlineName}</p>
+                </td>
+                <td align="right" style="vertical-align:top;">
+                  <p style="margin:0;font-size:11px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:#9B9B9B;">Total paid</p>
+                  <p style="margin:4px 0 0;font-size:22px;font-weight:800;color:#FFFFFF;letter-spacing:-0.5px;">${formatCurrency(booking.totalAmount, booking.currency)}</p>
+                </td>
+              </tr>
+            </table>
+          </td></tr>
+        </table>
+      </td></tr>
 
-</td>
-</tr>
+      <!-- Primary CTA -->
+      <tr><td align="center" style="padding:0 40px 28px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+          <tr><td align="center" style="border-radius:999px;background:#FFE500;">
+            <a href="https://planeraai.app" style="display:inline-block;padding:14px 32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;font-weight:800;color:#1A1A1A;text-decoration:none;border-radius:999px;letter-spacing:0.2px;">View itinerary in Planera</a>
+          </td></tr>
+        </table>
+      </td></tr>
 
-<!-- Passenger -->
-<tr>
-<td style="padding:0 24px 24px;">
-<h3>Passengers</h3>
-${passengersHtml}
-</td>
-</tr>
+      <!-- Itinerary -->
+      <tr><td style="padding:0 40px 8px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <p style="margin:0 0 12px;font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#1A1A1A;">${isRoundTrip ? "Round trip" : "One way"} itinerary</p>
+        ${renderLeg("Outbound", booking.outboundFlight)}
+        ${booking.returnFlight ? renderLeg("Return", booking.returnFlight) : ""}
+      </td></tr>
 
-<!-- Payment -->
-<tr>
-<td style="padding:0 24px 24px;">
-<h3>Total Paid</h3>
-<p style="font-size:18px;"><strong>${formatCurrency(booking.totalAmount, booking.currency)}</strong></p>
-</td>
-</tr>
+      <!-- Passengers -->
+      <tr><td style="padding:16px 40px 8px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <p style="margin:0 0 12px;font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#1A1A1A;">Passengers</p>
+        ${passengersList}
+      </td></tr>
 
-<!-- CTA -->
-<tr>
-<td style="padding:0 24px 32px;text-align:center;">
-<a href="https://planera.app" style="background:#111827;color:#ffffff;padding:12px 20px;
-border-radius:8px;text-decoration:none;display:inline-block;">
-View Booking in App
-</a>
-</td>
-</tr>
+      <!-- Check-in tip -->
+      <tr><td style="padding:24px 40px 8px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FFFBE0;border-radius:14px;border-left:4px solid #FFE500;">
+          <tr><td style="padding:18px 22px;">
+            <p style="margin:0 0 6px;font-size:14px;font-weight:700;color:#1A1A1A;">⏰ Don't forget to check in</p>
+            <p style="margin:0;font-size:14px;line-height:1.6;color:#4A4A4A;">Online check-in usually opens 24h before departure. Use confirmation <strong style="color:#1A1A1A;">${booking.bookingReference}</strong> + your last name on the ${airlineName} website or app.</p>
+          </td></tr>
+        </table>
+      </td></tr>
 
-<!-- Footer -->
-<tr>
-<td style="border-top:1px solid #e5e7eb;padding:16px 24px;font-size:12px;color:#6b7280;">
-Questions about your booking?<br/>
-Contact us at <a href="mailto:support@planeraai.app">support@planeraai.app</a><br/><br/>
-© ${new Date().getFullYear()} Planera. All rights reserved.
-</td>
-</tr>
+      <!-- Secondary upsell / engagement -->
+      <tr><td style="padding:24px 40px 8px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <p style="margin:0 0 8px;font-size:16px;font-weight:700;color:#1A1A1A;">Plan the rest of your trip in seconds</p>
+        <p style="margin:0 0 14px;font-size:14px;line-height:1.6;color:#4A4A4A;">Open Planera to build a smart day-by-day itinerary, save can't-miss spots, and share it with whoever's coming with you.</p>
+        <a href="https://planeraai.app" style="display:inline-block;font-size:14px;font-weight:700;color:#1A1A1A;text-decoration:underline;">Build my itinerary →</a>
+      </td></tr>
 
+      <!-- Footer -->
+      <tr><td style="padding:32px 40px;border-top:1px solid #EFEDE7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;text-align:center;">
+        <p style="margin:0 0 8px;font-size:13px;color:#4A4A4A;">Need help? Reply to this email or write to <a href="mailto:support@planeraai.app" style="color:#1A1A1A;font-weight:600;text-decoration:underline;">support@planeraai.app</a></p>
+        <p style="margin:0 0 4px;font-size:13px;color:#1A1A1A;font-weight:600;">Planera — travel smarter, plan better.</p>
+        <p style="margin:0;font-size:12px;color:#9B9B9B;">© ${year} Planera. All rights reserved.</p>
+      </td></tr>
+
+    </table>
+  </td></tr>
 </table>
-
-</td>
-</tr>
-</table>
-
 </body>
 </html>`;
 
@@ -566,7 +575,7 @@ export const sendFlightConfirmationEmail = internalAction({
         })),
       });
 
-      const emailSubject = `Flight Confirmation - ${booking.outboundFlight.origin} to ${booking.outboundFlight.destination} | ${booking.bookingReference || "Planera"}`;
+      const emailSubject = `✈ You're booked: ${booking.outboundFlight.origin} → ${booking.outboundFlight.destination} · ${booking.bookingReference || "Planera"}`;
       console.log(`📧 [EMAIL] Sending email with subject: "${emailSubject}"`);
       
       // Send the email

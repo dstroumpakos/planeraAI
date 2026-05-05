@@ -392,6 +392,140 @@ export const sendBookingReceiptEmail = internalAction({
 });
 
 /**
+ * Test sending the redesigned welcome email as raw HTML (bypasses Postmark template).
+ * Use this to preview the new design before uploading the template to the Postmark dashboard.
+ */
+export const testWelcomeEmailRaw = action({
+  args: {
+    to: v.string(),
+    name: v.optional(v.string()),
+  },
+  returns: v.object({
+    success: v.boolean(),
+    messageId: v.optional(v.string()),
+    error: v.optional(v.string()),
+  }),
+  handler: async (_ctx, args) => {
+    const apiToken = process.env.POSTMARK_SERVER_TOKEN;
+    if (!apiToken) return { success: false, error: "POSTMARK_SERVER_TOKEN not set" };
+
+    const name = args.name || "there";
+    const product_name = "Planera";
+    const product_url = "https://planeraai.app";
+
+    const htmlBody = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="x-apple-disable-message-reformatting" />
+<meta name="color-scheme" content="light" />
+<meta name="supported-color-schemes" content="light" />
+<title>Welcome to ${product_name}</title>
+<!--[if mso]><style>table,td,div,h1,p{font-family:Arial,sans-serif!important}</style><![endif]-->
+</head>
+<body style="margin:0;padding:0;background:#FAF9F6;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;visibility:hidden;mso-hide:all;font-size:1px;color:#FAF9F6;line-height:1px;">
+Your AI travel co-pilot is ready. Plan your first trip in under 60 seconds. ✈️
+</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FAF9F6;">
+  <tr><td align="center" style="padding:32px 16px;">
+    <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background:#FFFFFF;border-radius:20px;box-shadow:0 4px 24px rgba(26,26,26,0.06);overflow:hidden;">
+      <tr><td style="padding:32px 40px 0;">
+        <a href="${product_url}" style="text-decoration:none;display:inline-block;"><img src="https://planeraai.app/logo.png" alt="${product_name}" width="140" style="display:block;width:140px;max-width:140px;height:auto;border:0;outline:none;text-decoration:none;" /></a>
+      </td></tr>
+      <tr><td style="padding:24px 40px 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <p style="margin:0 0 8px;font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#8A8A8A;">Welcome aboard ✈</p>
+        <h1 style="margin:0 0 12px;font-size:34px;line-height:1.15;font-weight:800;color:#1A1A1A;letter-spacing:-1px;">Hey ${name}, the world just got smaller.</h1>
+        <p style="margin:0 0 24px;font-size:16px;line-height:1.6;color:#4A4A4A;">You just joined thousands of travelers who plan in minutes — not weeks. Tell ${product_name} where you want to go, and your AI co-pilot will handle the rest: itineraries, flights, hidden gems, the lot.</p>
+      </td></tr>
+      <tr><td align="center" style="padding:0 40px 8px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+          <tr><td align="center" style="border-radius:999px;background:#FFE500;">
+            <a href="${product_url}" style="display:inline-block;padding:16px 36px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:16px;font-weight:800;color:#1A1A1A;text-decoration:none;border-radius:999px;letter-spacing:0.2px;">Plan my first trip →</a>
+          </td></tr>
+        </table>
+      </td></tr>
+      <tr><td align="center" style="padding:8px 40px 32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <p style="margin:0;font-size:13px;color:#8A8A8A;">Takes under 60 seconds. No credit card.</p>
+      </td></tr>
+      <tr><td style="padding:0 40px 8px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <p style="margin:0 0 16px;font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:#1A1A1A;">What you can do today</p>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FAF9F6;border-radius:14px;margin-bottom:10px;"><tr><td style="padding:18px 22px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+          <td width="40" style="vertical-align:top;font-size:22px;line-height:1;">🤖</td>
+          <td style="vertical-align:top;"><p style="margin:0 0 4px;font-size:15px;font-weight:700;color:#1A1A1A;">Generate full itineraries with AI</p><p style="margin:0;font-size:14px;line-height:1.5;color:#4A4A4A;">Day-by-day plans tuned to your style, budget &amp; pace.</p></td>
+        </tr></table></td></tr></table>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FAF9F6;border-radius:14px;margin-bottom:10px;"><tr><td style="padding:18px 22px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+          <td width="40" style="vertical-align:top;font-size:22px;line-height:1;">📍</td>
+          <td style="vertical-align:top;"><p style="margin:0 0 4px;font-size:15px;font-weight:700;color:#1A1A1A;">Discover hidden gems &amp; local insights</p><p style="margin:0;font-size:14px;line-height:1.5;color:#4A4A4A;">Real recommendations from travelers who’ve been there — not tourist traps.</p></td>
+        </tr></table></td></tr></table>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FAF9F6;border-radius:14px;margin-bottom:10px;"><tr><td style="padding:18px 22px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+          <td width="40" style="vertical-align:top;font-size:22px;line-height:1;">📡</td>
+          <td style="vertical-align:top;"><p style="margin:0 0 4px;font-size:15px;font-weight:700;color:#1A1A1A;">Catch fare drops while you sleep</p><p style="margin:0;font-size:14px;line-height:1.5;color:#4A4A4A;">Low-fare radar pings you the moment your route gets cheap.</p></td>
+        </tr></table></td></tr></table>
+      </td></tr>
+      <tr><td style="padding:24px 40px 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FFFBE0;border-radius:14px;border-left:4px solid #FFE500;"><tr><td style="padding:18px 22px;">
+          <p style="margin:0 0 6px;font-size:14px;font-weight:700;color:#1A1A1A;">⚡ Pro tip</p>
+          <p style="margin:0;font-size:14px;line-height:1.6;color:#4A4A4A;">Already dreaming of somewhere? Just type <em>"5 days in Lisbon, mid-budget, food &amp; sunsets"</em> — Planera takes it from there.</p>
+        </td></tr></table>
+      </td></tr>
+      <tr><td style="padding:32px 40px;border-top:1px solid #EFEDE7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;text-align:center;">
+        <p style="margin:0 0 10px;font-size:13px;color:#4A4A4A;">Hit reply — a real human will read it. Or write us at <a href="mailto:support@planeraai.app" style="color:#1A1A1A;font-weight:600;text-decoration:underline;">support@planeraai.app</a></p>
+        <p style="margin:0 0 4px;font-size:13px;color:#1A1A1A;font-weight:600;">${product_name} — travel smarter, plan better.</p>
+        <p style="margin:0;font-size:12px;color:#9B9B9B;">You're getting this because you signed up for ${product_name}.</p>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>`;
+
+    const textBody = `Hey ${name}, the world just got smaller.
+
+You just joined thousands of travelers who plan in minutes — not weeks. Tell ${product_name} where you want to go, and your AI co-pilot will handle the rest: itineraries, flights, hidden gems, the lot.
+
+Plan my first trip → ${product_url}
+
+WHAT YOU CAN DO TODAY
+- Generate full itineraries with AI — day-by-day plans tuned to your style, budget & pace
+- Discover hidden gems & local insights — real recommendations from travelers who've been there
+- Catch fare drops while you sleep — low-fare radar pings you the moment your route gets cheap
+
+PRO TIP: Already dreaming of somewhere? Just type "5 days in Lisbon, mid-budget, food & sunsets" — Planera takes it from there.
+
+Need help? Hit reply or write to support@planeraai.app
+${product_name} — travel smarter, plan better.`;
+
+    try {
+      const response = await fetch("https://api.postmarkapp.com/email", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "X-Postmark-Server-Token": apiToken,
+        },
+        body: JSON.stringify({
+          From: SENDER_EMAIL,
+          To: args.to,
+          Subject: `Welcome to ${product_name}, ${name} ✈`,
+          HtmlBody: htmlBody,
+          TextBody: textBody,
+          MessageStream: MESSAGE_STREAM,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        return { success: false, error: result.Message || `HTTP ${response.status}` };
+      }
+      return { success: true, messageId: result.MessageID };
+    } catch (e) {
+      return { success: false, error: e instanceof Error ? e.message : "Unknown error" };
+    }
+  },
+});
+
+/**
  * Test sending a receipt email (for development/testing)
  */
 export const testReceiptEmail = action({
@@ -547,75 +681,95 @@ export const sendAccountDeletionEmail = internalAction({
 
     try {
       const userName = args.name || "there";
+      const year = new Date().getFullYear();
       console.log(`📧 [POSTMARK] Sending account deletion email to ${args.to}`);
 
-      const htmlBody = `
-<!DOCTYPE html>
-<html>
+      // Brand: cream #FAF9F6, charcoal #1A1A1A, yellow accent #FFE500
+      // Bulletproof, mobile-first, table-based layout — Outlook safe.
+      const htmlBody = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
 <head>
-  <meta charset="utf-8">
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1A1A1A; line-height: 1.6; padding: 0; margin: 0; background-color: #FAF9F6; }
-    .container { max-width: 560px; margin: 0 auto; padding: 40px 24px; }
-    .header { text-align: center; margin-bottom: 32px; }
-    .logo { font-size: 28px; font-weight: 800; color: #1A1A1A; }
-    .logo span { color: #FFE500; }
-    h1 { font-size: 22px; font-weight: 700; margin: 0 0 16px; }
-    p { font-size: 15px; color: #6B6B6B; margin: 0 0 16px; }
-    .highlight { background: #FFF9C4; padding: 16px 20px; border-radius: 12px; margin: 24px 0; }
-    .highlight p { color: #1A1A1A; margin: 0; font-size: 14px; }
-    .footer { margin-top: 40px; padding-top: 24px; border-top: 1px solid #E8E6E1; text-align: center; }
-    .footer p { font-size: 12px; color: #9B9B9B; }
-    a { color: #1A1A1A; }
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="x-apple-disable-message-reformatting" />
+<meta name="color-scheme" content="light" />
+<meta name="supported-color-schemes" content="light" />
+<title>Your Planera account has been deleted</title>
+<!--[if mso]><style>table,td,div,h1,p{font-family:Arial,sans-serif!important}</style><![endif]-->
 </head>
-<body>
-  <div class="container">
-    <div class="header">
-      <div class="logo">Planera<span>.</span></div>
-    </div>
-    <h1>Your account has been deleted</h1>
-    <p>Hi ${userName},</p>
-    <p>We're confirming that your Planera account and all associated data have been permanently deleted as requested.</p>
-    <div class="highlight">
-      <p><strong>What was deleted:</strong></p>
-      <p>• Your profile and account settings</p>
-      <p>• All saved trips and itineraries</p>
-      <p>• Booking history and traveler profiles</p>
-      <p>• Insights and preferences</p>
-      <p>• Session and authentication data</p>
-    </div>
-    <p>This action is irreversible. If you'd like to use Planera again in the future, you're welcome to create a new account.</p>
-    <p>If you did not request this deletion, please contact us immediately at <a href="mailto:support@planeraai.app">support@planeraai.app</a>.</p>
-    <p>We're sorry to see you go. Thank you for being part of Planera.</p>
-    <div class="footer">
-      <p>Planera – Travel smarter. Plan better.</p>
-      <p>&copy; ${new Date().getFullYear()} Planera. All rights reserved.</p>
-    </div>
-  </div>
+<body style="margin:0;padding:0;background:#FAF9F6;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;visibility:hidden;mso-hide:all;font-size:1px;color:#FAF9F6;line-height:1px;">
+Your account and all associated data have been permanently removed. The door's still open if you ever come back. ✈️
+</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FAF9F6;">
+  <tr><td align="center" style="padding:32px 16px;">
+    <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background:#FFFFFF;border-radius:20px;box-shadow:0 4px 24px rgba(26,26,26,0.06);overflow:hidden;">
+      <tr><td style="padding:40px 40px 8px;">
+        <a href="https://planeraai.app" style="text-decoration:none;display:inline-block;"><img src="https://planeraai.app/logo.png" alt="Planera" width="140" style="display:block;width:140px;max-width:140px;height:auto;border:0;outline:none;text-decoration:none;" /></a>
+      </td></tr>
+      <tr><td style="padding:24px 40px 8px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <h1 style="margin:0 0 12px;font-size:26px;line-height:1.25;font-weight:800;color:#1A1A1A;letter-spacing:-0.5px;">Your account has been deleted</h1>
+        <p style="margin:0 0 16px;font-size:16px;line-height:1.6;color:#1A1A1A;">Hi ${userName},</p>
+        <p style="margin:0 0 24px;font-size:16px;line-height:1.6;color:#4A4A4A;">As requested, your Planera account and everything tied to it have been permanently removed from our systems.</p>
+      </td></tr>
+      <tr><td style="padding:0 40px 8px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FAF9F6;border-radius:14px;border-left:4px solid #FFE500;">
+          <tr><td style="padding:20px 22px;">
+            <p style="margin:0 0 10px;font-size:13px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;color:#1A1A1A;">What we deleted</p>
+            <p style="margin:0;font-size:15px;line-height:1.8;color:#1A1A1A;">
+              ✓ Your profile &amp; account settings<br/>
+              ✓ All saved trips and itineraries<br/>
+              ✓ Bookings &amp; traveler profiles<br/>
+              ✓ Insights, preferences &amp; activity<br/>
+              ✓ Session and authentication data
+            </p>
+          </td></tr>
+        </table>
+      </td></tr>
+      <tr><td style="padding:24px 40px 8px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#4A4A4A;">This is permanent — we kept no copies. If you ever want to plan with us again, the door's open and your next trip is one tap away.</p>
+      </td></tr>
+      <tr><td align="center" style="padding:8px 40px 32px;">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+          <tr><td align="center" style="border-radius:999px;background:#1A1A1A;">
+            <a href="https://planeraai.app" style="display:inline-block;padding:14px 28px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;font-weight:700;color:#FFFFFF;text-decoration:none;border-radius:999px;letter-spacing:0.2px;">Come back to Planera</a>
+          </td></tr>
+        </table>
+      </td></tr>
+      <tr><td style="padding:0 40px 32px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <p style="margin:0;font-size:13px;line-height:1.6;color:#8A8A8A;">Didn't request this? Email us right away at <a href="mailto:support@planeraai.app" style="color:#1A1A1A;font-weight:600;text-decoration:underline;">support@planeraai.app</a> and we'll investigate.</p>
+      </td></tr>
+      <tr><td style="padding:24px 40px 32px;border-top:1px solid #EFEDE7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;text-align:center;">
+        <p style="margin:0 0 6px;font-size:13px;color:#1A1A1A;font-weight:600;">Planera — travel smarter, plan better.</p>
+        <p style="margin:0;font-size:12px;color:#9B9B9B;">© ${year} Planera. All rights reserved.</p>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
 </body>
 </html>`;
 
-      const textBody = `Your Planera Account Has Been Deleted
+      const textBody = `PLANERA
+
+Your account has been deleted
 
 Hi ${userName},
 
-We're confirming that your Planera account and all associated data have been permanently deleted as requested.
+As requested, your Planera account and everything tied to it have been permanently removed from our systems.
 
-What was deleted:
-- Your profile and account settings
+WHAT WE DELETED
+- Your profile & account settings
 - All saved trips and itineraries
-- Booking history and traveler profiles
-- Insights and preferences
+- Bookings & traveler profiles
+- Insights, preferences & activity
 - Session and authentication data
 
-This action is irreversible. If you'd like to use Planera again in the future, you're welcome to create a new account.
+This is permanent — we kept no copies. If you ever want to plan with us again, the door's open: https://planeraai.app
 
-If you did not request this deletion, please contact us immediately at support@planeraai.app.
+Didn't request this? Email us right away at support@planeraai.app and we'll investigate.
 
-We're sorry to see you go. Thank you for being part of Planera.
-
-Planera – Travel smarter. Plan better.`;
+Planera — travel smarter, plan better.
+© ${year} Planera. All rights reserved.`;
 
       const response = await fetch("https://api.postmarkapp.com/email", {
         method: "POST",
@@ -627,7 +781,7 @@ Planera – Travel smarter. Plan better.`;
         body: JSON.stringify({
           From: SENDER_EMAIL,
           To: args.to,
-          Subject: "Your Planera account has been deleted",
+          Subject: "Your Planera account has been deleted ✓",
           HtmlBody: htmlBody,
           TextBody: textBody,
           MessageStream: MESSAGE_STREAM,
