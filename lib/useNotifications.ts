@@ -130,6 +130,16 @@ export function useNotifications() {
         const handleNotificationTap = async (data: any) => {
             console.log("[Notifications] User tapped notification:", data);
             try {
+                // Fire-and-forget tap analytics for deal broadcasts
+                if (data?.broadcastId && token) {
+                    convex
+                        .mutation((api as any).lowFareRadar.trackBroadcastTap, {
+                            token,
+                            broadcastId: data.broadcastId,
+                        })
+                        .catch((err: any) => console.warn("[Notifications] trackBroadcastTap failed:", err));
+                }
+
                 if (data?.screen === "trip" && data?.tripId) {
                     router.push(`/trip/${data.tripId}` as any);
                     return;

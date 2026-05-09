@@ -610,9 +610,8 @@ export const broadcastDealToHomeAirports = action({
     customTitle: v.optional(v.string()),
     customBody: v.optional(v.string()),
   },
-  handler: async (ctx, args): Promise<{ targeted: number; sent: number; skipped: number }> => {
-    // Validate admin key via internal query (action can't use process.env helpers
-    // that throw inside ctx.db, but validateAdminKey only checks env vars + string)
+  handler: async (ctx, args): Promise<{ targeted: number; sent: number; skipped: number; broadcastId: string }> => {
+    // Validate admin key
     const expected = process.env.CONVEX_LOW_FARE_ADMIN_KEY;
     if (!expected) {
       throw new ConvexError("CONVEX_LOW_FARE_ADMIN_KEY environment variable not set");
@@ -637,6 +636,18 @@ export const broadcastDealToHomeAirports = action({
     const users: Array<{ userId: string; language?: string; homeAirport: string }> =
       await ctx.runQuery(internal.lowFareRadar.getUsersByHomeAirport, { origins });
 
+    // Create a broadcast log row up front so we can include its id in the push
+    // payload. Counts are patched in once we know them.
+    const broadcastId: any = await ctx.runMutation(internal.lowFareRadar.createBroadcastLog, {
+      dealId: args.dealId,
+      origins,
+      mode: args.customTitle || args.customBody ? "custom" : "auto",
+      customTitle: args.customTitle,
+      customBody: args.customBody,
+      routeSnapshot: `${finalDeal.origin} → ${finalDeal.destination}`,
+      targeted: users.length,
+    });
+
     let sent = 0;
     let skipped = 0;
 
@@ -655,6 +666,8 @@ export const broadcastDealToHomeAirports = action({
           data: {
             screen: "deal-trip",
             dealId: args.dealId,
+            // broadcastId lets the app attribute taps back to this broadcast row
+            broadcastId: String(broadcastId),
             origin: finalDeal.origin,
             originCity: finalDeal.originCity,
             destination: finalDeal.destination,
@@ -668,9 +681,158 @@ export const broadcastDealToHomeAirports = action({
       }
     }
 
-    return { targeted: users.length, sent, skipped };
+    // Patch final counts
+    await ctx.runMutation(internal.lowFareRadar.finalizeBroadcastLog, {
+      broadcastId,
+      sent,
+      skipped,
+    });
+
+    return { targeted: users.length, sent, skipped, broadcastId: String(broadcastId) };
   },
 });
+
+// ─── Broadcast logging (internal mutations + admin queries + tap tracking) ───
+
+export const createBroadcastLog = internalMutation({
+  args: {
+    dealId: v.optional(v.id("lowFareRadar")),
+    origins: v.array(v.string()),
+    mode: v.string(),
+    customTitle: v.optional(v.string()),
+    customBody: v.optional(v.string()),
+    routeSnapshot: v.optional(v.string()),
+    targeted: v.float64(),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db.insert("notificationBroadcasts", {
+      dealId: args.dealId,
+      origins: args.origins,
+      mode: args.mode,
+      customTitle: args.customTitle,
+      customBody: args.customBody,
+      routeSnapshot: args.routeSnapshot,
+      targeted: args.targeted,
+      sent: 0,
+      skipped: 0,
+      taps: 0,
+      uniqueTaps: 0,
+      createdAt: Date.now(),
+    });
+  },
+});
+
+export const finalizeBroadcastLog = internalMutation({
+  args: {
+    broadcastId: v.id("notificationBroadcasts"),
+    sent: v.float64(),
+    skipped: v.float64(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.broadcastId, {
+      sent: args.sent,
+      skipped: args.skipped,
+    });
+  },
+});
+
+/**
+ * Called by the app when a user taps a deal-broadcast notification.
+ * Auth is intentionally light — we only need to verify the user is logged in
+ * via their session token. Tap counts are coarse engagement metrics, not
+ * security-sensitive data.
+ */
+export const trackBroadcastTap = mutation({
+  args: {
+    token: v.string(),
+    broadcastId: v.id("notificationBroadcasts"),
+  },
+  handler: async (ctx, args) => {
+    // Validate session token
+    const session = await ctx.db
+      .query("sessions")
+      .withIndex("by_token", (q) => q.eq("token", args.token))
+      .first();
+    if (!session || (session.expiresAt && session.expiresAt < Date.now())) {
+      // Silently no-op rather than throw — analytics shouldn't break the UX
+      return null;
+    }
+
+    const broadcast = await ctx.db.get(args.broadcastId);
+    if (!broadcast) return null;
+
+    // Always increment total taps
+    const newTaps = (broadcast.taps ?? 0) + 1;
+
+    // Check if this user has tapped before to compute uniqueTaps
+    const previousTap = await ctx.db
+      .query("notificationBroadcastTaps")
+      .withIndex("by_broadcast_user", (q) =>
+        q.eq("broadcastId", args.broadcastId).eq("userId", session.userId)
+      )
+      .first();
+
+    let newUniqueTaps = broadcast.uniqueTaps ?? 0;
+    if (!previousTap) {
+      newUniqueTaps += 1;
+      await ctx.db.insert("notificationBroadcastTaps", {
+        broadcastId: args.broadcastId,
+        userId: session.userId,
+        tappedAt: Date.now(),
+      });
+    }
+
+    await ctx.db.patch(args.broadcastId, {
+      taps: newTaps,
+      uniqueTaps: newUniqueTaps,
+    });
+    return null;
+  },
+});
+
+/** Admin: list recent broadcasts for the analytics tab. */
+export const listBroadcasts = query({
+  args: {
+    adminKey: v.string(),
+    limit: v.optional(v.float64()),
+  },
+  handler: async (ctx, args) => {
+    validateAdminKey(args.adminKey);
+    const limit = args.limit ?? 100;
+    const rows = await ctx.db
+      .query("notificationBroadcasts")
+      .withIndex("by_createdAt")
+      .order("desc")
+      .take(limit);
+
+    // Enrich with deal route info if the deal still exists
+    const enriched = await Promise.all(
+      rows.map(async (b) => {
+        let dealInfo: any = null;
+        if (b.dealId) {
+          const deal = await ctx.db.get(b.dealId);
+          if (deal) {
+            dealInfo = {
+              origin: deal.origin,
+              originCity: deal.originCity,
+              destination: deal.destination,
+              destinationCity: deal.destinationCity,
+              price: deal.price,
+              currency: deal.currency,
+              active: deal.active,
+              deletedAt: deal.deletedAt,
+            };
+          }
+        }
+        return { ...b, dealInfo };
+      })
+    );
+
+    return enriched;
+  },
+});
+
+
 
 // ─── Broadcast translations / formatters ───
 //

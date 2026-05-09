@@ -672,6 +672,81 @@
       background: var(--primary); color: var(--text); border-color: var(--primary);
     }
 
+    /* Broadcast row */
+    .broadcast-row {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px 14px;
+      margin-bottom: 10px;
+    }
+    .broadcast-row.deleted { opacity: .6; }
+    .broadcast-head {
+      display: flex; justify-content: space-between; align-items: flex-start;
+      gap: 10px; margin-bottom: 6px;
+    }
+    .broadcast-route {
+      font-size: 14px; font-weight: 700; color: var(--text);
+      display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+    }
+    .broadcast-iata {
+      background: var(--bg); padding: 2px 8px; border-radius: 6px;
+      font-family: monospace; font-size: 12px;
+    }
+    .broadcast-time {
+      font-size: 11px; color: var(--muted); white-space: nowrap;
+    }
+    .broadcast-meta {
+      display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0;
+    }
+    .broadcast-pill {
+      font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 10px;
+      background: var(--bg); color: var(--muted);
+    }
+    .broadcast-pill.mode-auto { background: #DBEAFE; color: #1E40AF; }
+    .broadcast-pill.mode-custom { background: #FEF3C7; color: #92400E; }
+    .broadcast-pill.deleted { background: #FEE2E2; color: #991B1B; }
+    .broadcast-stats {
+      display: grid; grid-template-columns: repeat(4, 1fr);
+      gap: 8px; margin-top: 8px;
+    }
+    .broadcast-stat {
+      background: var(--bg); border-radius: 8px; padding: 6px 8px;
+      text-align: center;
+    }
+    .broadcast-stat-label {
+      font-size: 9px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .4px; color: var(--muted);
+    }
+    .broadcast-stat-value {
+      font-size: 16px; font-weight: 700; color: var(--text); margin-top: 2px;
+    }
+    .broadcast-stat.ctr-good .broadcast-stat-value { color: var(--success); }
+    .broadcast-stat.ctr-bad .broadcast-stat-value { color: var(--danger); }
+    .broadcast-preview {
+      margin-top: 8px; padding: 8px 10px;
+      background: var(--bg); border-radius: 8px;
+      font-size: 12px; color: var(--text); line-height: 1.4;
+    }
+    .broadcast-preview .pt {
+      font-weight: 700; margin-bottom: 2px;
+    }
+    .broadcast-preview .pb {
+      color: var(--muted); font-size: 11px;
+    }
+    .broadcast-summary-card {
+      flex: 1; min-width: 110px;
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 12px; padding: 10px 12px;
+    }
+    .broadcast-summary-card .lbl {
+      font-size: 10px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .4px; color: var(--muted);
+    }
+    .broadcast-summary-card .val {
+      font-size: 18px; font-weight: 700; color: var(--text); margin-top: 2px;
+    }
+
     /* Empty */
     .empty-state {
       text-align: center;
@@ -1120,6 +1195,9 @@
     <div class="tab" onclick="switchTab('airports')" id="tab-airports">
       <span data-i18n="tab_airports">&#127968; User Airports</span>
     </div>
+    <div class="tab" onclick="switchTab('broadcasts')" id="tab-broadcasts">
+      <span>&#128226; Notifications</span>
+    </div>
   </div>
 
   <!-- Import Deal -->
@@ -1424,6 +1502,18 @@
         <button class="btn-export" onclick="exportWishlistCSV()">❤️ Export Wishlist (.csv)</button>
       </div>
       <div id="airportsList"></div>
+    </div>
+  </div>
+
+  <!-- Notification Broadcasts -->
+  <div class="content" id="content-broadcasts" style="display:none">
+    <div class="form-card">
+      <div class="form-section-title">📣 <span>Notification Broadcasts</span></div>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:12px">
+        Every push you've sent from the deals tab. Tap-through rate (CTR) is computed as <strong>unique tappers ÷ users sent to</strong>.
+      </p>
+      <div id="broadcastsSummary" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"></div>
+      <div id="broadcastsList"></div>
     </div>
   </div>
 </div>
@@ -1807,12 +1897,13 @@
 
   // TABS
   function switchTab(tab) {
-    ['import', 'add', 'list', 'airports'].forEach(function(t) {
+    ['import', 'add', 'list', 'airports', 'broadcasts'].forEach(function(t) {
       document.getElementById('content-' + t).style.display = t === tab ? 'block' : 'none';
       document.getElementById('tab-' + t).classList.toggle('active', t === tab);
     });
     if (tab === 'list') loadDeals();
     if (tab === 'airports') loadAirports();
+    if (tab === 'broadcasts') loadBroadcasts();
   }
 
   // CONVEX API
@@ -2308,6 +2399,139 @@
   // AIRPORTS & WISHLIST
   var userAirports = [];
   var wishlistDests = [];
+
+  // ── Notification broadcasts (analytics tab) ──
+  var broadcasts = [];
+
+  function loadBroadcasts() {
+    var listEl = document.getElementById('broadcastsList');
+    var sumEl = document.getElementById('broadcastsSummary');
+    if (!adminKey) {
+      listEl.innerHTML = '<div class="empty-state"><div class="icon">\uD83D\uDD0C</div><p>' + escapeHtml(t('empty_connect')) + '</p></div>';
+      sumEl.innerHTML = '';
+      return;
+    }
+    listEl.innerHTML = '<div class="empty-state"><p>Loading…</p></div>';
+    convexQuery('lowFareRadar:listBroadcasts', { adminKey: adminKey, limit: 200 })
+      .then(function(rows) {
+        broadcasts = rows || [];
+        renderBroadcasts();
+      })
+      .catch(function(err) {
+        listEl.innerHTML = '<div class="empty-state"><p style="color:var(--danger)">Error: ' + escapeHtml(err.message || String(err)) + '</p></div>';
+      });
+  }
+
+  function renderBroadcasts() {
+    var listEl = document.getElementById('broadcastsList');
+    var sumEl = document.getElementById('broadcastsSummary');
+
+    if (!broadcasts.length) {
+      sumEl.innerHTML = '';
+      listEl.innerHTML = '<div class="empty-state"><div class="icon">📭</div><p>No broadcasts sent yet.</p><p style="font-size:12px;margin-top:6px">Tap the 📣 button on any active deal to send your first push.</p></div>';
+      return;
+    }
+
+    // Aggregate summary
+    var totalSent = 0, totalTaps = 0, totalUnique = 0, totalTargeted = 0;
+    broadcasts.forEach(function(b) {
+      totalSent += (b.sent || 0);
+      totalTargeted += (b.targeted || 0);
+      totalTaps += (b.taps || 0);
+      totalUnique += (b.uniqueTaps || 0);
+    });
+    var avgCtr = totalSent > 0 ? Math.round((totalUnique / totalSent) * 1000) / 10 : 0;
+
+    sumEl.innerHTML =
+      summaryCard('Broadcasts', String(broadcasts.length)) +
+      summaryCard('Pushes Sent', String(totalSent)) +
+      summaryCard('Total Taps', String(totalTaps)) +
+      summaryCard('Unique Tappers', String(totalUnique)) +
+      summaryCard('Avg CTR', avgCtr.toFixed(1) + '%');
+
+    listEl.innerHTML = broadcasts.map(renderBroadcastRow).join('');
+  }
+
+  function summaryCard(label, value) {
+    return '<div class="broadcast-summary-card"><div class="lbl">' + escapeHtml(label) + '</div><div class="val">' + escapeHtml(value) + '</div></div>';
+  }
+
+  function renderBroadcastRow(b) {
+    var d = b.dealInfo;
+    var route, deletedBadge = '';
+    if (d) {
+      route =
+        '<span class="broadcast-iata">' + escapeHtml(d.origin) + '</span>' +
+        '<span style="color:var(--muted)">→</span>' +
+        '<span class="broadcast-iata">' + escapeHtml(d.destination) + '</span>' +
+        '<span style="font-weight:500;color:var(--muted);font-size:12px">' + escapeHtml(d.originCity) + ' → ' + escapeHtml(d.destinationCity) + '</span>';
+      if (d.deletedAt) deletedBadge = '<span class="broadcast-pill deleted">Deal deleted</span>';
+      else if (!d.active) deletedBadge = '<span class="broadcast-pill deleted">Deal paused</span>';
+    } else if (b.routeSnapshot) {
+      route = '<span class="broadcast-iata">' + escapeHtml(b.routeSnapshot) + '</span>';
+      deletedBadge = '<span class="broadcast-pill deleted">Deal removed</span>';
+    } else {
+      route = '<span style="color:var(--muted)">Unknown route</span>';
+    }
+
+    var when = formatBroadcastTime(b.createdAt);
+    var modePill = b.mode === 'custom'
+      ? '<span class="broadcast-pill mode-custom">Custom copy</span>'
+      : '<span class="broadcast-pill mode-auto">Auto (per language)</span>';
+    var originsPill = (b.origins || []).length
+      ? '<span class="broadcast-pill">Targets: ' + escapeHtml(b.origins.join(', ')) + '</span>'
+      : '';
+
+    var sent = b.sent || 0;
+    var taps = b.taps || 0;
+    var unique = b.uniqueTaps || 0;
+    var ctr = sent > 0 ? (unique / sent) * 100 : 0;
+    var ctrClass = sent === 0 ? '' : (ctr >= 5 ? ' ctr-good' : (ctr < 1 ? ' ctr-bad' : ''));
+    var ctrTxt = sent > 0 ? ctr.toFixed(1) + '%' : '—';
+
+    var preview = '';
+    if (b.mode === 'custom' && (b.customTitle || b.customBody)) {
+      preview =
+        '<div class="broadcast-preview">' +
+          '<div class="pt">' + escapeHtml(b.customTitle || '') + '</div>' +
+          '<div class="pb">' + escapeHtml(b.customBody || '') + '</div>' +
+        '</div>';
+    }
+
+    var deletedClass = (d && d.deletedAt) || (!d && b.routeSnapshot) ? ' deleted' : '';
+
+    return (
+      '<div class="broadcast-row' + deletedClass + '">' +
+        '<div class="broadcast-head">' +
+          '<div class="broadcast-route">' + route + '</div>' +
+          '<div class="broadcast-time">' + escapeHtml(when) + '</div>' +
+        '</div>' +
+        '<div class="broadcast-meta">' + modePill + originsPill + deletedBadge + '</div>' +
+        '<div class="broadcast-stats">' +
+          '<div class="broadcast-stat"><div class="broadcast-stat-label">Sent</div><div class="broadcast-stat-value">' + sent + '</div></div>' +
+          '<div class="broadcast-stat"><div class="broadcast-stat-label">Taps</div><div class="broadcast-stat-value">' + taps + '</div></div>' +
+          '<div class="broadcast-stat"><div class="broadcast-stat-label">Unique</div><div class="broadcast-stat-value">' + unique + '</div></div>' +
+          '<div class="broadcast-stat' + ctrClass + '"><div class="broadcast-stat-label">CTR</div><div class="broadcast-stat-value">' + ctrTxt + '</div></div>' +
+        '</div>' +
+        preview +
+      '</div>'
+    );
+  }
+
+  function formatBroadcastTime(ts) {
+    if (!ts) return '';
+    var d = new Date(ts);
+    var now = Date.now();
+    var diff = now - ts;
+    var min = Math.floor(diff / 60000);
+    if (min < 1) return 'just now';
+    if (min < 60) return min + 'm ago';
+    var hr = Math.floor(min / 60);
+    if (hr < 24) return hr + 'h ago';
+    var day = Math.floor(hr / 24);
+    if (day < 7) return day + 'd ago';
+    return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
 
   function loadAirports() {
     if (!adminKey) {
@@ -2868,6 +3092,8 @@
       if (result.skipped) msg += ' (' + result.skipped + ' failed)';
       toast(msg, 'success');
       closeNotifModal();
+      // Refresh broadcasts tab data so it reflects this send next time it's opened
+      loadBroadcasts();
     }).catch(function(err) {
       sendBtn.disabled = false;
       sendBtn.textContent = '📬 Send notification';
