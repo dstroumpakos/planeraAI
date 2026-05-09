@@ -3,7 +3,7 @@ import { Platform, AppState, Alert } from "react-native";
 import * as Notifications from "expo-notifications";
 import * as Device from "expo-device";
 import Constants from "expo-constants";
-import { useMutation } from "convex/react";
+import { useMutation, useConvex } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useToken } from "@/lib/useAuthenticatedMutation";
 import { useRouter } from "expo-router";
@@ -115,6 +115,7 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
 export function useNotifications() {
     const router = useRouter();
     const { token } = useToken();
+    const convex = useConvex();
     const registerToken = useMutation((api as any).notifications.registerPushToken);
     const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
     const notificationListener = useRef<Notifications.EventSubscription | null>(null);
@@ -122,6 +123,61 @@ export function useNotifications() {
 
     useEffect(() => {
         if (!token || token === "skip") return;
+
+        // Handle a notification tap → route the user to the right screen.
+        // For deal pushes we fetch the live deal so the user lands on the
+        // deal-trip screen with the flight already selected (locked card).
+        const handleNotificationTap = async (data: any) => {
+            console.log("[Notifications] User tapped notification:", data);
+            try {
+                if (data?.screen === "trip" && data?.tripId) {
+                    router.push(`/trip/${data.tripId}` as any);
+                    return;
+                }
+                if (data?.screen === "create-trip") {
+                    router.push("/create-trip" as any);
+                    return;
+                }
+                if (data?.screen === "deal-trip" && data?.dealId) {
+                    // Fetch the deal so we can pre-fill the locked flight card
+                    const deal: any = await convex
+                        .query((api as any).lowFareRadar.get, { id: data.dealId })
+                        .catch(() => null);
+                    if (!deal) {
+                        // Deal removed/expired — fall back to home so user isn't stuck
+                        router.push("/(tabs)" as any);
+                        return;
+                    }
+                    router.push({
+                        pathname: "/deal-trip",
+                        params: {
+                            dealId: deal._id,
+                            origin: deal.origin,
+                            originCity: deal.originCity,
+                            destination: deal.destination,
+                            destinationCity: deal.destinationCity,
+                            airline: deal.airline,
+                            outboundDate: deal.outboundDate,
+                            outboundDeparture: deal.outboundDeparture,
+                            outboundArrival: deal.outboundArrival,
+                            returnDate: deal.returnDate || "",
+                            returnDeparture: deal.returnDeparture || "",
+                            returnArrival: deal.returnArrival || "",
+                            returnAirline: deal.returnAirline || "",
+                            price: String(deal.price),
+                            totalPrice: deal.totalPrice ? String(deal.totalPrice) : "",
+                            currency: deal.currency,
+                            outboundStops: String(deal.outboundStops ?? 0),
+                            returnStops: String(deal.returnStops ?? 0),
+                            outboundSegments: deal.outboundSegments ? JSON.stringify(deal.outboundSegments) : "",
+                            returnSegments: deal.returnSegments ? JSON.stringify(deal.returnSegments) : "",
+                        },
+                    } as any);
+                }
+            } catch (err) {
+                console.error("[Notifications] Failed to handle tap:", err);
+            }
+        };
 
         // Register for push notifications
         registerForPushNotificationsAsync().then(async (pushToken) => {
@@ -141,22 +197,22 @@ export function useNotifications() {
             }
         });
 
+        // Cold start: if the app was launched FROM a notification tap, replay it
+        // (the response listener doesn't fire for the launch notification).
+        Notifications.getLastNotificationResponseAsync().then((response) => {
+            if (response?.notification?.request?.content?.data) {
+                handleNotificationTap(response.notification.request.content.data);
+            }
+        });
+
         // Listener for notifications received while app is in foreground
         notificationListener.current = Notifications.addNotificationReceivedListener((notification) => {
             console.log("[Notifications] Received in foreground:", notification.request.content.title);
         });
 
-        // Listener for when user taps on a notification
+        // Listener for when user taps on a notification (warm/background)
         responseListener.current = Notifications.addNotificationResponseReceivedListener((response) => {
-            const data = response.notification.request.content.data;
-            console.log("[Notifications] User tapped notification:", data);
-
-            // Navigate based on notification data
-            if (data?.screen === "trip" && data?.tripId) {
-                router.push(`/trip/${data.tripId}` as any);
-            } else if (data?.screen === "create-trip") {
-                router.push("/create-trip" as any);
-            }
+            handleNotificationTap(response.notification.request.content.data);
         });
 
         return () => {

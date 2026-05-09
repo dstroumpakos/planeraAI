@@ -46,3 +46,5 @@ yarn-error.*
 scripts/flight-deal-extractor/
 convex/dealExtractor.ts
 convex-logs-tmp.txt
+convex-logs2.txt
+logs-essaouira.txt

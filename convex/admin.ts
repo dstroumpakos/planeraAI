@@ -206,7 +206,36 @@ export const getStats = query({
                 image: u.image,
                 createdAt: u._creationTime,
             }));
-        
+
+        // Build a quick lookup of userSettings by userId
+        const userSettingsByUserId: Record<string, any> = {};
+        for (const s of allUserSettings) {
+            if ((s as any).userId) {
+                userSettingsByUserId[(s as any).userId] = s;
+            }
+        }
+
+        // Last 10 generated trips (most recent first)
+        const recentTrips = [...allTrips]
+            .sort((a: any, b: any) => (b._creationTime || 0) - (a._creationTime || 0))
+            .slice(0, 10)
+            .map((t: any) => {
+                const owner = userSettingsByUserId[t.userId];
+                return {
+                    tripId: t._id,
+                    destination: t.destination || "Unknown",
+                    origin: t.origin,
+                    startDate: t.startDate,
+                    endDate: t.endDate,
+                    status: t.status,
+                    createdAt: t._creationTime,
+                    userId: t.userId,
+                    userName: owner?.name || "Unknown",
+                    userEmail: owner?.email || "Unknown",
+                    userImage: owner?.image,
+                };
+            });
+
         return {
             pendingInsightsCount: pendingInsights.length,
             flaggedInsightsCount: flaggedInsights.length,
@@ -222,6 +251,7 @@ export const getStats = query({
             mostLikedInsights,
             mostActiveUsers,
             recentUsers,
+            recentTrips,
         };
     },
 });

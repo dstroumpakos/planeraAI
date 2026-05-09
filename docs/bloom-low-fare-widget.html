@@ -506,6 +506,172 @@
     .toast.success { background: var(--success); }
     .toast.error { background: var(--danger); }
 
+    /* Notification Preview Modal */
+    .notif-modal-backdrop {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,.55);
+      display: none;
+      align-items: center; justify-content: center;
+      z-index: 9999;
+      padding: 20px;
+      backdrop-filter: blur(4px);
+    }
+    .notif-modal-backdrop.show { display: flex; }
+    .notif-modal {
+      background: var(--card);
+      border-radius: 20px;
+      width: 100%;
+      max-width: 460px;
+      max-height: 92vh;
+      overflow-y: auto;
+      box-shadow: 0 30px 80px rgba(0,0,0,.45);
+    }
+    .notif-modal-header {
+      padding: 18px 20px 12px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .notif-modal-header h3 { font-size: 16px; font-weight: 700; }
+    .notif-modal-close {
+      background: transparent; border: 0; font-size: 22px; cursor: pointer;
+      width: 32px; height: 32px; border-radius: 8px; color: var(--muted);
+    }
+    .notif-modal-close:hover { background: var(--bg); color: var(--text); }
+    .notif-modal-body { padding: 16px 20px 20px; }
+    .notif-section-label {
+      font-size: 11px; font-weight: 700; letter-spacing: .5px;
+      text-transform: uppercase; color: var(--muted); margin: 14px 0 6px;
+    }
+    /* iOS-style notification preview */
+    .ios-notif {
+      background: linear-gradient(180deg, #1c1c1e 0%, #2c2c2e 100%);
+      color: #fff;
+      border-radius: 16px;
+      padding: 12px 14px;
+      display: flex;
+      gap: 10px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.35);
+    }
+    .ios-notif-icon {
+      width: 38px; height: 38px;
+      border-radius: 9px;
+      background: var(--primary);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px;
+      flex-shrink: 0;
+    }
+    .ios-notif-content { flex: 1; min-width: 0; }
+    .ios-notif-row {
+      display: flex; justify-content: space-between; align-items: baseline;
+      gap: 8px;
+    }
+    .ios-notif-app {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      color: rgba(255,255,255,.55); letter-spacing: .3px;
+    }
+    .ios-notif-time {
+      font-size: 11px; color: rgba(255,255,255,.55);
+    }
+    .ios-notif-title {
+      font-size: 14px; font-weight: 700; margin-top: 2px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .ios-notif-body {
+      font-size: 13px; color: rgba(255,255,255,.85); margin-top: 2px;
+      line-height: 1.35;
+      display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+    /* Android-style preview */
+    .android-notif {
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 14px;
+      display: flex; gap: 10px;
+      box-shadow: 0 4px 12px rgba(0,0,0,.06);
+    }
+    .android-notif-icon {
+      width: 26px; height: 26px;
+      border-radius: 50%;
+      background: var(--primary);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+    .android-notif-row {
+      font-size: 11px; color: var(--muted); display: flex; gap: 6px;
+    }
+    .android-notif-title {
+      font-size: 14px; font-weight: 600; color: var(--text); margin-top: 1px;
+    }
+    .android-notif-body {
+      font-size: 13px; color: var(--text); margin-top: 1px; line-height: 1.35;
+    }
+    .notif-input {
+      width: 100%; padding: 10px 12px;
+      border: 2px solid var(--border); border-radius: 10px;
+      font-size: 13px; font-family: inherit; background: var(--bg);
+      color: var(--text);
+    }
+    .notif-input:focus { outline: none; border-color: var(--primary); }
+    .notif-textarea {
+      width: 100%; padding: 10px 12px;
+      border: 2px solid var(--border); border-radius: 10px;
+      font-size: 13px; font-family: inherit; background: var(--bg);
+      color: var(--text); resize: vertical; min-height: 64px;
+    }
+    .notif-charcount {
+      font-size: 10px; color: var(--muted); text-align: right; margin-top: 2px;
+    }
+    .notif-charcount.warn { color: #d97706; }
+    .notif-charcount.bad { color: var(--danger); }
+    .notif-lang-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+    .notif-lang-chip {
+      padding: 4px 10px; border-radius: 14px;
+      border: 1px solid var(--border); background: var(--bg);
+      font-size: 11px; font-weight: 600; cursor: pointer;
+      color: var(--muted);
+    }
+    .notif-lang-chip.active {
+      background: var(--text); color: #fff; border-color: var(--text);
+    }
+    .notif-target-row {
+      display: flex; gap: 8px; align-items: stretch; margin-top: 4px;
+    }
+    .notif-target-input { flex: 1; }
+    .notif-target-summary {
+      font-size: 12px; color: var(--muted); margin-top: 6px;
+    }
+    .notif-target-summary strong { color: var(--text); }
+    .notif-actions {
+      display: flex; gap: 8px; margin-top: 18px;
+    }
+    .notif-btn-secondary {
+      flex: 1; padding: 12px; border-radius: 10px;
+      border: 1px solid var(--border); background: var(--bg);
+      font-size: 14px; font-weight: 600; cursor: pointer; color: var(--text);
+    }
+    .notif-btn-primary {
+      flex: 2; padding: 12px; border-radius: 10px;
+      border: 0; background: var(--text); color: var(--primary);
+      font-size: 14px; font-weight: 700; cursor: pointer;
+    }
+    .notif-btn-primary:disabled {
+      opacity: .5; cursor: not-allowed;
+    }
+    .notif-mode-row {
+      display: flex; gap: 6px; margin-bottom: 6px;
+    }
+    .notif-mode-btn {
+      padding: 6px 12px; border-radius: 14px;
+      border: 1px solid var(--border); background: var(--bg);
+      font-size: 11px; font-weight: 600; cursor: pointer; color: var(--muted);
+    }
+    .notif-mode-btn.active {
+      background: var(--primary); color: var(--text); border-color: var(--primary);
+    }
+
     /* Empty */
     .empty-state {
       text-align: center;
@@ -1258,6 +1424,80 @@
         <button class="btn-export" onclick="exportWishlistCSV()">❤️ Export Wishlist (.csv)</button>
       </div>
       <div id="airportsList"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Notification Preview Modal -->
+<div class="notif-modal-backdrop" id="notifModal">
+  <div class="notif-modal">
+    <div class="notif-modal-header">
+      <h3>📣 Send push notification</h3>
+      <button class="notif-modal-close" onclick="closeNotifModal()">×</button>
+    </div>
+    <div class="notif-modal-body">
+
+      <div class="notif-section-label">Targets — home airports (IATA)</div>
+      <div class="notif-target-row">
+        <input type="text" id="notifTargets" class="notif-input notif-target-input"
+          placeholder="ATH, SKG, LHR" oninput="updateNotifTargetSummary()">
+      </div>
+      <div class="notif-target-summary" id="notifTargetSummary"></div>
+
+      <div class="notif-section-label">Preview language</div>
+      <div class="notif-lang-row" id="notifLangRow">
+        <div class="notif-lang-chip active" data-lang="en" onclick="setNotifPreviewLang('en')">EN</div>
+        <div class="notif-lang-chip" data-lang="el" onclick="setNotifPreviewLang('el')">EL</div>
+        <div class="notif-lang-chip" data-lang="es" onclick="setNotifPreviewLang('es')">ES</div>
+        <div class="notif-lang-chip" data-lang="fr" onclick="setNotifPreviewLang('fr')">FR</div>
+        <div class="notif-lang-chip" data-lang="de" onclick="setNotifPreviewLang('de')">DE</div>
+        <div class="notif-lang-chip" data-lang="ar" onclick="setNotifPreviewLang('ar')">AR</div>
+      </div>
+
+      <div class="notif-section-label">Mode</div>
+      <div class="notif-mode-row">
+        <button type="button" class="notif-mode-btn active" id="notifModeAuto" onclick="setNotifMode('auto')">
+          🌐 Auto-translate per user
+        </button>
+        <button type="button" class="notif-mode-btn" id="notifModeCustom" onclick="setNotifMode('custom')">
+          ✍️ Custom (single language)
+        </button>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:2px" id="notifModeHint">
+        Each user receives the deal in their app language. Tap a language above to preview.
+      </div>
+
+      <div class="notif-section-label">Preview</div>
+      <div class="ios-notif" id="notifPreviewIOS">
+        <div class="ios-notif-icon">🌸</div>
+        <div class="ios-notif-content">
+          <div class="ios-notif-row">
+            <span class="ios-notif-app">Planera AI</span>
+            <span class="ios-notif-time">now</span>
+          </div>
+          <div class="ios-notif-title" id="notifPreviewTitle">—</div>
+          <div class="ios-notif-body" id="notifPreviewBody">—</div>
+        </div>
+      </div>
+
+      <div id="notifCustomFields" style="display:none">
+        <div class="notif-section-label">Custom title</div>
+        <input type="text" id="notifCustomTitle" class="notif-input"
+          maxlength="80" oninput="onNotifCustomChange()">
+        <div class="notif-charcount" id="notifTitleCount">0 / 80</div>
+
+        <div class="notif-section-label">Custom body</div>
+        <textarea id="notifCustomBody" class="notif-textarea"
+          maxlength="180" oninput="onNotifCustomChange()"></textarea>
+        <div class="notif-charcount" id="notifBodyCount">0 / 180</div>
+      </div>
+
+      <div class="notif-actions">
+        <button class="notif-btn-secondary" onclick="closeNotifModal()">Cancel</button>
+        <button class="notif-btn-primary" id="notifSendBtn" onclick="sendNotifModal()">
+          📬 Send notification
+        </button>
+      </div>
     </div>
   </div>
 </div>
@@ -2054,6 +2294,7 @@
             '<button onclick="restoreDeal(\'' + d._id + '\')" title="Restore">♻️</button>' :
             '<button onclick="editDeal(\'' + d._id + '\')" title="Edit">\u270F\uFE0F</button>' +
             (d.bookingUrl ? '<button onclick="refreshDeal(\'' + d._id + '\')" title="Re-scrape &amp; update from URL" id="refresh-' + d._id + '">\uD83D\uDD04</button>' : '') +
+            (d.active && !isExpired ? '<button onclick="notifyDeal(\'' + d._id + '\')" title="Notify users with this home airport">\uD83D\uDCE3</button>' : '') +
             '<button onclick="toggleActive(\'' + d._id + '\', ' + !d.active + ')" title="' + (d.active ? 'Pause' : 'Activate') + '">' +
               (d.active ? '\u23F8\uFE0F' : '\u25B6\uFE0F') +
             '</button>' +
@@ -2325,6 +2566,315 @@
       loadDeals();
     }).catch(function(err) { toast('Error: ' + err.message, 'error'); });
   }
+
+  // ─── Notification Broadcast Modal ─────────────────────────────────────────
+  // Mirrors the server's variant logic so admins see EXACTLY what users will
+  // receive before sending. Server (convex/lowFareRadar.ts) is the source of
+  // truth for what actually goes out — this is purely for preview/UX.
+
+  var BROADCAST_VARIANTS = {
+    en: {
+      lastCall:  { title: '⏰ Last call: {{dest}} {{currency}}{{price}}',
+                   body: "Your {{origin}} → {{dest}} deal expires soon. {{currency}}{{price}}/pp — tap to lock it in before it's gone." },
+      discount:  { title: '✈️ {{dest}} −{{discount}}% from {{origin}}',
+                   body: '{{origin}} → {{dest}} now {{currency}}{{price}}/pp (was {{currency}}{{originalPrice}}). Save {{currency}}{{savings}} — tap to grab it.' },
+      roundTrip: { title: '✈️ {{origin}} ↔ {{dest}} from {{currency}}{{price}}',
+                   body: 'Round-trip {{origin}} ↔ {{dest}} for {{currency}}{{price}} per person. Tap and your AI itinerary is ready in minutes.' },
+      oneWay:    { title: '✈️ {{dest}} from {{currency}}{{price}}',
+                   body: '{{origin}} → {{dest}} from just {{currency}}{{price}}/pp. Tap to see the deal and plan your trip.' },
+    },
+    el: {
+      lastCall:  { title: '⏰ Τελευταία ευκαιρία: {{dest}} {{currency}}{{price}}',
+                   body: 'Η προσφορά {{origin}} → {{dest}} λήγει σύντομα. {{currency}}{{price}}/άτομο — πατήστε για να την κλειδώσετε.' },
+      discount:  { title: '✈️ {{dest}} −{{discount}}% από {{origin}}',
+                   body: '{{origin}} → {{dest}} τώρα {{currency}}{{price}}/άτομο (ήταν {{currency}}{{originalPrice}}). Εξοικονομήστε {{currency}}{{savings}} — πατήστε για να κλείσετε.' },
+      roundTrip: { title: '✈️ {{origin}} ↔ {{dest}} από {{currency}}{{price}}',
+                   body: 'Με επιστροφή {{origin}} ↔ {{dest}} {{currency}}{{price}} το άτομο. Πατήστε και το AI φτιάχνει το ταξίδι σε λίγα λεπτά.' },
+      oneWay:    { title: '✈️ {{dest}} από {{currency}}{{price}}',
+                   body: '{{origin}} → {{dest}} από μόλις {{currency}}{{price}}/άτομο. Πατήστε για την προσφορά και σχεδιάστε το ταξίδι.' },
+    },
+    es: {
+      lastCall:  { title: '⏰ Última llamada: {{dest}} {{currency}}{{price}}',
+                   body: 'Tu oferta {{origin}} → {{dest}} caduca pronto. {{currency}}{{price}}/pers — tócala para reservarla antes de que vuele.' },
+      discount:  { title: '✈️ {{dest}} −{{discount}}% desde {{origin}}',
+                   body: '{{origin}} → {{dest}} ahora {{currency}}{{price}}/pers (antes {{currency}}{{originalPrice}}). Ahorra {{currency}}{{savings}} — tócala ya.' },
+      roundTrip: { title: '✈️ {{origin}} ↔ {{dest}} desde {{currency}}{{price}}',
+                   body: 'Ida y vuelta {{origin}} ↔ {{dest}} por {{currency}}{{price}} por persona. Tócala y tu itinerario IA está listo en minutos.' },
+      oneWay:    { title: '✈️ {{dest}} desde {{currency}}{{price}}',
+                   body: '{{origin}} → {{dest}} desde solo {{currency}}{{price}}/pers. Tócala para ver la oferta y planear el viaje.' },
+    },
+    fr: {
+      lastCall:  { title: '⏰ Dernier appel : {{dest}} {{currency}}{{price}}',
+                   body: 'Votre offre {{origin}} → {{dest}} expire bientôt. {{currency}}{{price}}/pers — appuyez pour la sécuriser.' },
+      discount:  { title: '✈️ {{dest}} −{{discount}}% depuis {{origin}}',
+                   body: "{{origin}} → {{dest}} à {{currency}}{{price}}/pers (au lieu de {{currency}}{{originalPrice}}). Économisez {{currency}}{{savings}} — appuyez pour foncer." },
+      roundTrip: { title: '✈️ {{origin}} ↔ {{dest}} dès {{currency}}{{price}}',
+                   body: 'Aller-retour {{origin}} ↔ {{dest}} à {{currency}}{{price}} par personne. Appuyez : votre itinéraire IA est prêt en quelques minutes.' },
+      oneWay:    { title: '✈️ {{dest}} dès {{currency}}{{price}}',
+                   body: "{{origin}} → {{dest}} dès {{currency}}{{price}}/pers. Appuyez pour voir l'offre et planifier votre voyage." },
+    },
+    de: {
+      lastCall:  { title: '⏰ Letzte Chance: {{dest}} {{currency}}{{price}}',
+                   body: 'Dein Deal {{origin}} → {{dest}} läuft bald aus. {{currency}}{{price}}/Pers. — jetzt tippen und sichern.' },
+      discount:  { title: '✈️ {{dest}} −{{discount}}% ab {{origin}}',
+                   body: '{{origin}} → {{dest}} jetzt {{currency}}{{price}}/Pers. (statt {{currency}}{{originalPrice}}). Spare {{currency}}{{savings}} — gleich tippen.' },
+      roundTrip: { title: '✈️ {{origin}} ↔ {{dest}} ab {{currency}}{{price}}',
+                   body: 'Hin & zurück {{origin}} ↔ {{dest}} für {{currency}}{{price}} pro Person. Tippen — dein KI-Reiseplan ist in wenigen Minuten fertig.' },
+      oneWay:    { title: '✈️ {{dest}} ab {{currency}}{{price}}',
+                   body: '{{origin}} → {{dest}} ab nur {{currency}}{{price}}/Pers. Tippen, um den Deal zu sehen und zu planen.' },
+    },
+    ar: {
+      lastCall:  { title: '⏰ آخر فرصة: {{dest}} {{currency}}{{price}}',
+                   body: 'عرض {{origin}} → {{dest}} ينتهي قريبًا. {{currency}}{{price}} للشخص — اضغط لتأمينه الآن.' },
+      discount:  { title: '✈️ {{dest}} −{{discount}}% من {{origin}}',
+                   body: '{{origin}} → {{dest}} الآن {{currency}}{{price}} للشخص (بدلًا من {{currency}}{{originalPrice}}). وفّر {{currency}}{{savings}} — اضغط الآن.' },
+      roundTrip: { title: '✈️ {{origin}} ↔ {{dest}} من {{currency}}{{price}}',
+                   body: 'ذهاب وعودة {{origin}} ↔ {{dest}} بـ {{currency}}{{price}} للشخص. اضغط ليجهّز الذكاء الاصطناعي رحلتك خلال دقائق.' },
+      oneWay:    { title: '✈️ {{dest}} من {{currency}}{{price}}',
+                   body: '{{origin}} → {{dest}} من {{currency}}{{price}} فقط للشخص. اضغط لرؤية العرض وتخطيط الرحلة.' },
+    },
+  };
+
+  function notifInterpolate(tpl, vars) {
+    return tpl.replace(/\{\{(\w+)\}\}/g, function(_, k) { return vars[k] != null ? vars[k] : ''; });
+  }
+
+  function notifFormatPrice(n) {
+    if (n == null || isNaN(n)) return '';
+    return Number.isInteger(n) ? String(n) : Number(n).toFixed(2).replace(/\.?0+$/, '');
+  }
+
+  function notifPickVariant(deal, lang) {
+    var pack = BROADCAST_VARIANTS[lang] || BROADCAST_VARIANTS.en;
+    var base = {
+      dest: deal.destinationCity || deal.destination,
+      origin: deal.originCity || deal.origin,
+      currency: getCurrSym(deal.currency),
+      price: notifFormatPrice(deal.price),
+    };
+    var FORTY_EIGHT_H = 48 * 60 * 60 * 1000;
+    if (deal.expiresAt && (deal.expiresAt - Date.now()) <= FORTY_EIGHT_H && deal.expiresAt > Date.now()) {
+      return { id: 'lastCall', tpl: pack.lastCall, vars: base };
+    }
+    if (deal.originalPrice && deal.price && deal.originalPrice > deal.price) {
+      var pct = Math.round((1 - deal.price / deal.originalPrice) * 100);
+      if (pct >= 15) {
+        return {
+          id: 'discount',
+          tpl: pack.discount,
+          vars: Object.assign({}, base, {
+            discount: String(pct),
+            originalPrice: notifFormatPrice(deal.originalPrice),
+            savings: notifFormatPrice(deal.originalPrice - deal.price),
+          }),
+        };
+      }
+    }
+    if (deal.returnDate) return { id: 'roundTrip', tpl: pack.roundTrip, vars: base };
+    return { id: 'oneWay', tpl: pack.oneWay, vars: base };
+  }
+
+  function notifBuildPreview(deal, lang) {
+    var picked = notifPickVariant(deal, lang);
+    return {
+      title: notifInterpolate(picked.tpl.title, picked.vars),
+      body: notifInterpolate(picked.tpl.body, picked.vars),
+      variantId: picked.id,
+    };
+  }
+
+  // ─── Modal state ───
+  var notifModalState = {
+    deal: null,
+    previewLang: 'en',
+    mode: 'auto', // 'auto' | 'custom'
+    customTitle: '',
+    customBody: '',
+  };
+
+  function notifyDeal(id) {
+    var deal = deals.find(function(d) { return d._id === id; });
+    if (!deal) return toast('Deal not found', 'error');
+    notifModalState.deal = deal;
+    notifModalState.previewLang = (typeof lang === 'string' && BROADCAST_VARIANTS[lang]) ? lang : 'en';
+    notifModalState.mode = 'auto';
+    notifModalState.customTitle = '';
+    notifModalState.customBody = '';
+
+    document.getElementById('notifTargets').value = (deal.origin || '').toUpperCase();
+    setNotifMode('auto');
+    setNotifPreviewLang(notifModalState.previewLang);
+    updateNotifTargetSummary();
+
+    document.getElementById('notifModal').classList.add('show');
+
+    // Auto-load home-airport stats if not already cached, then refresh the
+    // recipient-count summary so the admin sees the real numbers.
+    if (!userAirports || userAirports.length === 0) {
+      var summaryEl = document.getElementById('notifTargetSummary');
+      if (summaryEl) {
+        summaryEl.innerHTML = '<span style="color:var(--muted)">⏳ Loading user counts...</span>';
+      }
+      convexQuery('lowFareRadar:getHomeAirports', { adminKey: adminKey })
+        .then(function(result) {
+          userAirports = result || [];
+          updateNotifTargetSummary();
+        })
+        .catch(function(err) {
+          console.warn('[notifyDeal] failed to load home airports:', err.message || err);
+          updateNotifTargetSummary();
+        });
+    }
+  }
+
+  function closeNotifModal() {
+    document.getElementById('notifModal').classList.remove('show');
+  }
+
+  function setNotifPreviewLang(lang) {
+    notifModalState.previewLang = lang;
+    var chips = document.querySelectorAll('#notifLangRow .notif-lang-chip');
+    chips.forEach(function(c) {
+      c.classList.toggle('active', c.getAttribute('data-lang') === lang);
+    });
+    renderNotifPreview();
+  }
+
+  function setNotifMode(mode) {
+    notifModalState.mode = mode;
+    document.getElementById('notifModeAuto').classList.toggle('active', mode === 'auto');
+    document.getElementById('notifModeCustom').classList.toggle('active', mode === 'custom');
+    document.getElementById('notifCustomFields').style.display = mode === 'custom' ? 'block' : 'none';
+    document.getElementById('notifModeHint').textContent = mode === 'auto'
+      ? 'Each user receives the deal in their app language. Tap a language above to preview.'
+      : 'Send the same custom copy to every user, regardless of their app language.';
+
+    if (mode === 'custom' && notifModalState.deal && !notifModalState.customTitle) {
+      // Pre-fill custom fields from the currently previewed language
+      var preview = notifBuildPreview(notifModalState.deal, notifModalState.previewLang);
+      document.getElementById('notifCustomTitle').value = preview.title;
+      document.getElementById('notifCustomBody').value = preview.body;
+      notifModalState.customTitle = preview.title;
+      notifModalState.customBody = preview.body;
+    }
+    renderNotifPreview();
+  }
+
+  function onNotifCustomChange() {
+    notifModalState.customTitle = document.getElementById('notifCustomTitle').value;
+    notifModalState.customBody = document.getElementById('notifCustomBody').value;
+    renderNotifPreview();
+  }
+
+  function renderNotifPreview() {
+    var d = notifModalState.deal;
+    if (!d) return;
+
+    var title, body;
+    if (notifModalState.mode === 'custom') {
+      title = notifModalState.customTitle || '(empty title)';
+      body = notifModalState.customBody || '(empty body)';
+    } else {
+      var p = notifBuildPreview(d, notifModalState.previewLang);
+      title = p.title;
+      body = p.body;
+    }
+
+    document.getElementById('notifPreviewTitle').textContent = title;
+    document.getElementById('notifPreviewBody').textContent = body;
+
+    // Char counters for custom mode
+    if (notifModalState.mode === 'custom') {
+      var tEl = document.getElementById('notifTitleCount');
+      var bEl = document.getElementById('notifBodyCount');
+      var tLen = (notifModalState.customTitle || '').length;
+      var bLen = (notifModalState.customBody || '').length;
+      tEl.textContent = tLen + ' / 80';
+      bEl.textContent = bLen + ' / 180';
+      tEl.className = 'notif-charcount' + (tLen > 65 ? ' warn' : '') + (tLen >= 80 ? ' bad' : '');
+      bEl.className = 'notif-charcount' + (bLen > 140 ? ' warn' : '') + (bLen >= 180 ? ' bad' : '');
+    }
+  }
+
+  function updateNotifTargetSummary() {
+    var raw = document.getElementById('notifTargets').value || '';
+    var origins = raw.split(',').map(function(s) { return s.trim().toUpperCase(); })
+      .filter(function(s) { return /^[A-Z]{3}$/.test(s); });
+
+    var summaryEl = document.getElementById('notifTargetSummary');
+    var sendBtn = document.getElementById('notifSendBtn');
+
+    if (origins.length === 0) {
+      summaryEl.innerHTML = '<span style="color:var(--danger)">⚠️ Enter at least one valid IATA code (3 letters).</span>';
+      sendBtn.disabled = true;
+      return;
+    }
+
+    sendBtn.disabled = false;
+    var totalUsers = 0;
+    var perAirport = origins.map(function(code) {
+      var match = (userAirports || []).find(function(a) { return a.code === code; });
+      var count = match ? match.count : null;
+      if (count !== null) totalUsers += count;
+      return { code: code, count: count };
+    });
+
+    var hasUnknown = perAirport.some(function(a) { return a.count === null; });
+    var html = perAirport.map(function(a) {
+      return '<strong>' + a.code + '</strong>' +
+        (a.count !== null ? ' (' + a.count + ')' : ' (?)');
+    }).join(' · ');
+
+    var totalLine = hasUnknown
+      ? '<span style="color:var(--muted)">User counts unavailable — open the User Airports tab to refresh.</span>'
+      : '👥 <strong>' + totalUsers + '</strong> user' + (totalUsers === 1 ? '' : 's') +
+        ' will receive this notification (those with deal alerts enabled).';
+
+    summaryEl.innerHTML = html + '<br>' + totalLine;
+  }
+
+  function sendNotifModal() {
+    var d = notifModalState.deal;
+    if (!d) return;
+
+    var raw = document.getElementById('notifTargets').value || '';
+    var origins = raw.split(',').map(function(s) { return s.trim().toUpperCase(); })
+      .filter(function(s) { return /^[A-Z]{3}$/.test(s); });
+    if (origins.length === 0) return toast('Enter at least one valid IATA code', 'error');
+
+    var payload = {
+      adminKey: adminKey,
+      dealId: d._id,
+      originsOverride: origins,
+    };
+
+    if (notifModalState.mode === 'custom') {
+      var ct = (notifModalState.customTitle || '').trim();
+      var cb = (notifModalState.customBody || '').trim();
+      if (!ct || !cb) return toast('Custom title and body are required', 'error');
+      payload.customTitle = ct;
+      payload.customBody = cb;
+    }
+
+    var sendBtn = document.getElementById('notifSendBtn');
+    sendBtn.disabled = true;
+    sendBtn.textContent = '⏳ Sending...';
+
+    convexAction('lowFareRadar:broadcastDealToHomeAirports', payload).then(function(result) {
+      sendBtn.disabled = false;
+      sendBtn.textContent = '📬 Send notification';
+      var msg = '📬 Sent to ' + (result.sent || 0) + ' / ' + (result.targeted || 0) + ' user' +
+        ((result.targeted === 1) ? '' : 's');
+      if (result.skipped) msg += ' (' + result.skipped + ' failed)';
+      toast(msg, 'success');
+      closeNotifModal();
+    }).catch(function(err) {
+      sendBtn.disabled = false;
+      sendBtn.textContent = '📬 Send notification';
+      toast('Notify error: ' + (err.message || 'Unknown error'), 'error');
+    });
+  }
+
 
   var refreshingDealId = null;
 

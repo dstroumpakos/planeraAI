@@ -1,4 +1,4 @@
-import { query, mutation, internalMutation } from "./_generated/server";
+import { query, mutation, internalMutation, internalQuery, action } from "./_generated/server";
 import { authQuery } from "./functions";
 import { internal as _internal } from "./_generated/api";
 import { ConvexError, v } from "convex/values";
@@ -564,3 +564,343 @@ export const softDeleteExpiredDeals = internalMutation({
     return { softDeleted: count };
   },
 });
+
+// ─── Admin: Broadcast a deal to users by home airport ───
+
+/** Internal: find all users whose home airport matches one of the given IATA codes */
+export const getUsersByHomeAirport = internalQuery({
+  args: {
+    origins: v.array(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const wanted = new Set(args.origins.map((o) => o.toUpperCase()));
+    const allSettings = await ctx.db.query("userSettings").collect();
+    const matches: Array<{ userId: string; language: string | undefined; homeAirport: string }> = [];
+    for (const s of allSettings) {
+      if (!s.homeAirport) continue;
+      const iataMatch = s.homeAirport.toUpperCase().match(/\b([A-Z]{3})\b/g);
+      if (!iataMatch) continue;
+      const code = iataMatch[iataMatch.length - 1];
+      if (wanted.has(code)) {
+        matches.push({
+          userId: s.userId,
+          language: s.language,
+          homeAirport: code,
+        });
+      }
+    }
+    return matches;
+  },
+});
+
+/**
+ * Admin action: send a deal-alert push notification to every user whose home
+ * airport matches the deal's origin (or any of the optional `originsOverride`).
+ * Returns counts so the admin widget can show a summary.
+ */
+export const broadcastDealToHomeAirports = action({
+  args: {
+    adminKey: v.string(),
+    dealId: v.id("lowFareRadar"),
+    // Optional: override which origin airports receive the broadcast.
+    // Defaults to the deal's own origin.
+    originsOverride: v.optional(v.array(v.string())),
+    // Optional: custom title/body. If omitted, falls back to localized
+    // "Deal found" template per user language.
+    customTitle: v.optional(v.string()),
+    customBody: v.optional(v.string()),
+  },
+  handler: async (ctx, args): Promise<{ targeted: number; sent: number; skipped: number }> => {
+    // Validate admin key via internal query (action can't use process.env helpers
+    // that throw inside ctx.db, but validateAdminKey only checks env vars + string)
+    const expected = process.env.CONVEX_LOW_FARE_ADMIN_KEY;
+    if (!expected) {
+      throw new ConvexError("CONVEX_LOW_FARE_ADMIN_KEY environment variable not set");
+    }
+    if (args.adminKey !== expected) {
+      throw new ConvexError("Unauthorized: invalid admin key");
+    }
+
+    // Load the deal
+    const finalDeal: any = await ctx.runQuery(
+      (await import("./_generated/api")).api.lowFareRadar.get,
+      { id: args.dealId }
+    );
+    if (!finalDeal) throw new ConvexError("Deal not found");
+
+    const origins = (args.originsOverride && args.originsOverride.length > 0
+      ? args.originsOverride
+      : [finalDeal.origin]
+    ).map((o: string) => o.toUpperCase());
+
+    // Find matching users
+    const users: Array<{ userId: string; language?: string; homeAirport: string }> =
+      await ctx.runQuery(internal.lowFareRadar.getUsersByHomeAirport, { origins });
+
+    let sent = 0;
+    let skipped = 0;
+
+    for (const u of users) {
+      const lang = u.language || "en";
+      const title = args.customTitle ?? buildBroadcastTitle(lang, finalDeal);
+      const body = args.customBody ?? buildBroadcastBody(lang, finalDeal);
+
+      try {
+        await ctx.runAction(internal.notifications.sendPushNotification, {
+          userId: u.userId,
+          title,
+          body,
+          // type begins with "deal" → respects user's dealAlerts preference
+          type: "deal_broadcast",
+          data: {
+            screen: "deal-trip",
+            dealId: args.dealId,
+            origin: finalDeal.origin,
+            originCity: finalDeal.originCity,
+            destination: finalDeal.destination,
+            destinationCity: finalDeal.destinationCity,
+          },
+        });
+        sent++;
+      } catch (err) {
+        console.error(`broadcastDealToHomeAirports: failed for user ${u.userId}`, err);
+        skipped++;
+      }
+    }
+
+    return { targeted: users.length, sent, skipped };
+  },
+});
+
+// ─── Broadcast translations / formatters ───
+//
+// Templates are ordered by priority. The first variant whose required vars are
+// available for a deal is used. This lets us tailor the copy to deal context
+// (% off, last-call expiry, round-trip, one-way) without bloating the action.
+//
+// Marketing principles applied:
+//  • Hook = destination + price in the first ~30 chars (fits iOS lock screen).
+//  • One emoji max per line (tested to feel premium, not spammy).
+//  • Specifics over vague ("save 38%" beats "great deal").
+//  • Urgency only when real (expiresAt within 48h).
+//  • Single, clear CTA verb ("Tap to plan", "Lock it in", "Grab it").
+
+type BroadcastVariant = {
+  id: "lastCall" | "discount" | "roundTrip" | "oneWay";
+  title: string;
+  body: string;
+};
+
+const BROADCAST_VARIANTS: Record<string, BroadcastVariant[]> = {
+  en: [
+    {
+      id: "lastCall",
+      title: "⏰ Last call: {{dest}} {{currency}}{{price}}",
+      body: "Your {{origin}} → {{dest}} deal expires soon. {{currency}}{{price}}/pp — tap to lock it in before it's gone.",
+    },
+    {
+      id: "discount",
+      title: "✈️ {{dest}} −{{discount}}% from {{origin}}",
+      body: "{{origin}} → {{dest}} now {{currency}}{{price}}/pp (was {{currency}}{{originalPrice}}). Save {{currency}}{{savings}} — tap to grab it.",
+    },
+    {
+      id: "roundTrip",
+      title: "✈️ {{origin}} ↔ {{dest}} from {{currency}}{{price}}",
+      body: "Round-trip {{origin}} ↔ {{dest}} for {{currency}}{{price}} per person. Tap and your AI itinerary is ready in minutes.",
+    },
+    {
+      id: "oneWay",
+      title: "✈️ {{dest}} from {{currency}}{{price}}",
+      body: "{{origin}} → {{dest}} from just {{currency}}{{price}}/pp. Tap to see the deal and plan your trip.",
+    },
+  ],
+  el: [
+    {
+      id: "lastCall",
+      title: "⏰ Τελευταία ευκαιρία: {{dest}} {{currency}}{{price}}",
+      body: "Η προσφορά {{origin}} → {{dest}} λήγει σύντομα. {{currency}}{{price}}/άτομο — πατήστε για να την κλειδώσετε.",
+    },
+    {
+      id: "discount",
+      title: "✈️ {{dest}} −{{discount}}% από {{origin}}",
+      body: "{{origin}} → {{dest}} τώρα {{currency}}{{price}}/άτομο (ήταν {{currency}}{{originalPrice}}). Εξοικονομήστε {{currency}}{{savings}} — πατήστε για να κλείσετε.",
+    },
+    {
+      id: "roundTrip",
+      title: "✈️ {{origin}} ↔ {{dest}} από {{currency}}{{price}}",
+      body: "Με επιστροφή {{origin}} ↔ {{dest}} {{currency}}{{price}} το άτομο. Πατήστε και το AI φτιάχνει το ταξίδι σε λίγα λεπτά.",
+    },
+    {
+      id: "oneWay",
+      title: "✈️ {{dest}} από {{currency}}{{price}}",
+      body: "{{origin}} → {{dest}} από μόλις {{currency}}{{price}}/άτομο. Πατήστε για την προσφορά και σχεδιάστε το ταξίδι.",
+    },
+  ],
+  es: [
+    {
+      id: "lastCall",
+      title: "⏰ Última llamada: {{dest}} {{currency}}{{price}}",
+      body: "Tu oferta {{origin}} → {{dest}} caduca pronto. {{currency}}{{price}}/pers — tócala para reservarla antes de que vuele.",
+    },
+    {
+      id: "discount",
+      title: "✈️ {{dest}} −{{discount}}% desde {{origin}}",
+      body: "{{origin}} → {{dest}} ahora {{currency}}{{price}}/pers (antes {{currency}}{{originalPrice}}). Ahorra {{currency}}{{savings}} — tócala ya.",
+    },
+    {
+      id: "roundTrip",
+      title: "✈️ {{origin}} ↔ {{dest}} desde {{currency}}{{price}}",
+      body: "Ida y vuelta {{origin}} ↔ {{dest}} por {{currency}}{{price}} por persona. Tócala y tu itinerario IA está listo en minutos.",
+    },
+    {
+      id: "oneWay",
+      title: "✈️ {{dest}} desde {{currency}}{{price}}",
+      body: "{{origin}} → {{dest}} desde solo {{currency}}{{price}}/pers. Tócala para ver la oferta y planear el viaje.",
+    },
+  ],
+  fr: [
+    {
+      id: "lastCall",
+      title: "⏰ Dernier appel : {{dest}} {{currency}}{{price}}",
+      body: "Votre offre {{origin}} → {{dest}} expire bientôt. {{currency}}{{price}}/pers — appuyez pour la sécuriser.",
+    },
+    {
+      id: "discount",
+      title: "✈️ {{dest}} −{{discount}}% depuis {{origin}}",
+      body: "{{origin}} → {{dest}} à {{currency}}{{price}}/pers (au lieu de {{currency}}{{originalPrice}}). Économisez {{currency}}{{savings}} — appuyez pour foncer.",
+    },
+    {
+      id: "roundTrip",
+      title: "✈️ {{origin}} ↔ {{dest}} dès {{currency}}{{price}}",
+      body: "Aller-retour {{origin}} ↔ {{dest}} à {{currency}}{{price}} par personne. Appuyez : votre itinéraire IA est prêt en quelques minutes.",
+    },
+    {
+      id: "oneWay",
+      title: "✈️ {{dest}} dès {{currency}}{{price}}",
+      body: "{{origin}} → {{dest}} dès {{currency}}{{price}}/pers. Appuyez pour voir l'offre et planifier votre voyage.",
+    },
+  ],
+  de: [
+    {
+      id: "lastCall",
+      title: "⏰ Letzte Chance: {{dest}} {{currency}}{{price}}",
+      body: "Dein Deal {{origin}} → {{dest}} läuft bald aus. {{currency}}{{price}}/Pers. — jetzt tippen und sichern.",
+    },
+    {
+      id: "discount",
+      title: "✈️ {{dest}} −{{discount}}% ab {{origin}}",
+      body: "{{origin}} → {{dest}} jetzt {{currency}}{{price}}/Pers. (statt {{currency}}{{originalPrice}}). Spare {{currency}}{{savings}} — gleich tippen.",
+    },
+    {
+      id: "roundTrip",
+      title: "✈️ {{origin}} ↔ {{dest}} ab {{currency}}{{price}}",
+      body: "Hin & zurück {{origin}} ↔ {{dest}} für {{currency}}{{price}} pro Person. Tippen — dein KI-Reiseplan ist in wenigen Minuten fertig.",
+    },
+    {
+      id: "oneWay",
+      title: "✈️ {{dest}} ab {{currency}}{{price}}",
+      body: "{{origin}} → {{dest}} ab nur {{currency}}{{price}}/Pers. Tippen, um den Deal zu sehen und zu planen.",
+    },
+  ],
+  ar: [
+    {
+      id: "lastCall",
+      title: "⏰ آخر فرصة: {{dest}} {{currency}}{{price}}",
+      body: "عرض {{origin}} → {{dest}} ينتهي قريبًا. {{currency}}{{price}} للشخص — اضغط لتأمينه الآن.",
+    },
+    {
+      id: "discount",
+      title: "✈️ {{dest}} −{{discount}}% من {{origin}}",
+      body: "{{origin}} → {{dest}} الآن {{currency}}{{price}} للشخص (بدلًا من {{currency}}{{originalPrice}}). وفّر {{currency}}{{savings}} — اضغط الآن.",
+    },
+    {
+      id: "roundTrip",
+      title: "✈️ {{origin}} ↔ {{dest}} من {{currency}}{{price}}",
+      body: "ذهاب وعودة {{origin}} ↔ {{dest}} بـ {{currency}}{{price}} للشخص. اضغط ليجهّز الذكاء الاصطناعي رحلتك خلال دقائق.",
+    },
+    {
+      id: "oneWay",
+      title: "✈️ {{dest}} من {{currency}}{{price}}",
+      body: "{{origin}} → {{dest}} من {{currency}}{{price}} فقط للشخص. اضغط لرؤية العرض وتخطيط الرحلة.",
+    },
+  ],
+};
+
+const FORTY_EIGHT_HOURS = 48 * 60 * 60 * 1000;
+
+/** Choose the best variant for a deal: lastCall > discount(≥15%) > roundTrip > oneWay. */
+function pickBroadcastVariant(lang: string, deal: any): { variant: BroadcastVariant; vars: Record<string, string> } {
+  const variants = BROADCAST_VARIANTS[lang] || BROADCAST_VARIANTS.en;
+  const byId = (id: BroadcastVariant["id"]) =>
+    variants.find((v) => v.id === id) ||
+    BROADCAST_VARIANTS.en.find((v) => v.id === id)!;
+
+  const baseVars: Record<string, string> = {
+    dest: deal.destinationCity || deal.destination,
+    origin: deal.originCity || deal.origin,
+    currency: currencySymbol(deal.currency),
+    price: formatPrice(deal.price),
+  };
+
+  // 1. Last call — expires within 48h
+  if (deal.expiresAt && deal.expiresAt - Date.now() <= FORTY_EIGHT_HOURS && deal.expiresAt > Date.now()) {
+    return { variant: byId("lastCall"), vars: baseVars };
+  }
+
+  // 2. Discount ≥ 15%
+  if (deal.originalPrice && deal.price && deal.originalPrice > deal.price) {
+    const discountPct = Math.round((1 - deal.price / deal.originalPrice) * 100);
+    if (discountPct >= 15) {
+      return {
+        variant: byId("discount"),
+        vars: {
+          ...baseVars,
+          discount: String(discountPct),
+          originalPrice: formatPrice(deal.originalPrice),
+          savings: formatPrice(deal.originalPrice - deal.price),
+        },
+      };
+    }
+  }
+
+  // 3. Round-trip
+  if (deal.returnDate) {
+    return { variant: byId("roundTrip"), vars: baseVars };
+  }
+
+  // 4. One-way / default
+  return { variant: byId("oneWay"), vars: baseVars };
+}
+
+function buildBroadcastTitle(lang: string, deal: any): string {
+  const { variant, vars } = pickBroadcastVariant(lang, deal);
+  return interpolate(variant.title, vars);
+}
+
+function buildBroadcastBody(lang: string, deal: any): string {
+  const { variant, vars } = pickBroadcastVariant(lang, deal);
+  return interpolate(variant.body, vars);
+}
+
+function interpolate(tpl: string, vars: Record<string, string>): string {
+  let out = tpl;
+  for (const [k, val] of Object.entries(vars)) {
+    out = out.replace(new RegExp(`\\{\\{${k}\\}\\}`, "g"), val);
+  }
+  return out;
+}
+
+function formatPrice(n: number | undefined): string {
+  if (n === undefined || n === null || isNaN(n as any)) return "";
+  // Strip trailing .00 for cleaner copy: 89 not 89.00
+  return Number.isInteger(n) ? String(n) : n.toFixed(2).replace(/\.?0+$/, "");
+}
+
+function currencySymbol(code: string | undefined): string {
+  switch ((code || "").toUpperCase()) {
+    case "EUR": return "€";
+    case "USD": return "$";
+    case "GBP": return "£";
+    default: return (code || "") + " ";
+  }
+}

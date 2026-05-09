@@ -1,4 +1,4 @@
-"use node";
+﻿"use node";
 
 import { v } from "convex/values";
 import { internalAction } from "./_generated/server";
@@ -643,8 +643,16 @@ export const generate = internalAction({
                         ? `\n\n**⛔ ARRIVAL DAY HARD RULE: Day 1 first activity startTime must be "${timeAwareGuidance.firstDayStartTime}" or later. The traveler arrives at the airport and needs ~3 hours (transfer + check-in) before being available. Any Day 1 activity before "${timeAwareGuidance.firstDayStartTime}" will be REJECTED.**`
                         : '';
 
+                    // Generate directly in the requested language. The model writes
+                    // all user-visible string values in `languageName`; JSON keys stay
+                    // in English. (No separate translation pass.)
+                    const isNonLatinLangForGen = /^(el|ar|ru|zh|ja|ko|he)$/.test(contentLanguage);
+                    const promptLanguageRequirement = isNonEnglish
+                        ? `\n**LANGUAGE REQUIREMENT:** ALL text content (activity titles, descriptions, tips, whyThisFits, duration text, day titles, travelFromPrevious descriptions, culinaryTags labels) MUST be written in ${languageName}. JSON keys/field names stay in English. Only the string VALUES should be in ${languageName}.\n`
+                        : '';
+
                     const itineraryPrompt = `Create a detailed day-by-day itinerary for a ${tripDays}-day trip to ${trip.destination} from ${new Date(trip.startDate).toDateString()} to ${new Date(trip.endDate).toDateString()}.
-${isNonEnglish ? `\n**LANGUAGE REQUIREMENT:** ALL text content (activity titles, descriptions, tips, whyThisFits, duration text, day titles, travelFromPrevious descriptions, culinaryTags labels) MUST be written in ${languageName}. JSON keys/field names stay in English. Only the string VALUES should be in ${languageName}.\n` : ''}
+${promptLanguageRequirement}
 **CRITICAL: ${daysInstructions}**${arrivalDayHardConstraint}
 
 ${budgetHeader}
@@ -808,13 +816,24 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                     // Non-Latin scripts (Greek, Arabic, etc.) tokenize ~1.5-2x larger than English,
                     // so we bump the budget to avoid truncation on those languages.
                     const hasTimeConstraints = arrivalTime || departureTime;
-                    const isNonLatinLang = /^(el|ar|ru|zh|ja|ko|he)$/.test(contentLanguage);
-                    const langMultiplier = isNonLatinLang ? 1.6 : 1;
-                    const baseTokens = Math.round((hasTimeConstraints ? 20000 : 16000) * langMultiplier);
-                    const tokensPerDay = Math.round((hasTimeConstraints ? 3000 : 2500) * langMultiplier);
-                    const maxTokens = Math.min(100000, Math.max(baseTokens, tripDays * tokensPerDay));
+                    // Non-Latin scripts (Greek, Arabic, CJK, Hebrew) tokenize
+                    // ~1.5-2x larger than English. Bump the token budget accordingly.
+                    const isNonLatinLang = isNonLatinLangForGen;
+                    const langMultiplier = isNonEnglish ? (isNonLatinLang ? 1.5 : 1.1) : 1;
+                    // gpt-5.5 is a reasoning model: max_completion_tokens covers BOTH
+                    // reasoning tokens and visible output. Reasoning can easily eat
+                    // 8-15k tokens on its own. We budget reasoning headroom on top of
+                    // the visible-output estimate so the JSON itinerary actually has
+                    // room to be emitted (otherwise finish_reason: "length" with empty
+                    // content). Combined with reasoning_effort: "low" below this stays
+                    // bounded.
+                    const REASONING_HEADROOM = 12000;
+                    const baseTokens = Math.round((hasTimeConstraints ? 16000 : 13000) * langMultiplier);
+                    const tokensPerDay = Math.round((hasTimeConstraints ? 2400 : 2000) * langMultiplier);
+                    const visibleTokens = Math.max(baseTokens, tripDays * tokensPerDay);
+                    const maxTokens = Math.min(100000, visibleTokens + REASONING_HEADROOM);
                     
-                    console.log(`📝 Using maxTokens: ${maxTokens} (days: ${tripDays}, timeConstraints: ${hasTimeConstraints}, lang: ${contentLanguage}, nonLatin: ${isNonLatinLang})`);
+                    console.log(`📝 Using maxTokens: ${maxTokens} (visible: ${visibleTokens}, reasoning: ${REASONING_HEADROOM}, days: ${tripDays}, timeConstraints: ${hasTimeConstraints}, lang: ${contentLanguage}, nonLatin: ${isNonLatinLang})`);
                     
                     // Build system prompt with time-awareness and budget awareness
                     const budgetSystemNote = budgetGuidance.budgetTier === 'low'
@@ -825,8 +844,9 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                         ? ` Include guided tours, unique experiences, and higher-quality venues.${hasCulinaryInterest ? ' Always start each day with a morning café/bakery.' : ''} Suggest ${hasCulinaryInterest ? '5' : '4'} items per day with convenience optimization.`
                         : ` Curate ${hasCulinaryInterest ? '6' : '5'} premium items per day (${hasCulinaryInterest ? '1 morning café + ' : ''}3-4 experiences + 1-2 dining).${hasCulinaryInterest ? ' Always start each day with a curated morning café/bakery.' : ''} Include exclusive activities, fine dining, and time-efficient routing. Focus on comfort and quality.`;
                     
-                    // Language instruction for the system prompt
-                    const languageInstruction = isNonEnglish 
+                    // Language instruction for the system prompt. The model writes
+                    // values directly in the target language.
+                    const languageInstruction = isNonEnglish
                         ? ` LANGUAGE: All text content in the JSON (titles, descriptions, tips, whyThisFits, duration text, travelFromPrevious descriptions, day titles) MUST be written in ${languageName}. Keep all JSON field names/keys in English. Only the VALUES of text fields should be in ${languageName}.`
                         : '';
                     
@@ -836,32 +856,59 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
 
                     // Hard timeout on the OpenAI call. Convex Node actions are killed
                     // after ~10 minutes total wall-clock time. We cap the OpenAI call
-                    // at 8 minutes so there is always headroom for post-processing
-                    // (TripAdvisor merge, image lookups, DB write). If the call exceeds
-                    // 8 minutes we abort it and fall back to the basic itinerary —
-                    // better to deliver a usable trip than to leave the user stuck.
-                    const OPENAI_TIMEOUT_MS = 8 * 60 * 1000;
+                    // at 7 minutes so there is always headroom for post-processing
+                    // (TripAdvisor merge, image lookups, DB write). We use Promise.race
+                    // because the bundled OpenAI SDK does not reliably honor
+                    // AbortController signals — the race throws regardless, and the
+                    // outer catch will fall back to the basic itinerary.
+                    const OPENAI_TIMEOUT_MS = 7 * 60 * 1000;
                     const openAIController = new AbortController();
-                    const openAITimeoutId = setTimeout(
-                        () => openAIController.abort(),
-                        OPENAI_TIMEOUT_MS,
-                    );
-                    let completion;
-                    try {
-                        completion = await openai.chat.completions.create(
+                    let openAITimeoutId: ReturnType<typeof setTimeout> | undefined;
+                    const openAIStartedAt = Date.now();
+                    const completion = await Promise.race([
+                        openai.chat.completions.create(
                             {
                                 messages: [
                                     { role: "system", content: systemPrompt },
                                     { role: "user", content: itineraryPrompt },
                                 ],
-                                model: "gpt-5.5",
+                                model: "gpt-5.4-2026-03-05",
                                 response_format: { type: "json_object" },
                                 max_completion_tokens: maxTokens,
-                            },
+                                // Cap gpt-5.5's hidden reasoning. Without this, the
+                                // model can spend 14k+ tokens "thinking" on a 7-day
+                                // plan and emit zero visible output (finish_reason
+                                // "length"). Itinerary planning is a structured-data
+                                // task and does not need deep reasoning.
+                                reasoning_effort: "low",
+                            } as any,
                             { signal: openAIController.signal },
+                        ).finally(() => {
+                            if (openAITimeoutId) clearTimeout(openAITimeoutId);
+                        }),
+                        new Promise<never>((_, reject) => {
+                            openAITimeoutId = setTimeout(() => {
+                                openAIController.abort();
+                                reject(
+                                    new Error(
+                                        `OpenAI call exceeded ${OPENAI_TIMEOUT_MS / 1000}s timeout`,
+                                    ),
+                                );
+                            }, OPENAI_TIMEOUT_MS);
+                        }),
+                    ]);
+                    console.log(
+                        `\u23F1\uFE0F OpenAI call took ${Date.now() - openAIStartedAt}ms`,
+                    );
+
+                    // Log usage so we can see how much went to reasoning vs output.
+                    const usage = (completion as any).usage;
+                    if (usage) {
+                        const reasoningTokens =
+                            usage.completion_tokens_details?.reasoning_tokens ?? 0;
+                        console.log(
+                            `📊 OpenAI usage: prompt=${usage.prompt_tokens}, completion=${usage.completion_tokens} (reasoning=${reasoningTokens}, visible=${usage.completion_tokens - reasoningTokens})`,
                         );
-                    } finally {
-                        clearTimeout(openAITimeoutId);
                     }
 
                     console.log("🔍 OpenAI response:", JSON.stringify(completion.choices[0], null, 2));
@@ -993,6 +1040,7 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                 tripId,
                 type: "trip_ready",
             });
+
         } catch (error: unknown) {
             const errorMessage = error instanceof Error ? error.message : "Unknown error";
             console.error("❌ Error generating itinerary:", error);
@@ -2066,6 +2114,7 @@ interface RestaurantInfo {
     tripAdvisorUrl?: string;
 }
 
+
 async function mergeRestaurantDataIntoItinerary(dayByDayItinerary: ItineraryDay[], restaurants: RestaurantInfo[], destination: string): Promise<ItineraryDay[]> {
     if (!restaurants || restaurants.length === 0) {
         return dayByDayItinerary;
@@ -2850,7 +2899,7 @@ Return a single JSON object (NOT an array) with the replacement activity:
                 { role: "system", content: `You are a travel planner. Return only valid JSON for a single activity.${lang !== "en" ? ` Write all content in ${langName}.` : ""}` },
                 { role: "user", content: prompt },
             ],
-            model: "gpt-5.5",
+            model: "gpt-5.4-2026-03-05",
             response_format: { type: "json_object" },
             max_completion_tokens: 1000,
         });
