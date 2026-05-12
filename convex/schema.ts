@@ -963,4 +963,119 @@ export default defineSchema({
     })
         .index("by_user", ["userId"])
         .index("by_user_and_city", ["userId", "cityId"]),
+
+    // ─────────────────────────────────────────────────────────
+    // OTA PACKAGES — Partner travel packages shown in trip view
+    // ─────────────────────────────────────────────────────────
+
+    otaPartners: defineTable({
+        name: v.string(),
+        slug: v.string(),
+        description: v.optional(v.string()),
+        logoUrl: v.optional(v.string()),
+        websiteUrl: v.optional(v.string()),
+        contactEmail: v.string(), // where lead notifications are sent
+        ccEmails: v.optional(v.array(v.string())),
+        phone: v.optional(v.string()),
+        // Optional disclaimer to show under partner cards (e.g. legal text)
+        disclaimer: v.optional(v.string()),
+        active: v.boolean(),
+        createdAt: v.float64(),
+        updatedAt: v.optional(v.float64()),
+    })
+        .index("by_slug", ["slug"])
+        .index("by_active", ["active"]),
+
+    otaPackages: defineTable({
+        partnerId: v.id("otaPartners"),
+        title: v.string(),
+        subtitle: v.optional(v.string()),
+        description: v.string(),
+        // Destination matching
+        destinationCity: v.optional(v.string()),
+        destinationCountry: v.string(),
+        destinationCountryCode: v.optional(v.string()), // ISO-2, lowercase
+        destinationLat: v.optional(v.float64()),
+        destinationLng: v.optional(v.float64()),
+        // Duration matching (in days)
+        durationDays: v.float64(),
+        minDurationDays: v.optional(v.float64()),
+        maxDurationDays: v.optional(v.float64()),
+        // Pricing (from-price, displayed)
+        priceFrom: v.float64(),
+        priceCurrency: v.string(), // ISO-4217 e.g. "EUR"
+        priceUnit: v.optional(v.union(
+            v.literal("per_person"),
+            v.literal("per_couple"),
+            v.literal("total")
+        )),
+        // What's included (badges)
+        includes: v.array(v.string()), // e.g. ["flights","hotel","transfers","breakfast"]
+        // Marketing content
+        highlights: v.optional(v.array(v.string())),
+        imageUrls: v.array(v.string()),
+        heroImageUrl: v.optional(v.string()),
+        // Availability window (unix ms)
+        availableFrom: v.optional(v.float64()),
+        availableTo: v.optional(v.float64()),
+        // External references
+        externalRef: v.optional(v.string()),
+        externalUrl: v.optional(v.string()),
+        // Display
+        badge: v.optional(v.string()), // e.g. "Best Seller", "Eco"
+        sortPriority: v.optional(v.float64()),
+        active: v.boolean(),
+        // Stats
+        viewCount: v.optional(v.float64()),
+        leadCount: v.optional(v.float64()),
+        createdAt: v.float64(),
+        updatedAt: v.optional(v.float64()),
+    })
+        .index("by_partner", ["partnerId"])
+        .index("by_country", ["destinationCountryCode", "active"])
+        .index("by_active", ["active"])
+        .index("by_external_ref", ["externalRef"]),
+
+    otaLeads: defineTable({
+        userId: v.string(),
+        packageId: v.id("otaPackages"),
+        partnerId: v.id("otaPartners"),
+        tripId: v.optional(v.id("trips")),
+        // Trip context snapshot
+        destination: v.string(),
+        startDate: v.optional(v.float64()),
+        endDate: v.optional(v.float64()),
+        travelers: v.float64(),
+        budget: v.optional(v.float64()),
+        // Contact
+        contactName: v.string(),
+        contactEmail: v.string(),
+        contactPhone: v.optional(v.string()),
+        preferredContactMethod: v.optional(v.union(
+            v.literal("email"),
+            v.literal("phone"),
+            v.literal("any")
+        )),
+        message: v.optional(v.string()),
+        consentGiven: v.boolean(), // GDPR — user agreed to share data with partner
+        // Lifecycle
+        status: v.union(
+            v.literal("pending"),
+            v.literal("sent"),
+            v.literal("contacted"),
+            v.literal("converted"),
+            v.literal("closed"),
+            v.literal("failed")
+        ),
+        sentToPartnerAt: v.optional(v.float64()),
+        sendError: v.optional(v.string()),
+        partnerNotes: v.optional(v.string()),
+        createdAt: v.float64(),
+        updatedAt: v.optional(v.float64()),
+    })
+        .index("by_user", ["userId"])
+        .index("by_partner", ["partnerId"])
+        .index("by_package", ["packageId"])
+        .index("by_status", ["status"])
+        .index("by_trip", ["tripId"]),
 });

@@ -22,6 +22,8 @@ import * as Location from "expo-location";
 import { useLocationNotifications } from "@/lib/useLocationNotifications";
 import { TripGuideTooltip, GuideStep } from "@/components/FirstTripGuide";
 import ShareTripCard, { ShareTripCardHandle } from "@/components/ShareTripCard";
+import PackageCard from "@/components/PackageCard";
+import PackageInquiryModal from "@/components/PackageInquiryModal";
 
 // Sanitize location titles for maps deep links by stripping descriptions, ratings, etc.
 const cleanLocationTitle = (title: string): string => {
@@ -913,7 +915,15 @@ export default function TripDetails() {
     const [addingToCart, setAddingToCart] = useState<string | null>(null); // Track which item is being added
     const [selectedFlightIndex, setSelectedFlightIndex] = useState<number>(0);
     const [checkedBaggageSelected, setCheckedBaggageSelected] = useState<boolean>(false);
-    const [activeFilter, setActiveFilter] = useState<'all' | 'flights' | 'food' | 'sights' | 'stays' | 'transportation' | 'insights'>('all');
+    const [activeFilter, setActiveFilter] = useState<'all' | 'flights' | 'packages' | 'food' | 'sights' | 'stays' | 'transportation' | 'insights'>('all');
+
+    // ─── OTA Packages partnership ───
+    const [inquiryPackage, setInquiryPackage] = useState<any | null>(null);
+    const otaPackages = useQuery(
+        (api as any).otaPackages.listForTrip,
+        token && id ? { token, tripId: id as string } : "skip"
+    );
+    const trackOtaView = useMutation((api as any).otaPackages.trackView);
 
     // ─── Trip detail guide state ───
     const [detailGuideStep, setDetailGuideStep] = useState(-1);
@@ -2064,6 +2074,18 @@ export default function TripDetails() {
                         <Ionicons name="airplane" size={18} color={activeFilter === 'flights' ? colors.card : colors.textMuted} />
                         <Text style={[styles.filterText, { color: colors.textMuted }, activeFilter === 'flights' && { color: colors.card }]}>{t('tripDetail.flightsTab')}</Text>
                     </TouchableOpacity>
+                    {otaPackages && otaPackages.length > 0 && (
+                        <TouchableOpacity
+                            style={[styles.filterChip, { backgroundColor: colors.card, borderColor: colors.border }, activeFilter === 'packages' && { backgroundColor: colors.text, borderColor: colors.text }]}
+                            onPress={() => setActiveFilter('packages')}
+                        >
+                            <Ionicons name="briefcase" size={18} color={activeFilter === 'packages' ? colors.card : colors.textMuted} />
+                            <Text style={[styles.filterText, { color: colors.textMuted }, activeFilter === 'packages' && { color: colors.card }]}>{t('tripDetail.packagesTab')}</Text>
+                            <View style={{ marginLeft: 4, backgroundColor: '#10b981', minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 5, alignItems: 'center', justifyContent: 'center' }}>
+                                <Text style={{ color: '#fff', fontSize: 10, fontWeight: '800' }}>{otaPackages.length}</Text>
+                            </View>
+                        </TouchableOpacity>
+                    )}
                     <TouchableOpacity 
                         style={[styles.filterChip, { backgroundColor: colors.card, borderColor: colors.border }, activeFilter === 'food' && { backgroundColor: colors.text, borderColor: colors.text }]}
                         onPress={() => setActiveFilter('food')}
@@ -2936,6 +2958,43 @@ export default function TripDetails() {
                                     <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700' }}>{t('tripDetail.searchOnSkyscanner')}</Text>
                                 </View>
                             </TouchableOpacity>
+                        </View>
+                    )}
+
+                    {activeFilter === 'packages' && (
+                        <View>
+                            <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('packages.title')}</Text>
+                            <Text style={{ color: colors.textMuted, fontSize: 13, marginTop: 4, marginBottom: 14, lineHeight: 18 }}>
+                                {t('packages.subtitle')}
+                            </Text>
+                            {!otaPackages ? (
+                                <View style={{ paddingVertical: 30, alignItems: 'center' }}>
+                                    <ActivityIndicator color={colors.primary} />
+                                </View>
+                            ) : otaPackages.length === 0 ? (
+                                <View style={{ paddingVertical: 36, alignItems: 'center' }}>
+                                    <Ionicons name="briefcase-outline" size={42} color={colors.textMuted} />
+                                    <Text style={{ color: colors.text, fontSize: 15, fontWeight: '700', marginTop: 12 }}>
+                                        {t('packages.emptyTitle')}
+                                    </Text>
+                                    <Text style={{ color: colors.textMuted, fontSize: 13, marginTop: 6, textAlign: 'center', paddingHorizontal: 24 }}>
+                                        {t('packages.emptyDesc')}
+                                    </Text>
+                                </View>
+                            ) : (
+                                otaPackages.map((pkg: any) => (
+                                    <PackageCard
+                                        key={pkg._id}
+                                        pkg={pkg}
+                                        onPressInquire={() => {
+                                            setInquiryPackage(pkg);
+                                            if (token) {
+                                                trackOtaView({ token, packageId: pkg._id }).catch(() => {});
+                                            }
+                                        }}
+                                    />
+                                ))
+                            )}
                         </View>
                     )}
 
@@ -4106,6 +4165,14 @@ export default function TripDetails() {
             <ShareTripCard
                 ref={shareCardRef}
                 trip={trip}
+            />
+
+            {/* OTA Package inquiry modal */}
+            <PackageInquiryModal
+                visible={!!inquiryPackage}
+                onClose={() => setInquiryPackage(null)}
+                packageInfo={inquiryPackage}
+                tripId={id as string}
             />
         </View>
     );

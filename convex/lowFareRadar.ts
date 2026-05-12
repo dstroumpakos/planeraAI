@@ -692,6 +692,176 @@ export const broadcastDealToHomeAirports = action({
   },
 });
 
+// ─── Admin: Nudge users who haven't generated their first trip ───
+
+/** Internal: count users in userSettings who have never created a trip. */
+export const getUsersWithoutTrips = internalQuery({
+  args: {
+    // If provided, exclude users who already received a "first_trip_nudge"
+    // within this many milliseconds.
+    skipIfNotifiedWithinMs: v.optional(v.float64()),
+    // If true, ONLY return users who have previously received a
+    // "first_trip_nudge" (used for follow-up apologies/corrections).
+    onlyPreviouslyNotified: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const allSettings = await ctx.db.query("userSettings").collect();
+    const allTrips = await ctx.db.query("trips").collect();
+    const usersWithTrips = new Set<string>(allTrips.map((t: any) => t.userId));
+
+    const cutoff = args.skipIfNotifiedWithinMs
+      ? Date.now() - args.skipIfNotifiedWithinMs
+      : null;
+
+    const matches: Array<{ userId: string; language: string | undefined }> = [];
+    for (const s of allSettings) {
+      if (!s.userId) continue;
+      if (usersWithTrips.has(s.userId)) continue;
+
+      // Look up most-recent first_trip_nudge once per user (used by both
+      // cooldown and the onlyPreviouslyNotified filter).
+      let recent: any = null;
+      if (cutoff !== null || args.onlyPreviouslyNotified) {
+        recent = await ctx.db
+          .query("notificationLog")
+          .withIndex("by_user_type", (q: any) =>
+            q.eq("userId", s.userId).eq("type", "first_trip_nudge")
+          )
+          .order("desc")
+          .first();
+      }
+
+      if (args.onlyPreviouslyNotified && !recent) continue;
+      if (cutoff !== null && recent && recent.sentAt >= cutoff) continue;
+
+      matches.push({ userId: s.userId, language: s.language });
+    }
+    return matches;
+  },
+});
+
+const FIRST_TRIP_NUDGE_COPY: Record<string, { title: string; body: string }> = {
+  en: { title: "✈️ Plan your first trip", body: "Where will you go first? Planera builds your itinerary in seconds." },
+  el: { title: "✈️ Σχεδίασε το πρώτο σου ταξίδι", body: "Πού θες να πας πρώτα; Το Planera φτιάχνει το πρόγραμμά σου σε δευτερόλεπτα." },
+  es: { title: "✈️ Planea tu primer viaje", body: "¿A dónde irás primero? Planera crea tu itinerario en segundos." },
+  fr: { title: "✈️ Planifie ton premier voyage", body: "Où iras-tu en premier ? Planera crée ton itinéraire en quelques secondes." },
+  de: { title: "✈️ Plane deine erste Reise", body: "Wohin geht's zuerst? Planera erstellt deinen Reiseplan in Sekunden." },
+  ar: { title: "✈️ خطط لرحلتك الأولى", body: "إلى أين ستذهب أولاً؟ يُنشئ Planera مسار رحلتك في ثوانٍ." },
+};
+
+/**
+ * Admin action: send a push notification to every signed-up user who has
+ * never created a trip yet. Useful for onboarding nudges.
+ */
+export const broadcastFirstTripNudge = action({
+  args: {
+    adminKey: v.string(),
+    // Optional: custom title/body for a single language (legacy).
+    customTitle: v.optional(v.string()),
+    customBody: v.optional(v.string()),
+    // Optional: per-language custom copy. Keys are 2-letter lang codes
+    // (en/el/es/fr/de/ar). Falls back to "en" entry if a user's language
+    // is missing. Takes priority over customTitle/customBody.
+    customCopy: v.optional(
+      v.record(
+        v.string(),
+        v.object({ title: v.string(), body: v.string() })
+      )
+    ),
+    // Optional: dry-run — just count targets, don't actually send.
+    dryRun: v.optional(v.boolean()),
+    // Optional: skip users who received a first_trip_nudge within the last N
+    // days. Defaults to 7 days to prevent re-spamming the same users.
+    cooldownDays: v.optional(v.float64()),
+    // Optional: only target users who already received a previous
+    // first_trip_nudge (used for apology/correction follow-ups).
+    onlyPreviouslyNotified: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args): Promise<{ targeted: number; sent: number; skipped: number; broadcastId: string | null }> => {
+    const expected = process.env.CONVEX_LOW_FARE_ADMIN_KEY;
+    if (!expected) throw new ConvexError("CONVEX_LOW_FARE_ADMIN_KEY environment variable not set");
+    if (args.adminKey !== expected) throw new ConvexError("Unauthorized: invalid admin key");
+
+    const cooldownDays = args.cooldownDays ?? 7;
+    const skipIfNotifiedWithinMs = cooldownDays > 0 ? cooldownDays * 24 * 60 * 60 * 1000 : undefined;
+
+    const users: Array<{ userId: string; language?: string }> =
+      await ctx.runQuery(internal.lowFareRadar.getUsersWithoutTrips, {
+        skipIfNotifiedWithinMs,
+        onlyPreviouslyNotified: args.onlyPreviouslyNotified,
+      });
+
+    if (args.dryRun) {
+      return { targeted: users.length, sent: 0, skipped: 0, broadcastId: null };
+    }
+
+    const hasCustom = !!(args.customCopy || args.customTitle || args.customBody);
+    const previewEn = args.customCopy?.en
+      ?? (args.customTitle || args.customBody
+        ? { title: args.customTitle || "", body: args.customBody || "" }
+        : null);
+
+    const broadcastId: any = await ctx.runMutation(internal.lowFareRadar.createBroadcastLog, {
+      origins: [],
+      mode: hasCustom ? "first_trip_custom" : "first_trip_nudge",
+      customTitle: previewEn?.title,
+      customBody: previewEn?.body,
+      routeSnapshot: args.onlyPreviouslyNotified
+        ? "Follow-up: previously notified"
+        : "First-trip nudge",
+      targeted: users.length,
+    });
+
+    let sent = 0;
+    let skipped = 0;
+
+    for (const u of users) {
+      const lang = (u.language || "en").toLowerCase();
+      const tpl = FIRST_TRIP_NUDGE_COPY[lang] || FIRST_TRIP_NUDGE_COPY.en;
+
+      // Resolve copy: per-language map → single custom string → auto template.
+      let title: string;
+      let body: string;
+      if (args.customCopy) {
+        const entry = args.customCopy[lang] || args.customCopy.en;
+        title = entry?.title || args.customTitle || tpl.title;
+        body = entry?.body || args.customBody || tpl.body;
+      } else {
+        title = args.customTitle ?? tpl.title;
+        body = args.customBody ?? tpl.body;
+      }
+
+      try {
+        await ctx.runAction(internal.notifications.sendPushNotification, {
+          userId: u.userId,
+          title,
+          body,
+          // type "deal_..." would respect dealAlerts; this is an onboarding
+          // nudge so we use a neutral type that only respects the master
+          // pushNotifications toggle.
+          type: "first_trip_nudge",
+          data: {
+            screen: "create-trip",
+            broadcastId: String(broadcastId),
+          },
+        });
+        sent++;
+      } catch (err) {
+        console.error(`broadcastFirstTripNudge: failed for user ${u.userId}`, err);
+        skipped++;
+      }
+    }
+
+    await ctx.runMutation(internal.lowFareRadar.finalizeBroadcastLog, {
+      broadcastId,
+      sent,
+      skipped,
+    });
+
+    return { targeted: users.length, sent, skipped, broadcastId: String(broadcastId) };
+  },
+});
+
 // ─── Broadcast logging (internal mutations + admin queries + tap tracking) ───
 
 export const createBroadcastLog = internalMutation({

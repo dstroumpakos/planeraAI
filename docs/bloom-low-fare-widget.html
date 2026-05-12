@@ -1507,10 +1507,75 @@
 
   <!-- Notification Broadcasts -->
   <div class="content" id="content-broadcasts" style="display:none">
+    <div class="form-card" style="margin-bottom:12px">
+      <div class="form-section-title">🌱 <span>Onboarding Nudges</span></div>
+      <p style="font-size:13px;color:var(--muted);margin-bottom:10px">
+        Send a push to users who signed up but haven't generated their first trip yet.
+      </p>
+
+      <!-- Mode -->
+      <div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap">
+        <button type="button" class="notif-mode-btn active" id="nudgeModeAuto" onclick="setNudgeMode('auto')">
+          🌐 Auto template (all 6 languages)
+        </button>
+        <button type="button" class="notif-mode-btn" id="nudgeModeCustom" onclick="setNudgeMode('custom')">
+          ✍️ Custom copy
+        </button>
+      </div>
+
+      <!-- Custom copy editor (hidden by default) -->
+      <div id="nudgeCustomFields" style="display:none;margin-bottom:12px;padding:12px;background:rgba(0,0,0,0.03);border-radius:8px">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:8px">
+          Edit per language. Empty fields fall back to the English version. Leave all blank to use the auto template.
+        </div>
+        <div style="margin-bottom:8px">
+          <button type="button" class="btn-export" onclick="loadNudgePreset('apology')" style="font-size:11px;padding:4px 10px">🌸 Load preset: Bloom apology joke</button>
+          <button type="button" class="btn-export" onclick="clearNudgeCustomCopy()" style="font-size:11px;padding:4px 10px">🗑️ Clear all</button>
+        </div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px">
+          <button type="button" class="notif-lang-chip active" data-nudge-lang="en" onclick="setNudgeEditLang('en')">EN</button>
+          <button type="button" class="notif-lang-chip" data-nudge-lang="el" onclick="setNudgeEditLang('el')">EL</button>
+          <button type="button" class="notif-lang-chip" data-nudge-lang="es" onclick="setNudgeEditLang('es')">ES</button>
+          <button type="button" class="notif-lang-chip" data-nudge-lang="fr" onclick="setNudgeEditLang('fr')">FR</button>
+          <button type="button" class="notif-lang-chip" data-nudge-lang="de" onclick="setNudgeEditLang('de')">DE</button>
+          <button type="button" class="notif-lang-chip" data-nudge-lang="ar" onclick="setNudgeEditLang('ar')">AR</button>
+        </div>
+        <input type="text" id="nudgeTitleInput" class="notif-input" placeholder="Title" maxlength="80" oninput="onNudgeCopyChange()" style="width:100%;margin-bottom:6px">
+        <textarea id="nudgeBodyInput" class="notif-textarea" placeholder="Body" maxlength="180" oninput="onNudgeCopyChange()" style="width:100%;min-height:60px"></textarea>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px" id="nudgeCharCount">0 / 80 · 0 / 180</div>
+      </div>
+
+      <!-- Target -->
+      <div style="margin-bottom:10px">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:4px">Target</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button type="button" class="notif-mode-btn active" id="nudgeTargetAll" onclick="setNudgeTarget('all')">
+            👥 All users without trips
+          </button>
+          <button type="button" class="notif-mode-btn" id="nudgeTargetPrev" onclick="setNudgeTarget('prev')">
+            🔁 Only those who got a previous nudge
+          </button>
+        </div>
+      </div>
+
+      <!-- Cooldown -->
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+        <label style="font-size:13px;display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="nudgeBypassCooldown"> Bypass 7-day cooldown (send anyway)
+        </label>
+      </div>
+
+      <!-- Actions -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="btn-export" onclick="previewFirstTripNudge()" id="nudgePreviewBtn">👀 Preview targets</button>
+        <button class="btn-export" onclick="sendFirstTripNudge()" id="nudgeSendBtn" style="background:var(--primary);color:#fff;border-color:var(--primary)">📬 Send notification</button>
+        <span id="nudgeTargetInfo" style="font-size:12px;color:var(--muted)"></span>
+      </div>
+    </div>
     <div class="form-card">
       <div class="form-section-title">📣 <span>Notification Broadcasts</span></div>
       <p style="font-size:13px;color:var(--muted);margin-bottom:12px">
-        Every push you've sent from the deals tab. Tap-through rate (CTR) is computed as <strong>unique tappers ÷ users sent to</strong>.
+        Every push you've sent. Tap-through rate (CTR) is computed as <strong>unique tappers ÷ users sent to</strong>.
       </p>
       <div id="broadcastsSummary" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"></div>
       <div id="broadcastsList"></div>
@@ -2459,7 +2524,10 @@
   function renderBroadcastRow(b) {
     var d = b.dealInfo;
     var route, deletedBadge = '';
-    if (d) {
+    var isNudge = b.mode === 'first_trip_nudge' || b.mode === 'first_trip_custom';
+    if (isNudge) {
+      route = '<span class="broadcast-iata" style="background:#FEF3C7;color:#92400E">🌱 First-trip nudge</span>';
+    } else if (d) {
       route =
         '<span class="broadcast-iata">' + escapeHtml(d.origin) + '</span>' +
         '<span style="color:var(--muted)">→</span>' +
@@ -2475,9 +2543,14 @@
     }
 
     var when = formatBroadcastTime(b.createdAt);
-    var modePill = b.mode === 'custom'
-      ? '<span class="broadcast-pill mode-custom">Custom copy</span>'
-      : '<span class="broadcast-pill mode-auto">Auto (per language)</span>';
+    var modePill;
+    if (b.mode === 'custom' || b.mode === 'first_trip_custom') {
+      modePill = '<span class="broadcast-pill mode-custom">Custom copy</span>';
+    } else if (b.mode === 'first_trip_nudge') {
+      modePill = '<span class="broadcast-pill mode-auto">Auto (per language)</span>';
+    } else {
+      modePill = '<span class="broadcast-pill mode-auto">Auto (per language)</span>';
+    }
     var originsPill = (b.origins || []).length
       ? '<span class="broadcast-pill">Targets: ' + escapeHtml(b.origins.join(', ')) + '</span>'
       : '';
@@ -2490,7 +2563,7 @@
     var ctrTxt = sent > 0 ? ctr.toFixed(1) + '%' : '—';
 
     var preview = '';
-    if (b.mode === 'custom' && (b.customTitle || b.customBody)) {
+    if ((b.mode === 'custom' || b.mode === 'first_trip_custom') && (b.customTitle || b.customBody)) {
       preview =
         '<div class="broadcast-preview">' +
           '<div class="pt">' + escapeHtml(b.customTitle || '') + '</div>' +
@@ -2498,7 +2571,7 @@
         '</div>';
     }
 
-    var deletedClass = (d && d.deletedAt) || (!d && b.routeSnapshot) ? ' deleted' : '';
+    var deletedClass = (d && d.deletedAt) || (!d && b.routeSnapshot && !isNudge) ? ' deleted' : '';
 
     return (
       '<div class="broadcast-row' + deletedClass + '">' +
@@ -2531,6 +2604,173 @@
     var day = Math.floor(hr / 24);
     if (day < 7) return day + 'd ago';
     return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  // ── First-trip nudge ──
+  var nudgeState = {
+    mode: 'auto',          // 'auto' | 'custom'
+    target: 'all',         // 'all' | 'prev'
+    editLang: 'en',
+    customCopy: { en: {title:'', body:''}, el: {title:'', body:''}, es: {title:'', body:''}, fr: {title:'', body:''}, de: {title:'', body:''}, ar: {title:'', body:''} },
+  };
+
+  function setNudgeMode(mode) {
+    nudgeState.mode = mode;
+    document.getElementById('nudgeModeAuto').classList.toggle('active', mode === 'auto');
+    document.getElementById('nudgeModeCustom').classList.toggle('active', mode === 'custom');
+    document.getElementById('nudgeCustomFields').style.display = mode === 'custom' ? '' : 'none';
+  }
+
+  function setNudgeTarget(t) {
+    nudgeState.target = t;
+    document.getElementById('nudgeTargetAll').classList.toggle('active', t === 'all');
+    document.getElementById('nudgeTargetPrev').classList.toggle('active', t === 'prev');
+    document.getElementById('nudgeTargetInfo').textContent = '';
+  }
+
+  function setNudgeEditLang(lang) {
+    nudgeState.editLang = lang;
+    document.querySelectorAll('[data-nudge-lang]').forEach(function(el) {
+      el.classList.toggle('active', el.getAttribute('data-nudge-lang') === lang);
+    });
+    var entry = nudgeState.customCopy[lang] || { title: '', body: '' };
+    document.getElementById('nudgeTitleInput').value = entry.title || '';
+    document.getElementById('nudgeBodyInput').value = entry.body || '';
+    document.getElementById('nudgeBodyInput').dir = (lang === 'ar') ? 'rtl' : 'ltr';
+    document.getElementById('nudgeTitleInput').dir = (lang === 'ar') ? 'rtl' : 'ltr';
+    updateNudgeCharCount();
+  }
+
+  function onNudgeCopyChange() {
+    var lang = nudgeState.editLang;
+    nudgeState.customCopy[lang] = {
+      title: document.getElementById('nudgeTitleInput').value || '',
+      body: document.getElementById('nudgeBodyInput').value || '',
+    };
+    updateNudgeCharCount();
+  }
+
+  function updateNudgeCharCount() {
+    var t = document.getElementById('nudgeTitleInput').value.length;
+    var b = document.getElementById('nudgeBodyInput').value.length;
+    document.getElementById('nudgeCharCount').textContent = t + ' / 80 · ' + b + ' / 180';
+  }
+
+  var NUDGE_PRESETS = {
+    apology: {
+      en: { title: "🌸 Plot twist: I'm Planera", body: "Yeah… we sent that last one signed “Bloom”. Awkward. Anyway — your first trip is still waiting. Tap to start it!" },
+      el: { title: "🌸 Plot twist: Planera είμαι!", body: "Ναι… το προηγούμενο το υπογράψαμε «Bloom». Awkward. Όπως και να ’χει — το πρώτο σου ταξίδι περιμένει. Πάτα να ξεκινήσεις!" },
+      es: { title: "🌸 Plot twist: ¡soy Planera!", body: "Sí… la última la firmamos como “Bloom”. Qué vergüenza. En fin — tu primer viaje sigue esperando. ¡Toca para empezar!" },
+      fr: { title: "🌸 Plot twist : c'est Planera !", body: "Ouais… la précédente était signée « Bloom ». La honte. Bref — ton premier voyage t'attend toujours. Touche pour commencer !" },
+      de: { title: "🌸 Plot Twist: Ich bin Planera!", body: "Ja… die letzte war mit „Bloom“ signiert. Peinlich. Egal — deine erste Reise wartet noch. Tippe und los!" },
+      ar: { title: "🌸 مفاجأة: أنا Planera!", body: "نعم… الإشعار السابق وقّعناه بـ”Bloom”. محرج. على كل حال — رحلتك الأولى ما زالت تنتظر. انقر للبدء!" },
+    },
+  };
+
+  function loadNudgePreset(name) {
+    var preset = NUDGE_PRESETS[name];
+    if (!preset) return;
+    Object.keys(preset).forEach(function(lang) {
+      nudgeState.customCopy[lang] = { title: preset[lang].title, body: preset[lang].body };
+    });
+    setNudgeEditLang(nudgeState.editLang);
+    toast('Preset loaded for all 6 languages', 'success');
+  }
+
+  function clearNudgeCustomCopy() {
+    ['en','el','es','fr','de','ar'].forEach(function(l) {
+      nudgeState.customCopy[l] = { title: '', body: '' };
+    });
+    setNudgeEditLang(nudgeState.editLang);
+  }
+
+  function buildNudgePayload(dryRun) {
+    var payload = { adminKey: adminKey };
+    if (dryRun) payload.dryRun = true;
+    if (nudgeState.target === 'prev') payload.onlyPreviouslyNotified = true;
+    if (document.getElementById('nudgeBypassCooldown') && document.getElementById('nudgeBypassCooldown').checked) {
+      payload.cooldownDays = 0;
+    }
+    if (nudgeState.mode === 'custom') {
+      var anyFilled = false;
+      var copy = {};
+      ['en','el','es','fr','de','ar'].forEach(function(l) {
+        var entry = nudgeState.customCopy[l] || {};
+        var title = (entry.title || '').trim();
+        var body = (entry.body || '').trim();
+        if (title || body) {
+          copy[l] = { title: title, body: body };
+          anyFilled = true;
+        }
+      });
+      if (anyFilled) {
+        // Require at least EN as fallback
+        if (!copy.en || !copy.en.title || !copy.en.body) {
+          throw new Error('English (EN) title and body are required as a fallback for other languages.');
+        }
+        payload.customCopy = copy;
+      }
+    }
+    return payload;
+  }
+
+  function previewFirstTripNudge() {
+    if (!adminKey) return toast(t('msg_connect_first'), 'error');
+    var infoEl = document.getElementById('nudgeTargetInfo');
+    var btn = document.getElementById('nudgePreviewBtn');
+    var payload;
+    try { payload = buildNudgePayload(true); }
+    catch (e) { return toast(e.message, 'error'); }
+    btn.disabled = true;
+    infoEl.textContent = 'Counting…';
+    convexAction('lowFareRadar:broadcastFirstTripNudge', payload)
+      .then(function(result) {
+        btn.disabled = false;
+        var n = result.targeted || 0;
+        var label = nudgeState.target === 'prev' ? 'previously notified user' : 'user without trips';
+        infoEl.textContent = '👥 ' + n + ' ' + label + (n === 1 ? '' : 's');
+      })
+      .catch(function(err) {
+        btn.disabled = false;
+        infoEl.textContent = '';
+        toast('Preview error: ' + (err.message || 'Unknown error'), 'error');
+      });
+  }
+
+  function sendFirstTripNudge() {
+    if (!adminKey) return toast(t('msg_connect_first'), 'error');
+    var payload;
+    try { payload = buildNudgePayload(false); }
+    catch (e) { return toast(e.message, 'error'); }
+
+    var modeLabel = nudgeState.mode === 'custom' && payload.customCopy ? 'CUSTOM copy' : 'auto template';
+    var targetLabel = nudgeState.target === 'prev'
+      ? 'users who received a previous nudge (and still have no trip)'
+      : 'every signed-up user who hasn\'t generated a trip yet';
+    var cooldownLabel = payload.cooldownDays === 0 ? '\n⚠️ 7-day cooldown is BYPASSED.' : '';
+    if (!confirm('Send push to ' + targetLabel + ' using ' + modeLabel + '?' + cooldownLabel)) return;
+
+    var btn = document.getElementById('nudgeSendBtn');
+    var infoEl = document.getElementById('nudgeTargetInfo');
+    btn.disabled = true;
+    var originalText = btn.textContent;
+    btn.textContent = '⏳ Sending…';
+    convexAction('lowFareRadar:broadcastFirstTripNudge', payload)
+      .then(function(result) {
+        btn.disabled = false;
+        btn.textContent = originalText;
+        var msg = '📬 Sent to ' + (result.sent || 0) + ' / ' + (result.targeted || 0) + ' user' +
+          ((result.targeted === 1) ? '' : 's');
+        if (result.skipped) msg += ' (' + result.skipped + ' failed)';
+        toast(msg, 'success');
+        infoEl.textContent = '';
+        loadBroadcasts();
+      })
+      .catch(function(err) {
+        btn.disabled = false;
+        btn.textContent = originalText;
+        toast('Nudge error: ' + (err.message || 'Unknown error'), 'error');
+      });
   }
 
   function loadAirports() {

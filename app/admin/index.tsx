@@ -180,6 +180,41 @@ export default function AdminDashboard() {
                         </TouchableOpacity>
                     </View>
 
+                    {/* Partnerships section */}
+                    <Text style={[styles.sectionTitle, { color: colors.text }]}>Partnerships</Text>
+                    <View style={[styles.menuContainer, { backgroundColor: colors.card }]}>
+                        <TouchableOpacity
+                            style={[styles.menuItem, { borderBottomColor: colors.border }]}
+                            onPress={() => router.push("/admin/packages" as any)}
+                        >
+                            <View style={[styles.menuIconContainer, { backgroundColor: isDarkMode ? 'rgba(14, 165, 233, 0.2)' : '#DBEAFE' }]}>
+                                <Ionicons name="briefcase" size={20} color="#0EA5E9" />
+                            </View>
+                            <View style={styles.menuTextContainer}>
+                                <Text style={[styles.menuTitle, { color: colors.text }]}>OTA Packages</Text>
+                                <Text style={[styles.menuSubtitle, { color: colors.textMuted }]}>
+                                    Manage partner packages
+                                </Text>
+                            </View>
+                            <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.menuItem, { borderBottomWidth: 0 }]}
+                            onPress={() => router.push("/admin/leads" as any)}
+                        >
+                            <View style={[styles.menuIconContainer, { backgroundColor: isDarkMode ? 'rgba(245, 158, 11, 0.2)' : '#FEF3C7' }]}>
+                                <Ionicons name="mail-open" size={20} color="#F59E0B" />
+                            </View>
+                            <View style={styles.menuTextContainer}>
+                                <Text style={[styles.menuTitle, { color: colors.text }]}>Partner Leads</Text>
+                                <Text style={[styles.menuSubtitle, { color: colors.textMuted }]}>
+                                    Inquiries sent to partners
+                                </Text>
+                            </View>
+                            <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+                        </TouchableOpacity>
+                    </View>
+
                     {/* Top Destinations by Insights */}
                     {stats.topDestinations && stats.topDestinations.length > 0 && (
                         <>

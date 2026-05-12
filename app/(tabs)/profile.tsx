@@ -351,6 +351,14 @@ export default function Profile() {
             action: () => router.push("/settings/wishlist" as any)
         },
         {
+            title: t('packages.myInquiriesTitle'),
+            subtitle: t('packages.myInquiriesSubtitle'),
+            icon: "briefcase-outline",
+            iconBg: isDarkMode ? "#0C2C44" : "#DBEAFE",
+            iconColor: "#0EA5E9",
+            action: () => router.push("/settings/inquiries" as any)
+        },
+        {
             title: t('referrals.inviteFriends'),
             subtitle: t('referrals.earnCredits'),
             icon: "gift-outline",
