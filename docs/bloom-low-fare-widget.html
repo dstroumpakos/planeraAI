@@ -1555,6 +1555,9 @@
           <button type="button" class="notif-mode-btn" id="nudgeTargetPrev" onclick="setNudgeTarget('prev')">
             🔁 Only those who got a previous nudge
           </button>
+          <button type="button" class="notif-mode-btn" id="nudgeTargetEveryone" onclick="setNudgeTarget('everyone')">
+            🌍 Everyone (notifications enabled)
+          </button>
         </div>
       </div>
 
@@ -1568,7 +1571,7 @@
       <!-- Actions -->
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <button class="btn-export" onclick="previewFirstTripNudge()" id="nudgePreviewBtn">👀 Preview targets</button>
-        <button class="btn-export" onclick="sendFirstTripNudge()" id="nudgeSendBtn" style="background:var(--primary);color:#fff;border-color:var(--primary)">📬 Send notification</button>
+        <button class="btn-export" onclick="sendFirstTripNudge()" id="nudgeSendBtn" style="background:#000;color:#fff;border-color:#000">📬 Send notification</button>
         <span id="nudgeTargetInfo" style="font-size:12px;color:var(--muted)"></span>
       </div>
     </div>
@@ -2625,6 +2628,8 @@
     nudgeState.target = t;
     document.getElementById('nudgeTargetAll').classList.toggle('active', t === 'all');
     document.getElementById('nudgeTargetPrev').classList.toggle('active', t === 'prev');
+    var ev = document.getElementById('nudgeTargetEveryone');
+    if (ev) ev.classList.toggle('active', t === 'everyone');
     document.getElementById('nudgeTargetInfo').textContent = '';
   }
 
@@ -2688,6 +2693,7 @@
     var payload = { adminKey: adminKey };
     if (dryRun) payload.dryRun = true;
     if (nudgeState.target === 'prev') payload.onlyPreviouslyNotified = true;
+    if (nudgeState.target === 'everyone') payload.includeUsersWithTrips = true;
     if (document.getElementById('nudgeBypassCooldown') && document.getElementById('nudgeBypassCooldown').checked) {
       payload.cooldownDays = 0;
     }
@@ -2727,7 +2733,11 @@
       .then(function(result) {
         btn.disabled = false;
         var n = result.targeted || 0;
-        var label = nudgeState.target === 'prev' ? 'previously notified user' : 'user without trips';
+        var label = nudgeState.target === 'prev'
+          ? 'previously notified user'
+          : nudgeState.target === 'everyone'
+          ? 'user with notifications enabled'
+          : 'user without trips';
         infoEl.textContent = '👥 ' + n + ' ' + label + (n === 1 ? '' : 's');
       })
       .catch(function(err) {
@@ -2746,6 +2756,8 @@
     var modeLabel = nudgeState.mode === 'custom' && payload.customCopy ? 'CUSTOM copy' : 'auto template';
     var targetLabel = nudgeState.target === 'prev'
       ? 'users who received a previous nudge (and still have no trip)'
+      : nudgeState.target === 'everyone'
+      ? '🌍 EVERYONE with notifications enabled (including users with trips)'
       : 'every signed-up user who hasn\'t generated a trip yet';
     var cooldownLabel = payload.cooldownDays === 0 ? '\n⚠️ 7-day cooldown is BYPASSED.' : '';
     if (!confirm('Send push to ' + targetLabel + ' using ' + modeLabel + '?' + cooldownLabel)) return;

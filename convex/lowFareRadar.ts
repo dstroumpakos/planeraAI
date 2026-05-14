@@ -703,11 +703,18 @@ export const getUsersWithoutTrips = internalQuery({
     // If true, ONLY return users who have previously received a
     // "first_trip_nudge" (used for follow-up apologies/corrections).
     onlyPreviouslyNotified: v.optional(v.boolean()),
+    // If true, do not filter out users who already have trips. Used for
+    // "Everyone" broadcasts (e.g. global announcements).
+    includeUsersWithTrips: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const allSettings = await ctx.db.query("userSettings").collect();
-    const allTrips = await ctx.db.query("trips").collect();
-    const usersWithTrips = new Set<string>(allTrips.map((t: any) => t.userId));
+
+    let usersWithTrips = new Set<string>();
+    if (!args.includeUsersWithTrips) {
+      const allTrips = await ctx.db.query("trips").collect();
+      usersWithTrips = new Set<string>(allTrips.map((t: any) => t.userId));
+    }
 
     const cutoff = args.skipIfNotifiedWithinMs
       ? Date.now() - args.skipIfNotifiedWithinMs
@@ -716,7 +723,7 @@ export const getUsersWithoutTrips = internalQuery({
     const matches: Array<{ userId: string; language: string | undefined }> = [];
     for (const s of allSettings) {
       if (!s.userId) continue;
-      if (usersWithTrips.has(s.userId)) continue;
+      if (!args.includeUsersWithTrips && usersWithTrips.has(s.userId)) continue;
 
       // Look up most-recent first_trip_nudge once per user (used by both
       // cooldown and the onlyPreviouslyNotified filter).
@@ -776,6 +783,9 @@ export const broadcastFirstTripNudge = action({
     // Optional: only target users who already received a previous
     // first_trip_nudge (used for apology/correction follow-ups).
     onlyPreviouslyNotified: v.optional(v.boolean()),
+    // Optional: send to ALL users (even those who already have trips).
+    // Use sparingly — for global announcements.
+    includeUsersWithTrips: v.optional(v.boolean()),
   },
   handler: async (ctx, args): Promise<{ targeted: number; sent: number; skipped: number; broadcastId: string | null }> => {
     const expected = process.env.CONVEX_LOW_FARE_ADMIN_KEY;
@@ -789,6 +799,7 @@ export const broadcastFirstTripNudge = action({
       await ctx.runQuery(internal.lowFareRadar.getUsersWithoutTrips, {
         skipIfNotifiedWithinMs,
         onlyPreviouslyNotified: args.onlyPreviouslyNotified,
+        includeUsersWithTrips: args.includeUsersWithTrips,
       });
 
     if (args.dryRun) {
@@ -806,7 +817,9 @@ export const broadcastFirstTripNudge = action({
       mode: hasCustom ? "first_trip_custom" : "first_trip_nudge",
       customTitle: previewEn?.title,
       customBody: previewEn?.body,
-      routeSnapshot: args.onlyPreviouslyNotified
+      routeSnapshot: args.includeUsersWithTrips
+        ? "Everyone (global broadcast)"
+        : args.onlyPreviouslyNotified
         ? "Follow-up: previously notified"
         : "First-trip nudge",
       targeted: users.length,
