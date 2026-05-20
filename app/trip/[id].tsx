@@ -790,6 +790,7 @@ export default function TripDetails() {
     const unlikeInsight = useAuthenticatedMutation(api.insights.unlike as any);
     // @ts-ignore
     const trackClick = useMutation(api.bookings.trackClick);
+    const resolveBookingUrl = useAction(api.flightsResolve.resolveBookingUrl);
     const insights = useQuery(api.insights.getDestinationInsights, trip ? { destination: trip.destination } : "skip");
     const myLikedInsightIds = useQuery((api as any).insights.getMyLikedInsightIds, token ? { token } : "skip");
     const { image: destinationImage } = useDestinationImage(trip?.destination);
@@ -1540,6 +1541,7 @@ export default function TripDetails() {
         // Track the click
         try {
             await trackClick({
+                token: token || "",
                 tripId: id as Id<"trips">,
                 type: type,
                 item: query,
@@ -1605,6 +1607,13 @@ export default function TripDetails() {
     };
 
     const renderFlights = () => {
+        // Provider failed / no results → show only the Trip.com & Skyscanner
+        // search cards (rendered separately below) instead of cards built
+        // from fabricated flight data.
+        if (itinerary.flights?.unavailable || itinerary.flights?.dataSource === "unavailable") {
+            return null;
+        }
+
         // Check if flights were skipped
         if (itinerary.flights?.skipped) {
             return (
@@ -1850,7 +1859,35 @@ export default function TripDetails() {
 
                     <TouchableOpacity 
                         style={styles.affiliateButton}
-                        onPress={() => selectedFlight.bookingUrl ? Linking.openURL(selectedFlight.bookingUrl) : openAffiliateLink('flight', `${trip.origin} to ${trip.destination}`)}
+                        onPress={async () => {
+                            const iata = (s: string | undefined): string => {
+                                if (!s) return '';
+                                const m = s.match(/\b([A-Z]{3})\b/);
+                                return m ? m[1] : s;
+                            };
+                            const origCode = selectedFlight.outbound?.departureAirport || iata(trip.origin);
+                            const destCode = selectedFlight.arrivalAirport || selectedFlight.outbound?.arrivalAirport || iata(trip.destination);
+                            const dep = new Date(trip.startDate).toISOString().split('T')[0];
+                            const ret = new Date(trip.endDate).toISOString().split('T')[0];
+                            // Google Flights deep-link fallback (legacy
+                            // `#flt=` hash format that always resolves).
+                            const fallback = ret
+                                ? `https://www.google.com/travel/flights?hl=en&curr=EUR#flt=${origCode}.${destCode}.${dep}*${destCode}.${origCode}.${ret};c:EUR;e:1;sd:1;t:f`
+                                : `https://www.google.com/travel/flights?hl=en&curr=EUR#flt=${origCode}.${destCode}.${dep};c:EUR;e:1;sd:1;t:o`;
+
+                            // If we have a SerpApi POST-based booking_request,
+                            // resolve it server-side to the real provider URL.
+                            let url = selectedFlight.bookingUrl || fallback;
+                            const br = selectedFlight.bookingRequest;
+                            if (br?.url && br?.postData) {
+                                try {
+                                    const resolved = await resolveBookingUrl({ url: br.url, postData: br.postData });
+                                    if (resolved?.ok && resolved.url) url = resolved.url;
+                                } catch {}
+                            }
+                            try { trackClick({ token: token || "", tripId: id as Id<"trips">, type: 'flight', item: `${origCode}-${destCode}`, url }); } catch {}
+                            Linking.openURL(url);
+                        }}
                     >
                         <Text style={styles.affiliateButtonText}>{t('tripDetail.bookThisFlight')}</Text>
                         <Ionicons name="open-outline" size={16} color="#14B8A6" />
@@ -2703,6 +2740,9 @@ export default function TripDetails() {
                     {activeFilter === 'flights' && (
                         <View>
                             <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('tripDetail.availableFlights')}</Text>
+
+                            {/* AI-generated / SerpApi flight options for normal trips */}
+                            {trip.tripType !== 'deal' && trip.itinerary?.flights && renderFlights()}
 
                             {/* Deal Flight Card - only shown for deal-generated trips */}
                             {trip.tripType === 'deal' && trip.itinerary?.flights?.options && Array.isArray(trip.itinerary.flights.options) && trip.itinerary.flights.options.length > 0 && (() => {

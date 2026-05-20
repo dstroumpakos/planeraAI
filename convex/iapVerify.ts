@@ -13,6 +13,7 @@
  */
 
 import { action } from "./_generated/server";
+import { reportError } from "./helpers/reportError";
 import { v } from "convex/values";
 import { internal } from "./_generated/api";
 
@@ -124,10 +125,12 @@ export const verifyAndApplyApplePurchase = action({
       resp = await verifyAppleReceipt(args.receipt);
     } catch (e) {
       console.error("[IAP] verifyReceipt error:", e);
+      await reportError(ctx, "iapVerify:verifyAppleReceipt", e, { productId: args.productId });
       return { success: false, error: "Could not verify purchase with Apple." };
     }
     if (resp.status !== 0) {
       console.error("[IAP] verifyReceipt status:", resp.status);
+      await reportError(ctx, "iapVerify:badStatus", new Error(`Apple status ${resp.status}`), { productId: args.productId, status: resp.status });
       return { success: false, error: `Apple receipt status ${resp.status}` };
     }
 

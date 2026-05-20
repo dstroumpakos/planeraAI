@@ -12,9 +12,10 @@
  * from SerpApi's raw shape.
  */
 
-import { action } from "./_generated/server";
+import { action, internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
+import { reportError } from "./helpers/reportError";
 import {
   createFlightSearchCacheKey,
   mapFlightType,
@@ -151,6 +152,102 @@ function normalizeSearchResponse(
 
 // ============================== searchFlights ===============================
 
+/**
+ * Core search flow — validation + cache read + network call + cache write
+ * + opportunistic Low-Fare Radar seeding. Shared by the public, auth-gated
+ * `searchFlights` action and the `searchFlightsInternal` action used by
+ * trusted Convex actions (trip generation, radar cron, etc.).
+ */
+async function _runSearch(
+  ctx: any,
+  input: FlightSearchInput,
+  cacheTtlMs?: number
+): Promise<NormalizedFlightSearchResponse> {
+  if (!input.departureId?.trim()) throw new Error("Departure airport is required.");
+  if (!input.arrivalId?.trim()) throw new Error("Arrival airport is required.");
+  if (!input.outboundDate) throw new Error("Outbound date is required.");
+  if ((input.type ?? "round_trip") === "round_trip" && !input.returnDate) {
+    throw new Error("Return date is required for round-trip searches.");
+  }
+
+  const cacheKey = createFlightSearchCacheKey(input);
+
+  if (!input.noCache) {
+    const cached: NormalizedFlightSearchResponse | null = await ctx.runQuery(
+      internal.flightSearchCache.readCache,
+      { cacheKey }
+    );
+    if (cached) {
+      console.log(
+        `[SerpApi] cache hit ${input.departureId}->${input.arrivalId} ${input.outboundDate}`
+      );
+      return cached;
+    }
+  }
+
+  const params = buildSearchParams(input);
+  const raw = await callSerpApi(params);
+  const normalized = normalizeSearchResponse(raw, input);
+
+  console.log(
+    `[SerpApi] search ${input.departureId}->${input.arrivalId} ${input.outboundDate}` +
+      (input.returnDate ? `/${input.returnDate}` : "") +
+      ` status=${normalized.status} best=${normalized.bestFlights.length} other=${normalized.otherFlights.length}`
+  );
+
+  const ttlMs = Math.min(
+    Math.max(cacheTtlMs ?? SEARCH_CACHE_TTL_MS, 0),
+    SEARCH_CACHE_TTL_MAX_MS
+  );
+  try {
+    await ctx.runMutation(internal.flightSearchCache.writeCache, {
+      cacheKey,
+      kind: "search",
+      ttlMs,
+      normalizedResults: normalized,
+      departureId: input.departureId,
+      arrivalId: input.arrivalId,
+      outboundDate: input.outboundDate,
+      returnDate: input.returnDate,
+      type: input.type ?? "round_trip",
+      currency: (input.currency ?? "EUR").toUpperCase(),
+    });
+  } catch (err) {
+    console.error("[SerpApi] cache write failed");
+  }
+
+  try {
+    const all = [...normalized.bestFlights, ...normalized.otherFlights]
+      .filter((o) => o.price != null);
+    const cheapest = all.length
+      ? all.reduce((m, o) => ((o.price ?? Infinity) < (m.price ?? Infinity) ? o : m))
+      : null;
+    if (cheapest) {
+      // Fire-and-forget: enrichment action does up to 2 follow-up SerpApi
+      // calls (return leg + booking options) then writes the deal. Doesn't
+      // block the user-facing search response.
+      await ctx.scheduler.runAfter(
+        0,
+        internal.lowFareRadarAutoAction.enrichAndSeedDeal,
+        {
+          origin: input.departureId,
+          destination: input.arrivalId,
+          outboundDate: input.outboundDate,
+          returnDate: input.returnDate,
+          currency: (input.currency ?? "EUR").toUpperCase(),
+          priceLevel: (normalized.priceInsights?.priceLevel as string) ?? undefined,
+          option: cheapest,
+          adults: typeof input.adults === "number" && input.adults > 0 ? input.adults : 1,
+        }
+      );
+    }
+  } catch (err) {
+    console.error("[SerpApi] radar seed schedule failed");
+  }
+
+  return normalized;
+}
+
 export const searchFlights = action({
   args: {
     token: v.string(),
@@ -208,7 +305,6 @@ export const searchFlights = action({
     cacheTtlMs: v.optional(v.float64()),
   },
   handler: async (ctx, args): Promise<NormalizedFlightSearchResponse> => {
-    // ---- Auth (lightweight; matches convex/flightBooking.ts pattern) ----
     if (!args.token) throw new Error("Authentication required");
     const session: any = await ctx.runQuery(
       internal.authNativeDb.getSessionByToken,
@@ -217,92 +313,35 @@ export const searchFlights = action({
     if (!session || (session.expiresAt && session.expiresAt < Date.now())) {
       throw new Error("Authentication required");
     }
-
-    const input = args.input as FlightSearchInput;
-
-    // ---- Validation ----
-    if (!input.departureId?.trim()) throw new Error("Departure airport is required.");
-    if (!input.arrivalId?.trim()) throw new Error("Arrival airport is required.");
-    if (!input.outboundDate) throw new Error("Outbound date is required.");
-    if ((input.type ?? "round_trip") === "round_trip" && !input.returnDate) {
-      throw new Error("Return date is required for round-trip searches.");
-    }
-
-    const cacheKey = createFlightSearchCacheKey(input);
-
-    // ---- Cache read ----
-    if (!input.noCache) {
-      const cached: NormalizedFlightSearchResponse | null = await ctx.runQuery(
-        internal.flightSearchCache.readCache,
-        { cacheKey }
-      );
-      if (cached) {
-        console.log(
-          `[SerpApi] cache hit ${input.departureId}->${input.arrivalId} ${input.outboundDate}`
-        );
-        return cached;
-      }
-    }
-
-    // ---- Network ----
-    const params = buildSearchParams(input);
-    const raw = await callSerpApi(params);
-    const normalized = normalizeSearchResponse(raw, input);
-
-    console.log(
-      `[SerpApi] search ${input.departureId}->${input.arrivalId} ${input.outboundDate}` +
-        (input.returnDate ? `/${input.returnDate}` : "") +
-        ` status=${normalized.status} best=${normalized.bestFlights.length} other=${normalized.otherFlights.length}`
-    );
-
-    // ---- Cache write (best-effort) ----
-    const ttlMs = Math.min(
-      Math.max(args.cacheTtlMs ?? SEARCH_CACHE_TTL_MS, 0),
-      SEARCH_CACHE_TTL_MAX_MS
-    );
     try {
-      await ctx.runMutation(internal.flightSearchCache.writeCache, {
-        cacheKey,
-        kind: "search",
-        ttlMs,
-        normalizedResults: normalized,
-        departureId: input.departureId,
-        arrivalId: input.arrivalId,
-        outboundDate: input.outboundDate,
-        returnDate: input.returnDate,
-        type: input.type ?? "round_trip",
-        currency: (input.currency ?? "EUR").toUpperCase(),
+      return await _runSearch(ctx, args.input as FlightSearchInput, args.cacheTtlMs);
+    } catch (err) {
+      await reportError(ctx, "flightsSerpApi:searchFlights", err, {
+        departureId: args.input?.departureId,
+        arrivalId: args.input?.arrivalId,
       });
-    } catch (err) {
-      console.error("[SerpApi] cache write failed");
+      throw err;
     }
+  },
+});
 
-    // ---- Opportunistic Low-Fare Radar seeding (best-effort) ----
-    // If we don't already have a curated deal for this route, drop the
-    // cheapest result into `lowFareRadar` so other users see *something*
-    // for that destination. Only when SerpApi grades the fare low/typical.
+// Internal variant for trusted server-side callers (trip generation, crons).
+// Same flow, no token check. Never expose to the client.
+export const searchFlightsInternal = internalAction({
+  args: {
+    input: v.any(),
+    cacheTtlMs: v.optional(v.float64()),
+  },
+  handler: async (ctx, args): Promise<NormalizedFlightSearchResponse> => {
     try {
-      const all = [...normalized.bestFlights, ...normalized.otherFlights]
-        .filter((o) => o.price != null);
-      const cheapest = all.length
-        ? all.reduce((m, o) => ((o.price ?? Infinity) < (m.price ?? Infinity) ? o : m))
-        : null;
-      if (cheapest) {
-        await ctx.runMutation(internal.lowFareRadarAuto.upsertAutoDealFromSerpApi, {
-          origin: input.departureId,
-          destination: input.arrivalId,
-          outboundDate: input.outboundDate,
-          returnDate: input.returnDate,
-          currency: (input.currency ?? "EUR").toUpperCase(),
-          priceLevel: (normalized.priceInsights?.priceLevel as string) ?? undefined,
-          option: cheapest,
-        });
-      }
+      return await _runSearch(ctx, args.input as FlightSearchInput, args.cacheTtlMs);
     } catch (err) {
-      console.error("[SerpApi] radar seed failed");
+      await reportError(ctx, "flightsSerpApi:searchFlightsInternal", err, {
+        departureId: args.input?.departureId,
+        arrivalId: args.input?.arrivalId,
+      });
+      throw err;
     }
-
-    return normalized;
   },
 });
 
@@ -319,6 +358,7 @@ export const getBookingOptions = action({
     }),
   },
   handler: async (ctx, args): Promise<NormalizedBookingOptionsResponse> => {
+    try {
     if (!args.token) throw new Error("Authentication required");
     const session: any = await ctx.runQuery(
       internal.authNativeDb.getSessionByToken,
@@ -387,5 +427,11 @@ export const getBookingOptions = action({
     }
 
     return normalized;
+    } catch (err) {
+      await reportError(ctx, "flightsSerpApi:getBookingOptions", err, {
+        bookingToken: args.input?.bookingToken?.slice(0, 24),
+      });
+      throw err;
+    }
   },
 });

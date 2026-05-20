@@ -52,6 +52,13 @@ export const upsertAutoDealFromSerpApi = internalMutation({
     // Cheapest normalized flight option (any-shaped so we don't bind tightly
     // to types/flights.ts inside Convex validators).
     option: v.any(),
+    // Optional enrichment data from follow-up SerpApi calls.
+    returnOption: v.optional(v.any()),
+    bookingUrl: v.optional(v.string()),
+    cabinBaggage: v.optional(v.string()),
+    checkedBaggage: v.optional(v.string()),
+    totalPrice: v.optional(v.float64()),
+    adults: v.optional(v.float64()),
   },
   handler: async (ctx, args) => {
     const level = (args.priceLevel || "").toLowerCase();
@@ -83,6 +90,45 @@ export const upsertAutoDealFromSerpApi = internalMutation({
     const hasCurated = liveExisting.some((d) => d.dealTag !== "AUTO");
     if (hasCurated) return null;
 
+
+    // Outbound segments (SerpApi `searchFlights` returns the outbound only
+    // in a round-trip query; return-leg detail requires a follow-up call
+    // with `departure_token` which we skip to keep quota low.)
+    const outboundSegments = Array.isArray(opt.flights)
+      ? opt.flights.map((seg: any) => ({
+          airline: seg.airline ?? "",
+          flightNumber: seg.flightNumber ?? undefined,
+          departureAirport: seg.departureAirport?.id ?? "",
+          departureTime: timeOnly(seg.departureAirport?.time),
+          arrivalAirport: seg.arrivalAirport?.id ?? "",
+          arrivalTime: timeOnly(seg.arrivalAirport?.time),
+          duration: minutesToHm(seg.durationMinutes),
+        }))
+      : undefined;
+
+    // Surface layover + emissions detail as human-readable notes since the
+    // schema has no dedicated columns for them.
+    const noteParts: string[] = [];
+    if (Array.isArray(opt.layovers) && opt.layovers.length > 0) {
+      const layoverText = opt.layovers
+        .map((l: any) => {
+          const dur = minutesToHm(l.durationMinutes);
+          const overnight = l.overnight ? " (overnight)" : "";
+          return `${l.id ?? l.name ?? "?"} ${dur ?? ""}${overnight}`.trim();
+        })
+        .join(", ");
+      noteParts.push(`Layovers: ${layoverText}`);
+    }
+    if (opt.carbonEmissions?.thisFlight != null) {
+      const diff = opt.carbonEmissions.differencePercent;
+      const diffText =
+        diff != null ? ` (${diff > 0 ? "+" : ""}${diff}% vs typical)` : "";
+      noteParts.push(
+        `CO₂: ${Math.round(opt.carbonEmissions.thisFlight / 1000)}kg${diffText}`
+      );
+    }
+    const notes = noteParts.length > 0 ? noteParts.join(" • ") : undefined;
+
     const firstSeg = Array.isArray(opt.flights) ? opt.flights[0] : null;
     const lastSeg = Array.isArray(opt.flights)
       ? opt.flights[opt.flights.length - 1]
@@ -90,6 +136,23 @@ export const upsertAutoDealFromSerpApi = internalMutation({
     if (!firstSeg || !lastSeg) return null;
 
     const stops = Math.max(0, (opt.flights?.length ?? 1) - 1);
+
+    // Return leg (if SerpApi `departure_token` follow-up was made).
+    const ret = args.returnOption;
+    const retSegs = ret && Array.isArray(ret.flights) ? ret.flights : null;
+    const returnSegments = retSegs
+      ? retSegs.map((seg: any) => ({
+          airline: seg.airline ?? "",
+          flightNumber: seg.flightNumber ?? undefined,
+          departureAirport: seg.departureAirport?.id ?? "",
+          departureTime: timeOnly(seg.departureAirport?.time),
+          arrivalAirport: seg.arrivalAirport?.id ?? "",
+          arrivalTime: timeOnly(seg.arrivalAirport?.time),
+          duration: minutesToHm(seg.durationMinutes),
+        }))
+      : undefined;
+    const retFirst = retSegs?.[0] ?? null;
+    const retLast = retSegs ? retSegs[retSegs.length - 1] : null;
 
     const payload = {
       origin,
@@ -104,9 +167,34 @@ export const upsertAutoDealFromSerpApi = internalMutation({
       outboundArrival: timeOnly(lastSeg.arrivalAirport?.time),
       outboundDuration: minutesToHm(opt.totalDurationMinutes),
       outboundStops: stops,
+      outboundSegments,
       returnDate: args.returnDate,
-      price: Number(opt.price),
+      returnDeparture: retFirst ? timeOnly(retFirst.departureAirport?.time) : undefined,
+      returnArrival: retLast ? timeOnly(retLast.arrivalAirport?.time) : undefined,
+      returnDuration: ret ? minutesToHm(ret.totalDurationMinutes) : undefined,
+      returnAirline: retFirst?.airline ?? undefined,
+      returnFlightNumber: retFirst?.flightNumber ?? undefined,
+      returnStops: retSegs ? Math.max(0, retSegs.length - 1) : undefined,
+      returnSegments,
+      // SerpApi returns prices as the TOTAL for the `adults` count passed
+      // to the search. Divide to get a true per-person figure for the
+      // radar card (which labels it "/pp"), and store the original as
+      // `totalPrice`.
+      price: Math.round(Number(opt.price) / Math.max(1, args.adults ?? 1)),
+      totalPrice: args.totalPrice ?? Number(opt.price),
       currency: args.currency.toUpperCase(),
+      cabinBaggage: args.cabinBaggage,
+      checkedBaggage: args.checkedBaggage,
+      // Always provide a booking link. Fall back to a Google Flights
+      // deep-link that lands directly on the results page (legacy
+      // `#flt=` hash format), so the deal card "Book" CTA never
+      // dead-ends.
+      bookingUrl:
+        args.bookingUrl ||
+        (args.returnDate
+          ? `https://www.google.com/travel/flights?hl=en&curr=${args.currency.toUpperCase()}#flt=${origin}.${destination}.${args.outboundDate}*${destination}.${origin}.${args.returnDate};c:${args.currency.toUpperCase()};e:1;sd:1;t:f`
+          : `https://www.google.com/travel/flights?hl=en&curr=${args.currency.toUpperCase()}#flt=${origin}.${destination}.${args.outboundDate};c:${args.currency.toUpperCase()};e:1;sd:1;t:o`),
+      notes,
       dealTag: "AUTO" as const,
       active: true,
       expiresAt: now + AUTO_DEAL_TTL_MS,

@@ -5,7 +5,14 @@ import { internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import OpenAI from "openai";
 import * as duffel from "./flights/duffel";
+import { AIRPORTS } from "../lib/airports";
 import { FEATURES } from "./_features";
+import {
+    normalizeBookingOption,
+    normalizeFlightOption,
+    normalizePriceInsights,
+} from "./lib/serpApiFlights";
+import { reportError } from "./helpers/reportError";
 
 // Helper function to generate travel style guidance for OpenAI prompt
 function generateTravelStyleGuidance(interests: string[]): string {
@@ -412,15 +419,16 @@ export const generate = internalAction({
         console.log("=".repeat(80));
 
         // Check if API keys are configured
-        const { hasDuffelKey, hasOpenAIKey, hasTripAdvisorKey, hasViatorKey } = checkApiKeys();
+        const { hasDuffelKey, hasSerpApiKey, hasOpenAIKey, hasTripAdvisorKey, hasViatorKey } = checkApiKeys();
 
+        console.log("  - SerpApi:", hasSerpApiKey ? "✅ Configured" : "❌ Missing");
         console.log("  - Duffel API:", hasDuffelKey ? "✅ Configured" : "❌ Missing");
         console.log("  - OpenAI API:", hasOpenAIKey ? "✅ Configured" : "❌ Missing");
         console.log("  - TripAdvisor API:", hasTripAdvisorKey ? "✅ Configured" : "❌ Missing");
         console.log("  - Viator API:", hasViatorKey ? "✅ Configured" : "❌ Missing");
 
-        if (!hasDuffelKey) {
-            console.warn("⚠️ Duffel API key not configured. Using AI-generated data.");
+        if (!hasSerpApiKey && !hasDuffelKey) {
+            console.warn("⚠️ No flight provider configured. Using AI-generated data.");
         }
         if (!hasOpenAIKey) {
             console.warn("⚠️ OpenAI API key not configured. Using basic itinerary.");
@@ -455,7 +463,420 @@ export const generate = internalAction({
                 console.log("✈️ Fetching flights...");
                 console.log("  - Preferred time:", preferredFlightTime || "any");
                 
-                if (hasDuffelKey) {
+                if (hasSerpApiKey) {
+                    try {
+                        const originCode = extractIATACode(origin);
+                        const destCode = extractIATACode(trip.destination);
+                        const departureDate = new Date(trip.startDate).toISOString().split('T')[0];
+                        const returnDate = new Date(trip.endDate).toISOString().split('T')[0];
+
+                        console.log(`🔍 Searching flights via SerpApi: ${originCode} -> ${destCode}`);
+
+                        if (!originCode || !destCode) {
+                            throw new Error(
+                                `Invalid IATA codes — origin="${origin}" -> "${originCode}", destination="${trip.destination}" -> "${destCode}"`
+                            );
+                        }
+                        if (originCode === destCode) {
+                            throw new Error("Origin and destination are the same");
+                        }
+
+                        const result: any = await ctx.runAction(
+                            internal.flightsSerpApi.searchFlightsInternal,
+                            {
+                                input: {
+                                    departureId: originCode,
+                                    arrivalId: destCode,
+                                    outboundDate: departureDate,
+                                    returnDate,
+                                    type: "round_trip",
+                                    currency: "EUR",
+                                    adults: travelerCount,
+                                },
+                            }
+                        );
+
+                        const allOptions = [
+                            ...(result?.bestFlights ?? []),
+                            ...(result?.otherFlights ?? []),
+                        ].filter((o: any) => o?.price != null);
+
+                        if (allOptions.length === 0) {
+                            console.warn("⚠️ No flights found via SerpApi");
+                            return {
+                                unavailable: true,
+                                dataSource: "unavailable",
+                                message: "No flights returned by provider",
+                            };
+                        }
+
+                        interface FlightSegment {
+                            airline: string;
+                            flightNumber?: string;
+                            departureAirport: string;
+                            departureTime: string;
+                            arrivalAirport: string;
+                            arrivalTime: string;
+                            duration?: string;
+                        }
+                        interface FlightLeg {
+                            airline: string;
+                            flightNumber?: string;
+                            departure: string;
+                            arrival: string;
+                            duration?: string;
+                            stops: number;
+                            departureAirport: string;
+                            arrivalAirport: string;
+                            segments: FlightSegment[];
+                        }
+                        interface FlightOption {
+                            id: string;
+                            pricePerPerson: number;
+                            currency: string;
+                            outbound: FlightLeg;
+                            return?: FlightLeg;
+                            isBestPrice?: boolean;
+                            bookingToken?: string;
+                            airlineLogo?: string;
+                            arrivalAirport?: string;
+                            luggage?: string;
+                            checkedBaggageIncluded?: boolean;
+                            checkedBaggagePrice?: number;
+                            bookingUrl?: string;
+                            bookingRequest?: { url: string; postData: string };
+                        }
+
+                        // SerpApi returns datetimes like "2026-05-22 08:00".
+                        // The UI expects clean "HH:MM" strings.
+                        const timeOnly = (s: string | undefined | null): string => {
+                            if (!s) return "";
+                            const parts = String(s).split(" ");
+                            return parts[1] ?? String(s);
+                        };
+                        const minutesToHm = (mins: number | undefined | null): string | undefined => {
+                            if (mins == null) return undefined;
+                            const h = Math.floor(mins / 60);
+                            const m = mins % 60;
+                            return `${h}h ${m}m`;
+                        };
+
+                        // ---- SerpApi per-option enrichment ----
+                        // Up to 2 follow-up calls per option:
+                        //   1. departure_token → return leg options (cheapest wins).
+                        //   2. booking_token   → provider URL + baggage from extensions.
+                        // Errors swallowed — we degrade to outbound-only.
+                        const SERPAPI_KEY = process.env.SERPAPI_API_KEY;
+                        const SERPAPI_ENDPOINT = "https://serpapi.com/search.json";
+                        const callSerp = async (params: URLSearchParams): Promise<any | null> => {
+                            if (!SERPAPI_KEY) return null;
+                            params.append("api_key", SERPAPI_KEY);
+                            try {
+                                const res = await fetch(`${SERPAPI_ENDPOINT}?${params.toString()}`);
+                                if (!res.ok) {
+                                    console.warn(`SerpApi HTTP ${res.status} for engine=${params.get("engine")} booking_token=${params.get("booking_token") ? "yes" : "no"}`);
+                                    return null;
+                                }
+                                const j = await res.json();
+                                if (j?.error) {
+                                    console.warn(`SerpApi error: ${j.error} (booking_token=${params.get("booking_token") ? "yes" : "no"})`);
+                                    return null;
+                                }
+                                return j;
+                            } catch (e) {
+                                console.warn(`SerpApi fetch threw: ${(e as Error).message}`);
+                                return null;
+                            }
+                        };
+                        const parseBaggage = (extensions: any): { cabin?: string; checked?: string } => {
+                            const out: { cabin?: string; checked?: string } = {};
+                            if (!Array.isArray(extensions)) return out;
+                            for (const ext of extensions) {
+                                if (typeof ext !== "string") continue;
+                                const low = ext.toLowerCase();
+                                if (!out.cabin && /carry[- ]?on|cabin/.test(low)) out.cabin = ext;
+                                if (!out.checked && /checked/.test(low)) out.checked = ext;
+                            }
+                            return out;
+                        };
+                        const enrichOption = async (
+                            o: any
+                        ): Promise<{
+                            returnOption?: any;
+                            bookingRequest?: { url: string; postData: string };
+                            cabinBaggage?: string;
+                            checkedBaggage?: string;
+                            checkedBaggageIncluded?: boolean;
+                            totalPrice?: number;
+                            debug?: { step15: string; step2: string };
+                        }> => {
+                            let bookingToken: string | null = o?.bookingToken ?? null;
+                            let returnOption: any = undefined;
+                            let totalPrice: number | undefined = undefined;
+                            const debug = { step15: "skip", step2: "skip" } as {
+                                step15: string;
+                                step2: string;
+                            };
+
+                            if (o?.departureToken) {
+                                const p = new URLSearchParams();
+                                p.append("engine", "google_flights");
+                                p.append("departure_id", originCode);
+                                p.append("arrival_id", destCode);
+                                p.append("outbound_date", departureDate);
+                                p.append("return_date", returnDate);
+                                p.append("currency", "EUR");
+                                p.append("hl", "en");
+                                p.append("type", "1");
+                                p.append("departure_token", o.departureToken);
+                                const raw = await callSerp(p);
+                                if (!raw) {
+                                    debug.step15 = "serpapi-null";
+                                }
+                                if (raw) {
+                                    const pi = normalizePriceInsights(raw?.price_insights);
+                                    const all: any[] = [
+                                        ...(Array.isArray(raw?.best_flights)
+                                            ? raw.best_flights.map((x: any, i: number) =>
+                                                  normalizeFlightOption(x, "best_flights", i, pi)
+                                              )
+                                            : []),
+                                        ...(Array.isArray(raw?.other_flights)
+                                            ? raw.other_flights.map((x: any, i: number) =>
+                                                  normalizeFlightOption(x, "other_flights", i, pi)
+                                              )
+                                            : []),
+                                    ].filter((x: any) => x.price != null);
+                                    if (all.length) {
+                                        returnOption = all.reduce((m: any, x: any) =>
+                                            (x.price ?? Infinity) < (m.price ?? Infinity) ? x : m
+                                        );
+                                        if (returnOption.bookingToken) {
+                                            bookingToken = returnOption.bookingToken;
+                                            totalPrice = Number(returnOption.price);
+                                            debug.step15 = "ok";
+                                        } else {
+                                            debug.step15 = "no-bookingToken-in-return";
+                                        }
+                                    } else {
+                                        debug.step15 = "no-return-options";
+                                    }
+                                }
+                            }
+
+                            let bookingRequest: { url: string; postData: string } | undefined;
+                            let cabinBaggage: string | undefined;
+                            let checkedBaggage: string | undefined;
+                            let checkedBaggageIncluded: boolean | undefined;
+                            if (bookingToken) {
+                                // SerpApi's booking_options endpoint requires
+                                // the full route + dates alongside the token —
+                                // passing only `booking_token` returns an
+                                // error. Mirror the params used for the
+                                // original round-trip search.
+                                const p = new URLSearchParams();
+                                p.append("engine", "google_flights");
+                                p.append("departure_id", originCode);
+                                p.append("arrival_id", destCode);
+                                p.append("outbound_date", departureDate);
+                                if (returnDate) {
+                                    p.append("return_date", returnDate);
+                                    p.append("type", "1");
+                                } else {
+                                    p.append("type", "2");
+                                }
+                                p.append("booking_token", bookingToken);
+                                p.append("currency", "EUR");
+                                p.append("hl", "en");
+                                const raw = await callSerp(p);
+                                if (!raw) {
+                                    debug.step2 = "serpapi-null";
+                                }
+                                if (raw) {
+                                    const opts = Array.isArray(raw?.booking_options)
+                                        ? raw.booking_options.map((x: any, i: number) =>
+                                              normalizeBookingOption(x, i)
+                                          )
+                                        : [];
+                                    const withUrl = opts.filter(
+                                        (x: any) => x?.bookingRequest?.url
+                                    );
+                                    const pick =
+                                        withUrl.length > 0
+                                            ? withUrl.reduce((m: any, x: any) =>
+                                                  (x.price ?? Infinity) < (m.price ?? Infinity)
+                                                      ? x
+                                                      : m
+                                              )
+                                            : opts[0];
+                                    if (pick) {
+                                        // Capture the POST-based booking_request so the
+                                        // client can resolve the real provider URL on
+                                        // demand (the `url` here is Google's clk/f
+                                        // endpoint that 404s on GET — it requires the
+                                        // `post_data` as the POST body).
+                                        if (pick.bookingRequest?.url && pick.bookingRequest?.post_data) {
+                                            bookingRequest = {
+                                                url: String(pick.bookingRequest.url),
+                                                postData: String(pick.bookingRequest.post_data),
+                                            };
+                                        }
+                                        debug.step2 = bookingRequest
+                                            ? "ok"
+                                            : `no-url (opts=${opts.length}, withUrl=${withUrl.length})`;
+                                        const bag = parseBaggage(pick.extensions);
+                                        cabinBaggage = bag.cabin;
+                                        checkedBaggage = bag.checked;
+                                        if (checkedBaggage) {
+                                            const low = checkedBaggage.toLowerCase();
+                                            checkedBaggageIncluded =
+                                                /included|free/.test(low) && !/fee|paid|extra/.test(low);
+                                        }
+                                        if (totalPrice == null && pick.price != null) {
+                                            totalPrice = Number(pick.price);
+                                        }
+                                    } else {
+                                        debug.step2 = "no-booking-options";
+                                    }
+                                }
+                            }
+
+                            return {
+                                returnOption,
+                                bookingRequest,
+                                cabinBaggage,
+                                checkedBaggage,
+                                checkedBaggageIncluded,
+                                totalPrice,
+                                debug,
+                            };
+                        };
+
+                        const topOptions = allOptions.slice(0, 5);
+                        const enrichments = await Promise.all(
+                            topOptions.map((o: any) =>
+                                enrichOption(o).catch(() => ({}) as any)
+                            )
+                        );
+
+                        const flightOptions: FlightOption[] = topOptions.map(
+                            (o: any, idx: number) => {
+                                const segs: any[] = Array.isArray(o.flights) ? o.flights : [];
+                                const first = segs[0] ?? {};
+                                const last = segs[segs.length - 1] ?? {};
+                                const stops = Math.max(0, segs.length - 1);
+                                const mappedSegments: FlightSegment[] = segs.map((seg: any) => ({
+                                    airline: seg.airline ?? "",
+                                    flightNumber: seg.flightNumber ?? undefined,
+                                    departureAirport: seg.departureAirport?.id ?? "",
+                                    departureTime: timeOnly(seg.departureAirport?.time),
+                                    arrivalAirport: seg.arrivalAirport?.id ?? "",
+                                    arrivalTime: timeOnly(seg.arrivalAirport?.time),
+                                    duration: minutesToHm(seg.durationMinutes),
+                                }));
+                                const enr = enrichments[idx] ?? {};
+                                const ret = enr.returnOption;
+                                const retSegs: any[] = ret && Array.isArray(ret.flights) ? ret.flights : [];
+                                const retFirst = retSegs[0] ?? null;
+                                const retLast = retSegs[retSegs.length - 1] ?? null;
+                                const returnLeg: FlightLeg | undefined =
+                                    retSegs.length > 0
+                                        ? {
+                                              airline: retFirst?.airline ?? "Multiple",
+                                              flightNumber: retFirst?.flightNumber ?? undefined,
+                                              departure: timeOnly(retFirst?.departureAirport?.time),
+                                              arrival: timeOnly(retLast?.arrivalAirport?.time),
+                                              duration: minutesToHm(ret.totalDurationMinutes),
+                                              stops: Math.max(0, retSegs.length - 1),
+                                              departureAirport: retFirst?.departureAirport?.id ?? destCode,
+                                              arrivalAirport: retLast?.arrivalAirport?.id ?? originCode,
+                                              segments: retSegs.map((seg: any) => ({
+                                                  airline: seg.airline ?? "",
+                                                  flightNumber: seg.flightNumber ?? undefined,
+                                                  departureAirport: seg.departureAirport?.id ?? "",
+                                                  departureTime: timeOnly(seg.departureAirport?.time),
+                                                  arrivalAirport: seg.arrivalAirport?.id ?? "",
+                                                  arrivalTime: timeOnly(seg.arrivalAirport?.time),
+                                                  duration: minutesToHm(seg.durationMinutes),
+                                              })),
+                                          }
+                                        : undefined;
+                                const luggageLabel = enr.cabinBaggage ?? "1 cabin bag";
+                                // Google Flights deep-link that lands
+                                // directly on the results page (legacy
+                                // `#flt=` hash format that Google still
+                                // honors), pre-filled with route + dates.
+                                // We do NOT use SerpApi's
+                                // `bookingRequest.url` because it's a POST
+                                // endpoint requiring form data — opening it
+                                // as a GET returns 404.
+                                const bookingDeepLink = returnDate
+                                    ? `https://www.google.com/travel/flights?hl=en&curr=EUR#flt=${originCode}.${destCode}.${departureDate}*${destCode}.${originCode}.${returnDate};c:EUR;e:1;sd:1;t:f`
+                                    : `https://www.google.com/travel/flights?hl=en&curr=EUR#flt=${originCode}.${destCode}.${departureDate};c:EUR;e:1;sd:1;t:o`;
+                                return {
+                                    id: o.bookingToken ?? o.departureToken ?? `serpapi-${idx}`,
+                                    pricePerPerson: Number(o.price),
+                                    currency: "EUR",
+                                    outbound: {
+                                        airline: first.airline ?? "Multiple",
+                                        flightNumber: first.flightNumber ?? undefined,
+                                        departure: timeOnly(first.departureAirport?.time),
+                                        arrival: timeOnly(last.arrivalAirport?.time),
+                                        duration: minutesToHm(o.totalDurationMinutes),
+                                        stops,
+                                        departureAirport: first.departureAirport?.id ?? originCode,
+                                        arrivalAirport: last.arrivalAirport?.id ?? destCode,
+                                        segments: mappedSegments,
+                                    },
+                                    return: returnLeg,
+                                    bookingToken: o.bookingToken ?? undefined,
+                                    airlineLogo: o.airlineLogo ?? first.airlineLogo,
+                                    arrivalAirport: last.arrivalAirport?.id ?? destCode,
+                                    luggage: luggageLabel,
+                                    checkedBaggageIncluded: enr.checkedBaggageIncluded ?? false,
+                                    checkedBaggagePrice: 30,
+                                    bookingUrl: bookingDeepLink,
+                                    // POST-based provider link from SerpApi. The
+                                    // client calls `flights.resolveBookingUrl`
+                                    // with this to get the real provider URL
+                                    // (the `url` field is Google's clk/f
+                                    // endpoint that 404s on GET).
+                                    bookingRequest: enr.bookingRequest,
+                                };
+                            }
+                        );
+                        flightOptions.sort((a, b) => a.pricePerPerson - b.pricePerPerson);
+                        if (flightOptions.length > 0) flightOptions[0].isBestPrice = true;
+
+                        console.log(
+                            `✅ SerpApi returned ${flightOptions.length} flight options ` +
+                                `(enriched: ${enrichments.filter((e: any) => e?.bookingUrl).length} with URL)`
+                        );
+                        const debugSummary = enrichments
+                            .map((e: any, i: number) => {
+                                const d = e?.debug ?? { step15: "exception", step2: "exception" };
+                                return `#${i}:1.5=${d.step15},2=${d.step2}`;
+                            })
+                            .join(" | ");
+                        console.log(`   enrichment debug: ${debugSummary}`);
+                        return {
+                            options: flightOptions,
+                            bestPrice: flightOptions[0]?.pricePerPerson ?? 0,
+                            preferredTime: preferredFlightTime || "any",
+                            dataSource: "serpapi",
+                        };
+                    } catch (error) {
+                        console.error("❌ SerpApi flights failed:", error);
+                        await reportError(ctx, "tripsActions:fetchFlightsAsync:serpapi", error, {
+                            tripId, origin, destination: trip.destination,
+                        });
+                        return {
+                            unavailable: true,
+                            dataSource: "unavailable",
+                            message: "Flight search temporarily unavailable",
+                        };
+                    }
+                } else if (hasDuffelKey) {
                     try {
                         const originCode = extractIATACode(origin);
                         const destCode = extractIATACode(trip.destination);
@@ -483,10 +904,11 @@ export const generate = internalAction({
 
                         if (!offers || offers.length === 0) {
                             console.warn("⚠️ No flights found via Duffel");
-                            return await generateRealisticFlights(
-                                origin, originCode, trip.destination, destCode,
-                                departureDate, returnDate, travelerCount, preferredFlightTime || "any"
-                            );
+                            return {
+                                unavailable: true,
+                                dataSource: "unavailable",
+                                message: "No flights returned by provider",
+                            };
                         }
                         
                         interface FlightOption {
@@ -514,24 +936,21 @@ export const generate = internalAction({
                         };
                     } catch (error) {
                         console.error("❌ Duffel flights failed:", error);
-                        const originCode = extractIATACode(origin);
-                        const destCode = extractIATACode(trip.destination);
-                        return await generateRealisticFlights(
-                            origin, originCode, trip.destination, destCode,
-                            new Date(trip.startDate).toISOString().split('T')[0],
-                            new Date(trip.endDate).toISOString().split('T')[0],
-                            travelerCount, preferredFlightTime || "any"
-                        );
+                        await reportError(ctx, "tripsActions:fetchFlightsAsync:duffel", error, {
+                            tripId, origin, destination: trip.destination,
+                        });
+                        return {
+                            unavailable: true,
+                            dataSource: "unavailable",
+                            message: "Flight search temporarily unavailable",
+                        };
                     }
                 } else {
-                    const originCode = extractIATACode(origin);
-                    const destCode = extractIATACode(trip.destination);
-                    return await generateRealisticFlights(
-                        origin, originCode, trip.destination, destCode,
-                        new Date(trip.startDate).toISOString().split('T')[0],
-                        new Date(trip.endDate).toISOString().split('T')[0],
-                        travelerCount, preferredFlightTime || "any"
-                    );
+                    return {
+                        unavailable: true,
+                        dataSource: "unavailable",
+                        message: "No flight provider configured",
+                    };
                 }
             };
 
@@ -1048,7 +1467,8 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                 message: errorMessage,
                 stack: error instanceof Error ? error.stack : undefined,
             });
-            
+            await reportError(ctx, "tripsActions:generateTrip", error, { tripId });
+
             await ctx.runMutation(internal.trips.updateItinerary, {
                 tripId,
                 itinerary: null,
@@ -1078,6 +1498,7 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
 function checkApiKeys() {
     return {
         hasDuffelKey: !!process.env.DUFFEL_ACCESS_TOKEN,
+        hasSerpApiKey: !!process.env.SERPAPI_API_KEY,
         hasOpenAIKey: !!process.env.OPENAI_API_KEY,
         hasTripAdvisorKey: !!process.env.TRIPADVISOR_API_KEY,
         hasViatorKey: !!process.env.VIATOR_API_KEY,
@@ -1144,6 +1565,32 @@ function extractIATACode(cityName: string): string {
         "florence": "FLR",
         "venice": "VCE",
         "naples": "NAP",
+        // Italy — popular destinations without their own airport (nearest hub)
+        "amalfi": "NAP",
+        "amalfi coast": "NAP",
+        "positano": "NAP",
+        "sorrento": "NAP",
+        "capri": "NAP",
+        "ischia": "NAP",
+        "pompeii": "NAP",
+        "cinque terre": "PSA",
+        "portofino": "GOA",
+        "genoa": "GOA",
+        "tuscany": "FLR",
+        "siena": "FLR",
+        "lake como": "MXP",
+        "como": "MXP",
+        "verona": "VRN",
+        "bologna": "BLQ",
+        "pisa": "PSA",
+        "turin": "TRN",
+        "bari": "BRI",
+        "catania": "CTA",
+        "palermo": "PMO",
+        "sicily": "CTA",
+        "sardinia": "CAG",
+        "cagliari": "CAG",
+        "olbia": "OLB",
         "nice": "NCE",
         "zurich": "ZRH",
         "geneva": "GVA",
@@ -1160,6 +1607,40 @@ function extractIATACode(cityName: string): string {
         "corfu": "CFU",
         "porto": "OPO",
         "seville": "SVQ",
+        // Spain — additional popular destinations
+        "malaga": "AGP",
+        "valencia": "VLC",
+        "bilbao": "BIO",
+        "alicante": "ALC",
+        "granada": "GRX",
+        "santiago de compostela": "SCQ",
+        "san sebastian": "EAS",
+        "santander": "SDR",
+        "asturias": "OVD",
+        // Balearic Islands
+        "mallorca": "PMI",
+        "palma": "PMI",
+        "palma de mallorca": "PMI",
+        "majorca": "PMI",
+        "ibiza": "IBZ",
+        "menorca": "MAH",
+        "minorca": "MAH",
+        "formentera": "IBZ",
+        // Canary Islands
+        "tenerife": "TFS",
+        "tenerife south": "TFS",
+        "tenerife north": "TFN",
+        "santa cruz de tenerife": "TFN",
+        "canary islands": "TFS",
+        "canaries": "TFS",
+        "gran canaria": "LPA",
+        "las palmas": "LPA",
+        "lanzarote": "ACE",
+        "arrecife": "ACE",
+        "fuerteventura": "FUE",
+        "la palma": "SPC",
+        "la gomera": "GMZ",
+        "el hierro": "VDE",
         "denver": "DEN",
         "dallas": "DFW",
         "atlanta": "ATL",
@@ -1385,7 +1866,27 @@ function extractIATACode(cityName: string): string {
             return code;
         }
     }
-    
+
+    // Fallback to the comprehensive lib/airports.ts dataset (1000+ airports).
+    // Match on city, then on airport name.
+    const airportByCity = AIRPORTS.find(
+        (a) => a.city.toLowerCase() === cleanedName || a.city.toLowerCase() === normalized
+    );
+    if (airportByCity) {
+        console.log(`   → lib/airports.ts city match "${airportByCity.city}": ${airportByCity.code}`);
+        return airportByCity.code;
+    }
+    const airportPartial = AIRPORTS.find(
+        (a) =>
+            cleanedName.includes(a.city.toLowerCase()) ||
+            a.city.toLowerCase().includes(cleanedName) ||
+            a.name.toLowerCase().includes(cleanedName)
+    );
+    if (airportPartial) {
+        console.log(`   → lib/airports.ts partial match "${airportPartial.city}": ${airportPartial.code}`);
+        return airportPartial.code;
+    }
+
     console.warn(`⚠️ Could not find IATA code for "${cityName}" (cleaned: "${cleanedName}")`);
     return ""; // Return empty string instead of default to trigger validation
 }

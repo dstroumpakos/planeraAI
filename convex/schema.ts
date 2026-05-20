@@ -1098,4 +1098,16 @@ export default defineSchema({
     })
         .index("by_cacheKey", ["cacheKey"])
         .index("by_expires", ["expiresAt"]),
+
+    // Error report throttle — keeps Postmark spam down by recording the
+    // last time each unique error key (source + message hash) was emailed.
+    errorReports: defineTable({
+        key: v.string(),          // sha1(source + message head)
+        source: v.string(),       // e.g. "tripsActions:generateTrip"
+        message: v.string(),
+        count: v.float64(),       // occurrences since first seen
+        firstSeenAt: v.float64(),
+        lastSentAt: v.float64(),
+    })
+        .index("by_key", ["key"]),
 });
