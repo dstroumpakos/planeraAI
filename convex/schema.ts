@@ -1078,4 +1078,24 @@ export default defineSchema({
         .index("by_package", ["packageId"])
         .index("by_status", ["status"])
         .index("by_trip", ["tripId"]),
+
+    // SerpApi Google Flights cache. Reduces latency & API quota use by
+    // caching normalized search responses + booking option lookups for a
+    // short window. Stores `any` because the normalized shape is defined in
+    // types/flights.ts and may evolve faster than the schema.
+    flightSearchCache: defineTable({
+        cacheKey: v.string(),
+        kind: v.union(v.literal("search"), v.literal("booking_options")),
+        departureId: v.optional(v.string()),
+        arrivalId: v.optional(v.string()),
+        outboundDate: v.optional(v.string()),
+        returnDate: v.optional(v.string()),
+        type: v.optional(v.string()),
+        currency: v.optional(v.string()),
+        normalizedResults: v.any(),
+        createdAt: v.float64(),
+        expiresAt: v.float64(),
+    })
+        .index("by_cacheKey", ["cacheKey"])
+        .index("by_expires", ["expiresAt"]),
 });

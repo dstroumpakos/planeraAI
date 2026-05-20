@@ -48,20 +48,26 @@ export default function AdminLeadsScreen() {
                     <View style={{ width: 40 }} />
                 </View>
 
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
-                    {STATUSES.map(s => {
-                        const active = s === filter;
-                        return (
-                            <TouchableOpacity
-                                key={s}
-                                style={[styles.filterChip, { backgroundColor: active ? colors.text : colors.card, borderColor: colors.border }]}
-                                onPress={() => setFilter(s)}
-                            >
-                                <Text style={{ color: active ? colors.card : colors.textMuted, fontSize: 12, fontWeight: '700', textTransform: 'capitalize' }}>{s}</Text>
-                            </TouchableOpacity>
-                        );
-                    })}
-                </ScrollView>
+                <View style={styles.filtersWrap}>
+                    <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.filters}
+                    >
+                        {STATUSES.map(s => {
+                            const active = s === filter;
+                            return (
+                                <TouchableOpacity
+                                    key={s}
+                                    style={[styles.filterChip, { backgroundColor: active ? colors.text : colors.card, borderColor: colors.border }]}
+                                    onPress={() => setFilter(s)}
+                                >
+                                    <Text style={{ color: active ? colors.card : colors.textMuted, fontSize: 12, fontWeight: '700', textTransform: 'capitalize' }}>{s}</Text>
+                                </TouchableOpacity>
+                            );
+                        })}
+                    </ScrollView>
+                </View>
 
                 {!leads ? (
                     <View style={styles.loading}><ActivityIndicator color={colors.primary} /></View>
@@ -141,8 +147,9 @@ const styles = StyleSheet.create({
     header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1 },
     headerTitle: { fontSize: 17, fontWeight: '700' },
     iconBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-    filters: { gap: 8, paddingHorizontal: 14, paddingVertical: 12 },
-    filterChip: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999, borderWidth: 1 },
+    filtersWrap: { paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: 'transparent' },
+    filters: { gap: 8, paddingHorizontal: 14, alignItems: 'center' },
+    filterChip: { paddingHorizontal: 14, height: 32, justifyContent: 'center', borderRadius: 999, borderWidth: 1 },
     loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
     card: { borderRadius: 14, borderWidth: 1, padding: 14, marginBottom: 12 },
     cardHeader: { flexDirection: 'row', alignItems: 'center', gap: 6 },
