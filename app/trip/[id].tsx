@@ -1638,7 +1638,25 @@ export default function TripDetails() {
             const flightOptions = itinerary.flights.options;
             const selectedFlight = flightOptions[selectedFlightIndex] || flightOptions[0];
             const bestPrice = itinerary.flights.bestPrice;
-            
+
+            // Smart-badge metrics: identify cheapest + fastest option so we
+            // can surface them as marketing trust signals.
+            const parseDur = (d: string | undefined): number => {
+                if (!d) return Infinity;
+                const m = d.match(/(\d+)h\s*(\d+)?/);
+                return m ? parseInt(m[1]) * 60 + parseInt(m[2] || "0") : Infinity;
+            };
+            let cheapestIdx = 0;
+            let fastestIdx = 0;
+            let minPrice = Infinity;
+            let minDur = Infinity;
+            flightOptions.forEach((o: any, i: number) => {
+                const p = Number(o.pricePerPerson ?? Infinity);
+                if (p < minPrice) { minPrice = p; cheapestIdx = i; }
+                const d = parseDur(o.outbound?.duration);
+                if (d < minDur) { minDur = d; fastestIdx = i; }
+            });
+
             return (
                 <View style={styles.card}>
                     {itinerary.flights.dataSource === "low-fare-radar" && (
@@ -1647,35 +1665,148 @@ export default function TripDetails() {
                             <Text style={styles.dealFlightBannerText}>{t('tripDetail.fromLowFareRadar', { defaultValue: 'Selected from Low Fare Radar' })}</Text>
                         </View>
                     )}
-                    <View style={styles.bestPriceBanner}>
-                        <Ionicons name="pricetag" size={16} color="#10B981" />
-                        <Text style={styles.bestPriceText}>{t('tripDetail.bestPriceFrom', { price: Math.round(bestPrice) })}</Text>
+
+                    {/* Hero strip — instantly communicates value */}
+                    <View style={styles.flightHeroStrip}>
+                        <View>
+                            <Text style={styles.flightHeroFromLabel}>{t('tripDetail.flightsFrom', { defaultValue: 'Flights from' })}</Text>
+                            <View style={styles.flightHeroPriceRow}>
+                                <Text style={styles.flightHeroCurrency}>€</Text>
+                                <Text style={styles.flightHeroPrice}>{Math.round(bestPrice)}</Text>
+                                <Text style={styles.flightHeroPer}>{t('tripDetail.perPerson')}</Text>
+                            </View>
+                        </View>
+                        <View style={styles.flightHeroCount}>
+                            <Ionicons name="airplane" size={13} color="#0F766E" />
+                            <Text style={styles.flightHeroCountText}>
+                                {flightOptions.length} {t('tripDetail.optionsAvailable', { defaultValue: 'options' })}
+                            </Text>
+                        </View>
                     </View>
-                    
-                    <Text style={styles.flightOptionsLabel}>{t('tripDetail.selectYourFlight')}</Text>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.flightOptionsScroll}>
-                        {flightOptions.map((option: any, index: number) => (
-                            <TouchableOpacity
-                                key={option.id || index}
-                                style={[
-                                    styles.flightOptionCard,
-                                    selectedFlightIndex === index && styles.flightOptionCardSelected,
-                                ]}
-                                onPress={() => setSelectedFlightIndex(index)}
-                            >
-                                {option.isBestPrice && (
-                                    <View style={styles.bestPriceBadge}>
-                                        <Text style={styles.bestPriceBadgeText}>{t('tripDetail.bestPrice')}</Text>
+
+                    {/* Picker header */}
+                    <View style={styles.flightPickerHeader}>
+                        <Text style={styles.flightPickerTitle}>{t('tripDetail.selectYourFlight')}</Text>
+                        <Text style={styles.flightPickerHint}>{t('tripDetail.swipeToCompare', { defaultValue: 'Swipe to compare' })}  ›</Text>
+                    </View>
+
+                    {/* Premium horizontal cards */}
+                    <ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        style={styles.flightOptionsScroll}
+                        contentContainerStyle={styles.flightOptionsScrollContent}
+                        snapToInterval={188}
+                        decelerationRate="fast"
+                    >
+                        {flightOptions.map((option: any, index: number) => {
+                            const isSelected = selectedFlightIndex === index;
+                            const isCheapest = index === cheapestIdx;
+                            const isFastest = index === fastestIdx && !isCheapest;
+                            const stops = option.outbound?.stops ?? 0;
+                            const direct = stops === 0;
+                            const dep = option.outbound?.departureAirport || "";
+                            const arr = option.outbound?.arrivalAirport || option.arrivalAirport || "";
+                            return (
+                                <TouchableOpacity
+                                    key={option.id || index}
+                                    activeOpacity={0.85}
+                                    style={[
+                                        styles.flightOptionCard,
+                                        isSelected && styles.flightOptionCardSelected,
+                                    ]}
+                                    onPress={() => setSelectedFlightIndex(index)}
+                                >
+                                    {/* Top badge row */}
+                                    <View style={styles.flightCardBadgeRow}>
+                                        {isCheapest && (
+                                            <View style={[styles.flightCardBadge, { backgroundColor: "#10B981" }]}>
+                                                <Ionicons name="pricetag" size={9} color="#fff" />
+                                                <Text style={styles.flightCardBadgeText}>{t('tripDetail.cheapest', { defaultValue: 'Cheapest' })}</Text>
+                                            </View>
+                                        )}
+                                        {isFastest && (
+                                            <View style={[styles.flightCardBadge, { backgroundColor: "#6366F1" }]}>
+                                                <Ionicons name="flash" size={9} color="#fff" />
+                                                <Text style={styles.flightCardBadgeText}>{t('tripDetail.fastest', { defaultValue: 'Fastest' })}</Text>
+                                            </View>
+                                        )}
                                     </View>
-                                )}
-                                <Text style={styles.flightOptionAirline}>{option.outbound.airline}</Text>
-                                <Text style={styles.flightOptionTime}>{option.outbound.departure}</Text>
-                                <Text style={styles.flightOptionPrice}>€{Math.round(option.pricePerPerson)}</Text>
-                                <Text style={styles.flightOptionStops}>
-                                    {option.outbound.stops === 0 ? t('tripDetail.directFlight') : t('tripDetail.stops', { count: option.outbound.stops })}
-                                </Text>
-                            </TouchableOpacity>
-                        ))}
+
+                                    {/* Airline */}
+                                    <View style={styles.flightCardAirlineRow}>
+                                        {option.airlineLogo ? (
+                                            <Image
+                                                source={{ uri: option.airlineLogo }}
+                                                style={styles.flightCardLogo}
+                                                contentFit="contain"
+                                                transition={120}
+                                            />
+                                        ) : (
+                                            <View style={styles.flightCardLogoPlaceholder}>
+                                                <Ionicons name="airplane" size={11} color="#94A3B8" />
+                                            </View>
+                                        )}
+                                        <Text style={styles.flightCardAirline} numberOfLines={1}>
+                                            {option.outbound?.airline}
+                                        </Text>
+                                    </View>
+
+                                    {/* Times + route */}
+                                    <View style={styles.flightCardTimeRow}>
+                                        <Text style={styles.flightCardTime}>{option.outbound?.departure}</Text>
+                                        <View style={styles.flightCardArrow}>
+                                            <View style={[styles.flightCardArrowLine, isSelected && { backgroundColor: '#14B8A6' }]} />
+                                            <Ionicons name="airplane" size={10} color={isSelected ? '#14B8A6' : '#94A3B8'} />
+                                            <View style={[styles.flightCardArrowLine, isSelected && { backgroundColor: '#14B8A6' }]} />
+                                        </View>
+                                        <Text style={styles.flightCardTime}>{option.outbound?.arrival}</Text>
+                                    </View>
+                                    <View style={styles.flightCardCodeRow}>
+                                        <Text style={styles.flightCardCode}>{dep}</Text>
+                                        <Text style={styles.flightCardDuration}>{option.outbound?.duration}</Text>
+                                        <Text style={styles.flightCardCode}>{arr}</Text>
+                                    </View>
+
+                                    {/* Stops pill */}
+                                    <View
+                                        style={[
+                                            styles.flightCardStopsPill,
+                                            { backgroundColor: direct ? '#ECFDF5' : '#FFFBEB' },
+                                        ]}
+                                    >
+                                        <View
+                                            style={[
+                                                styles.flightCardStopsDot,
+                                                { backgroundColor: direct ? '#10B981' : '#F59E0B' },
+                                            ]}
+                                        />
+                                        <Text
+                                            style={[
+                                                styles.flightCardStopsText,
+                                                { color: direct ? '#065F46' : '#92400E' },
+                                            ]}
+                                        >
+                                            {direct ? t('tripDetail.directFlight') : t('tripDetail.stops', { count: stops })}
+                                        </Text>
+                                    </View>
+
+                                    {/* Price footer */}
+                                    <View style={styles.flightCardPriceRow}>
+                                        <Text style={styles.flightCardPriceLabel}>{t('tripDetail.from', { defaultValue: 'from' })}</Text>
+                                        <Text style={[styles.flightCardPrice, isSelected && styles.flightCardPriceSelected]}>
+                                            €{Math.round(option.pricePerPerson)}
+                                        </Text>
+                                    </View>
+
+                                    {isSelected && (
+                                        <View style={styles.flightCardSelectedTick}>
+                                            <Ionicons name="checkmark-circle" size={20} color="#14B8A6" />
+                                        </View>
+                                    )}
+                                </TouchableOpacity>
+                            );
+                        })}
                     </ScrollView>
                     
                     <View style={styles.selectedFlightDetails}>
@@ -4878,26 +5009,253 @@ const styles = StyleSheet.create({
         fontWeight: "600",
         color: "#15803D",
     },
-    flightOptionsLabel: {
-        fontSize: 14,
+    // ---- Redesigned flight picker ----
+    flightHeroStrip: {
+        flexDirection: "row",
+        alignItems: "flex-end",
+        justifyContent: "space-between",
+        paddingHorizontal: 16,
+        paddingVertical: 14,
+        borderRadius: 14,
+        backgroundColor: "#F0FDFA",
+        borderWidth: 1,
+        borderColor: "#CCFBF1",
+        marginBottom: 18,
+    },
+    flightHeroFromLabel: {
+        fontSize: 11,
         fontWeight: "600",
+        letterSpacing: 0.5,
+        color: "#0F766E",
+        textTransform: "uppercase",
+        marginBottom: 2,
+    },
+    flightHeroPriceRow: {
+        flexDirection: "row",
+        alignItems: "baseline",
+    },
+    flightHeroCurrency: {
+        fontSize: 18,
+        fontWeight: "700",
+        color: "#0F766E",
+        marginRight: 2,
+    },
+    flightHeroPrice: {
+        fontSize: 30,
+        fontWeight: "800",
+        color: "#134E4A",
+        letterSpacing: -0.5,
+    },
+    flightHeroPer: {
+        fontSize: 11,
+        color: "#0F766E",
+        marginLeft: 4,
+        fontWeight: "500",
+    },
+    flightHeroCount: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 5,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        backgroundColor: "#fff",
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: "#CCFBF1",
+    },
+    flightHeroCountText: {
+        fontSize: 11,
+        fontWeight: "700",
+        color: "#0F766E",
+    },
+    flightPickerHeader: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
         marginBottom: 12,
     },
+    flightPickerTitle: {
+        fontSize: 15,
+        fontWeight: "700",
+        color: "#0F172A",
+    },
+    flightPickerHint: {
+        fontSize: 11,
+        color: "#94A3B8",
+        fontWeight: "500",
+    },
     flightOptionsScroll: {
-        marginBottom: 16,
+        marginBottom: 18,
+        marginHorizontal: -4,
+    },
+    flightOptionsScrollContent: {
+        paddingHorizontal: 4,
+        paddingVertical: 6,
     },
     flightOptionCard: {
-        backgroundColor: "white",
-        borderRadius: 12,
-        padding: 12,
+        width: 176,
+        backgroundColor: "#fff",
+        borderRadius: 16,
+        padding: 14,
         marginRight: 12,
-        borderWidth: 2,
+        borderWidth: 1.5,
         borderColor: "#E2E8F0",
-        minWidth: 140,
+        shadowColor: "#0F172A",
+        shadowOpacity: 0.06,
+        shadowRadius: 8,
+        shadowOffset: { width: 0, height: 2 },
+        elevation: 2,
+        position: "relative",
     },
     flightOptionCardSelected: {
         borderColor: "#14B8A6",
         backgroundColor: "#F0FDFA",
+        shadowColor: "#14B8A6",
+        shadowOpacity: 0.25,
+        shadowRadius: 12,
+        shadowOffset: { width: 0, height: 4 },
+        elevation: 4,
+    },
+    flightCardBadgeRow: {
+        flexDirection: "row",
+        gap: 4,
+        minHeight: 18,
+        marginBottom: 8,
+    },
+    flightCardBadge: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 3,
+        paddingHorizontal: 6,
+        paddingVertical: 3,
+        borderRadius: 999,
+    },
+    flightCardBadgeText: {
+        color: "#fff",
+        fontSize: 9,
+        fontWeight: "800",
+        letterSpacing: 0.3,
+        textTransform: "uppercase",
+    },
+    flightCardAirlineRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        marginBottom: 10,
+    },
+    flightCardLogo: {
+        width: 18,
+        height: 18,
+        borderRadius: 4,
+    },
+    flightCardLogoPlaceholder: {
+        width: 18,
+        height: 18,
+        borderRadius: 4,
+        backgroundColor: "#F1F5F9",
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    flightCardAirline: {
+        flex: 1,
+        fontSize: 11,
+        fontWeight: "600",
+        color: "#475569",
+    },
+    flightCardTimeRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+    },
+    flightCardTime: {
+        fontSize: 17,
+        fontWeight: "800",
+        color: "#0F172A",
+        letterSpacing: -0.3,
+    },
+    flightCardArrow: {
+        flex: 1,
+        flexDirection: "row",
+        alignItems: "center",
+        marginHorizontal: 6,
+        gap: 2,
+    },
+    flightCardArrowLine: {
+        flex: 1,
+        height: 1,
+        backgroundColor: "#CBD5E1",
+    },
+    flightCardCodeRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        marginTop: 2,
+        marginBottom: 10,
+    },
+    flightCardCode: {
+        fontSize: 10,
+        fontWeight: "700",
+        color: "#94A3B8",
+        letterSpacing: 0.5,
+    },
+    flightCardDuration: {
+        fontSize: 10,
+        color: "#64748B",
+        fontWeight: "500",
+    },
+    flightCardStopsPill: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 5,
+        alignSelf: "flex-start",
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: 999,
+        marginBottom: 10,
+    },
+    flightCardStopsDot: {
+        width: 5,
+        height: 5,
+        borderRadius: 999,
+    },
+    flightCardStopsText: {
+        fontSize: 10,
+        fontWeight: "700",
+    },
+    flightCardPriceRow: {
+        flexDirection: "row",
+        alignItems: "baseline",
+        gap: 4,
+        paddingTop: 10,
+        borderTopWidth: 1,
+        borderTopColor: "#F1F5F9",
+    },
+    flightCardPriceLabel: {
+        fontSize: 10,
+        color: "#94A3B8",
+        fontWeight: "500",
+    },
+    flightCardPrice: {
+        fontSize: 18,
+        fontWeight: "800",
+        color: "#0F172A",
+        letterSpacing: -0.3,
+    },
+    flightCardPriceSelected: {
+        color: "#0F766E",
+    },
+    flightCardSelectedTick: {
+        position: "absolute",
+        top: 8,
+        right: 8,
+        backgroundColor: "#fff",
+        borderRadius: 999,
+    },
+    // ---- Legacy styles (kept for backward compat) ----
+    flightOptionsLabel: {
+        fontSize: 14,
+        fontWeight: "600",
+        marginBottom: 12,
     },
     bestPriceBadge: {
         backgroundColor: "#10B981",

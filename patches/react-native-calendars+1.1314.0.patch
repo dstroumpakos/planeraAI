@@ -1,0 +1,16 @@
+diff --git a/node_modules/react-native-calendars/src/calendar/img/next@2x.png b/node_modules/react-native-calendars/src/calendar/img/next@2x.png
+new file mode 100644
+index 0000000..b589a4a
+Binary files /dev/null and b/node_modules/react-native-calendars/src/calendar/img/next@2x.png differ
+diff --git a/node_modules/react-native-calendars/src/calendar/img/next@3x.png b/node_modules/react-native-calendars/src/calendar/img/next@3x.png
+new file mode 100644
+index 0000000..f79bfd7
+Binary files /dev/null and b/node_modules/react-native-calendars/src/calendar/img/next@3x.png differ
+diff --git a/node_modules/react-native-calendars/src/calendar/img/previous@2x.png b/node_modules/react-native-calendars/src/calendar/img/previous@2x.png
+new file mode 100644
+index 0000000..368b33d
+Binary files /dev/null and b/node_modules/react-native-calendars/src/calendar/img/previous@2x.png differ
+diff --git a/node_modules/react-native-calendars/src/calendar/img/previous@3x.png b/node_modules/react-native-calendars/src/calendar/img/previous@3x.png
+new file mode 100644
+index 0000000..23e0880
+Binary files /dev/null and b/node_modules/react-native-calendars/src/calendar/img/previous@3x.png differ

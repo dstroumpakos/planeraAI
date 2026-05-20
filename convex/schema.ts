@@ -761,6 +761,13 @@ export default defineSchema({
         isRecommended: v.optional(v.boolean()),
         dealTag: v.optional(v.string()),  // "HOT DEAL", "LOWEST PRICE"
         bookingUrl: v.optional(v.string()),
+        // SerpApi POST-based booking request (Google clk/f endpoint).
+        // When present, the app resolves it server-side to the real
+        // provider URL via `flightsResolve.resolveBookingUrl`.
+        bookingRequest: v.optional(v.object({
+            url: v.string(),
+            postData: v.string(),
+        })),
         expiresAt: v.optional(v.float64()),
         notes: v.optional(v.string()),
         // Travel date range (which months this deal covers)

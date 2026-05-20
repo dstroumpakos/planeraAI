@@ -149,6 +149,7 @@ export const enrichAndSeedDeal = internalAction({
 
     // Step 2 — booking options fetch (URL + baggage).
     let bookingUrl: string | undefined;
+    let bookingRequest: { url: string; postData: string } | undefined;
     let cabinBaggage: string | undefined;
     let checkedBaggage: string | undefined;
     if (bookingToken) {
@@ -186,9 +187,15 @@ export const enrichAndSeedDeal = internalAction({
               )
             : opts[0];
         if (pick) {
-          // Do NOT use pick.bookingRequest.url — it's a POST endpoint
-          // requiring form data. The mutation falls back to a Google
-          // Flights `#flt=` deep-link which always opens correctly.
+          // Capture the SerpApi POST-based booking_request so the app can
+          // resolve it to the real provider URL at click-time (mirrors the
+          // regular trip flight booking flow).
+          if (pick.bookingRequest?.url && pick.bookingRequest?.postData) {
+            bookingRequest = {
+              url: pick.bookingRequest.url,
+              postData: pick.bookingRequest.postData,
+            };
+          }
           const bag = parseBaggage(pick.extensions);
           cabinBaggage = bag.cabinBaggage;
           checkedBaggage = bag.checkedBaggage;
@@ -212,6 +219,7 @@ export const enrichAndSeedDeal = internalAction({
           option: opt,
           returnOption: returnOption ?? undefined,
           bookingUrl,
+          bookingRequest,
           cabinBaggage,
           checkedBaggage,
           totalPrice,

@@ -55,6 +55,10 @@ export const upsertAutoDealFromSerpApi = internalMutation({
     // Optional enrichment data from follow-up SerpApi calls.
     returnOption: v.optional(v.any()),
     bookingUrl: v.optional(v.string()),
+    bookingRequest: v.optional(v.object({
+      url: v.string(),
+      postData: v.string(),
+    })),
     cabinBaggage: v.optional(v.string()),
     checkedBaggage: v.optional(v.string()),
     totalPrice: v.optional(v.float64()),
@@ -194,6 +198,7 @@ export const upsertAutoDealFromSerpApi = internalMutation({
         (args.returnDate
           ? `https://www.google.com/travel/flights?hl=en&curr=${args.currency.toUpperCase()}#flt=${origin}.${destination}.${args.outboundDate}*${destination}.${origin}.${args.returnDate};c:${args.currency.toUpperCase()};e:1;sd:1;t:f`
           : `https://www.google.com/travel/flights?hl=en&curr=${args.currency.toUpperCase()}#flt=${origin}.${destination}.${args.outboundDate};c:${args.currency.toUpperCase()};e:1;sd:1;t:o`),
+      bookingRequest: args.bookingRequest,
       notes,
       dealTag: "AUTO" as const,
       active: true,

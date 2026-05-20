@@ -296,6 +296,7 @@ export const createFromDeal = authMutation({
                 checkedBaggagePrice: 0,
                 luggage: deal.cabinBaggage || "Check airline",
                 bookingUrl: deal.bookingUrl || "",
+                bookingRequest: deal.bookingRequest,
             }],
             bestPrice: deal.price,
             dataSource: "low-fare-radar",

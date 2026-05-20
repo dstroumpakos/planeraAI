@@ -715,10 +715,10 @@ export const generate = internalAction({
                                         // demand (the `url` here is Google's clk/f
                                         // endpoint that 404s on GET — it requires the
                                         // `post_data` as the POST body).
-                                        if (pick.bookingRequest?.url && pick.bookingRequest?.post_data) {
+                                        if (pick.bookingRequest?.url && pick.bookingRequest?.postData) {
                                             bookingRequest = {
                                                 url: String(pick.bookingRequest.url),
-                                                postData: String(pick.bookingRequest.post_data),
+                                                postData: String(pick.bookingRequest.postData),
                                             };
                                         }
                                         debug.step2 = bookingRequest
@@ -850,7 +850,7 @@ export const generate = internalAction({
 
                         console.log(
                             `✅ SerpApi returned ${flightOptions.length} flight options ` +
-                                `(enriched: ${enrichments.filter((e: any) => e?.bookingUrl).length} with URL)`
+                                `(enriched: ${enrichments.filter((e: any) => e?.bookingRequest?.url).length} with URL)`
                         );
                         const debugSummary = enrichments
                             .map((e: any, i: number) => {
@@ -1641,6 +1641,44 @@ function extractIATACode(cityName: string): string {
         "la palma": "SPC",
         "la gomera": "GMZ",
         "el hierro": "VDE",
+        // Balkans / SE Europe
+        "belgrade": "BEG",
+        "serbia": "BEG",
+        "zagreb": "ZAG",
+        "croatia": "ZAG",
+        "split": "SPU",
+        "dubrovnik": "DBV",
+        "zadar": "ZAD",
+        "pula": "PUY",
+        "rijeka": "RJK",
+        "sarajevo": "SJJ",
+        "bosnia": "SJJ",
+        "bosnia and herzegovina": "SJJ",
+        "mostar": "OMO",
+        "skopje": "SKP",
+        "north macedonia": "SKP",
+        "macedonia": "SKP",
+        "ohrid": "OHD",
+        "tirana": "TIA",
+        "albania": "TIA",
+        "podgorica": "TGD",
+        "montenegro": "TGD",
+        "tivat": "TIV",
+        "ljubljana": "LJU",
+        "slovenia": "LJU",
+        "sofia": "SOF",
+        "bulgaria": "SOF",
+        "varna": "VAR",
+        "burgas": "BOJ",
+        "plovdiv": "PDV",
+        "bucharest": "OTP",
+        "romania": "OTP",
+        "cluj": "CLJ",
+        "cluj-napoca": "CLJ",
+        "timisoara": "TSR",
+        "iasi": "IAS",
+        "kosovo": "PRN",
+        "pristina": "PRN",
         "denver": "DEN",
         "dallas": "DFW",
         "atlanta": "ATL",

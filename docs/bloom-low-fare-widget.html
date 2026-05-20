@@ -1444,6 +1444,7 @@
         <button class="filter-pill" onclick="setStatusFilter('deleted')" id="fp-deleted">🗑️ Deleted <span class="pill-count" id="fpc-deleted">0</span></button>
         <button class="filter-pill" onclick="setStatusFilter('recommended')" id="fp-recommended">⭐ Recommended <span class="pill-count" id="fpc-recommended">0</span></button>
         <button class="filter-pill" onclick="setStatusFilter('wishlisted')" id="fp-wishlisted">❤️ Wishlisted <span class="pill-count" id="fpc-wishlisted">0</span></button>
+        <button class="filter-pill" onclick="setStatusFilter('auto')" id="fp-auto">🤖 Auto <span class="pill-count" id="fpc-auto">0</span></button>
       </div>
       <!-- Dropdowns row -->
       <div class="filter-row">
@@ -2131,7 +2132,7 @@
   function setStatusFilter(status) {
     activeStatusFilter = status;
     // Update pill active states
-    var pills = ['all','live','paused','expired','deleted','recommended','wishlisted'];
+    var pills = ['all','live','paused','expired','deleted','recommended','wishlisted','auto'];
     pills.forEach(function(p) {
       var el = document.getElementById('fp-' + p);
       if (!el) return;
@@ -2139,7 +2140,7 @@
     });
     var activeEl = document.getElementById('fp-' + status);
     if (activeEl) {
-      var colorMap = { all:'active', live:'active-green', paused:'active-gray', expired:'active-amber', deleted:'active-red', recommended:'active', wishlisted:'active' };
+      var colorMap = { all:'active', live:'active-green', paused:'active-gray', expired:'active-amber', deleted:'active-red', recommended:'active', wishlisted:'active', auto:'active' };
       activeEl.classList.add(colorMap[status] || 'active');
     }
     applyFilters();
@@ -2173,6 +2174,7 @@
         return w.destination.toLowerCase() === (d.destinationCity || '').toLowerCase();
       });
     }).length;
+    var auto = deals.filter(function(d) { return d.dealTag === 'AUTO' && getDealStatus(d) !== 'deleted'; }).length;
 
     document.getElementById('statsRow').innerHTML =
       '<div class="stat-card" style="cursor:pointer" onclick="setStatusFilter(\'all\')">' +
@@ -2186,10 +2188,12 @@
       (deleted > 0 ? '<div class="stat-card" style="cursor:pointer" onclick="setStatusFilter(\'deleted\')">' +
         '<div class="num" style="color:var(--muted)">' + deleted + '</div><div class="label">Deleted</div></div>' : '') +
       (paused > 0 ? '<div class="stat-card" style="cursor:pointer" onclick="setStatusFilter(\'paused\')">' +
-        '<div class="num" style="color:#6B7280">' + paused + '</div><div class="label">Paused</div></div>' : '');
+        '<div class="num" style="color:#6B7280">' + paused + '</div><div class="label">Paused</div></div>' : '') +
+      (auto > 0 ? '<div class="stat-card" style="cursor:pointer" onclick="setStatusFilter(\'auto\')">' +
+        '<div class="num" style="color:#7C3AED">' + auto + '</div><div class="label">🤖 Auto</div></div>' : '');
 
     // Update pill counts
-    var countMap = { live: live, paused: paused, expired: expired, deleted: deleted, recommended: recommended, wishlisted: wishlisted };
+    var countMap = { live: live, paused: paused, expired: expired, deleted: deleted, recommended: recommended, wishlisted: wishlisted, auto: auto };
     Object.keys(countMap).forEach(function(k) {
       var el = document.getElementById('fpc-' + k);
       if (el) el.textContent = countMap[k];
@@ -2348,6 +2352,8 @@
           return w.destination.toLowerCase() === (d.destinationCity || '').toLowerCase();
         });
         if (!isW || status === 'deleted') return false;
+      } else if (activeStatusFilter === 'auto') {
+        if (d.dealTag !== 'AUTO' || status === 'deleted') return false;
       }
 
       // Year filter
