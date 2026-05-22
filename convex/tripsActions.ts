@@ -813,9 +813,16 @@ export const generate = internalAction({
                                 const bookingDeepLink = returnDate
                                     ? `https://www.google.com/travel/flights?hl=en&curr=EUR#flt=${originCode}.${destCode}.${departureDate}*${destCode}.${originCode}.${returnDate};c:EUR;e:1;sd:1;t:f`
                                     : `https://www.google.com/travel/flights?hl=en&curr=EUR#flt=${originCode}.${destCode}.${departureDate};c:EUR;e:1;sd:1;t:o`;
+                                // SerpApi's `price` field is the total fare for all
+                                // passengers in the search (adults=travelerCount), not
+                                // per-person. Divide to get per-person price.
+                                const serpTotal = Number(o.price) || 0;
+                                const perPerson = travelerCount > 0
+                                    ? Math.round(serpTotal / travelerCount)
+                                    : serpTotal;
                                 return {
                                     id: o.bookingToken ?? o.departureToken ?? `serpapi-${idx}`,
-                                    pricePerPerson: Number(o.price),
+                                    pricePerPerson: perPerson,
                                     currency: "EUR",
                                     outbound: {
                                         airline: first.airline ?? "Multiple",
@@ -864,6 +871,9 @@ export const generate = internalAction({
                             bestPrice: flightOptions[0]?.pricePerPerson ?? 0,
                             preferredTime: preferredFlightTime || "any",
                             dataSource: "serpapi",
+                            // Marks pricePerPerson as truly per-person (post-May-2026 fix);
+                            // backfillFlightPricePerPerson uses this to skip already-correct rows.
+                            _perPersonNormalized: true,
                         };
                     } catch (error) {
                         console.error("❌ SerpApi flights failed:", error);
@@ -933,6 +943,7 @@ export const generate = internalAction({
                             preferredTime: preferredFlightTime || "any",
                             dataSource: "duffel",
                             offerRequestId,
+                            _perPersonNormalized: true,
                         };
                     } catch (error) {
                         console.error("❌ Duffel flights failed:", error);

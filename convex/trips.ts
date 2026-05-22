@@ -557,6 +557,94 @@ export const failStuckGeneratingTrips = internalMutation({
     },
 });
 
+/**
+ * One-shot backfill: SerpApi returns `price` as the total fare for all
+ * passengers, but until May 2026 we stored it as `pricePerPerson` without
+ * dividing. This walks every trip and rewrites itinerary.flights.{options,
+ * pricePerPerson,price,bestPrice} to the correct per-person value.
+ *
+ * Idempotent: marks trips with `itinerary.flights._perPersonNormalized=true`
+ * after fixing and skips them on re-runs. Duffel-sourced flights are also
+ * marked so they're never touched (Duffel always returned per-person).
+ *
+ * Run from the Convex dashboard:
+ *   await ctx.runMutation(internal.trips.backfillFlightPricePerPerson, {})
+ */
+export const backfillFlightPricePerPerson = internalMutation({
+    args: {},
+    returns: v.object({
+        scanned: v.float64(),
+        updated: v.float64(),
+        skipped: v.float64(),
+    }),
+    handler: async (ctx: any) => {
+        const trips = await ctx.db.query("trips").collect();
+        let updated = 0;
+        let skipped = 0;
+        for (const trip of trips) {
+            const it = trip.itinerary;
+            const flights = it && typeof it === "object" ? it.flights : undefined;
+            if (!flights || typeof flights !== "object") {
+                skipped++;
+                continue;
+            }
+            if (flights._perPersonNormalized) {
+                skipped++;
+                continue;
+            }
+            const travelerCount = trip.travelerCount ?? trip.travelers ?? 1;
+            const dataSource = flights.dataSource;
+            // Duffel was already per-person. Just stamp the flag.
+            if (dataSource === "duffel" || travelerCount <= 1) {
+                await ctx.db.patch(trip._id, {
+                    itinerary: {
+                        ...it,
+                        flights: { ...flights, _perPersonNormalized: true },
+                    },
+                });
+                updated++;
+                continue;
+            }
+            const fixedOptions = Array.isArray(flights.options)
+                ? flights.options.map((opt: any) => {
+                      if (!opt || typeof opt.pricePerPerson !== "number") return opt;
+                      return {
+                          ...opt,
+                          pricePerPerson: Math.round(opt.pricePerPerson / travelerCount),
+                      };
+                  })
+                : flights.options;
+            const fixedBestPrice =
+                typeof flights.bestPrice === "number"
+                    ? Math.round(flights.bestPrice / travelerCount)
+                    : flights.bestPrice;
+            const fixedPricePerPerson =
+                typeof flights.pricePerPerson === "number"
+                    ? Math.round(flights.pricePerPerson / travelerCount)
+                    : flights.pricePerPerson;
+            const fixedPrice =
+                typeof flights.price === "number" && flights.pricePerPerson == null
+                    ? Math.round(flights.price / travelerCount)
+                    : flights.price;
+            await ctx.db.patch(trip._id, {
+                itinerary: {
+                    ...it,
+                    flights: {
+                        ...flights,
+                        options: fixedOptions,
+                        bestPrice: fixedBestPrice,
+                        pricePerPerson: fixedPricePerPerson,
+                        price: fixedPrice,
+                        _perPersonNormalized: true,
+                    },
+                },
+            });
+            updated++;
+        }
+        return { scanned: trips.length, updated, skipped };
+    },
+});
+
 export const list = authQuery({
     args: {
         token: v.string(),
