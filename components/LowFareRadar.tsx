@@ -12,6 +12,8 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { useAction } from "convex/react";
+import { api } from "@/convex/_generated/api";
 import { useTheme } from "@/lib/ThemeContext";
 import { useTranslation } from "react-i18next";
 
@@ -60,6 +62,10 @@ interface FlightDeal {
   isRecommended?: boolean;
   dealTag?: string;
   bookingUrl?: string;
+  // SerpApi POST-based booking_request — when present, resolve it to the
+  // real provider URL via flightsResolve.resolveBookingUrl before opening
+  // (the bookingUrl alone is just a Google Flights fallback deep-link).
+  bookingRequest?: { url: string; postData: string };
   notes?: string;
   matchesPreference?: boolean;
   matchesWishlist?: boolean;
@@ -85,6 +91,8 @@ type Filter = "all" | "recommended" | "wishlist";
 export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip, onPlanFromWishlist, onBookingClick }: LowFareRadarProps) {
   const { colors } = useTheme();
   const { t } = useTranslation();
+  const resolveBookingUrl = useAction(api.flightsResolve.resolveBookingUrl);
+  const [resolvingDealId, setResolvingDealId] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
   const [wishlistFilter, setWishlistFilter] = useState<string | null>(null);
   const [allExpanded, setAllExpanded] = useState(false);
@@ -178,11 +186,23 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
     return { type: "increase" as const, percent };
   };
 
-  const handleBooking = (deal: FlightDeal) => {
-    if (deal.bookingUrl) {
-      if (onBookingClick) onBookingClick(deal._id);
-      Linking.openURL(deal.bookingUrl);
+  const handleBooking = async (deal: FlightDeal) => {
+    if (resolvingDealId) return;
+    if (onBookingClick) onBookingClick(deal._id);
+    let url = deal.bookingUrl;
+    const br = deal.bookingRequest;
+    if (br?.url && br?.postData) {
+      try {
+        setResolvingDealId(deal._id);
+        const resolved = await resolveBookingUrl({ url: br.url, postData: br.postData });
+        if (resolved?.ok && resolved.url) url = resolved.url;
+      } catch {
+        // fall through to bookingUrl fallback
+      } finally {
+        setResolvingDealId(null);
+      }
     }
+    if (url) Linking.openURL(url);
   };
 
   const recommendedCount = deals.filter(
@@ -892,18 +912,19 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
                   )}
 
                   {/* Booking button */}
-                  {deal.bookingUrl && !deal.isExpired && (
+                  {(deal.bookingUrl || deal.bookingRequest?.url) && !deal.isExpired && (
                     <TouchableOpacity
                       style={[
                         styles.bookBtn,
-                        { backgroundColor: colors.primary },
+                        { backgroundColor: colors.primary, opacity: resolvingDealId === deal._id ? 0.6 : 1 },
                       ]}
                       onPress={() => handleBooking(deal)}
+                      disabled={resolvingDealId === deal._id}
                     >
                       <Text style={styles.bookBtnText}>
-                        {t("lowFare.bookNow", {
-                          defaultValue: "Book This Flight",
-                        })}
+                        {resolvingDealId === deal._id
+                          ? t("lowFare.opening", { defaultValue: "Opening…" })
+                          : t("lowFare.bookNow", { defaultValue: "Book This Flight" })}
                       </Text>
                       <Ionicons name="open-outline" size={16} color="#000" />
                     </TouchableOpacity>
