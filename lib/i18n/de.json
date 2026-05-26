@@ -450,6 +450,8 @@
     "maxWatchedReached": "Maximal 20 beobachtete Reiseziele erreicht"
   },
   "flights": {
+    "noOwnAirport": "{{city}} hat keinen eigenen Flughafen. Flüge nach {{nearestCity}} ({{iata}}) werden angezeigt.",
+    "noOwnAirportWithDistance": "{{city}} hat keinen eigenen Flughafen. Flüge nach {{nearestCity}} ({{iata}}), ca. {{distance}} km entfernt, werden angezeigt.",
     "bookFlight": "Flug Buchen",
     "bookingConfirmed": "Buchung Bestätigt!",
     "flightBookedSuccess": "Ihr Flug wurde erfolgreich gebucht",

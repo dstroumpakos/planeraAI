@@ -450,6 +450,8 @@
     "maxWatchedReached": "Μέγιστο 20 προορισμοί παρακολούθησης"
   },
   "flights": {
+    "noOwnAirport": "Το {{city}} δεν έχει δικό του αεροδρόμιο. Εμφάνιση πτήσεων προς {{nearestCity}} ({{iata}}).",
+    "noOwnAirportWithDistance": "Το {{city}} δεν έχει δικό του αεροδρόμιο. Εμφάνιση πτήσεων προς {{nearestCity}} ({{iata}}), ~{{distance}} χλμ μακριά.",
     "bookFlight": "Κράτηση Πτήσης",
     "bookingConfirmed": "Η Κράτηση Επιβεβαιώθηκε!",
     "flightBookedSuccess": "Η πτήση σας κρατήθηκε με επιτυχία",

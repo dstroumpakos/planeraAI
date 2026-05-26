@@ -10,8 +10,10 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useTranslation } from "react-i18next";
 import { useTheme } from "@/lib/ThemeContext";
 import { useFlightSearch } from "@/hooks/useFlightSearch";
+import { resolveAirport } from "@/lib/destinationAirports";
 import { FlightSearchForm } from "@/components/flights/FlightSearchForm";
 import { AirportsSummaryCard } from "@/components/flights/AirportsSummaryCard";
 import { PriceInsightsCard } from "@/components/flights/PriceInsightsCard";
@@ -30,6 +32,7 @@ import type {
  */
 export default function FlightsSearchScreen() {
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const router = useRouter();
   const params = useLocalSearchParams<{
     departureId?: string;
@@ -38,7 +41,13 @@ export default function FlightsSearchScreen() {
     returnDate?: string;
     adults?: string;
     currency?: string;
+    arrivalCityName?: string;
   }>();
+
+  const arrivalInfo = useMemo(
+    () => (params.arrivalCityName ? resolveAirport(params.arrivalCityName) : null),
+    [params.arrivalCityName]
+  );
 
   const initial: Partial<FlightSearchInput> = useMemo(
     () => ({
@@ -86,6 +95,18 @@ export default function FlightsSearchScreen() {
       borderRadius: 14,
       height: 120,
     },
+    banner: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 10,
+      padding: 12,
+      borderRadius: 12,
+      backgroundColor: colors.lightGray,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    bannerText: { flex: 1, color: colors.text, fontSize: 13, lineHeight: 18 },
+    bannerEmphasis: { fontWeight: "700", color: colors.text },
   });
 
   return (
@@ -115,6 +136,28 @@ export default function FlightsSearchScreen() {
 
         {!loading && data && (
           <>
+            {arrivalInfo && !arrivalInfo.hasOwnAirport && arrivalInfo.nearestCity && (
+              <View style={styles.banner}>
+                <Ionicons
+                  name="information-circle"
+                  size={18}
+                  color={colors.text}
+                />
+                <Text style={styles.bannerText}>
+                  {t(
+                    arrivalInfo.distanceKm
+                      ? "flights.noOwnAirportWithDistance"
+                      : "flights.noOwnAirport",
+                    {
+                      city: params.arrivalCityName,
+                      nearestCity: arrivalInfo.nearestCity,
+                      iata: arrivalInfo.iata,
+                      distance: arrivalInfo.distanceKm,
+                    }
+                  )}
+                </Text>
+              </View>
+            )}
             <AirportsSummaryCard airports={data.airports} />
             <PriceInsightsCard
               priceInsights={data.priceInsights}

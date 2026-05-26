@@ -450,6 +450,8 @@
     "maxWatchedReached": "Maximum de 20 destinations suivies atteint"
   },
   "flights": {
+    "noOwnAirport": "{{city}} n'a pas son propre aéroport. Affichage des vols vers {{nearestCity}} ({{iata}}).",
+    "noOwnAirportWithDistance": "{{city}} n'a pas son propre aéroport. Affichage des vols vers {{nearestCity}} ({{iata}}), à ~{{distance}} km.",
     "bookFlight": "Réserver un Vol",
     "bookingConfirmed": "Réservation Confirmée !",
     "flightBookedSuccess": "Votre vol a été réservé avec succès",

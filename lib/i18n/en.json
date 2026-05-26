@@ -450,6 +450,8 @@
     "maxWatchedReached": "Maximum of 20 watched destinations reached"
   },
   "flights": {
+    "noOwnAirport": "{{city}} doesn't have its own airport. Showing flights to {{nearestCity}} ({{iata}}).",
+    "noOwnAirportWithDistance": "{{city}} doesn't have its own airport. Showing flights to {{nearestCity}} ({{iata}}), ~{{distance}} km away.",
     "bookFlight": "Book Flight",
     "bookingConfirmed": "Booking Confirmed!",
     "flightBookedSuccess": "Your flight has been booked successfully",
