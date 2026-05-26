@@ -172,6 +172,35 @@ const SIMPLE: Record<string, string> = {
   "skiathos": "JSI",
   "kalamata": "KLX",
   "ioannina": "IOA",
+  // Greek-script aliases (diacritics stripped by normalize())
+  "αθηνα": "ATH",
+  "θεσσαλονικη": "SKG",
+  "ηρακλειο": "HER",
+  "κρητη": "HER",
+  "χανια": "CHQ",
+  "σαντορινη": "JTR",
+  "θηρα": "JTR",
+  "μυκονος": "JMK",
+  "ροδος": "RHO",
+  "κερκυρα": "CFU",
+  "κως": "KGS",
+  "ζακυνθος": "ZTH",
+  "κεφαλονια": "EFL",
+  // Malta
+  "malta": "MLA",
+  "valletta": "MLA",
+  // Azores (Portugal)
+  "azores": "PDL",
+  "açores": "PDL",
+  "acores": "PDL",
+  "ponta delgada": "PDL",
+  "são miguel": "PDL",
+  "sao miguel": "PDL",
+  "terceira": "TER",
+  "horta": "HOR",
+  "faial": "HOR",
+  "pico": "PIX",
+  "santa maria": "SMA",
   // Balkans / SE Europe
   "belgrade": "BEG",
   "serbia": "BEG",
@@ -662,6 +691,9 @@ const VIA_HUB: Record<string, AirportInfo> = {
   // Vatican
   "vatican": { iata: "FCO", hasOwnAirport: false, nearestCity: "Rome", nearestCountry: "Italy", distanceKm: 30 },
   "vatican city": { iata: "FCO", hasOwnAirport: false, nearestCity: "Rome", nearestCountry: "Italy", distanceKm: 30 },
+  // Malta — Gozo has no airport, accessed via ferry from Malta International (MLA)
+  "gozo": { iata: "MLA", hasOwnAirport: false, nearestCity: "Malta", nearestCountry: "Malta", distanceKm: 30 },
+  "comino": { iata: "MLA", hasOwnAirport: false, nearestCity: "Malta", nearestCountry: "Malta", distanceKm: 25 },
   // Mexico — Riviera Maya area → Cancún
   "tulum": { iata: "CUN", hasOwnAirport: false, nearestCity: "Cancún", nearestCountry: "Mexico", distanceKm: 130 },
   "playa del carmen": { iata: "CUN", hasOwnAirport: false, nearestCity: "Cancún", nearestCountry: "Mexico", distanceKm: 70 },
@@ -737,9 +769,11 @@ export const DESTINATION_AIRPORTS: Record<string, AirportInfo> = (() => {
 /* -------------------------------------------------------------------------- */
 function normalize(name: string): string {
   return name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // strip diacritics (Latin accents + Greek tonos)
     .toLowerCase()
     .trim()
-    .replace(/,\s*[a-z\s.-]+$/i, "") // strip ", Country"
+    .replace(/,\s*[\p{L}\s.-]+$/u, "") // strip ", Country" (any script)
     .replace(/\s+(airport|international|intl)$/i, "")
     .trim();
 }
