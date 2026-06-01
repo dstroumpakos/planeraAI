@@ -392,6 +392,12 @@
   "subscription": {
     "unlockNextEra": "Débloquez votre prochaine\nère de voyage.",
     "aiPoweredItineraries": "Itinéraires propulsés par l'IA, inspiration illimitée et recommandations intelligentes.",
+    "currentPlanTitle": "Votre forfait actuel",
+    "currentPlanMonthly": "Planera Pro – Mensuel",
+    "currentPlanYearly": "Planera Pro – Annuel",
+    "renewsOn": "Renouvellement le {{date}}",
+    "expiresOn": "Expire le {{date}}",
+    "inGracePeriod": "Problème de paiement – accès maintenu jusqu'au {{date}}",
     "bestValue": "MEILLEURE VALEUR",
     "proYearly": "Planera Pro – Annuel",
     "save50": "ÉCONOMISEZ 50%",

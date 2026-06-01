@@ -392,6 +392,12 @@
   "subscription": {
     "unlockNextEra": "Ξεκλειδώστε τη νέα\nεποχή ταξιδιών.",
     "aiPoweredItineraries": "Δρομολόγια AI, απεριόριστη έμπνευση και έξυπνες προτάσεις.",
+    "currentPlanTitle": "Το τρέχον πρόγραμμά σας",
+    "currentPlanMonthly": "Planera Pro – Μηνιαίο",
+    "currentPlanYearly": "Planera Pro – Ετήσιο",
+    "renewsOn": "Ανανεώνεται στις {{date}}",
+    "expiresOn": "Λήγει στις {{date}}",
+    "inGracePeriod": "Πρόβλημα πληρωμής – η πρόσβαση συνεχίζεται έως {{date}}",
     "bestValue": "ΚΑΛΥΤΕΡΗ ΑΞΙΑ",
     "proYearly": "Planera Pro – Ετήσιο",
     "save50": "ΕΞΟΙΚΟΝΟΜΗΣΤΕ 50%",

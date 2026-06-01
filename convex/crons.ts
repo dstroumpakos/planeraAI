@@ -30,4 +30,12 @@ crons.interval(
     internal.trips.failStuckGeneratingTrips,
 );
 
+// Re-verify auto-renewing Apple subscriptions at/near expiry so paying
+// monthly subscribers keep premium (no server-to-server notifications wired).
+crons.interval(
+    "refresh-apple-subscriptions",
+    { hours: 6 },
+    internal.iapVerify.refreshExpiringSubscriptions,
+);
+
 export default crons;

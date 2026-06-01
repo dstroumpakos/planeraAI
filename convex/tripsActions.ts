@@ -1097,6 +1097,22 @@ ${generateTravelStyleGuidance(trip.interests)}
 ${localExperiencesGuidance}
 ${timeAwareGuidance.guidance}
 
+**MUST-SEE LANDMARKS (CRITICAL):**
+Every traveler going to ${trip.destination} expects the iconic, world-famous sights they would regret missing. Build the itinerary so the genuine must-see landmarks of ${trip.destination} are covered across the trip:
+- Identify the 3-6 truly iconic, signature sights of ${trip.destination} (the ones that define the destination and appear on every "top things to do" list).
+- Prioritize these over generic or filler activities. A traveler should NEVER finish this trip having missed the destination's defining landmark.
+- Front-load the most iconic sights into the earlier full days, in case later plans change — but cluster by geography to minimize back-and-forth.
+- For longer trips, also include 1-2 well-known secondary highlights and at least one notable viewpoint or scenic vantage point of the destination.
+- If a famous landmark genuinely requires advance booking (e.g. timed-entry tickets), note it in "tips" and set skipTheLine accordingly.
+- Respect the per-day item limits below — must-see sights take the place of generic activities, they do NOT add extra items.
+
+**SPECIFICITY & ACCURACY (CRITICAL):**
+- Use REAL, specific, named venues that actually exist in ${trip.destination} — never generic placeholders like "a local café" or "a popular museum". Name the actual place.
+- Only recommend venues you are confident genuinely exist. Do NOT invent restaurants, attractions, or addresses. If unsure of an exact spot, choose a well-known, established one rather than fabricating.
+- Use precise, real neighborhood and street names for ${trip.destination}.
+- Descriptions must be concrete and informative (what makes THIS place worth visiting), not vague marketing fluff.
+- Tips must be actionable and specific to that exact venue (best time to go, what to order, which entrance, what to skip).
+
 IMPORTANT: For each activity, include:
 - Realistic entry prices in EUR that RESPECT the budget tier (${budgetGuidance.budgetTier})
 - Whether "Skip the Line" tickets are available (for museums, attractions)${budgetGuidance.budgetTier === "low" ? " — only suggest if affordable within budget" : budgetGuidance.budgetTier === "moderate" ? " — suggest for popular attractions only" : ""}
@@ -1282,8 +1298,8 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                         : '';
                     
                     const systemPrompt = timeAwareGuidance.skipLastDay
-                        ? `You are a travel itinerary planner. Return only valid JSON. Always include realistic prices and booking information for activities. IMPORTANT: Generate ${effectiveTripDays} days of activities (Days 1-${effectiveTripDays}). Day ${tripDays} is departure day with no activities. Respect arrival and departure time constraints.${budgetSystemNote} The traveler's budget tier is ${budgetGuidance.budgetTier.toUpperCase()} (€${budgetGuidance.dailyBudgetPerPerson}/person/day). All recommendations must respect this budget.${languageInstruction}`
-                        : `You are a travel itinerary planner. Return only valid JSON. Always include realistic prices and booking information for activities. IMPORTANT: You must generate the complete itinerary for ALL ${tripDays} days requested. If arrival/departure times are specified, adjust activities accordingly - fewer activities on partial days.${budgetSystemNote} The traveler's budget tier is ${budgetGuidance.budgetTier.toUpperCase()} (€${budgetGuidance.dailyBudgetPerPerson}/person/day). All recommendations must respect this budget.${languageInstruction}`;
+                        ? `You are an expert local travel itinerary planner with deep, first-hand knowledge of ${trip.destination}. Return only valid JSON. Recommend ONLY real, specific, named venues that genuinely exist — never generic placeholders or invented places. Ensure the destination's iconic must-see landmarks are covered across the trip; a traveler should never miss the signature sights of ${trip.destination}. Always include realistic prices and booking information for activities. IMPORTANT: Generate ${effectiveTripDays} days of activities (Days 1-${effectiveTripDays}). Day ${tripDays} is departure day with no activities. Respect arrival and departure time constraints.${budgetSystemNote} The traveler's budget tier is ${budgetGuidance.budgetTier.toUpperCase()} (€${budgetGuidance.dailyBudgetPerPerson}/person/day). All recommendations must respect this budget.${languageInstruction}`
+                        : `You are an expert local travel itinerary planner with deep, first-hand knowledge of ${trip.destination}. Return only valid JSON. Recommend ONLY real, specific, named venues that genuinely exist — never generic placeholders or invented places. Ensure the destination's iconic must-see landmarks are covered across the trip; a traveler should never miss the signature sights of ${trip.destination}. Always include realistic prices and booking information for activities. IMPORTANT: You must generate the complete itinerary for ALL ${tripDays} days requested. If arrival/departure times are specified, adjust activities accordingly - fewer activities on partial days.${budgetSystemNote} The traveler's budget tier is ${budgetGuidance.budgetTier.toUpperCase()} (€${budgetGuidance.dailyBudgetPerPerson}/person/day). All recommendations must respect this budget.${languageInstruction}`;
 
                     // Hard timeout on the OpenAI call. Convex Node actions are killed
                     // after ~10 minutes total wall-clock time. We cap the OpenAI call

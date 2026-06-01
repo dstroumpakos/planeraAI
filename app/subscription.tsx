@@ -142,24 +142,33 @@ export default function SubscriptionScreen() {
                     const successfulRestores = restoreResults.filter(r => r.success && r.transactionId);
                     
                     if (successfulRestores.length > 0) {
+                        let anyVerified = false;
                         for (const r of successfulRestores) {
                             if (!r.receipt) continue;
                             try {
-                                await verifyApplePurchase({
+                                const vr: any = await verifyApplePurchase({
                                     token,
                                     productId: r.productId!,
                                     transactionId: r.transactionId!,
                                     receipt: r.receipt,
                                 });
+                                if (vr?.success) anyVerified = true;
                             } catch (e) {
                                 console.warn("[Subscription] Restore verify failed for", r.productId, e);
                             }
                         }
-                        Alert.alert(
-                            t('subscription.subscriptionRestored') + " ✓",
-                            t('subscription.alreadyActiveRestored')
-                        );
-                        router.back();
+                        if (anyVerified) {
+                            Alert.alert(
+                                t('subscription.subscriptionRestored') + " ✓",
+                                t('subscription.alreadyActiveRestored')
+                            );
+                            router.back();
+                        } else {
+                            Alert.alert(
+                                t('subscription.alreadySubscribed'),
+                                t('subscription.alreadyActiveSyncRestore')
+                            );
+                        }
                     } else {
                         Alert.alert(
                             t('subscription.alreadySubscribed'),
@@ -200,24 +209,33 @@ export default function SubscriptionScreen() {
             
             if (successfulRestores.length > 0) {
                 // Verify each restored receipt with Apple before granting anything
+                let anyVerified = false;
                 for (const r of successfulRestores) {
                     if (!r.receipt) continue;
                     try {
-                        await verifyApplePurchase({
+                        const vr: any = await verifyApplePurchase({
                             token,
                             productId: r.productId!,
                             transactionId: r.transactionId!,
                             receipt: r.receipt,
                         });
+                        if (vr?.success) anyVerified = true;
                     } catch (e) {
                         console.warn("[Subscription] Restore verify failed for", r.productId, e);
                     }
                 }
 
-                Alert.alert(
-                    t('subscription.purchasesRestored') + " ✓",
-                    t('subscription.previousPurchasesRestored')
-                );
+                if (anyVerified) {
+                    Alert.alert(
+                        t('subscription.purchasesRestored') + " ✓",
+                        t('subscription.previousPurchasesRestored')
+                    );
+                } else {
+                    Alert.alert(
+                        t('subscription.noPurchasesFound'),
+                        t('subscription.noPurchasesContact')
+                    );
+                }
             } else {
                 Alert.alert(
                     t('subscription.noPurchasesFound'),
@@ -236,6 +254,27 @@ export default function SubscriptionScreen() {
     const isProcessing = loading !== null || restoring || iapLoading;
     const purchaseDisabled = isProcessing || (Platform.OS === 'ios' && !productsLoaded);
 
+    // Current paid plan banner: show which subscription (monthly/yearly) the
+    // user is on, plus renew/expire date, when they have an active sub.
+    const currentPlanLabel =
+        userPlan?.subscriptionType === "monthly"
+            ? t('subscription.currentPlanMonthly')
+            : userPlan?.subscriptionType === "yearly"
+                ? t('subscription.currentPlanYearly')
+                : null;
+    const expiryDate = userPlan?.subscriptionExpiresAt
+        ? new Date(userPlan.subscriptionExpiresAt).toLocaleDateString()
+        : null;
+    const currentPlanDetail = !expiryDate
+        ? null
+        : userPlan?.inBillingGracePeriod
+            ? t('subscription.inGracePeriod', {
+                date: userPlan?.gracePeriodEndsAt
+                    ? new Date(userPlan.gracePeriodEndsAt).toLocaleDateString()
+                    : expiryDate,
+            })
+            : t('subscription.renewsOn', { date: expiryDate });
+
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
             <View style={styles.header}>
@@ -250,6 +289,26 @@ export default function SubscriptionScreen() {
                 <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
                     {t('subscription.aiPoweredItineraries')}
                 </Text>
+
+                {/* Current paid plan banner */}
+                {isSubscriptionActive && currentPlanLabel && (
+                    <View style={[styles.currentPlanCard, { backgroundColor: colors.card, borderColor: colors.primary }]}>
+                        <Ionicons name="checkmark-circle" size={22} color={colors.primary} />
+                        <View style={styles.currentPlanInfo}>
+                            <Text style={[styles.currentPlanLabel, { color: colors.textMuted }]}>
+                                {t('subscription.currentPlanTitle')}
+                            </Text>
+                            <Text style={[styles.currentPlanName, { color: colors.text }]}>
+                                {currentPlanLabel}
+                            </Text>
+                            {currentPlanDetail && (
+                                <Text style={[styles.currentPlanDetail, { color: colors.textMuted }]}>
+                                    {currentPlanDetail}
+                                </Text>
+                            )}
+                        </View>
+                    </View>
+                )}
 
                 {/* Yearly Plan - Best Value */}
                 <TouchableOpacity 
@@ -471,6 +530,33 @@ const styles = StyleSheet.create({
         textAlign: "center",
         marginBottom: 32,
         lineHeight: 24,
+    },
+    currentPlanCard: {
+        flexDirection: "row",
+        alignItems: "center",
+        borderRadius: 14,
+        borderWidth: 1.5,
+        padding: 16,
+        marginBottom: 24,
+        gap: 12,
+    },
+    currentPlanInfo: {
+        flex: 1,
+    },
+    currentPlanLabel: {
+        fontSize: 12,
+        fontWeight: "600",
+        textTransform: "uppercase",
+        letterSpacing: 0.5,
+        marginBottom: 2,
+    },
+    currentPlanName: {
+        fontSize: 17,
+        fontWeight: "700",
+    },
+    currentPlanDetail: {
+        fontSize: 13,
+        marginTop: 2,
     },
     planCard: {
         borderRadius: 16,

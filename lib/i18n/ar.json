@@ -392,6 +392,12 @@
   "subscription": {
     "unlockNextEra": "افتح عصرك القادم\nفي السفر.",
     "aiPoweredItineraries": "برامج رحلات بالذكاء الاصطناعي، إلهام غير محدود، وتوصيات ذكية.",
+    "currentPlanTitle": "باقتك الحالية",
+    "currentPlanMonthly": "Planera Pro – شهري",
+    "currentPlanYearly": "Planera Pro – سنوي",
+    "renewsOn": "يتجدد في {{date}}",
+    "expiresOn": "ينتهي في {{date}}",
+    "inGracePeriod": "مشكلة في الدفع – يستمر الوصول حتى {{date}}",
     "bestValue": "أفضل قيمة",
     "proYearly": "Planera Pro – سنوي",
     "save50": "وفر 50%",

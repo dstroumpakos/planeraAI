@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import { query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { authMutation, authQuery } from "./functions";
-import { internalMutation } from "./_generated/server";
+import { internalMutation, internalQuery } from "./_generated/server";
 import { isSubscriptionActiveWithGrace, BILLING_GRACE_PERIOD_MS } from "./helpers/subscription";
 
 // Simple token validation query for actions
@@ -800,6 +800,7 @@ export const applyVerifiedApplePurchase = internalMutation({
         transactionId: v.string(),
         receipt: v.string(),
         expiresAt: v.optional(v.float64()),
+        originalTransactionId: v.optional(v.string()),
     },
     returns: v.object({
         success: v.boolean(),
@@ -810,7 +811,7 @@ export const applyVerifiedApplePurchase = internalMutation({
         totalCredits: v.optional(v.float64()),
     }),
     handler: async (ctx, args) => {
-        const { userId, productId, transactionId, receipt, expiresAt } = args;
+        const { userId, productId, transactionId, receipt, expiresAt, originalTransactionId } = args;
 
         // Idempotency: ignore replays of the same transaction
         const existingTx = await ctx.db
@@ -831,6 +832,7 @@ export const applyVerifiedApplePurchase = internalMutation({
             productId,
             transactionId,
             receipt,
+            originalTransactionId,
             processedAt: Date.now(),
             status: "completed",
         });
@@ -860,6 +862,7 @@ export const applyVerifiedApplePurchase = internalMutation({
                 subscriptionExpiresAt: expiresAt,
                 subscriptionType: productId === PRODUCT_IDS.YEARLY ? "yearly" : "monthly",
                 lastTransactionId: transactionId,
+                ...(originalTransactionId ? { originalTransactionId } : {}),
             });
             return { success: true, type: "subscription", expiresAt };
         }
@@ -878,6 +881,200 @@ export const applyVerifiedApplePurchase = internalMutation({
         }
 
         throw new Error(`Unknown product ID: ${productId}`);
+    },
+});
+
+// ===========================================
+// SUBSCRIPTION RENEWAL REFRESH
+// ===========================================
+// `subscriptionExpiresAt` is set at purchase time only. Auto-renewing monthly
+// subs renew every 30 days, but Apple does not push us those renewals (no
+// server-to-server notifications wired up). Without re-verification a paying
+// monthly subscriber gets wrongly downgraded ~46 days after their FIRST
+// purchase (30d period + 16d grace), even though Apple keeps charging them.
+//
+// The cron in `iapVerify.refreshExpiringSubscriptions` re-verifies the stored
+// receipt against Apple (whose `latest_receipt_info` includes every renewal)
+// and feeds the freshest expiry back through the helpers below.
+
+/** Premium plans at/near expiry that should be re-verified against Apple. */
+export const getSubscriptionsNeedingRefresh = internalQuery({
+    args: {},
+    returns: v.array(v.object({ userId: v.string() })),
+    handler: async (ctx) => {
+        // Refresh anything expiring within the next 3 days, plus anything past
+        // expiry but still inside the billing grace window (so we catch
+        // renewals that land late and avoid premature downgrades).
+        const horizon = Date.now() + 3 * 24 * 60 * 60 * 1000;
+        const cutoff = Date.now() - BILLING_GRACE_PERIOD_MS;
+        const plans = await ctx.db.query("userPlans").collect();
+        return plans
+            .filter(
+                (p) =>
+                    p.plan === "premium" &&
+                    p.subscriptionExpiresAt != null &&
+                    p.subscriptionExpiresAt <= horizon &&
+                    p.subscriptionExpiresAt >= cutoff
+            )
+            .map((p) => ({ userId: p.userId }));
+    },
+});
+
+/** Most recent subscription receipt for a user (for re-verification). */
+export const getLatestSubscriptionReceipt = internalQuery({
+    args: { userId: v.string() },
+    returns: v.union(
+        v.object({ receipt: v.string(), productId: v.string() }),
+        v.null()
+    ),
+    handler: async (ctx, { userId }) => {
+        const txs = await ctx.db
+            .query("iapTransactions")
+            .withIndex("by_user", (q) => q.eq("userId", userId))
+            .collect();
+        const latest = txs
+            .filter(
+                (t) =>
+                    !!t.receipt &&
+                    (t.productId === PRODUCT_IDS.MONTHLY ||
+                        t.productId === PRODUCT_IDS.YEARLY)
+            )
+            .sort((a, b) => b.processedAt - a.processedAt)[0];
+        return latest?.receipt
+            ? { receipt: latest.receipt, productId: latest.productId }
+            : null;
+    },
+});
+
+/**
+ * Apply a freshly verified subscription expiry from Apple. Extends premium
+ * when Apple reports a future (grace-inclusive) expiry, or downgrades to free
+ * once the subscription is genuinely past the grace window.
+ */
+export const refreshSubscriptionExpiry = internalMutation({
+    args: {
+        userId: v.string(),
+        expiresAt: v.float64(),
+        originalTransactionId: v.optional(v.string()),
+    },
+    returns: v.object({ action: v.string() }),
+    handler: async (ctx, { userId, expiresAt, originalTransactionId }) => {
+        const plan = await ctx.db
+            .query("userPlans")
+            .withIndex("by_user", (q) => q.eq("userId", userId))
+            .unique();
+        if (!plan) return { action: "no_plan" };
+
+        // Backfill the Apple key so future server notifications can map to us.
+        const backfill =
+            originalTransactionId && plan.originalTransactionId !== originalTransactionId
+                ? { originalTransactionId }
+                : {};
+
+        const status = isSubscriptionActiveWithGrace("premium", expiresAt);
+
+        if (status.active) {
+            if (
+                plan.plan !== "premium" ||
+                plan.subscriptionExpiresAt !== expiresAt ||
+                Object.keys(backfill).length > 0
+            ) {
+                await ctx.db.patch(plan._id, {
+                    plan: "premium",
+                    subscriptionExpiresAt: expiresAt,
+                    ...backfill,
+                });
+                return { action: "refreshed" };
+            }
+            return { action: "unchanged" };
+        }
+
+        // Past expiry + grace → subscription truly lapsed.
+        if (plan.plan === "premium") {
+            await ctx.db.patch(plan._id, {
+                plan: "free",
+                subscriptionExpiresAt: expiresAt,
+                ...backfill,
+            });
+            return { action: "downgraded" };
+        }
+        if (Object.keys(backfill).length > 0) {
+            await ctx.db.patch(plan._id, backfill);
+        }
+        return { action: "unchanged" };
+    },
+});
+
+/**
+ * Apply an App Store Server Notification (V2) event. Called by the verified
+ * webhook in `http.ts` after the signed payload + transaction have been
+ * decoded against Apple's certificate chain.
+ *
+ * Maps `originalTransactionId` → the owning user, then either extends premium
+ * (renewals) or downgrades (expiry / refund / revoke). Renewals/expiry flow
+ * through the same grace-aware logic as the polling cron; refunds and revokes
+ * downgrade immediately.
+ */
+export const applyAppleNotification = internalMutation({
+    args: {
+        originalTransactionId: v.string(),
+        notificationType: v.string(),
+        subtype: v.optional(v.string()),
+        productId: v.optional(v.string()),
+        expiresAt: v.optional(v.float64()),
+    },
+    returns: v.object({ action: v.string() }),
+    handler: async (ctx, args) => {
+        const { originalTransactionId, notificationType, productId, expiresAt } = args;
+
+        const plan = await ctx.db
+            .query("userPlans")
+            .withIndex("by_original_transaction", (q) =>
+                q.eq("originalTransactionId", originalTransactionId)
+            )
+            .first();
+        if (!plan) {
+            // Unknown subscriber (e.g. legacy purchase before originalTransactionId
+            // tracking). The polling cron backfills these; nothing to do here.
+            return { action: "unmapped" };
+        }
+
+        const subType =
+            productId === PRODUCT_IDS.YEARLY
+                ? "yearly"
+                : productId === PRODUCT_IDS.MONTHLY
+                  ? "monthly"
+                  : plan.subscriptionType;
+
+        // Revocation events: pull access immediately.
+        if (notificationType === "REFUND" || notificationType === "REVOKE") {
+            await ctx.db.patch(plan._id, {
+                plan: "free",
+                subscriptionExpiresAt: expiresAt ?? plan.subscriptionExpiresAt,
+            });
+            return { action: "revoked" };
+        }
+
+        // Everything else is driven by the new expiry Apple reports.
+        if (expiresAt) {
+            const status = isSubscriptionActiveWithGrace("premium", expiresAt);
+            if (status.active) {
+                await ctx.db.patch(plan._id, {
+                    plan: "premium",
+                    subscriptionExpiresAt: expiresAt,
+                    ...(subType ? { subscriptionType: subType } : {}),
+                });
+                return { action: "extended" };
+            }
+            // Past expiry + grace window.
+            await ctx.db.patch(plan._id, {
+                plan: "free",
+                subscriptionExpiresAt: expiresAt,
+            });
+            return { action: "expired" };
+        }
+
+        return { action: "noop" };
     },
 });
 

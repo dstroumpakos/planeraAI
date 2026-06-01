@@ -111,9 +111,30 @@ async function callSerpApi(params: URLSearchParams): Promise<any> {
   }
 
   if (json?.error) {
-    // SerpApi returns 200 with `error: string` for quota / param errors.
-    console.error("[SerpApi] API error:", json.error);
-    throw new Error("Flight search is unavailable right now. Try again later.");
+    // SerpApi returns 200 with `error: string` for several distinct cases:
+    //  - "no results" (a legitimate empty search, NOT a failure)
+    //  - param errors (bad/past date, unknown airport)
+    //  - quota / rate-limit / plan errors
+    const detail = String(json.error);
+    const lower = detail.toLowerCase();
+    console.error("[SerpApi] API error:", detail);
+
+    // Treat "no results" as an empty result set, not a hard error. Google
+    // Flights routinely returns this for thin routes/dates (e.g. some
+    // ATH->LHR combinations) and it should surface as "no flights found"
+    // rather than blowing up trip generation and spamming error reports.
+    if (
+      lower.includes("hasn't returned any results") ||
+      lower.includes("has not returned any results") ||
+      lower.includes("no results") ||
+      lower.includes("fully booked")
+    ) {
+      return { __noResults: true };
+    }
+
+    // Genuine error — preserve SerpApi's own message so error reports are
+    // diagnosable. This text is SerpApi's, not a secret (no key leakage).
+    throw new Error(`Flight search unavailable: ${detail}`);
   }
   return json;
 }
@@ -136,7 +157,9 @@ function normalizeSearchResponse(
 
   return {
     searchId: raw?.search_metadata?.id ?? null,
-    status: raw?.search_metadata?.status ?? "unknown",
+    status: raw?.__noResults
+      ? "no_results"
+      : raw?.search_metadata?.status ?? "unknown",
     searchParameters: raw?.search_parameters ?? {
       departure_id: input.departureId,
       arrival_id: input.arrivalId,

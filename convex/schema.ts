@@ -114,7 +114,13 @@ export default defineSchema({
         subscriptionType: v.optional(v.union(v.literal("monthly"), v.literal("yearly"))),
         // Apple IAP tracking
         lastTransactionId: v.optional(v.string()),
-    }).index("by_user", ["userId"]),
+        // Stable per-subscription key from Apple. App Store Server Notifications
+        // and renewals reference this (not the per-renewal transactionId), so we
+        // index it to map an inbound notification back to the owning user.
+        originalTransactionId: v.optional(v.string()),
+    })
+        .index("by_user", ["userId"])
+        .index("by_original_transaction", ["originalTransactionId"]),
 
     // Apple In-App Purchase transaction history
     iapTransactions: defineTable({
@@ -122,6 +128,7 @@ export default defineSchema({
         productId: v.string(),
         transactionId: v.string(),
         receipt: v.optional(v.string()),
+        originalTransactionId: v.optional(v.string()),
         processedAt: v.float64(),
         status: v.union(
             v.literal("completed"),

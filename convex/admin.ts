@@ -455,17 +455,25 @@ export const listUsers = query({
         if (!userId) throw new Error("Unauthorized");
         await assertAdmin(ctx, userId);
         
-        // Get all userSettings
-        const allSettings = await ctx.db.query("userSettings").take(args.limit || 50);
-        
+        // Get userSettings, newest first. Without an explicit order, `.take()`
+        // returns the OLDEST rows, so new signups never appear once there are
+        // more than `limit` users. When searching we scan a wider window so
+        // recent-but-not-newest matches are still found.
+        const settingsQuery = ctx.db.query("userSettings").order("desc");
+        const allSettings = args.search
+            ? await settingsQuery.take(1000)
+            : await settingsQuery.take(args.limit || 50);
+
         // Filter by search if provided
         let filteredSettings = allSettings;
         if (args.search) {
             const searchLower = args.search.toLowerCase();
-            filteredSettings = allSettings.filter((s: any) => 
-                s.name?.toLowerCase().includes(searchLower) ||
-                s.email?.toLowerCase().includes(searchLower)
-            );
+            filteredSettings = allSettings
+                .filter((s: any) =>
+                    s.name?.toLowerCase().includes(searchLower) ||
+                    s.email?.toLowerCase().includes(searchLower)
+                )
+                .slice(0, args.limit || 50);
         }
         
         // Enrich with user flags and stats
