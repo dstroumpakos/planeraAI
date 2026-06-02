@@ -7,6 +7,8 @@ import {
   buildCacheKey,
   normalizeDestinationKey,
   normalizePreferences,
+  canonicalizeDestination,
+  cityTokenOf,
   partnerError,
   partnerJson,
   corsPreflight,
@@ -142,7 +144,7 @@ http.route({
       return partnerError("validation_error", "Request body must be valid JSON.");
     }
 
-    const destination =
+    const rawDestination =
       typeof body?.destination === "string" ? body.destination.trim() : "";
     const days = body?.days;
     const preferences = Array.isArray(body?.preferences) ? body.preferences : [];
@@ -153,7 +155,7 @@ http.route({
     const webhookUrl =
       typeof body?.webhook_url === "string" ? body.webhook_url.trim() : undefined;
 
-    if (!destination) {
+    if (!rawDestination) {
       return partnerError("validation_error", "`destination` is required.");
     }
     if (
@@ -181,6 +183,18 @@ http.route({
     }
 
     const normPrefs = normalizePreferences(preferences);
+    // Canonicalize "London"/"London, UK" -> "London, United Kingdom" so the
+    // cache key matches our pre-generated entries instead of missing them.
+    const cityToken = cityTokenOf(rawDestination);
+    let destination = canonicalizeDestination(rawDestination);
+    // Not a curated city — consult the learned-alias table so repeat requests
+    // for the same city (any spelling) collapse onto the first-seen canonical.
+    if (destination === rawDestination.trim()) {
+      const learned = await ctx.runQuery(internal.partnerApi.lookupCanonical, {
+        cityToken,
+      });
+      if (learned) destination = learned;
+    }
     const cacheKey = buildCacheKey(destination, days, preferences);
     const normalizedDestination = normalizeDestinationKey(destination);
     const idempotencyKey =
@@ -259,6 +273,14 @@ http.route({
       destinationKey: normalizedDestination,
       destination,
       days,
+    });
+
+    // 7b) Lock in this spelling as the canonical for the city token so future
+    // requests with a different spelling match the cache instead of re-running
+    // the LLM. First spelling wins; later calls only bump lastSeenAt.
+    await ctx.runMutation(internal.partnerApi.rememberCanonical, {
+      cityToken,
+      destination,
     });
 
     // 8) Enqueue async generation.

@@ -197,3 +197,119 @@ export const getPartnerUsage = query({
     };
   },
 });
+
+/**
+ * Pre-generation status board. For every pre-gen city (curated list + cities
+ * partners have actually requested) and every standard duration, report whether
+ * the itinerary is cached & ready, currently generating, failed, or still
+ * missing — so the operator can see coverage gaps at a glance.
+ */
+export const getPregenerationStatus = query({
+  args: { adminToken: v.string() },
+  handler: async (ctx, args) => {
+    assertAdmin(args.adminToken);
+
+    // Demand rows (cities partners asked for live). Group by destination so a
+    // requested city is shown alongside the curated ones.
+    const demandRows = await ctx.db.query("partnerDemand").collect();
+    const demandByKey = new Map<
+      string,
+      { destination: string; count: number; covered: boolean; lastRequestedAt: number }
+    >();
+    for (const d of demandRows) {
+      const cur = demandByKey.get(d.destinationKey);
+      if (cur) {
+        cur.count += d.count;
+        cur.covered = cur.covered && d.covered;
+        cur.lastRequestedAt = Math.max(cur.lastRequestedAt, d.lastRequestedAt);
+      } else {
+        demandByKey.set(d.destinationKey, {
+          destination: d.destination,
+          count: d.count,
+          covered: d.covered,
+          lastRequestedAt: d.lastRequestedAt,
+        });
+      }
+    }
+
+    // Build the ordered city list: curated first, then any demand-only cities.
+    const cityList: Array<{ destination: string; fromDemand: boolean }> = [];
+    const seen = new Set<string>();
+    for (const c of CURATED_CITIES) {
+      const key = normalizeDestinationKey(c);
+      seen.add(key);
+      cityList.push({ destination: c, fromDemand: false });
+    }
+    for (const [key, info] of demandByKey) {
+      if (!seen.has(key)) {
+        seen.add(key);
+        cityList.push({ destination: info.destination, fromDemand: true });
+      }
+    }
+
+    const summary = { ready: 0, inProgress: 0, failed: 0, missing: 0 };
+
+    const cities = [];
+    for (const { destination, fromDemand } of cityList) {
+      const destinationKey = normalizeDestinationKey(destination);
+      const demand = demandByKey.get(destinationKey);
+
+      const slots = [];
+      for (const days of DEFAULT_DURATIONS) {
+        const cacheKey = buildCacheKey(destination, days, []);
+        const records = await ctx.db
+          .query("partnerItineraries")
+          .withIndex("by_cacheKey", (q) => q.eq("cacheKey", cacheKey))
+          .take(100);
+
+        // Reduce all records for this slot to a single status.
+        let status: "ready" | "in_progress" | "failed" | "missing" = "missing";
+        let readyAt: number | null = null;
+        let error: string | null = null;
+        for (const r of records) {
+          if (r.status === "ready" && r.itinerary) {
+            status = "ready";
+            readyAt = r.readyAt ?? r.createdAt;
+            break; // ready wins outright
+          }
+          if (r.status === "queued" || r.status === "generating") {
+            if (status !== "in_progress") status = "in_progress";
+          } else if (r.status === "failed" && status === "missing") {
+            status = "failed";
+            error = r.error ?? "Generation failed.";
+          }
+        }
+
+        summary[
+          status === "ready"
+            ? "ready"
+            : status === "in_progress"
+            ? "inProgress"
+            : status === "failed"
+            ? "failed"
+            : "missing"
+        ]++;
+
+        slots.push({ days, status, readyAt, error });
+      }
+
+      cities.push({
+        destination,
+        destinationKey,
+        fromDemand,
+        demandCount: demand?.count ?? 0,
+        demandCovered: demand?.covered ?? null,
+        lastRequestedAt: demand?.lastRequestedAt ?? null,
+        slots,
+      });
+    }
+
+    return {
+      durations: DEFAULT_DURATIONS,
+      summary,
+      cities,
+      generatedAt: Date.now(),
+    };
+  },
+});
+

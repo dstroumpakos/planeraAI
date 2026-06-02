@@ -64,6 +64,50 @@ export const findCached = internalQuery({
   },
 });
 
+/**
+ * Look up the learned canonical spelling for a city token. Used on cache miss
+ * for cities we don't pre-generate, so repeat requests with a different
+ * spelling collapse onto the first-seen canonical and hit the cache.
+ */
+export const lookupCanonical = internalQuery({
+  args: { cityToken: v.string() },
+  handler: async (ctx, args) => {
+    const row = await ctx.db
+      .query("partnerCityCanonical")
+      .withIndex("by_cityToken", (q) => q.eq("cityToken", args.cityToken))
+      .first();
+    return row?.canonicalDestination ?? null;
+  },
+});
+
+/**
+ * Lock in the canonical spelling for a city token on first sight. Later
+ * requests for the same city (any spelling) resolve to this value. The first
+ * spelling wins; subsequent calls only bump `lastSeenAt`.
+ */
+export const rememberCanonical = internalMutation({
+  args: { cityToken: v.string(), destination: v.string() },
+  handler: async (ctx, args) => {
+    if (!args.cityToken) return null;
+    const now = Date.now();
+    const existing = await ctx.db
+      .query("partnerCityCanonical")
+      .withIndex("by_cityToken", (q) => q.eq("cityToken", args.cityToken))
+      .first();
+    if (existing) {
+      await ctx.db.patch(existing._id, { lastSeenAt: now });
+    } else {
+      await ctx.db.insert("partnerCityCanonical", {
+        cityToken: args.cityToken,
+        canonicalDestination: args.destination,
+        createdAt: now,
+        lastSeenAt: now,
+      });
+    }
+    return null;
+  },
+});
+
 /** Fetch a record by its public itinerary id. */
 export const getByItineraryId = internalQuery({
   args: { itineraryId: v.string() },

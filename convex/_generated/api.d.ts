@@ -59,6 +59,7 @@ import type * as partnerApiAdmin from "../partnerApiAdmin.js";
 import type * as partnerApiAuth from "../partnerApiAuth.js";
 import type * as partnerItineraryGen from "../partnerItineraryGen.js";
 import type * as partnerPortal from "../partnerPortal.js";
+import type * as partnerPregenConfig from "../partnerPregenConfig.js";
 import type * as partnerPregenerate from "../partnerPregenerate.js";
 import type * as passwordReset from "../passwordReset.js";
 import type * as passwordResetDb from "../passwordResetDb.js";
@@ -141,6 +142,7 @@ declare const fullApi: ApiFromModules<{
   partnerApiAuth: typeof partnerApiAuth;
   partnerItineraryGen: typeof partnerItineraryGen;
   partnerPortal: typeof partnerPortal;
+  partnerPregenConfig: typeof partnerPregenConfig;
   partnerPregenerate: typeof partnerPregenerate;
   passwordReset: typeof passwordReset;
   passwordResetDb: typeof passwordResetDb;

@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { internalQuery, internalMutation } from "./_generated/server";
+import { CURATED_CITIES, CITY_ALIASES } from "./partnerPregenConfig";
 
 /**
  * Partner API — authentication, rate limiting and small shared helpers.
@@ -54,6 +55,47 @@ export function normalizeDestinationKey(destination: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
+}
+
+/**
+ * Map of normalized city token (the part before the first comma) -> canonical
+ * curated "City, Country" string. Built once at module load. A token that
+ * appears in more than one curated city is set to null so it is treated as
+ * ambiguous and left untouched (none today, but keeps us safe if two
+ * "Paris"-style cities are ever added).
+ */
+const CANONICAL_BY_CITY_TOKEN: Map<string, string | null> = (() => {
+  const map = new Map<string, string | null>();
+  for (const city of CURATED_CITIES) {
+    const token = normalizeDestinationKey(city.split(",")[0]);
+    map.set(token, map.has(token) ? null : city);
+  }
+  return map;
+})();
+
+/** Normalized first-segment token of a destination, e.g. "London, UK" -> "london". */
+export function cityTokenOf(destination: string): string {
+  return normalizeDestinationKey(destination.trim().split(",")[0]);
+}
+
+/**
+ * Canonicalize a partner-supplied destination to our curated "City, Country"
+ * form when the city is one we pre-generate. This keeps cache keys stable
+ * regardless of how the partner typed the destination — "London", "London, UK"
+ * and "London, United Kingdom" all collapse to the same canonical string, so a
+ * pre-generated entry is found instead of triggering a needless LLM call.
+ * Resolution order: explicit alias table (e.g. "NYC") → curated city-token
+ * match. Returns the original (trimmed) input when there is no match — callers
+ * then fall back to the learned-alias table for non-curated cities.
+ */
+export function canonicalizeDestination(destination: string): string {
+  const trimmed = destination.trim();
+  if (!trimmed) return trimmed;
+  const cityToken = cityTokenOf(trimmed);
+  const aliased = CITY_ALIASES[cityToken];
+  if (aliased) return aliased;
+  const canonical = CANONICAL_BY_CITY_TOKEN.get(cityToken);
+  return canonical ?? trimmed;
 }
 
 /**

@@ -1266,4 +1266,19 @@ export default defineSchema({
     })
         .index("by_dest_days", ["destinationKey", "days"])
         .index("by_covered_count", ["covered", "count"]),
+
+    // Learned canonical spelling for a city. The first time a partner requests a
+    // city we don't pre-generate (e.g. "Porto"), we lock its `cityToken`
+    // (normalized text before the first comma) to that spelling. Every later
+    // variant ("porto", "Porto, Portugal") then canonicalizes to the same value
+    // so it hits the cache instead of triggering a fresh LLM generation. This is
+    // what guarantees every requested city ends up matched correctly.
+    partnerCityCanonical: defineTable({
+        cityToken: v.string(),               // normalized first segment, e.g. "porto"
+        canonicalDestination: v.string(),    // locked spelling, e.g. "Porto, Portugal"
+        createdAt: v.float64(),
+        lastSeenAt: v.float64(),
+    })
+        .index("by_cityToken", ["cityToken"]),
 });
+

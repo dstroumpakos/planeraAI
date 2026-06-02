@@ -52,3 +52,23 @@ export const CURATED_CITIES = [
   "Dublin, Ireland",
   "Edinburgh, United Kingdom",
 ];
+
+/**
+ * Static aliases for curated cities whose common short/alternate spellings do
+ * NOT share the same first-segment token as the canonical name (so the
+ * automatic city-token match in `canonicalizeDestination` can't catch them).
+ * Keys are normalized (lowercase, non-alphanumerics -> "-"); values are the
+ * canonical "City, Country" string. Extend this list as partners surface new
+ * variants. City-token matches (e.g. "london" -> "London, United Kingdom") are
+ * handled automatically and don't need an entry here.
+ */
+export const CITY_ALIASES: Record<string, string> = {
+  "new-york": "New York City, USA",
+  "nyc": "New York City, USA",
+  "new-york-ny": "New York City, USA",
+  "la": "Los Angeles, USA",
+  "sf": "San Francisco, USA",
+  "rio": "Rio de Janeiro, Brazil",
+  "cdmx": "Mexico City, Mexico",
+};
+

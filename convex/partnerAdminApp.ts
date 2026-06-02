@@ -4,6 +4,10 @@ import { mutation, query, action } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { sha256Hex } from "./partnerApiAuth";
 import { assertAdmin } from "./admin";
+import {
+  CURATED_CITIES as PREGEN_CITIES,
+  DEFAULT_DURATIONS as PREGEN_DURATIONS,
+} from "./partnerPregenConfig";
 
 /**
  * Partner API — IN-APP admin surface.
@@ -249,55 +253,6 @@ export const getSummary = query({
 });
 
 /**
- * Curated targets — kept in sync with `partnerPregenerate.ts`. Duplicated here
- * (instead of imported) because that module is a Node action and this is a V8
- * query. Used to compute coverage / missing cities for the admin panel.
- */
-const PREGEN_CITIES = [
-  "Paris, France",
-  "London, United Kingdom",
-  "Rome, Italy",
-  "Barcelona, Spain",
-  "Madrid, Spain",
-  "Amsterdam, Netherlands",
-  "Berlin, Germany",
-  "Prague, Czech Republic",
-  "Vienna, Austria",
-  "Lisbon, Portugal",
-  "Athens, Greece",
-  "Santorini, Greece",
-  "Venice, Italy",
-  "Florence, Italy",
-  "Milan, Italy",
-  "Istanbul, Turkey",
-  "Dubai, United Arab Emirates",
-  "New York City, USA",
-  "Los Angeles, USA",
-  "San Francisco, USA",
-  "Miami, USA",
-  "Las Vegas, USA",
-  "Cancun, Mexico",
-  "Mexico City, Mexico",
-  "Rio de Janeiro, Brazil",
-  "Buenos Aires, Argentina",
-  "Tokyo, Japan",
-  "Kyoto, Japan",
-  "Bangkok, Thailand",
-  "Singapore",
-  "Bali, Indonesia",
-  "Hong Kong",
-  "Seoul, South Korea",
-  "Sydney, Australia",
-  "Marrakech, Morocco",
-  "Cairo, Egypt",
-  "Cape Town, South Africa",
-  "Budapest, Hungary",
-  "Dublin, Ireland",
-  "Edinburgh, United Kingdom",
-];
-const PREGEN_DURATIONS = [3, 4, 5, 7];
-
-/**
  * Detailed pre-generation status for the admin panel.
  *
  * Returns the overall counts by status, the expected total (cities ×
@@ -368,11 +323,30 @@ export const getPregenStatus = query({
     const expectedTotal = PREGEN_CITIES.length * PREGEN_DURATIONS.length;
     const completeCities = cities.filter((c) => c.complete).length;
 
+    // Headline counts are scoped to the curated coverage grid (cities ×
+    // durations, deduped) so they always sum to expectedTotal. Demand / custom
+    // destinations are surfaced separately via `extraDestinations` and must NOT
+    // inflate the curated totals (otherwise ready can exceed 100% / missing < 0).
+    let readyTotal = 0;
+    let inProgressTotal = 0;
+    let failedTotal = 0;
+    for (const c of cities) {
+      for (const d of c.durations) {
+        if (d.status === "ready") readyTotal++;
+        else if (d.status === "queued" || d.status === "generating")
+          inProgressTotal++;
+        else if (d.status === "failed") failedTotal++;
+      }
+    }
+    const missingTotal =
+      expectedTotal - readyTotal - inProgressTotal - failedTotal;
+
     return {
       expectedTotal,
-      readyTotal: byStatus.ready,
-      inProgressTotal: byStatus.queued + byStatus.generating,
-      failedTotal: byStatus.failed,
+      readyTotal,
+      inProgressTotal,
+      failedTotal,
+      missingTotal,
       byStatus,
       completeCities,
       totalCities: PREGEN_CITIES.length,
