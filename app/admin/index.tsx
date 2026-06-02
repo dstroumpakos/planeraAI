@@ -199,7 +199,7 @@ export default function AdminDashboard() {
                             <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
                         </TouchableOpacity>
                         <TouchableOpacity
-                            style={[styles.menuItem, { borderBottomWidth: 0 }]}
+                            style={[styles.menuItem, { borderBottomColor: colors.border }]}
                             onPress={() => router.push("/admin/leads" as any)}
                         >
                             <View style={[styles.menuIconContainer, { backgroundColor: isDarkMode ? 'rgba(245, 158, 11, 0.2)' : '#FEF3C7' }]}>
@@ -209,6 +209,21 @@ export default function AdminDashboard() {
                                 <Text style={[styles.menuTitle, { color: colors.text }]}>Partner Leads</Text>
                                 <Text style={[styles.menuSubtitle, { color: colors.textMuted }]}>
                                     Inquiries sent to partners
+                                </Text>
+                            </View>
+                            <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                            style={[styles.menuItem, { borderBottomWidth: 0 }]}
+                            onPress={() => router.push("/admin/partners" as any)}
+                        >
+                            <View style={[styles.menuIconContainer, { backgroundColor: isDarkMode ? 'rgba(255, 229, 0, 0.18)' : '#FFF8C5' }]}>
+                                <Ionicons name="key" size={20} color="#B59A00" />
+                            </View>
+                            <View style={styles.menuTextContainer}>
+                                <Text style={[styles.menuTitle, { color: colors.text }]}>Partner API</Text>
+                                <Text style={[styles.menuSubtitle, { color: colors.textMuted }]}>
+                                    Keys, limits, usage & pre-generation
                                 </Text>
                             </View>
                             <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />

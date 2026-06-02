@@ -38,4 +38,15 @@ crons.interval(
     internal.iapVerify.refreshExpiringSubscriptions,
 );
 
+// Partner API: fill the pre-generation "budget" from real demand. Every live
+// (cache-miss) generation records the requested city + duration; this job
+// pre-builds the other common durations for the most-requested cities so future
+// requests are served instantly from cache.
+crons.interval(
+    "partner-pregenerate-demand",
+    { hours: 12 },
+    internal.partnerPregenerate.pregenerateDemanded,
+    {},
+);
+
 export default crons;

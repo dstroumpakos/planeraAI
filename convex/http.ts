@@ -1,6 +1,17 @@
 import { httpRouter } from "convex/server";
 import { httpAction } from "./_generated/server";
 import { internal } from "./_generated/api";
+import {
+  sha256Hex,
+  parseBearer,
+  buildCacheKey,
+  normalizeDestinationKey,
+  normalizePreferences,
+  partnerError,
+  partnerJson,
+  corsPreflight,
+} from "./partnerApiAuth";
+import { serializeItinerary } from "./partnerApi";
 
 const http = httpRouter();
 
@@ -46,6 +57,276 @@ http.route({
       return new Response("Invalid signature", { status: 400 });
     }
     return new Response("OK", { status: 200 });
+  }),
+});
+
+// ===========================================================================
+// Partner Itinerary API — versioned /v1/ surface (e.g. spytrip.gr).
+//
+//   POST /v1/itineraries        — create (cache hit → 200, miss → 202 job)
+//   GET  /v1/itineraries/{id}   — poll / retrieve
+//
+// Auth: per-partner Bearer key (Authorization: Bearer <key>), hashed lookup.
+// Optional Idempotency-Key header dedupes retries. Returns structured JSON.
+// ===========================================================================
+
+const MAX_DAYS = 15;
+
+// CORS preflight for the browser-callable Partner API (e.g. the playground).
+http.route({
+  path: "/v1/itineraries",
+  method: "OPTIONS",
+  handler: httpAction(async () => corsPreflight()),
+});
+http.route({
+  pathPrefix: "/v1/itineraries/",
+  method: "OPTIONS",
+  handler: httpAction(async () => corsPreflight()),
+});
+
+/**
+ * Authenticate the Bearer key on a request. Returns either the key doc or a
+ * ready-to-return error Response.
+ */
+async function authenticatePartner(
+  ctx: any,
+  request: Request
+): Promise<{ key: any } | { error: Response }> {
+  const raw = parseBearer(request.headers.get("Authorization"));
+  if (!raw) {
+    return {
+      error: partnerError("invalid_key", "Missing or malformed Authorization header."),
+    };
+  }
+  const keyHash = await sha256Hex(raw);
+  const key = await ctx.runQuery(internal.partnerApiAuth.getKeyByHash, {
+    keyHash,
+  });
+  if (!key) {
+    return { error: partnerError("invalid_key", "Unknown API key.") };
+  }
+  if (!key.active || key.revokedAt) {
+    return { error: partnerError("revoked", "This API key has been revoked.") };
+  }
+  return { key };
+}
+
+http.route({
+  path: "/v1/itineraries",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    // 1) Auth
+    const auth = await authenticatePartner(ctx, request);
+    if ("error" in auth) return auth.error;
+    const { key } = auth;
+
+    // 2) Per-minute rate limit
+    const rate = await ctx.runMutation(internal.partnerApiAuth.checkRequestRate, {
+      keyId: key._id,
+      rateLimitPerMin: key.rateLimitPerMin,
+    });
+    if (!rate.allowed) {
+      return partnerError(
+        "rate_limited",
+        "Rate limit exceeded. Slow down and retry shortly.",
+        { "Retry-After": String(rate.retryAfter) }
+      );
+    }
+    await ctx.runMutation(internal.partnerApiAuth.touchKey, { keyId: key._id });
+
+    // 3) Parse + validate body
+    let body: any;
+    try {
+      body = await request.json();
+    } catch {
+      return partnerError("validation_error", "Request body must be valid JSON.");
+    }
+
+    const destination =
+      typeof body?.destination === "string" ? body.destination.trim() : "";
+    const days = body?.days;
+    const preferences = Array.isArray(body?.preferences) ? body.preferences : [];
+    const partnerRef =
+      typeof body?.partner_ref === "string" && body.partner_ref.trim().length > 0
+        ? body.partner_ref.trim()
+        : key.partnerRef;
+    const webhookUrl =
+      typeof body?.webhook_url === "string" ? body.webhook_url.trim() : undefined;
+
+    if (!destination) {
+      return partnerError("validation_error", "`destination` is required.");
+    }
+    if (
+      typeof days !== "number" ||
+      !Number.isInteger(days) ||
+      days < 1 ||
+      days > MAX_DAYS
+    ) {
+      return partnerError(
+        "validation_error",
+        `\`days\` must be an integer between 1 and ${MAX_DAYS}.`
+      );
+    }
+    if (!preferences.every((p: any) => typeof p === "string")) {
+      return partnerError(
+        "validation_error",
+        "`preferences` must be an array of strings."
+      );
+    }
+    if (webhookUrl && !/^https?:\/\//i.test(webhookUrl)) {
+      return partnerError(
+        "validation_error",
+        "`webhook_url` must be an http(s) URL."
+      );
+    }
+
+    const normPrefs = normalizePreferences(preferences);
+    const cacheKey = buildCacheKey(destination, days, preferences);
+    const normalizedDestination = normalizeDestinationKey(destination);
+    const idempotencyKey =
+      request.headers.get("Idempotency-Key")?.trim() || undefined;
+
+    const origin = new URL(request.url).origin;
+    const pollUrl = (id: string) => `${origin}/v1/itineraries/${id}`;
+
+    // 4) Idempotency: a repeated key returns the same resource.
+    if (idempotencyKey) {
+      const prior = await ctx.runQuery(internal.partnerApi.findByIdempotency, {
+        keyId: key._id,
+        idempotencyKey,
+      });
+      if (prior) {
+        if (prior.cacheKey !== cacheKey) {
+          return partnerError(
+            "idempotency_conflict",
+            "Idempotency-Key was already used with different parameters."
+          );
+        }
+        const view = serializeItinerary(prior);
+        return partnerJson(
+          { ...view, cached: prior.status === "ready", poll_url: pollUrl(prior.itineraryId) },
+          prior.status === "ready" ? 200 : 202
+        );
+      }
+    }
+
+    // 5) Cache lookup — a hit costs zero LLM and no generation quota.
+    const cachedHit = await ctx.runQuery(internal.partnerApi.findCached, {
+      cacheKey,
+    });
+    if (cachedHit) {
+      // Mint a partner-owned copy so GET stays strictly per-partner.
+      const owned = await ctx.runMutation(internal.partnerApi.recordCacheHit, {
+        keyId: key._id,
+        partnerRef,
+        idempotencyKey,
+        destination,
+        normalizedDestination,
+        days,
+        preferences: normPrefs,
+        cacheKey,
+        itinerary: cachedHit.itinerary,
+        originSource: cachedHit.source,
+      });
+      // Track the free cache hit for analytics (not billed, no quota).
+      await ctx.runMutation(internal.partnerApiAuth.recordCacheHit, {
+        keyId: key._id,
+      });
+      const view = serializeItinerary(owned);
+      return partnerJson(
+        { ...view, cached: true, poll_url: pollUrl(owned.itineraryId) },
+        200
+      );
+    }    // 6) Cache miss — consume a generation against daily/monthly caps.
+    const consume = await ctx.runMutation(
+      internal.partnerApiAuth.consumeGeneration,
+      { keyId: key._id, dailyCap: key.dailyCap, monthlyCap: key.monthlyCap }
+    );
+    if (!consume.allowed) {
+      const code =
+        consume.code === "monthly_cap_exceeded"
+          ? "monthly_cap_exceeded"
+          : "daily_cap_exceeded";
+      return partnerError(
+        code,
+        "Generation cap exceeded for this billing window."
+      );
+    }
+
+    // 7) Record demand so the pre-generation budget can fill the gaps later
+    // (pre-build the other common durations for this city on the next cron).
+    await ctx.runMutation(internal.partnerApi.recordDemand, {
+      destinationKey: normalizedDestination,
+      destination,
+      days,
+    });
+
+    // 8) Enqueue async generation.
+    const { itineraryId } = await ctx.runMutation(
+      internal.partnerApi.enqueueGeneration,
+      {
+        keyId: key._id,
+        partnerRef,
+        idempotencyKey,
+        destination,
+        normalizedDestination,
+        days,
+        preferences: normPrefs,
+        cacheKey,
+        webhookUrl,
+      }
+    );
+
+    return partnerJson(
+      {
+        itinerary_id: itineraryId,
+        status: "queued",
+        cached: false,
+        poll_url: pollUrl(itineraryId),
+      },
+      202
+    );
+  }),
+});
+
+http.route({
+  pathPrefix: "/v1/itineraries/",
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    const auth = await authenticatePartner(ctx, request);
+    if ("error" in auth) return auth.error;
+    const { key } = auth;
+
+    const rate = await ctx.runMutation(internal.partnerApiAuth.checkRequestRate, {
+      keyId: key._id,
+      rateLimitPerMin: key.rateLimitPerMin,
+    });
+    if (!rate.allowed) {
+      return partnerError(
+        "rate_limited",
+        "Rate limit exceeded. Slow down and retry shortly.",
+        { "Retry-After": String(rate.retryAfter) }
+      );
+    }
+
+    const path = new URL(request.url).pathname;
+    const itineraryId = path.substring(path.lastIndexOf("/") + 1);
+    if (!itineraryId) {
+      return partnerError("not_found", "Itinerary id missing from path.");
+    }
+
+    const record = await ctx.runQuery(internal.partnerApi.getByItineraryId, {
+      itineraryId,
+    });
+    if (!record) {
+      return partnerError("not_found", "No itinerary with that id.");
+    }
+    // Partner isolation: a key can only read its own itineraries.
+    if (record.keyId !== key._id) {
+      return partnerError("forbidden", "This itinerary belongs to another partner.");
+    }
+
+    return partnerJson(serializeItinerary(record), 200);
   }),
 });
 

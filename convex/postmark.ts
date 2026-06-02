@@ -245,6 +245,61 @@ export const sendTemplateEmail = internalAction({
 });
 
 /**
+ * Send a raw (non-template) email via Postmark with arbitrary HTML/text.
+ * Used for one-off transactional emails like partner invites.
+ */
+export const sendRawEmail = internalAction({
+  args: {
+    to: v.string(),
+    subject: v.string(),
+    html: v.string(),
+    text: v.optional(v.string()),
+  },
+  returns: v.object({
+    success: v.boolean(),
+    messageId: v.optional(v.string()),
+    error: v.optional(v.string()),
+  }),
+  handler: async (ctx, args) => {
+    const apiToken = process.env.POSTMARK_SERVER_TOKEN;
+    if (!apiToken) {
+      return { success: false, error: "POSTMARK_SERVER_TOKEN is not set" };
+    }
+    try {
+      const response = await fetch("https://api.postmarkapp.com/email", {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "X-Postmark-Server-Token": apiToken,
+        },
+        body: JSON.stringify({
+          From: SENDER_EMAIL,
+          To: args.to,
+          Subject: args.subject,
+          HtmlBody: args.html,
+          TextBody: args.text ?? undefined,
+          MessageStream: MESSAGE_STREAM,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        return {
+          success: false,
+          error: result.Message || `HTTP ${response.status}`,
+        };
+      }
+      return { success: true, messageId: result.MessageID };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+  },
+});
+
+/**
  * Send flight booking receipt email using Postmark "receipt" template
  */
 export const sendBookingReceiptEmail = internalAction({
