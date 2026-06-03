@@ -5,7 +5,7 @@
   },
   "build": {
     "base": {
-      "node": "20.18.0",
+      "node": "20.19.5",
       "env": {
         "NPM_CONFIG_LEGACY_PEER_DEPS": "true",
         "RCT_NEW_ARCH_ENABLED": "1",
