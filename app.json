@@ -2,7 +2,7 @@
   "expo": {
     "name": "Planera AI Travel Planner",
     "slug": "planera-ai-travel-planner",
-    "version": "1.2.1",
+    "version": "1.2.2",
     "orientation": "portrait",
     "icon": "./assets/images/appicon-1024x1024-01-9h6cls.jpg",
     "scheme": "myapp",
@@ -38,7 +38,15 @@
         "image": "./assets/images/appicon-1024x1024-01-9h6cls.jpg",
         "resizeMode": "contain",
         "backgroundColor": "#FAF9F6"
-      }
+      },
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -88,6 +96,12 @@
       "eas": {
         "projectId": "2ac0a8a4-c019-48ac-b8a3-4651a864b089"
       }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/2ac0a8a4-c019-48ac-b8a3-4651a864b089"
     }
   }
 }

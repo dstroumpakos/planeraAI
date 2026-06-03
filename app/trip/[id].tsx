@@ -24,6 +24,14 @@ import { TripGuideTooltip, GuideStep } from "@/components/FirstTripGuide";
 import ShareTripCard, { ShareTripCardHandle } from "@/components/ShareTripCard";
 import PackageCard from "@/components/PackageCard";
 import PackageInquiryModal from "@/components/PackageInquiryModal";
+import {
+    buildFlightLink,
+    buildHotelLink,
+    FlightLinkParams,
+    HotelLinkParams,
+    FlightPartnerKey,
+    HotelPartnerKey,
+} from "@/lib/affiliateLinks";
 
 // Sanitize location titles for maps deep links by stripping descriptions, ratings, etc.
 const cleanLocationTitle = (title: string): string => {
@@ -1568,6 +1576,171 @@ export default function TripDetails() {
         );
     };
 
+    // Open a pre-built affiliate URL: track the click, then confirm + redirect.
+    const openPartnerLink = async (url: string, type: string, item: string) => {
+        try {
+            await trackClick({
+                token: token || "",
+                tripId: id as Id<"trips">,
+                type,
+                item,
+                url,
+            });
+        } catch (e) {
+            console.error("Failed to track click", e);
+        }
+        Alert.alert(
+            t('tripDetail.redirectingToSupplier'),
+            t('tripDetail.redirectMsg'),
+            [
+                { text: t('tripDetail.continue'), onPress: () => Linking.openURL(url) },
+                { text: t('tripDetail.cancel'), style: "cancel" },
+            ]
+        );
+    };
+
+    // Build affiliate link params from the current trip.
+    const flightLinkParams = (): FlightLinkParams => ({
+        origin: trip.origin,
+        destination: trip.destination,
+        originCode: getAirportCode(trip.origin),
+        destCode: getAirportCode(trip.destination),
+        outboundDate: new Date(trip.startDate).toISOString().split('T')[0],
+        returnDate: new Date(trip.endDate).toISOString().split('T')[0],
+        travelers,
+        lang: i18n.language,
+    });
+
+    const hotelLinkParams = (): HotelLinkParams => ({
+        destination: trip.destination || '',
+        destEntityId: getSkyscannerEntityId(trip.destination),
+        checkIn: new Date(trip.startDate).toISOString().split('T')[0],
+        checkOut: new Date(trip.endDate).toISOString().split('T')[0],
+        travelers,
+        nights: duration,
+        lang: i18n.language,
+    });
+
+    // Reusable affiliate flight partner card (route + dates + CTA).
+    const renderAffiliateFlightCard = (cfg: {
+        partner: FlightPartnerKey;
+        item: string;
+        brand: string;
+        badge: string;
+        color: string;
+        subtitle: string;
+        cta: string;
+    }) => (
+        <TouchableOpacity
+            key={cfg.item}
+            style={{ marginTop: 16, backgroundColor: colors.card, borderRadius: 16, padding: 20, borderWidth: 1, borderColor: colors.border, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 8, elevation: 3 }}
+            activeOpacity={0.8}
+            onPress={() => openPartnerLink(buildFlightLink(cfg.partner, flightLinkParams()), 'flight', cfg.item)}
+        >
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+                <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: cfg.color, justifyContent: 'center', alignItems: 'center', marginRight: 10 }}>
+                    <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>{cfg.badge}</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text }}>{cfg.brand}</Text>
+                    <Text style={{ fontSize: 12, color: colors.textMuted }}>{cfg.subtitle}</Text>
+                </View>
+                <Ionicons name="open-outline" size={18} color={colors.textMuted} />
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: isDarkMode ? colors.secondary : '#F8F9FA', borderRadius: 12, padding: 14, marginBottom: 12 }}>
+                <View style={{ flex: 1, alignItems: 'center' }}>
+                    <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>{t('tripDetail.from')}</Text>
+                    <Text style={{ fontSize: 15, fontWeight: '700', color: colors.text }} numberOfLines={1}>{trip.origin || '—'}</Text>
+                    <Text style={{ fontSize: 11, color: colors.primary, fontWeight: '600', marginTop: 2 }}>{getAirportCode(trip.origin)}</Text>
+                </View>
+                <View style={{ paddingHorizontal: 8 }}>
+                    <Ionicons name="airplane" size={20} color={colors.primary} />
+                </View>
+                <View style={{ flex: 1, alignItems: 'center' }}>
+                    <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>{t('tripDetail.to')}</Text>
+                    <Text style={{ fontSize: 15, fontWeight: '700', color: colors.text }} numberOfLines={1}>{trip.destination || '—'}</Text>
+                    <Text style={{ fontSize: 11, color: colors.primary, fontWeight: '600', marginTop: 2 }}>{getAirportCode(trip.destination)}</Text>
+                </View>
+            </View>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 14 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Ionicons name="calendar-outline" size={16} color={colors.textMuted} style={{ marginRight: 4 }} />
+                    <Text style={{ fontSize: 13, color: colors.textSecondary }}>
+                        {new Date(trip.startDate).toLocaleDateString(i18n.language, { day: 'numeric', month: 'short' })} – {new Date(trip.endDate).toLocaleDateString(i18n.language, { day: 'numeric', month: 'short' })}
+                    </Text>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Ionicons name="people-outline" size={16} color={colors.textMuted} style={{ marginRight: 4 }} />
+                    <Text style={{ fontSize: 13, color: colors.textSecondary }}>{t('tripDetail.travelerCount', { count: travelers })}</Text>
+                </View>
+            </View>
+            <View style={{ backgroundColor: cfg.color, borderRadius: 10, paddingVertical: 12, alignItems: 'center' }}>
+                <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700' }}>{cfg.cta}</Text>
+            </View>
+        </TouchableOpacity>
+    );
+
+    // Reusable affiliate hotel/stay partner card (destination + dates + CTA).
+    const renderAffiliateHotelCard = (cfg: {
+        partner: HotelPartnerKey;
+        item: string;
+        brand: string;
+        badge: string;
+        color: string;
+        subtitle: string;
+        cta: string;
+    }) => (
+        <TouchableOpacity
+            key={cfg.item}
+            style={{ marginTop: 16, backgroundColor: colors.card, borderRadius: 16, padding: 20, borderWidth: 1, borderColor: colors.border, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.08, shadowRadius: 8, elevation: 3 }}
+            activeOpacity={0.8}
+            onPress={() => openPartnerLink(buildHotelLink(cfg.partner, hotelLinkParams()), 'hotel', cfg.item)}
+        >
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+                <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: cfg.color, justifyContent: 'center', alignItems: 'center', marginRight: 10 }}>
+                    <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>{cfg.badge}</Text>
+                </View>
+                <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text }}>{cfg.brand}</Text>
+                    <Text style={{ fontSize: 12, color: colors.textMuted }}>{cfg.subtitle}</Text>
+                </View>
+                <Ionicons name="open-outline" size={18} color={colors.textMuted} />
+            </View>
+            <View style={{ backgroundColor: isDarkMode ? colors.secondary : '#F8F9FA', borderRadius: 12, padding: 14, marginBottom: 12 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                    <Ionicons name="location" size={18} color={colors.primary} style={{ marginRight: 6 }} />
+                    <Text style={{ fontSize: 15, fontWeight: '700', color: colors.text }} numberOfLines={1}>{trip.destination || '—'}</Text>
+                </View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                    <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>{t('tripDetail.checkIn')}</Text>
+                        <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text }}>{new Date(trip.startDate).toLocaleDateString(i18n.language, { day: 'numeric', month: 'short', year: 'numeric' })}</Text>
+                    </View>
+                    <View style={{ paddingHorizontal: 10, justifyContent: 'center' }}>
+                        <Ionicons name="arrow-forward" size={16} color={colors.textMuted} />
+                    </View>
+                    <View style={{ flex: 1, alignItems: 'flex-end' }}>
+                        <Text style={{ fontSize: 11, color: colors.textMuted, marginBottom: 2 }}>{t('tripDetail.checkOut')}</Text>
+                        <Text style={{ fontSize: 13, fontWeight: '600', color: colors.text }}>{new Date(trip.endDate).toLocaleDateString(i18n.language, { day: 'numeric', month: 'short', year: 'numeric' })}</Text>
+                    </View>
+                </View>
+            </View>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 14 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Ionicons name="people-outline" size={16} color={colors.textMuted} style={{ marginRight: 4 }} />
+                    <Text style={{ fontSize: 13, color: colors.textSecondary }}>{t('tripDetail.guestCount', { count: travelers })}</Text>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Ionicons name="moon-outline" size={16} color={colors.textMuted} style={{ marginRight: 4 }} />
+                    <Text style={{ fontSize: 13, color: colors.textSecondary }}>{t('tripDetail.nightCount', { count: duration })}</Text>
+                </View>
+            </View>
+            <View style={{ backgroundColor: cfg.color, borderRadius: 10, paddingVertical: 12, alignItems: 'center' }}>
+                <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700' }}>{cfg.cta}</Text>
+            </View>
+        </TouchableOpacity>
+    );
+
     const handleBookTrip = () => {
         // For now, we'll link to a general travel booking site or a specific package deal
         // In a real app, this would likely add items to a cart or redirect to a checkout flow
@@ -2994,11 +3167,7 @@ export default function TripDetails() {
                                 }}
                                 activeOpacity={0.8}
                                 onPress={() => {
-                                    const dDate = new Date(trip.startDate).toISOString().split('T')[0];
-                                    const rDate = new Date(trip.endDate).toISOString().split('T')[0];
-                                    const depCode = getAirportCode(trip.origin).toLowerCase();
-                                    const arrCode = getAirportCode(trip.destination).toLowerCase();
-                                    Linking.openURL(`https://www.trip.com/flights/showfarefirst?dcity=${depCode}&acity=${arrCode}&ddate=${dDate}&rdate=${rDate}&aairport=${arrCode}&triptype=rt&class=y&lowpricesource=searchform&quantity=${travelers}&searchboxarg=t&nonstoponly=off&locale=${i18n.language}-XX&curr=EUR&Allianceid=7913522&SID=297487884&trip_sub1=`);
+                                    openPartnerLink(buildFlightLink('tripcom', flightLinkParams()), 'flight', 'tripcom');
                                 }}
                             >
                                 {/* Trip.com branding */}
@@ -3069,14 +3238,7 @@ export default function TripDetails() {
                                 }}
                                 activeOpacity={0.8}
                                 onPress={() => {
-                                    const startD = new Date(trip.startDate);
-                                    const endD = new Date(trip.endDate);
-                                    const fmt = (d: Date) => d.toISOString().slice(2, 10).replace(/-/g, '');
-                                    const depCode = getAirportCode(trip.origin).toLowerCase();
-                                    const arrCode = getAirportCode(trip.destination).toLowerCase();
-                                    const skyDomainMap: Record<string, string> = { en: 'www.skyscanner.com', el: 'gr.skyscanner.com', es: 'www.skyscanner.es', fr: 'www.skyscanner.fr', de: 'www.skyscanner.de', ar: 'www.skyscanner.ae' };
-                                    const skyDomain = skyDomainMap[i18n.language] || 'www.skyscanner.com';
-                                    Linking.openURL(`https://${skyDomain}/transport/flights/${depCode}/${arrCode}/${fmt(startD)}/${fmt(endD)}/?adultsv2=${travelers}&cabinclass=economy&childrenv2=&ref=home&rtn=1&preferdirects=false&outboundaltsenabled=false&inboundaltsenabled=false`);
+                                    openPartnerLink(buildFlightLink('skyscanner', flightLinkParams()), 'flight', 'skyscanner');
                                 }}
                             >
                                 {/* Skyscanner branding */}
@@ -3129,6 +3291,10 @@ export default function TripDetails() {
                                     <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700' }}>{t('tripDetail.searchOnSkyscanner')}</Text>
                                 </View>
                             </TouchableOpacity>
+
+                            {renderAffiliateFlightCard({ partner: 'kiwi', item: 'kiwi', brand: 'Kiwi.com', badge: 'Ki', color: '#E61C5D', subtitle: t('tripDetail.searchFlightsOnKiwi'), cta: t('tripDetail.searchOnKiwi') })}
+                            {renderAffiliateFlightCard({ partner: 'esky', item: 'esky', brand: 'eSky', badge: 'eS', color: '#00A1E0', subtitle: t('tripDetail.searchFlightsOnEsky'), cta: t('tripDetail.searchOnEsky') })}
+                            {renderAffiliateFlightCard({ partner: 'iberia', item: 'iberia', brand: 'Iberia', badge: 'IB', color: '#D7192D', subtitle: t('tripDetail.searchFlightsOnIberia'), cta: t('tripDetail.searchOnIberia') })}
                         </View>
                     )}
 
@@ -3323,12 +3489,7 @@ export default function TripDetails() {
                                 }}
                                 activeOpacity={0.8}
                                 onPress={() => {
-                                    const checkin = new Date(trip.startDate).toISOString().split('T')[0];
-                                    const checkout = new Date(trip.endDate).toISOString().split('T')[0];
-                                    const airbnbDomainMap: Record<string, string> = { en: 'www.airbnb.com', el: 'www.airbnb.gr', es: 'www.airbnb.es', fr: 'www.airbnb.fr', de: 'www.airbnb.de', ar: 'www.airbnb.com' };
-                                    const airbnbDomain = airbnbDomainMap[i18n.language] || 'www.airbnb.com';
-                                    const dest = encodeURIComponent(trip.destination || '');
-                                    Linking.openURL(`https://${airbnbDomain}/s/${dest}/homes?date_picker_type=calendar&checkin=${checkin}&checkout=${checkout}&adults=${travelers}&search_type=AUTOSUGGEST`);
+                                    openPartnerLink(buildHotelLink('airbnb', hotelLinkParams()), 'hotel', 'airbnb');
                                 }}
                             >
                                 {/* Airbnb branding */}
@@ -3407,16 +3568,7 @@ export default function TripDetails() {
                                 }}
                                 activeOpacity={0.8}
                                 onPress={() => {
-                                    const checkin = new Date(trip.startDate).toISOString().split('T')[0];
-                                    const checkout = new Date(trip.endDate).toISOString().split('T')[0];
-                                    const skyDomainMap: Record<string, string> = { en: 'www.skyscanner.com', el: 'gr.skyscanner.com', es: 'www.skyscanner.es', fr: 'www.skyscanner.fr', de: 'www.skyscanner.de', ar: 'www.skyscanner.ae' };
-                                    const skyDomain = skyDomainMap[i18n.language] || 'www.skyscanner.com';
-                                    const entityId = getSkyscannerEntityId(trip.destination);
-                                    if (entityId) {
-                                        Linking.openURL(`https://${skyDomain}/hotels/search?entity_id=${entityId}&checkin=${checkin}&checkout=${checkout}&rooms=1&adults=${travelers}`);
-                                    } else {
-                                        Linking.openURL(`https://${skyDomain}/hotels`);
-                                    }
+                                    openPartnerLink(buildHotelLink('skyscanner', hotelLinkParams()), 'hotel', 'skyscanner-hotels');
                                 }}
                             >
                                 {/* Skyscanner branding */}
@@ -3561,6 +3713,9 @@ export default function TripDetails() {
                                     <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700' }}>{t('tripDetail.searchOnBookingHotels')}</Text>
                                 </View>
                             </TouchableOpacity>
+
+                            {renderAffiliateHotelCard({ partner: 'tripcom', item: 'tripcom-hotels', brand: 'Trip.com', badge: 'Trip', color: '#287DFA', subtitle: t('tripDetail.searchHotelsOnTripcom'), cta: t('tripDetail.searchOnTripcomHotels') })}
+                            {renderAffiliateHotelCard({ partner: 'esky', item: 'esky-stays', brand: 'eSky', badge: 'eS', color: '#00A1E0', subtitle: t('tripDetail.searchStaysOnEsky'), cta: t('tripDetail.searchOnEskyStays') })}
                         </View>
                     )}
 

@@ -13,7 +13,8 @@
       },
       "cache": {
         "disabled": true
-      }
+      },
+      "channel": "base"
     },
     "development": {
       "extends": "base",
@@ -24,7 +25,8 @@
         "env": {
           "RCT_NEW_ARCH_ENABLED": "1"
         }
-      }
+      },
+      "channel": "development"
     },
     "preview": {
       "extends": "base",
@@ -33,7 +35,8 @@
         "env": {
           "RCT_NEW_ARCH_ENABLED": "1"
         }
-      }
+      },
+      "channel": "preview"
     },
     "production": {
       "extends": "base",
@@ -42,7 +45,8 @@
         "env": {
           "RCT_NEW_ARCH_ENABLED": "1"
         }
-      }
+      },
+      "channel": "production"
     }
   },
   "submit": {
