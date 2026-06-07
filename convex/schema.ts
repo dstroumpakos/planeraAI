@@ -1113,7 +1113,17 @@ export default defineSchema({
         .index("by_cacheKey", ["cacheKey"])
         .index("by_expires", ["expiresAt"]),
 
-    // Error report throttle — keeps Postmark spam down by recording the
+    // Cache for AI-resolved IATA codes. When the static destination→airport
+    // map can't resolve a city, we ask OpenAI for the nearest airport's IATA
+    // code and persist it here so the same place never re-hits OpenAI.
+    iataResolutionCache: defineTable({
+        cityKey: v.string(),      // normalized (lowercased, trimmed) city name
+        iata: v.string(),         // resolved 3-letter IATA code
+        createdAt: v.float64(),
+    })
+        .index("by_cityKey", ["cityKey"]),
+
+
     // last time each unique error key (source + message hash) was emailed.
     errorReports: defineTable({
         key: v.string(),          // sha1(source + message head)

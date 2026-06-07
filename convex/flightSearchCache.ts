@@ -77,3 +77,40 @@ export const purgeExpired = internalMutation({
     return expired.length;
   },
 });
+
+// ============================ IATA resolution cache ==========================
+// Persists AI-resolved IATA codes keyed by normalized city name so the same
+// destination never re-hits OpenAI. Invoked from the Node action in
+// tripsActions.ts via ctx.runQuery / ctx.runMutation.
+
+export const readIataCache = internalQuery({
+  args: { cityKey: v.string() },
+  handler: async (ctx, { cityKey }) => {
+    const row = await ctx.db
+      .query("iataResolutionCache")
+      .withIndex("by_cityKey", (q) => q.eq("cityKey", cityKey))
+      .first();
+    return row?.iata ?? null;
+  },
+});
+
+export const writeIataCache = internalMutation({
+  args: { cityKey: v.string(), iata: v.string() },
+  handler: async (ctx, { cityKey, iata }) => {
+    const existing = await ctx.db
+      .query("iataResolutionCache")
+      .withIndex("by_cityKey", (q) => q.eq("cityKey", cityKey))
+      .first();
+    if (existing) {
+      await ctx.db.patch(existing._id, { iata });
+    } else {
+      await ctx.db.insert("iataResolutionCache", {
+        cityKey,
+        iata,
+        createdAt: Date.now(),
+      });
+    }
+    return null;
+  },
+});
+

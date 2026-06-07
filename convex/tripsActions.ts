@@ -466,8 +466,13 @@ export const generate = internalAction({
                 
                 if (hasSerpApiKey) {
                     try {
-                        const originCode = extractIATACode(origin);
-                        const destCode = extractIATACode(trip.destination);
+                        let originCode = extractIATACode(origin);
+                        let destCode = extractIATACode(trip.destination);
+
+                        // AI fallback for destinations the static map doesn't cover.
+                        if (!originCode) originCode = await resolveIataWithAI(ctx, origin);
+                        if (!destCode) destCode = await resolveIataWithAI(ctx, trip.destination);
+
                         const departureDate = new Date(trip.startDate).toISOString().split('T')[0];
                         const returnDate = new Date(trip.endDate).toISOString().split('T')[0];
 
@@ -889,8 +894,13 @@ export const generate = internalAction({
                     }
                 } else if (hasDuffelKey) {
                     try {
-                        const originCode = extractIATACode(origin);
-                        const destCode = extractIATACode(trip.destination);
+                        let originCode = extractIATACode(origin);
+                        let destCode = extractIATACode(trip.destination);
+
+                        // AI fallback for destinations the static map doesn't cover.
+                        if (!originCode) originCode = await resolveIataWithAI(ctx, origin);
+                        if (!destCode) destCode = await resolveIataWithAI(ctx, trip.destination);
+
                         const departureDate = new Date(trip.startDate).toISOString().split('T')[0];
                         const returnDate = new Date(trip.endDate).toISOString().split('T')[0];
 
@@ -1552,6 +1562,85 @@ function extractIATACode(cityName: string): string {
     }
     console.warn(`⚠️ Could not find IATA code for "${cityName}"`);
     return "";
+}
+
+// AI fallback: when the static destination→airport map (extractIATACode)
+// can't resolve a city, ask OpenAI for the nearest major commercial airport's
+// IATA code. Returns a validated 3-letter uppercase code, or "" on any failure
+// (missing key, bad/unsafe response, network error). Cheap and only runs when
+// the static map misses, so flight search can still proceed for obscure places.
+// Results are persisted in iataResolutionCache so the same place never re-hits
+// OpenAI.
+async function resolveIataWithAI(ctx: any, cityName: string): Promise<string> {
+    if (!cityName || !cityName.trim()) return "";
+
+    const cityKey = cityName.trim().toLowerCase();
+
+    // 1. Cache lookup.
+    try {
+        const cached: string | null = await ctx.runQuery(
+            internal.flightSearchCache.readIataCache,
+            { cityKey }
+        );
+        if (cached) {
+            console.log(`   → ${cached} (AI cache)`);
+            return cached;
+        }
+    } catch (err) {
+        console.warn(`⚠️ resolveIataWithAI cache read failed: ${(err as Error).message}`);
+    }
+
+    if (!process.env.OPENAI_API_KEY) {
+        console.warn("⚠️ resolveIataWithAI: OpenAI key not configured");
+        return "";
+    }
+    try {
+        console.log(`🤖 Resolving IATA via OpenAI for: "${cityName}"`);
+        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+        const completion = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            temperature: 0,
+            max_tokens: 20,
+            messages: [
+                {
+                    role: "system",
+                    content:
+                        "You map a travel destination to the IATA code of the nearest major commercial airport that travelers fly into. " +
+                        "Reply with ONLY the 3-letter uppercase IATA code, nothing else. " +
+                        "If the place has no airport, use the nearest hub airport. " +
+                        "If you are unsure or the input is not a real place, reply with NONE.",
+                },
+                {
+                    role: "user",
+                    content: `Destination: ${cityName.trim()}`,
+                },
+            ],
+        });
+
+        const raw = completion.choices?.[0]?.message?.content?.trim().toUpperCase() ?? "";
+        const match = raw.match(/\b([A-Z]{3})\b/);
+        const code = match?.[1] ?? "";
+        if (!code || code === "NON") {
+            console.warn(`⚠️ resolveIataWithAI: no valid code for "${cityName}" (got "${raw}")`);
+            return "";
+        }
+        console.log(`   → ${code} (AI)`);
+
+        // 2. Persist for next time (fire-and-forget; don't block on failure).
+        try {
+            await ctx.runMutation(internal.flightSearchCache.writeIataCache, {
+                cityKey,
+                iata: code,
+            });
+        } catch (err) {
+            console.warn(`⚠️ resolveIataWithAI cache write failed: ${(err as Error).message}`);
+        }
+
+        return code;
+    } catch (err) {
+        console.warn(`⚠️ resolveIataWithAI failed for "${cityName}": ${(err as Error).message}`);
+        return "";
+    }
 }
 
 // Helper function to get fallback hotel data
