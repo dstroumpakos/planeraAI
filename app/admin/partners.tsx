@@ -306,6 +306,29 @@ function PregenStatus({ pregen, colors, isDarkMode }: any) {
                 </View>
             )}
 
+            {pregen.requested?.length > 0 && (
+                <View style={[styles.pgReqBox, { borderColor: colors.border, backgroundColor: isDarkMode ? 'rgba(255,255,255,0.03)' : '#FAFAF8' }]}>
+                    <Text style={{ color: colors.text, fontWeight: '700', fontSize: 12, marginBottom: 2 }}>
+                        Requested — not pre-generated yet ({pregen.requested.length})
+                    </Text>
+                    <Text style={{ color: colors.textMuted, fontSize: 11, marginBottom: 6 }}>
+                        Cities partners asked for that aren't pre-built. The next pre-generation run will cover them.
+                    </Text>
+                    {pregen.requested.slice(0, 12).map((r: any, i: number) => (
+                        <View key={i} style={styles.pgReqRow}>
+                            <Text style={[styles.pgReqCity, { color: colors.text }]} numberOfLines={1}>{r.destination}</Text>
+                            <Text style={{ color: colors.textMuted, fontSize: 11 }}>
+                                {r.days.join(", ")}d · {r.count}×
+                            </Text>
+                        </View>
+                    ))}
+                    {pregen.requested.length > 12 && (
+                        <Text style={{ color: colors.textMuted, fontSize: 11, marginTop: 4 }}>
+                            +{pregen.requested.length - 12} more
+                        </Text>
+                    )}
+                </View>
+            )}
             <TouchableOpacity style={styles.pgToggle} onPress={() => setOpen((o) => !o)}>
                 <Text style={{ color: colors.primary === "#FFE500" ? "#B59A00" : colors.primary, fontWeight: '700', fontSize: 13 }}>
                     {open ? "Hide per-city breakdown" : "Show per-city breakdown"}
@@ -460,6 +483,9 @@ const styles = StyleSheet.create({
     pgDot: { width: 9, height: 9, borderRadius: 999 },
     pgLegendText: { fontSize: 11, textTransform: 'capitalize' },
     pgFailBox: { borderWidth: 1, borderRadius: 10, padding: 10, marginTop: 12 },
+    pgReqBox: { borderWidth: 1, borderRadius: 10, padding: 10, marginTop: 12 },
+    pgReqRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 3, gap: 8 },
+    pgReqCity: { flex: 1, fontSize: 12, fontWeight: '600' },
     pgToggle: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 14 },
     pgCityRow: { flexDirection: 'row', alignItems: 'center', borderTopWidth: 1, paddingVertical: 9 },
     pgCityName: { fontSize: 13, fontWeight: '600' },

@@ -320,6 +320,46 @@ export const getPregenStatus = query({
         error: r.error ?? null,
       }));
 
+    // Cities partners requested live but we have NOT pre-generated yet (cache
+    // misses, covered=false). The recurring pre-gen cron picks these up; this
+    // list lets an admin see exactly what demand is still uncovered.
+    const demandRows = await ctx.db
+      .query("partnerDemand")
+      .withIndex("by_covered_count", (q) => q.eq("covered", false))
+      .collect();
+    const requestedByKey = new Map<
+      string,
+      {
+        destination: string;
+        count: number;
+        days: Set<number>;
+        lastRequestedAt: number;
+      }
+    >();
+    for (const d of demandRows) {
+      const cur = requestedByKey.get(d.destinationKey);
+      if (cur) {
+        cur.count += d.count;
+        cur.days.add(d.days);
+        cur.lastRequestedAt = Math.max(cur.lastRequestedAt, d.lastRequestedAt);
+      } else {
+        requestedByKey.set(d.destinationKey, {
+          destination: d.destination,
+          count: d.count,
+          days: new Set<number>([d.days]),
+          lastRequestedAt: d.lastRequestedAt,
+        });
+      }
+    }
+    const requested = [...requestedByKey.values()]
+      .map((r) => ({
+        destination: r.destination,
+        count: r.count,
+        days: [...r.days].sort((a, b) => a - b),
+        lastRequestedAt: r.lastRequestedAt,
+      }))
+      .sort((a, b) => b.count - a.count);
+
     const expectedTotal = PREGEN_CITIES.length * PREGEN_DURATIONS.length;
     const completeCities = cities.filter((c) => c.complete).length;
 
@@ -354,6 +394,7 @@ export const getPregenStatus = query({
       cities,
       failures,
       extraDestinations,
+      requested,
     };
   },
 });
