@@ -206,8 +206,13 @@ export const validateInvite = query({
 
 /** Accept an invite: set password, activate, return a session token. */
 export const acceptInvite = mutation({
-  args: { token: v.string(), password: v.string() },
+  args: { token: v.string(), password: v.string(), acceptedTerms: v.boolean() },
   handler: async (ctx, args) => {
+    if (!args.acceptedTerms) {
+      throw new ConvexError(
+        "You must accept the Partner API Terms to create an account."
+      );
+    }
     if (args.password.length < 8) {
       throw new ConvexError("Password must be at least 8 characters.");
     }
@@ -232,6 +237,7 @@ export const acceptInvite = mutation({
       inviteExpiresAt: undefined,
       activatedAt: now,
       lastLoginAt: now,
+      acceptedTermsAt: now,
     });
 
     const sessionToken = randomSecret("ps_");

@@ -68,6 +68,7 @@ export default function Index() {
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [name, setName] = useState("");
+    const [acceptedTerms, setAcceptedTerms] = useState(false);
     const [loading, setLoading] = useState(false);
     const [oauthLoading, setOauthLoading] = useState<string | null>(null);
     const router = useRouter();
@@ -81,6 +82,11 @@ export default function Index() {
     const handleEmailAuth = async () => {
         if (!email || !password || (isSignUp && !name)) {
             Alert.alert(t('common.error'), t('auth.errorFillFields'));
+            return;
+        }
+
+        if (isSignUp && !acceptedTerms) {
+            Alert.alert(t('common.error'), t('auth.mustAcceptTerms'));
             return;
         }
 
@@ -321,7 +327,38 @@ export default function Index() {
                                 <Text style={styles.forgotPasswordText}>{t('auth.forgotPassword')}</Text>
                             </TouchableOpacity>
                         )}
-                        
+
+                        {/* Explicit terms acceptance - required to create an account */}
+                        {isSignUp && (
+                            <TouchableOpacity
+                                style={styles.termsCheckboxRow}
+                                onPress={() => setAcceptedTerms(!acceptedTerms)}
+                                activeOpacity={0.7}
+                            >
+                                <View style={[styles.checkbox, acceptedTerms && styles.checkboxChecked]}>
+                                    {acceptedTerms && (
+                                        <Ionicons name="checkmark" size={16} color={COLORS.text} />
+                                    )}
+                                </View>
+                                <Text style={styles.termsCheckboxLabel}>
+                                    {t('auth.acceptTermsPrefix')}{" "}
+                                    <Text
+                                        style={styles.termsLink}
+                                        onPress={() => router.push("/terms")}
+                                    >
+                                        {t('auth.termsOfUse')}
+                                    </Text>{" "}
+                                    {t('auth.and')}{" "}
+                                    <Text
+                                        style={styles.termsLink}
+                                        onPress={() => router.push("/privacy")}
+                                    >
+                                        {t('auth.privacyPolicy')}
+                                    </Text>.
+                                </Text>
+                            </TouchableOpacity>
+                        )}
+
                         <TouchableOpacity 
                             style={styles.primaryButton} 
                             onPress={handleEmailAuth}
@@ -805,5 +842,32 @@ const styles = StyleSheet.create({
     termsLink: {
         color: COLORS.textSecondary,
         textDecorationLine: "underline",
+    },
+    termsCheckboxRow: {
+        flexDirection: "row",
+        alignItems: "flex-start",
+        gap: 10,
+        marginBottom: 16,
+        marginTop: 4,
+    },
+    checkbox: {
+        width: 22,
+        height: 22,
+        borderRadius: 6,
+        borderWidth: 2,
+        borderColor: COLORS.border,
+        alignItems: "center",
+        justifyContent: "center",
+        marginTop: 1,
+    },
+    checkboxChecked: {
+        backgroundColor: COLORS.primary,
+        borderColor: COLORS.primary,
+    },
+    termsCheckboxLabel: {
+        flex: 1,
+        color: COLORS.textSecondary,
+        fontSize: 13,
+        lineHeight: 19,
     },
 });

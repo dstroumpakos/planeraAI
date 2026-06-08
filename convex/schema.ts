@@ -1186,6 +1186,8 @@ export default defineSchema({
         createdAt: v.float64(),
         activatedAt: v.optional(v.float64()),
         lastLoginAt: v.optional(v.float64()),
+        // When the partner accepted the Partner API Terms during signup.
+        acceptedTermsAt: v.optional(v.float64()),
     })
         .index("by_email", ["email"])
         .index("by_inviteTokenHash", ["inviteTokenHash"])
