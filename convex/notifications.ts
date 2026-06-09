@@ -581,3 +581,99 @@ export const processScheduledNotifications = internalAction({
         console.log(`🔔 Notification check complete — ${trips.upcoming.length} upcoming, ${trips.active.length} active, ${trips.recentlyEnded.length} recently ended, ${trips.anniversary.length} anniversaries`);
     },
 });
+
+// ─── Streak rewards announcement (free users only) ───
+const STREAK_PROMO: Record<string, { title: string; body: string }> = {
+    en: {
+        title: "🔥 Daily streaks = free trips!",
+        body: "Check in 7 days in a row for a FREE AI trip. Start today! ✈️",
+    },
+    el: {
+        title: "🔥 Τα σερί φέρνουν δωρεάν ταξίδια!",
+        body: "Check-in 7 μέρες στη σειρά για ένα ΔΩΡΕΑΝ ταξίδι AI. Ξεκίνα σήμερα! ✈️",
+    },
+    es: {
+        title: "🔥 ¡Las rachas dan viajes gratis!",
+        body: "Haz check-in 7 días seguidos y gana un viaje con IA GRATIS. ¡Empieza hoy! ✈️",
+    },
+    fr: {
+        title: "🔥 Les séries = voyages gratuits !",
+        body: "Connectez-vous 7 jours d'affilée pour un voyage IA GRATUIT. Commencez aujourd'hui ! ✈️",
+    },
+    de: {
+        title: "🔥 Serien = kostenlose Reisen!",
+        body: "Checke 7 Tage in Folge ein für eine GRATIS KI-Reise. Starte heute! ✈️",
+    },
+    ar: {
+        title: "🔥 السلاسل تعني رحلات مجانية!",
+        body: "سجّل دخولك 7 أيام متتالية واكسب رحلة مجانية بالذكاء الاصطناعي. ابدأ اليوم! ✈️",
+    },
+};
+
+/** Internal: list all FREE users (no active premium subscription) with their language. */
+export const getFreeUsersForBroadcast = internalQuery({
+    args: {},
+    handler: async (ctx) => {
+        const now = Date.now();
+        const allSettings = await ctx.db.query("userSettings").collect();
+        const result: Array<{ userId: string; language: string | undefined }> = [];
+        for (const s of allSettings) {
+            const plan = await ctx.db
+                .query("userPlans")
+                .withIndex("by_user", (q) => q.eq("userId", s.userId))
+                .unique();
+            const isPremium =
+                plan?.plan === "premium" &&
+                !!plan?.subscriptionExpiresAt &&
+                plan.subscriptionExpiresAt > now;
+            if (!isPremium) {
+                result.push({ userId: s.userId, language: s.language });
+            }
+        }
+        return result;
+    },
+});
+
+/**
+ * Admin action: announce the streak-rewards feature to every FREE user, in their
+ * own app language. Respects each user's master push-notification preference.
+ * Pass `dryRun: true` to only count recipients without sending.
+ */
+export const broadcastStreakRewards = internalAction({
+    args: { dryRun: v.optional(v.boolean()) },
+    handler: async (ctx, args): Promise<{ targeted: number; sent: number; skipped: number; dryRun: boolean }> => {
+        const users: Array<{ userId: string; language?: string }> = await ctx.runQuery(
+            internal.notifications.getFreeUsersForBroadcast,
+            {}
+        );
+
+        if (args.dryRun) {
+            console.log(`📣 [dryRun] streak-rewards broadcast would target ${users.length} free user(s)`);
+            return { targeted: users.length, sent: 0, skipped: 0, dryRun: true };
+        }
+
+        let sent = 0;
+        let skipped = 0;
+        for (const u of users) {
+            const lang = u.language && STREAK_PROMO[u.language] ? u.language : "en";
+            const copy = STREAK_PROMO[lang];
+            try {
+                await ctx.runAction(internal.notifications.sendPushNotification, {
+                    userId: u.userId,
+                    title: copy.title,
+                    body: copy.body,
+                    // "streak_promo" is filtered only by the master pushNotifications toggle
+                    type: "streak_promo",
+                    data: { screen: "home" },
+                });
+                sent++;
+            } catch (err) {
+                console.error(`broadcastStreakRewards: failed for user ${u.userId}`, err);
+                skipped++;
+            }
+        }
+
+        console.log(`📣 streak-rewards broadcast complete — targeted ${users.length}, sent ${sent}, skipped ${skipped}`);
+        return { targeted: users.length, sent, skipped, dryRun: false };
+    },
+});
