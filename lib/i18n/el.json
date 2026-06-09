@@ -1440,7 +1440,10 @@
     "longest": "Μεγαλύτερο",
     "totalDays": "Συνολικές Ημέρες",
     "shieldActive": "Ασπίδα Σερί Ενεργή",
-    "checkedInToday": "Check-in σήμερα!"
+    "checkedInToday": "Check-in σήμερα!",
+    "rewardTitle": "🔥 Σερί {{count}} ημερών!",
+    "rewardMessage_one": "Κέρδισες {{count}} δωρεάν πίστωση ταξιδιού! Συνέχισε τα check-in για περισσότερα.",
+    "rewardMessage_other": "Κέρδισες {{count}} δωρεάν πιστώσεις ταξιδιού! Συνέχισε τα check-in για περισσότερα."
   },
   "referrals": {
     "title": "Πρόσκληση Φίλων",

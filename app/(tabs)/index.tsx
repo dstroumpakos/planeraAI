@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   TextInput,
   StatusBar,
+  Alert,
 } from "react-native";
 import { Image } from "expo-image";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -98,9 +99,18 @@ export default function HomeScreen() {
   useEffect(() => {
     if (token && isAuthenticated && !checkedIn) {
       setCheckedIn(true);
-      checkIn({ token }).catch((err: any) => {
-        console.error("[HomeScreen] Streak check-in failed:", err);
-      });
+      checkIn({ token })
+        .then((result: any) => {
+          if (result?.creditsAwarded > 0) {
+            Alert.alert(
+              t("streaks.rewardTitle", { count: result.milestone }),
+              t("streaks.rewardMessage", { count: result.creditsAwarded })
+            );
+          }
+        })
+        .catch((err: any) => {
+          console.error("[HomeScreen] Streak check-in failed:", err);
+        });
     }
   }, [token, isAuthenticated, checkedIn]);
 

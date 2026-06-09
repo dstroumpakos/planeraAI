@@ -1,6 +1,15 @@
 import { authQuery, authMutation } from "./functions";
 import { internal } from "./_generated/api";
 
+// Streak milestones → trip credits awarded (once each)
+const STREAK_REWARDS: Record<number, number> = {
+  7: 1,
+  14: 1,
+  30: 2,
+  60: 3,
+  100: 5,
+};
+
 // Get current streak info
 export const getStreak = authQuery({
   args: {},
@@ -74,12 +83,12 @@ export const checkIn = authMutation({
       });
       // Trigger achievement check
       await ctx.scheduler.runAfter(0, (internal as any).achievements.checkAndUnlock, { userId });
-      return { newStreak: 1, isNewRecord: true };
+      return { newStreak: 1, isNewRecord: true, creditsAwarded: 0, milestone: null };
     }
 
     // Already checked in today
     if (streak.lastCheckInDate === today) {
-      return { newStreak: streak.currentStreak, isNewRecord: false };
+      return { newStreak: streak.currentStreak, isNewRecord: false, creditsAwarded: 0, milestone: null };
     }
 
     const yesterday = getYesterdayString();
@@ -131,12 +140,41 @@ export const checkIn = authMutation({
       patch.streakShieldUsedAt = Date.now();
     }
 
+    // Milestone reward — award trip credits the first time a milestone is reached.
+    // Only non-subscribers earn credits (premium users already have unlimited generations).
+    const rewarded: number[] = streak.rewardedMilestones || [];
+    const reward = STREAK_REWARDS[newCurrentStreak];
+    let creditsAwarded = 0;
+    if (reward && !rewarded.includes(newCurrentStreak)) {
+      const userPlan = await ctx.db
+        .query("userPlans")
+        .withIndex("by_user", (q: any) => q.eq("userId", userId))
+        .unique();
+      const isPremium =
+        userPlan?.plan === "premium" &&
+        userPlan?.subscriptionExpiresAt &&
+        userPlan.subscriptionExpiresAt > Date.now();
+
+      if (!isPremium && userPlan) {
+        patch.rewardedMilestones = [...rewarded, newCurrentStreak];
+        creditsAwarded = reward;
+        await ctx.db.patch(userPlan._id, {
+          tripCredits: (userPlan.tripCredits || 0) + reward,
+        });
+      }
+    }
+
     await ctx.db.patch(streak._id, patch);
 
     // Trigger achievement check for streak milestones
     await ctx.scheduler.runAfter(0, (internal as any).achievements.checkAndUnlock, { userId });
 
-    return { newStreak: newCurrentStreak, isNewRecord };
+    return {
+      newStreak: newCurrentStreak,
+      isNewRecord,
+      creditsAwarded,
+      milestone: creditsAwarded > 0 ? newCurrentStreak : null,
+    };
   },
 });
 

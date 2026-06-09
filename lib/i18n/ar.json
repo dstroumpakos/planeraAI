@@ -1440,7 +1440,10 @@
     "longest": "الأطول",
     "totalDays": "إجمالي الأيام",
     "shieldActive": "درع السلسلة نشط",
-    "checkedInToday": "تم تسجيل الدخول اليوم!"
+    "checkedInToday": "تم تسجيل الدخول اليوم!",
+    "rewardTitle": "🔥 سلسلة {{count}} يوم!",
+    "rewardMessage_one": "لقد حصلت على {{count}} رصيد رحلة مجاني! واصل تسجيل الدخول للحصول على المزيد.",
+    "rewardMessage_other": "لقد حصلت على {{count}} أرصدة رحلات مجانية! واصل تسجيل الدخول للحصول على المزيد."
   },
   "referrals": {
     "title": "دعوة الأصدقاء",

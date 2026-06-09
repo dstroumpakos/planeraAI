@@ -1440,7 +1440,10 @@
     "longest": "Longest",
     "totalDays": "Total Days",
     "shieldActive": "Streak Shield Active",
-    "checkedInToday": "Checked in today!"
+    "checkedInToday": "Checked in today!",
+    "rewardTitle": "🔥 {{count}}-Day Streak!",
+    "rewardMessage_one": "You earned {{count}} free trip credit! Keep checking in for more.",
+    "rewardMessage_other": "You earned {{count}} free trip credits! Keep checking in for more."
   },
   "referrals": {
     "title": "Invite Friends",

@@ -878,6 +878,7 @@ export default defineSchema({
         lastCheckInDate: v.string(), // "YYYY-MM-DD"
         streakShieldUsedAt: v.optional(v.float64()),
         totalCheckIns: v.float64(),
+        rewardedMilestones: v.optional(v.array(v.float64())), // streak milestones already paid out
     })
         .index("by_user", ["userId"]),
 

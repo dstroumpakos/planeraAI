@@ -1440,7 +1440,10 @@
     "longest": "Más larga",
     "totalDays": "Días Totales",
     "shieldActive": "Escudo de Racha Activo",
-    "checkedInToday": "¡Check-in de hoy hecho!"
+    "checkedInToday": "¡Check-in de hoy hecho!",
+    "rewardTitle": "🔥 ¡Racha de {{count}} días!",
+    "rewardMessage_one": "¡Ganaste {{count}} crédito de viaje gratis! Sigue registrándote para más.",
+    "rewardMessage_other": "¡Ganaste {{count}} créditos de viaje gratis! Sigue registrándote para más."
   },
   "referrals": {
     "title": "Invitar Amigos",

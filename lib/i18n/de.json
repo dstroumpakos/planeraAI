@@ -1440,7 +1440,10 @@
     "longest": "Längste",
     "totalDays": "Gesamttage",
     "shieldActive": "Serien-Schutzschild Aktiv",
-    "checkedInToday": "Heute eingecheckt!"
+    "checkedInToday": "Heute eingecheckt!",
+    "rewardTitle": "🔥 {{count}}-Tage-Serie!",
+    "rewardMessage_one": "Du hast {{count}} kostenloses Reise-Guthaben erhalten! Checke weiter täglich ein für mehr.",
+    "rewardMessage_other": "Du hast {{count}} kostenlose Reise-Guthaben erhalten! Checke weiter täglich ein für mehr."
   },
   "referrals": {
     "title": "Freunde einladen",
