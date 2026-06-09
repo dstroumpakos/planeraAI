@@ -333,7 +333,7 @@ export default function AdminDashboard() {
                                             <Text style={[styles.listItemTitle, { color: colors.text }]}>{item.name}</Text>
                                             <Text style={[styles.userEmail, { color: colors.textMuted }]}>{item.email}</Text>
                                         </View>
-                                        <Text style={[styles.listItemValue, { color: colors.textMuted }]}>{item.insightsCount} insights</Text>
+                                        <Text style={[styles.listItemValue, { color: colors.textMuted }]}>🔥 {item.currentStreak} day{item.currentStreak === 1 ? "" : "s"}</Text>
                                     </TouchableOpacity>
                                 ))}
                             </View>

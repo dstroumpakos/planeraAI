@@ -170,27 +170,31 @@ export const getStats = query({
                 category: i.category,
             }));
         
-        // Most active users (by insights count)
-        const userInsightCounts: Record<string, number> = {};
-        allInsights.forEach((insight: any) => {
-            userInsightCounts[insight.userId] = (userInsightCounts[insight.userId] || 0) + 1;
-        });
-        
-        const topUserIds = Object.entries(userInsightCounts)
-            .sort(([, a], [, b]) => b - a)
+        // Most active users (by daily check-in streak)
+        const allStreaks = await ctx.db.query("userStreaks").collect();
+
+        const topStreaks = [...allStreaks]
+            .sort((a: any, b: any) => {
+                const curDiff = (b.currentStreak || 0) - (a.currentStreak || 0);
+                if (curDiff !== 0) return curDiff;
+                return (b.totalCheckIns || 0) - (a.totalCheckIns || 0);
+            })
+            .filter((s: any) => (s.currentStreak || 0) > 0 || (s.totalCheckIns || 0) > 0)
             .slice(0, 5);
-        
+
         const mostActiveUsers = await Promise.all(
-            topUserIds.map(async ([uId, count]) => {
+            topStreaks.map(async (s: any) => {
                 const settings = await ctx.db
                     .query("userSettings")
-                    .withIndex("by_user", (q: any) => q.eq("userId", uId))
+                    .withIndex("by_user", (q: any) => q.eq("userId", s.userId))
                     .first();
                 return {
-                    userId: uId,
+                    userId: s.userId,
                     name: settings?.name || "Unknown",
                     email: settings?.email || "Unknown",
-                    insightsCount: count,
+                    currentStreak: s.currentStreak || 0,
+                    longestStreak: s.longestStreak || 0,
+                    totalCheckIns: s.totalCheckIns || 0,
                 };
             })
         );
