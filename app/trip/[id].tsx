@@ -3295,6 +3295,7 @@ export default function TripDetails() {
                             {renderAffiliateFlightCard({ partner: 'kiwi', item: 'kiwi', brand: 'Kiwi.com', badge: 'Ki', color: '#E61C5D', subtitle: t('tripDetail.searchFlightsOnKiwi'), cta: t('tripDetail.searchOnKiwi') })}
                             {renderAffiliateFlightCard({ partner: 'esky', item: 'esky', brand: 'eSky', badge: 'eS', color: '#00A1E0', subtitle: t('tripDetail.searchFlightsOnEsky'), cta: t('tripDetail.searchOnEsky') })}
                             {renderAffiliateFlightCard({ partner: 'iberia', item: 'iberia', brand: 'Iberia', badge: 'IB', color: '#D7192D', subtitle: t('tripDetail.searchFlightsOnIberia'), cta: t('tripDetail.searchOnIberia') })}
+                            {renderAffiliateFlightCard({ partner: 'volotea', item: 'volotea', brand: 'Volotea', badge: 'VO', color: '#9B1B5A', subtitle: t('tripDetail.searchFlightsOnVolotea'), cta: t('tripDetail.searchOnVolotea') })}
                         </View>
                     )}
 

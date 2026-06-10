@@ -33,11 +33,20 @@ export function buildClickUrl(linkId: string, deepTarget?: string): string {
 // Deep-linkable (Evergreen) — accept a `url=` target.
 const TRIPCOM_EVERGREEN = "15735051";
 const IBERIA_EVERGREEN = "15736023";
+const VOLOTEA_EVERGREEN = "15735255";
 
 // Non-deep-link homepage/landing links, keyed by language (fallback: en).
 const KIWI_BY_LANG: Record<string, string> = {
   en: "13856226",
   de: "16967825",
+};
+// Volotea localized homepage CJ links (EU low-cost carrier).
+const VOLOTEA_BY_LANG: Record<string, string> = {
+  en: "13995505",
+  el: "14464215",
+  es: "13980924",
+  fr: "14446290",
+  de: "13980926",
 };
 const ESKY_BY_LANG: Record<string, string> = {
   en: "15347259",
@@ -145,12 +154,19 @@ function iberiaFlightTarget(p: FlightLinkParams): string {
   );
 }
 
+function voloteaHomeTarget(lang: string): string {
+  const path =
+    lang === "es" ? "es" : lang === "fr" ? "fr" : lang === "de" ? "de" : "en";
+  return `https://www.volotea.com/${path}/`;
+}
+
 export type FlightPartnerKey =
   | "tripcom"
   | "skyscanner"
   | "kiwi"
   | "esky"
-  | "iberia";
+  | "iberia"
+  | "volotea";
 
 /** Returns the final (CJ-wrapped when available) flight URL for a partner. */
 export function buildFlightLink(
@@ -168,6 +184,12 @@ export function buildFlightLink(
       return buildClickUrl(pickByLang(ESKY_BY_LANG, p.lang));
     case "iberia":
       return buildClickUrl(IBERIA_EVERGREEN, iberiaFlightTarget(p));
+    case "volotea":
+      // Prefer a localized homepage CJ link; otherwise deep-link via Evergreen.
+      if (VOLOTEA_BY_LANG[p.lang]) {
+        return buildClickUrl(VOLOTEA_BY_LANG[p.lang]);
+      }
+      return buildClickUrl(VOLOTEA_EVERGREEN, voloteaHomeTarget(p.lang));
     default:
       return skyscannerFlightTarget(p);
   }
