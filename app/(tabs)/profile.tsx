@@ -16,6 +16,7 @@ import * as Haptics from "expo-haptics";
 import { Id } from "@/convex/_generated/dataModel";
 import Constants from "expo-constants";
 import * as Notifications from "expo-notifications";
+import * as Updates from "expo-updates";
 import { useMutation } from "convex/react";
 import { useTranslation } from "react-i18next";
 
@@ -55,6 +56,9 @@ export default function Profile() {
         (api as any).admin.isAdmin,
         token ? { token } : "skip"
     );
+
+    // Live backend identity check — proves which Convex deployment answers
+    const backendWhoami = useQuery((api as any).ping.whoami, {});
     
     // Get profile image URL if profilePicture storage ID exists
     const profileImageUrl = useQuery(
@@ -811,6 +815,44 @@ export default function Profile() {
 
                 {/* Version */}
                 <Text style={styles.versionText}>PLANERA V{Constants.expoConfig?.version || '1.0.0'}</Text>
+
+                {/* Build / environment diagnostic */}
+                <TouchableOpacity
+                    activeOpacity={0.6}
+                    onPress={() => {
+                        const convexUrl = process.env.EXPO_PUBLIC_CONVEX_URL || "(unset)";
+                        const siteUrl = process.env.EXPO_PUBLIC_CONVEX_SITE_URL || "(unset)";
+                        const backendUrl = (backendWhoami as any)?.deploymentUrl ?? "(loading…)";
+                        const bundleIsProd = convexUrl.includes("canny-bobcat-846");
+                        const backendIsProd = String(backendUrl).includes("canny-bobcat-846");
+                        Alert.alert(
+                            "Build info",
+                            [
+                                `Bundle env: ${bundleIsProd ? "PROD" : "DEV"}`,
+                                `Bundle URL: ${convexUrl}`,
+                                `Site URL: ${siteUrl}`,
+                                "",
+                                `LIVE backend: ${backendIsProd ? "PROD ✅" : "DEV ⚠️"}`,
+                                `Backend URL: ${backendUrl}`,
+                                "",
+                                `Channel: ${(Updates as any).channel ?? "(embedded)"}`,
+                                `Update ID: ${Updates.updateId ?? "(embedded build)"}`,
+                                `Runtime: ${Updates.runtimeVersion ?? "?"}`,
+                                `Embedded: ${Updates.isEmbeddedLaunch ? "yes (no OTA applied)" : "no (OTA active)"}`,
+                            ].join("\n")
+                        );
+                    }}
+                >
+                    <Text style={styles.versionText}>
+                        {String((backendWhoami as any)?.deploymentUrl ?? "").includes("canny-bobcat-846")
+                            ? "BACKEND: PROD"
+                            : backendWhoami
+                                ? "BACKEND: DEV"
+                                : "BACKEND: …"}
+                        {" · "}
+                        {Updates.updateId ? Updates.updateId.slice(0, 8) : "embedded"}
+                    </Text>
+                </TouchableOpacity>
 
                 {/* Bottom Spacing */}
                 <View style={{ height: 120 }} />

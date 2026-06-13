@@ -64,6 +64,7 @@ import type * as partnerPregenConfig from "../partnerPregenConfig.js";
 import type * as partnerPregenerate from "../partnerPregenerate.js";
 import type * as passwordReset from "../passwordReset.js";
 import type * as passwordResetDb from "../passwordResetDb.js";
+import type * as ping from "../ping.js";
 import type * as postmark from "../postmark.js";
 import type * as publicStats from "../publicStats.js";
 import type * as publishedItineraries from "../publishedItineraries.js";
@@ -148,6 +149,7 @@ declare const fullApi: ApiFromModules<{
   partnerPregenerate: typeof partnerPregenerate;
   passwordReset: typeof passwordReset;
   passwordResetDb: typeof passwordResetDb;
+  ping: typeof ping;
   postmark: typeof postmark;
   publicStats: typeof publicStats;
   publishedItineraries: typeof publishedItineraries;
