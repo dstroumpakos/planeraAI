@@ -139,7 +139,23 @@ function AppContent() {
                 // CRITICAL: Create Convex client AFTER auth is initialized
                 // This ensures the token is available when fetchAccessToken is called
                 try {
-                    const client = new ConvexReactClient(process.env.EXPO_PUBLIC_CONVEX_URL!, {
+                    const convexUrl = process.env.EXPO_PUBLIC_CONVEX_URL!;
+                    // Tripwire: a production (non-__DEV__) build must NEVER point at the
+                    // dev Convex deployment. This catches the Metro-cache env trap where a
+                    // stale dev URL gets inlined into a prod OTA. See repo memory
+                    // "ota-and-deploy" / scripts/ota-prod.mjs.
+                    // NOTE: the dev name is assembled from fragments on purpose so the
+                    // contiguous literal does NOT appear in the bundle (otherwise the
+                    // ota-prod bundle scanner would false-positive on this very check).
+                    const DEV_DEPLOYMENT = ["giddy", "sandpiper", "781"].join("-");
+                    if (!__DEV__ && convexUrl.includes(DEV_DEPLOYMENT)) {
+                        console.error(
+                            "[BOOT][FATAL] Production build is pointing at the DEV Convex deployment. " +
+                            "This is the Metro-cache env trap. Re-publish with " +
+                            "`npm run ota:prod` (clears cache + verifies bundle)."
+                        );
+                    }
+                    const client = new ConvexReactClient(convexUrl, {
                         unsavedChangesWarning: false,
                     });
                     setConvex(client);

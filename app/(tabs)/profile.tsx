@@ -6,7 +6,7 @@ import { useNavigation } from "@react-navigation/native";
 import { CommonActions } from "@react-navigation/native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useQuery } from "convex/react";
+import { useQuery, useConvex } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useToken, useAuthenticatedMutation } from "@/lib/useAuthenticatedMutation";
 import { useState } from "react";
@@ -59,6 +59,7 @@ export default function Profile() {
 
     // Live backend identity check — proves which Convex deployment answers
     const backendWhoami = useQuery((api as any).ping.whoami, {});
+    const liveConvexClient = useConvex();
     
     // Get profile image URL if profilePicture storage ID exists
     const profileImageUrl = useQuery(
@@ -822,6 +823,7 @@ export default function Profile() {
                     onPress={() => {
                         const convexUrl = process.env.EXPO_PUBLIC_CONVEX_URL || "(unset)";
                         const siteUrl = process.env.EXPO_PUBLIC_CONVEX_SITE_URL || "(unset)";
+                        const clientUrl = (liveConvexClient as any)?.url ?? "(?)";
                         const backendUrl = (backendWhoami as any)?.deploymentUrl ?? "(loading…)";
                         const bundleIsProd = convexUrl.includes("canny-bobcat-846");
                         const backendIsProd = String(backendUrl).includes("canny-bobcat-846");
@@ -831,6 +833,7 @@ export default function Profile() {
                                 `Bundle env: ${bundleIsProd ? "PROD" : "DEV"}`,
                                 `Bundle URL: ${convexUrl}`,
                                 `Site URL: ${siteUrl}`,
+                                `Client URL: ${clientUrl}`,
                                 "",
                                 `LIVE backend: ${backendIsProd ? "PROD ✅" : "DEV ⚠️"}`,
                                 `Backend URL: ${backendUrl}`,

@@ -51,3 +51,4 @@ logs-essaouira.txt
 pm2_jlist.json
 scripts/partner-api-e2e.ps1
 scripts/partner-api-idem.ps1
+scripts/ota-prod.mjs
