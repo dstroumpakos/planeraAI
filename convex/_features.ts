@@ -11,6 +11,8 @@ export const FEATURES = {
   DUFFEL: false,
   /** Hotel provider integration */
   HOTEL_PROVIDER: false,
+  /** Real hotel + Airbnb listings via searchapi.io (Google Hotels + Airbnb) */
+  REAL_ACCOMMODATIONS: true,
   /** Viator activities API integration */
   VIATOR: false,
   /** Activities provider integration (any) */

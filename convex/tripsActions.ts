@@ -13,6 +13,7 @@ import {
     normalizeFlightOption,
     normalizePriceInsights,
 } from "./lib/serpApiFlights";
+import { fetchAccommodations, type Accommodation } from "./lib/searchApiAccommodations";
 import { reportError } from "./helpers/reportError";
 
 // Helper function to generate travel style guidance for OpenAI prompt
@@ -986,7 +987,35 @@ export const generate = internalAction({
                         dataSource: "user-provided",
                     };
                 }
-                return getFallbackHotels(trip.destination);
+
+                // Try real listings (Google Hotels + Airbnb) via searchapi.io first.
+                if (FEATURES.REAL_ACCOMMODATIONS) {
+                    try {
+                        const checkInDate = new Date(trip.startDate).toISOString().split('T')[0];
+                        const checkOutDate = new Date(trip.endDate).toISOString().split('T')[0];
+                        const nights = Math.max(
+                            1,
+                            Math.ceil((trip.endDate - trip.startDate) / (1000 * 60 * 60 * 24))
+                        );
+                        const real = await fetchAccommodations({
+                            destination: trip.destination,
+                            checkInDate,
+                            checkOutDate,
+                            adults: travelerCount,
+                            currency: "EUR",
+                            nights,
+                        });
+                        if (real.length > 0) {
+                            console.log(`🏨 Found ${real.length} real listings (hotels + airbnb)`);
+                            return real;
+                        }
+                        console.log("🏨 No real listings returned — using fallback hotels");
+                    } catch (err) {
+                        console.warn("🏨 Real accommodation search failed — using fallback:", (err as Error).message);
+                    }
+                }
+
+                return mapFallbackHotels(getFallbackHotels(trip.destination));
             };
 
             const fetchActivitiesAsync = async () => {
@@ -1683,6 +1712,35 @@ function getFallbackHotels(destination: string) {
         { name: "Budget Inn", stars: 2, price: 60, currency: "EUR", description: "Budget-friendly 2-star hotel" },
         { name: "Luxury Resort", stars: 5, price: 280, currency: "EUR", description: "5-star luxury resort" },
     ];
+}
+
+// Map legacy fallback hotels onto the unified Accommodation shape so the UI can
+// render them identically to real searchapi.io listings (and so pricePerNight
+// feeds the trip cost summary).
+function mapFallbackHotels(
+    hotels: { name: string; stars: number; price: number; currency: string; description: string }[]
+): Accommodation[] {
+    return hotels.map((h) => ({
+        type: "hotel" as const,
+        name: h.name,
+        image: undefined,
+        images: [],
+        rating: undefined,
+        reviews: undefined,
+        stars: h.stars,
+        pricePerNight: h.price,
+        totalPrice: undefined,
+        originalPrice: undefined,
+        currency: h.currency,
+        link: undefined,
+        bookingLink: undefined,
+        description: h.description,
+        amenities: [],
+        badges: [],
+        freeCancellation: undefined,
+        gpsCoordinates: undefined,
+        dealLabel: undefined,
+    }));
 }
 
 // Helper function to search for activities using Viator API

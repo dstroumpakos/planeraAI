@@ -18,6 +18,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useAuthenticatedMutation, useToken } from "@/lib/useAuthenticatedMutation";
 import { optimizeUnsplashUrl, IMAGE_SIZES } from "@/lib/imageUtils";
 import * as Haptics from "expo-haptics";
+import * as WebBrowser from "expo-web-browser";
 import * as Location from "expo-location";
 import { useLocationNotifications } from "@/lib/useLocationNotifications";
 import { TripGuideTooltip, GuideStep } from "@/components/FirstTripGuide";
@@ -887,6 +888,8 @@ export default function TripDetails() {
     }, [trip?.itinerary]);
 
     const [accommodationType, setAccommodationType] = useState<'all' | 'hotel' | 'airbnb'>('all');
+    const [staysSortBy, setStaysSortBy] = useState<'recommended' | 'price' | 'rating'>('recommended');
+    const [showMoreWaysToBook, setShowMoreWaysToBook] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
     const [editForm, setEditForm] = useState({
         destination: "",
@@ -1486,12 +1489,23 @@ export default function TripDetails() {
     const travelers = trip.travelers || 1;
 
     const allAccommodations = Array.isArray(trip.itinerary?.hotels) ? trip.itinerary.hotels : [];
-    
+
     // Filter accommodations based on selected type
-    const filteredAccommodations = accommodationType === 'all' 
-        ? allAccommodations 
-        : allAccommodations.filter((acc: any) => acc.type === accommodationType);
-    
+    const typeFilteredAccommodations = accommodationType === 'all'
+        ? allAccommodations
+        : allAccommodations.filter((acc: any) => (acc.type || 'hotel') === accommodationType);
+
+    // Apply the active sort (a copy — never mutate the source array)
+    const filteredAccommodations = [...typeFilteredAccommodations].sort((a: any, b: any) => {
+        if (staysSortBy === 'price') {
+            return (a.pricePerNight || Infinity) - (b.pricePerNight || Infinity);
+        }
+        if (staysSortBy === 'rating') {
+            return (b.rating || 0) - (a.rating || 0);
+        }
+        return 0; // recommended — keep supplier order
+    });
+
     // Get hotels and airbnbs counts
     const hotelsCount = allAccommodations.filter((acc: any) => acc.type === 'hotel' || !acc.type).length;
     const airbnbsCount = allAccommodations.filter((acc: any) => acc.type === 'airbnb').length;
@@ -1597,6 +1611,36 @@ export default function TripDetails() {
                 { text: t('tripDetail.cancel'), style: "cancel" },
             ]
         );
+    };
+
+    // Open a real hotel/Airbnb listing. Prefer the in-app browser (keeps users in
+    // the app); fall back to the system browser if it's unavailable.
+    const openAccommodation = async (acc: any) => {
+        const url: string | undefined = acc?.bookingLink || acc?.link;
+        if (!url) {
+            // No external link (e.g. fallback hotel) — drop the user into a supplier search instead.
+            openPartnerLink(buildHotelLink('skyscanner', hotelLinkParams()), 'hotel', 'stay-search-fallback');
+            return;
+        }
+        try {
+            await trackClick({
+                token: token || "",
+                tripId: id as Id<"trips">,
+                type: 'hotel',
+                item: acc?.type === 'airbnb' ? 'airbnb-listing' : 'hotel-listing',
+                url,
+            });
+        } catch (e) {
+            console.error("Failed to track click", e);
+        }
+        try {
+            await WebBrowser.openBrowserAsync(url, {
+                presentationStyle: WebBrowser.WebBrowserPresentationStyle.PAGE_SHEET,
+                controlsColor: colors.primary,
+            });
+        } catch {
+            Linking.openURL(url);
+        }
     };
 
     // Build affiliate link params from the current trip.
@@ -1740,6 +1784,145 @@ export default function TripDetails() {
             </View>
         </TouchableOpacity>
     );
+
+    // Compact currency formatter for accommodation prices.
+    const formatStayPrice = (amount: number, currency?: string): string => {
+        const symbols: Record<string, string> = { EUR: '€', USD: '$', GBP: '£', JPY: '¥' };
+        const sym = symbols[(currency || 'EUR').toUpperCase()];
+        const rounded = Math.round(amount);
+        return sym ? `${sym}${rounded.toLocaleString(i18n.language)}` : `${rounded.toLocaleString(i18n.language)} ${currency || ''}`.trim();
+    };
+
+    // Premium accommodation result card (real Google Hotels / Airbnb listings).
+    const renderStayCard = (acc: any, index: number, opts?: { featured?: boolean }) => {
+        const featured = opts?.featured;
+        const isAirbnb = acc?.type === 'airbnb';
+        const accentColor = isAirbnb ? '#FF5A5F' : '#003580';
+        const nightly = acc?.pricePerNight || 0;
+        const total = acc?.totalPrice || (nightly ? nightly * duration : 0);
+        const original = acc?.originalPrice;
+        const savePct = original && original > nightly ? Math.round(((original - nightly) / original) * 100) : 0;
+        const photo = acc?.image || (Array.isArray(acc?.images) ? acc.images[0] : undefined);
+        const amenityIcon = (a: string): any => {
+            const s = (a || '').toLowerCase();
+            if (s.includes('wifi') || s.includes('wi‑fi') || s.includes('wi-fi')) return 'wifi';
+            if (s.includes('breakfast')) return 'cafe';
+            if (s.includes('pool')) return 'water';
+            if (s.includes('park')) return 'car';
+            if (s.includes('bed')) return 'bed';
+            if (s.includes('air')) return 'snow';
+            return 'checkmark-circle';
+        };
+
+        return (
+            <TouchableOpacity
+                key={`${acc?.name || 'stay'}-${index}`}
+                activeOpacity={0.9}
+                onPress={() => openAccommodation(acc)}
+                style={{
+                    width: featured ? 280 : undefined,
+                    marginRight: featured ? 14 : 0,
+                    marginTop: featured ? 0 : 16,
+                    backgroundColor: colors.card,
+                    borderRadius: 18,
+                    borderWidth: 1,
+                    borderColor: colors.border,
+                    overflow: 'hidden',
+                    shadowColor: '#000',
+                    shadowOffset: { width: 0, height: 4 },
+                    shadowOpacity: 0.1,
+                    shadowRadius: 12,
+                    elevation: 4,
+                }}
+            >
+                {/* Photo */}
+                <View style={{ height: featured ? 150 : 180, backgroundColor: colors.secondary }}>
+                    {photo ? (
+                        <Image source={{ uri: photo }} style={{ width: '100%', height: '100%' }} contentFit="cover" transition={200} />
+                    ) : (
+                        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                            <Ionicons name={isAirbnb ? 'home' : 'bed'} size={40} color={colors.textMuted} />
+                        </View>
+                    )}
+                    <LinearGradient
+                        colors={['transparent', 'rgba(0,0,0,0.55)']}
+                        style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: 70 }}
+                    />
+                    {/* Type badge */}
+                    <View style={{ position: 'absolute', top: 12, left: 12, flexDirection: 'row', alignItems: 'center', backgroundColor: accentColor, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 }}>
+                        <Ionicons name={isAirbnb ? 'home' : 'business'} size={12} color="#fff" style={{ marginRight: 4 }} />
+                        <Text style={{ color: '#fff', fontSize: 11, fontWeight: '800' }}>{isAirbnb ? t('tripDetail.airbnbLabel') : t('tripDetail.hotelLabel')}</Text>
+                    </View>
+                    {/* Deal / save badge */}
+                    {savePct > 0 && (
+                        <View style={{ position: 'absolute', top: 12, right: 12, backgroundColor: '#16A34A', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 }}>
+                            <Text style={{ color: '#fff', fontSize: 11, fontWeight: '800' }}>{t('tripDetail.savePct', { pct: savePct })}</Text>
+                        </View>
+                    )}
+                    {/* Rating pill */}
+                    {acc?.rating ? (
+                        <View style={{ position: 'absolute', bottom: 12, left: 12, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.95)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}>
+                            <Ionicons name="star" size={12} color="#F59E0B" style={{ marginRight: 3 }} />
+                            <Text style={{ fontSize: 12, fontWeight: '800', color: '#111' }}>{Number(acc.rating).toFixed(1)}</Text>
+                            {acc?.reviews ? <Text style={{ fontSize: 11, color: '#555', marginLeft: 3 }}>({acc.reviews})</Text> : null}
+                        </View>
+                    ) : null}
+                </View>
+
+                {/* Body */}
+                <View style={{ padding: 14 }}>
+                    <Text style={{ fontSize: 15, fontWeight: '800', color: colors.text }} numberOfLines={1}>{acc?.name}</Text>
+
+                    {/* Stars / badges row */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
+                        {acc?.stars ? (
+                            <View style={{ flexDirection: 'row', alignItems: 'center', marginRight: 8 }}>
+                                {Array.from({ length: Math.min(5, Math.round(acc.stars)) }).map((_, i) => (
+                                    <Ionicons key={i} name="star" size={11} color="#F59E0B" />
+                                ))}
+                            </View>
+                        ) : null}
+                        {Array.isArray(acc?.badges) && acc.badges.slice(0, 1).map((b: string, i: number) => (
+                            <View key={i} style={{ backgroundColor: isDarkMode ? colors.secondary : '#FEF3C7', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, marginRight: 6 }}>
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: isDarkMode ? colors.text : '#92400E' }}>{b}</Text>
+                            </View>
+                        ))}
+                    </View>
+
+                    {/* Amenity chips */}
+                    {!featured && Array.isArray(acc?.amenities) && acc.amenities.length > 0 && (
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginTop: 10 }}>
+                            {acc.amenities.slice(0, 3).map((a: string, i: number) => (
+                                <View key={i} style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: isDarkMode ? colors.secondary : '#F3F4F6', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, marginRight: 6, marginBottom: 6 }}>
+                                    <Ionicons name={amenityIcon(a)} size={11} color={colors.textSecondary} style={{ marginRight: 4 }} />
+                                    <Text style={{ fontSize: 11, color: colors.textSecondary }} numberOfLines={1}>{a}</Text>
+                                </View>
+                            ))}
+                        </View>
+                    )}
+
+                    {/* Price + CTA */}
+                    <View style={{ flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginTop: 12 }}>
+                        <View style={{ flex: 1 }}>
+                            {original && original > nightly ? (
+                                <Text style={{ fontSize: 12, color: colors.textMuted, textDecorationLine: 'line-through' }}>{formatStayPrice(original, acc?.currency)}</Text>
+                            ) : null}
+                            <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
+                                <Text style={{ fontSize: 19, fontWeight: '900', color: colors.text }}>{formatStayPrice(nightly, acc?.currency)}</Text>
+                                <Text style={{ fontSize: 12, color: colors.textMuted, marginLeft: 3 }}>{t('tripDetail.perNight')}</Text>
+                            </View>
+                            {total > 0 ? (
+                                <Text style={{ fontSize: 11, color: colors.textMuted, marginTop: 1 }}>{t('tripDetail.totalForNights', { price: formatStayPrice(total, acc?.currency), nights: duration })}</Text>
+                            ) : null}
+                        </View>
+                        <View style={{ backgroundColor: accentColor, borderRadius: 10, paddingHorizontal: 16, paddingVertical: 10 }}>
+                            <Text style={{ color: '#fff', fontSize: 13, fontWeight: '800' }}>{t('tripDetail.viewDeal')}</Text>
+                        </View>
+                    </View>
+                </View>
+            </TouchableOpacity>
+        );
+    };
 
     const handleBookTrip = () => {
         // For now, we'll link to a general travel booking site or a specific package deal
@@ -3473,6 +3656,98 @@ export default function TripDetails() {
                         <View>
                             <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('tripDetail.accommodations')}</Text>
 
+                            {/* ===== Live listings (Google Hotels + Airbnb) ===== */}
+                            {allAccommodations.length > 0 && (
+                                <>
+                                    {/* Segmented type tabs */}
+                                    <View style={{ flexDirection: 'row', backgroundColor: colors.secondary, borderRadius: 14, padding: 4, marginTop: 16 }}>
+                                        {([
+                                            { key: 'all', label: t('tripDetail.staysAll'), count: allAccommodations.length },
+                                            { key: 'hotel', label: t('tripDetail.hotelsLabel'), count: hotelsCount },
+                                            { key: 'airbnb', label: 'Airbnb', count: airbnbsCount },
+                                        ] as const).map((tab) => {
+                                            const active = accommodationType === tab.key;
+                                            return (
+                                                <TouchableOpacity
+                                                    key={tab.key}
+                                                    activeOpacity={0.8}
+                                                    onPress={() => { Haptics.selectionAsync().catch(() => {}); setAccommodationType(tab.key); }}
+                                                    style={{ flex: 1, paddingVertical: 9, borderRadius: 11, alignItems: 'center', backgroundColor: active ? colors.card : 'transparent', shadowColor: '#000', shadowOpacity: active ? 0.08 : 0, shadowRadius: 4, shadowOffset: { width: 0, height: 1 }, elevation: active ? 2 : 0 }}
+                                                >
+                                                    <Text style={{ fontSize: 13, fontWeight: active ? '800' : '600', color: active ? colors.text : colors.textMuted }}>
+                                                        {tab.label}{tab.count ? `  ${tab.count}` : ''}
+                                                    </Text>
+                                                </TouchableOpacity>
+                                            );
+                                        })}
+                                    </View>
+
+                                    {/* Sort chips */}
+                                    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 12 }} contentContainerStyle={{ gap: 8, paddingRight: 8 }}>
+                                        {([
+                                            { key: 'recommended', label: t('tripDetail.sortRecommended'), icon: 'sparkles' as const },
+                                            { key: 'price', label: t('tripDetail.sortLowestPrice'), icon: 'pricetag' as const },
+                                            { key: 'rating', label: t('tripDetail.sortTopRated'), icon: 'star' as const },
+                                        ] as const).map((s) => {
+                                            const active = staysSortBy === s.key;
+                                            return (
+                                                <TouchableOpacity
+                                                    key={s.key}
+                                                    activeOpacity={0.8}
+                                                    onPress={() => setStaysSortBy(s.key)}
+                                                    style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 13, paddingVertical: 8, borderRadius: 20, borderWidth: 1, borderColor: active ? colors.primary : colors.border, backgroundColor: active ? colors.primary : colors.card }}
+                                                >
+                                                    <Ionicons name={s.icon} size={13} color={active ? '#fff' : colors.textMuted} style={{ marginRight: 5 }} />
+                                                    <Text style={{ fontSize: 12, fontWeight: '700', color: active ? '#fff' : colors.textSecondary }}>{s.label}</Text>
+                                                </TouchableOpacity>
+                                            );
+                                        })}
+                                    </ScrollView>
+
+                                    {/* Live prices trust microcopy */}
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 12 }}>
+                                        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#16A34A', marginRight: 6 }} />
+                                        <Text style={{ fontSize: 11, color: colors.textMuted }}>{t('tripDetail.pricesUpdateLive')}</Text>
+                                    </View>
+
+                                    {/* Top picks carousel (all tab only) */}
+                                    {accommodationType === 'all' && allAccommodations.length > 3 && (
+                                        <View style={{ marginTop: 18 }}>
+                                            <Text style={{ fontSize: 15, fontWeight: '800', color: colors.text, marginBottom: 12 }}>{t('tripDetail.topPicks')}</Text>
+                                            <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                                                {[...allAccommodations]
+                                                    .sort((a: any, b: any) => (b.rating || 0) - (a.rating || 0))
+                                                    .slice(0, 3)
+                                                    .map((acc: any, i: number) => renderStayCard(acc, i, { featured: true }))}
+                                            </ScrollView>
+                                        </View>
+                                    )}
+
+                                    {/* Results list */}
+                                    {filteredAccommodations.length > 0 ? (
+                                        filteredAccommodations.map((acc: any, i: number) => renderStayCard(acc, i))
+                                    ) : (
+                                        <View style={{ alignItems: 'center', paddingVertical: 32 }}>
+                                            <Ionicons name="bed-outline" size={40} color={colors.textMuted} />
+                                            <Text style={{ fontSize: 14, color: colors.textMuted, marginTop: 10 }}>{t('tripDetail.noStaysFound')}</Text>
+                                        </View>
+                                    )}
+
+                                    {/* More ways to book toggle */}
+                                    <TouchableOpacity
+                                        activeOpacity={0.7}
+                                        onPress={() => setShowMoreWaysToBook((v) => !v)}
+                                        style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 22, paddingVertical: 12 }}
+                                    >
+                                        <Text style={{ fontSize: 14, fontWeight: '700', color: colors.primary, marginRight: 6 }}>{t('tripDetail.moreWaysToBook')}</Text>
+                                        <Ionicons name={showMoreWaysToBook ? 'chevron-up' : 'chevron-down'} size={16} color={colors.primary} />
+                                    </TouchableOpacity>
+                                </>
+                            )}
+
+                            {/* ===== Partner search cards (fallback / more ways to book) ===== */}
+                            {(showMoreWaysToBook || allAccommodations.length === 0) && (
+                              <>
                             {/* Airbnb Search Card */}
                             <TouchableOpacity
                                 style={{
@@ -3717,6 +3992,8 @@ export default function TripDetails() {
 
                             {renderAffiliateHotelCard({ partner: 'tripcom', item: 'tripcom-hotels', brand: 'Trip.com', badge: 'Trip', color: '#287DFA', subtitle: t('tripDetail.searchHotelsOnTripcom'), cta: t('tripDetail.searchOnTripcomHotels') })}
                             {renderAffiliateHotelCard({ partner: 'esky', item: 'esky-stays', brand: 'eSky', badge: 'eS', color: '#00A1E0', subtitle: t('tripDetail.searchStaysOnEsky'), cta: t('tripDetail.searchOnEskyStays') })}
+                              </>
+                            )}
                         </View>
                     )}
 
