@@ -41,6 +41,10 @@
     "production": {
       "extends": "base",
       "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_CONVEX_URL": "https://canny-bobcat-846.convex.cloud",
+        "EXPO_PUBLIC_CONVEX_SITE_URL": "https://canny-bobcat-846.convex.site"
+      },
       "ios": {
         "env": {
           "RCT_NEW_ARCH_ENABLED": "1"
