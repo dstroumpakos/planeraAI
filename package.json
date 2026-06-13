@@ -22,7 +22,7 @@
     "@react-navigation/bottom-tabs": "^7.3.10",
     "@react-navigation/elements": "^2.3.8",
     "@react-navigation/native": "^7.1.6",
-    "convex": "^1.39.1",
+    "convex": "^1.41.0",
     "convex-helpers": "^0.1.104",
     "expo": "^55.0.17",
     "expo-apple-authentication": "~55.0.13",
@@ -92,5 +92,9 @@
       }
     }
   },
-  "private": true
+  "private": true,
+  "allowScripts": {
+    "esbuild@0.27.0": true,
+    "unrs-resolver@1.11.1": true
+  }
 }

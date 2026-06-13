@@ -44,6 +44,7 @@ import type * as iapVerify from "../iapVerify.js";
 import type * as images from "../images.js";
 import type * as insights from "../insights.js";
 import type * as lib_appleRootCerts from "../lib/appleRootCerts.js";
+import type * as lib_searchApiAccommodations from "../lib/searchApiAccommodations.js";
 import type * as lib_serpApiFlights from "../lib/serpApiFlights.js";
 import type * as lowFareRadar from "../lowFareRadar.js";
 import type * as lowFareRadarAuto from "../lowFareRadarAuto.js";
@@ -127,6 +128,7 @@ declare const fullApi: ApiFromModules<{
   images: typeof images;
   insights: typeof insights;
   "lib/appleRootCerts": typeof lib_appleRootCerts;
+  "lib/searchApiAccommodations": typeof lib_searchApiAccommodations;
   "lib/serpApiFlights": typeof lib_serpApiFlights;
   lowFareRadar: typeof lowFareRadar;
   lowFareRadarAuto: typeof lowFareRadarAuto;
