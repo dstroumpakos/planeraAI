@@ -187,7 +187,12 @@ export default function Onboarding() {
       <>
         <StatusBar barStyle="dark-content" backgroundColor="transparent" translucent={true} />
         <SafeAreaView style={styles.container}>
-        <View style={styles.welcomeContent}>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={styles.welcomeContent}
+          showsVerticalScrollIndicator={false}
+          bounces={false}
+        >
           <View style={styles.logoContainer}>
             <View style={styles.logoInner}>
               <Ionicons name="airplane" size={48} color="#1A1A1A" />
@@ -211,7 +216,7 @@ export default function Onboarding() {
             </View>
           </View>
           
-          <View style={{ flex: 1 }} />
+          <View style={{ flex: 1, minHeight: 24 }} />
           
           <View style={styles.featuresList}>
             <View style={styles.featureItem}>
@@ -244,7 +249,7 @@ export default function Onboarding() {
             <Text style={styles.primaryButtonText}>{t('onboarding.startSetup')}</Text>
             <Ionicons name="arrow-forward" size={20} color="#FFF" />
           </TouchableOpacity>
-        </View>
+        </ScrollView>
       </SafeAreaView>
       </>
     );
@@ -680,7 +685,7 @@ const styles = StyleSheet.create({
   
   // Welcome Screen
   welcomeContent: {
-    flex: 1,
+    flexGrow: 1,
     paddingHorizontal: 24,
     paddingTop: 40,
     paddingBottom: 24,

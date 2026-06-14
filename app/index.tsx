@@ -201,7 +201,12 @@ export default function Index() {
     // Splash Screen
     const renderSplash = () => (
         <View style={styles.splashContainer}>
-            <View style={styles.splashContent}>
+            <ScrollView
+                style={{ flex: 1 }}
+                contentContainerStyle={styles.splashContent}
+                showsVerticalScrollIndicator={false}
+                bounces={false}
+            >
                 <View style={styles.logoContainer}>
                     <View style={styles.logoIconWrapper}>
                         <Image 
@@ -212,7 +217,7 @@ export default function Index() {
                 </View>
                 <Text style={styles.splashTitle}>{t('auth.planera')}</Text>
                 <Text style={styles.splashSubtitle}>{t('auth.tagline')}</Text>
-            </View>
+            </ScrollView>
             
             <View style={styles.splashBottom}>
                 <TouchableOpacity 
@@ -237,7 +242,12 @@ export default function Index() {
         <View style={styles.onboardingContainer}>
             <Text style={styles.onboardingBrand}>PLANERA</Text>
             
-            <View style={styles.onboardingContent}>
+            <ScrollView
+                style={{ flex: 1 }}
+                contentContainerStyle={styles.onboardingContent}
+                showsVerticalScrollIndicator={false}
+                bounces={false}
+            >
                 <Text style={styles.onboardingTitle}>{onboardingData[0].title}</Text>
                 <Text style={styles.onboardingSubtitle}>{onboardingData[0].subtitle}</Text>
                 
@@ -254,7 +264,7 @@ export default function Index() {
                         </View>
                     ))}
                 </View>
-            </View>
+            </ScrollView>
             
             <View style={styles.onboardingBottom}>
                 <TouchableOpacity 
@@ -507,7 +517,7 @@ const styles = StyleSheet.create({
         paddingVertical: 40,
     },
     splashContent: {
-        flex: 1,
+        flexGrow: 1,
         justifyContent: "center",
         alignItems: "center",
     },
@@ -594,7 +604,7 @@ const styles = StyleSheet.create({
         marginBottom: 24,
     },
     onboardingContent: {
-        flex: 1,
+        flexGrow: 1,
     },
     onboardingTitle: {
         fontSize: 32,
