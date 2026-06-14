@@ -927,7 +927,9 @@ export default function TripDetails() {
     const [addingToCart, setAddingToCart] = useState<string | null>(null); // Track which item is being added
     const [selectedFlightIndex, setSelectedFlightIndex] = useState<number>(0);
     const [checkedBaggageSelected, setCheckedBaggageSelected] = useState<boolean>(false);
-    const [activeFilter, setActiveFilter] = useState<'all' | 'flights' | 'packages' | 'food' | 'sights' | 'stays' | 'transportation' | 'insights'>('all');
+    const [activeFilter, setActiveFilter] = useState<'all' | 'flights' | 'packages' | 'food' | 'sights' | 'stays' | 'transportation' | 'insights' | 'budget'>('all');
+    // Whether the user has manually overridden the auto cheapest selection in the budget view
+    const budgetSelectionTouchedRef = useRef(false);
 
     // ─── OTA Packages partnership ───
     const [inquiryPackage, setInquiryPackage] = useState<any | null>(null);
@@ -982,6 +984,37 @@ export default function TripDetails() {
             return () => clearTimeout(timer);
         }
     }, [userSettings, trip?.itinerary?.dayByDayItinerary]);
+
+    // Default the budget view to the cheapest flight + cheapest stay (until the user picks another)
+    useEffect(() => {
+        if (budgetSelectionTouchedRef.current) return;
+        const flightOpts = trip?.itinerary?.flights?.options;
+        if (Array.isArray(flightOpts) && flightOpts.length > 0) {
+            let cheapestFlightIdx = 0;
+            let cheapestFlightPrice = Infinity;
+            flightOpts.forEach((opt: any, idx: number) => {
+                const p = typeof opt?.pricePerPerson === "number" ? opt.pricePerPerson : Infinity;
+                if (p < cheapestFlightPrice) {
+                    cheapestFlightPrice = p;
+                    cheapestFlightIdx = idx;
+                }
+            });
+            setSelectedFlightIndex(cheapestFlightIdx);
+        }
+        const stays = trip?.itinerary?.hotels;
+        if (Array.isArray(stays) && stays.length > 0) {
+            let cheapestStayIdx = 0;
+            let cheapestStayPrice = Infinity;
+            stays.forEach((acc: any, idx: number) => {
+                const p = typeof acc?.pricePerNight === "number" ? acc.pricePerNight : Infinity;
+                if (p < cheapestStayPrice) {
+                    cheapestStayPrice = p;
+                    cheapestStayIdx = idx;
+                }
+            });
+            setSelectedHotelIndex(cheapestStayIdx);
+        }
+    }, [trip?.itinerary?.flights?.options, trip?.itinerary?.hotels]);
 
     useEffect(() => {
         if (trip) {
@@ -1540,6 +1573,42 @@ export default function TripDetails() {
     
     const grandTotal = totalFlightCost + totalBaggageCost + totalAccommodationCost + totalDailyExpenses;
     const pricePerPerson = grandTotal / travelers;
+
+    // ─── Budget breakdown (marketing view) ───
+    // Whether flight prices come from a live search vs an estimate
+    const flightDataSource = itinerary?.flights?.dataSource;
+    const isLiveFlightData = flightDataSource === 'serpapi' || flightDataSource === 'duffel' || flightDataSource === 'low-fare-radar';
+    // Real supplier deal on the selected stay (only when supplier returned an original price)
+    const stayOriginalPrice = typeof selectedAccommodation?.originalPrice === 'number' ? selectedAccommodation.originalPrice : null;
+    const stayDealLabel = selectedAccommodation?.dealLabel || null;
+    // Category split for the proportional bar
+    const budgetCategories = [
+        { key: 'flights', label: t('tripDetail.flightsCost'), amount: totalFlightCost, color: '#3B82F6', icon: 'airplane' as const },
+        { key: 'stays', label: t('tripDetail.staysCost'), amount: totalAccommodationCost, color: '#8B5CF6', icon: 'bed' as const },
+        { key: 'daily', label: t('tripDetail.dailyCost'), amount: totalDailyExpenses, color: '#10B981', icon: 'wallet' as const },
+        { key: 'baggage', label: t('tripDetail.baggageCost'), amount: totalBaggageCost, color: '#F59E0B', icon: 'briefcase' as const },
+    ].filter((c) => c.amount > 0);
+    const perDay = duration > 0 ? grandTotal / duration : grandTotal;
+    const perPersonPerDay = (duration > 0 && travelers > 0) ? grandTotal / duration / travelers : 0;
+    // Target budget set by the user (vs the estimated total)
+    const targetBudget = typeof trip.budgetTotal === 'number' && trip.budgetTotal > 0
+        ? trip.budgetTotal
+        : (typeof trip.budget === 'number' && trip.budget > 0 ? trip.budget : 0);
+    const budgetDelta = targetBudget > 0 ? targetBudget - grandTotal : 0;
+    const isOverBudget = targetBudget > 0 && grandTotal > targetBudget;
+    const budgetUsedPct = targetBudget > 0 ? Math.min((grandTotal / targetBudget) * 100, 100) : 0;
+    const formatMoney = (n: number) => `€${Math.round(n).toLocaleString()}`;
+
+    const selectBudgetFlight = (idx: number) => {
+        budgetSelectionTouchedRef.current = true;
+        setSelectedFlightIndex(idx);
+        if (Platform.OS !== 'web') Haptics.selectionAsync().catch(() => {});
+    };
+    const selectBudgetStay = (idx: number) => {
+        budgetSelectionTouchedRef.current = true;
+        setSelectedHotelIndex(idx);
+        if (Platform.OS !== 'web') Haptics.selectionAsync().catch(() => {});
+    };
 
     const openMap = (query: string) => {
         const url = Platform.select({
@@ -2584,6 +2653,13 @@ export default function TripDetails() {
 
                 {/* Filter Chips */}
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterContainer}>
+                    <TouchableOpacity 
+                        style={[styles.filterChip, { backgroundColor: colors.card, borderColor: colors.border }, activeFilter === 'budget' && { backgroundColor: colors.text, borderColor: colors.text }]}
+                        onPress={() => setActiveFilter('budget')}
+                    >
+                        <Ionicons name="pie-chart" size={18} color={activeFilter === 'budget' ? colors.card : colors.textMuted} />
+                        <Text style={[styles.filterText, { color: colors.textMuted }, activeFilter === 'budget' && { color: colors.card }]}>{t('tripDetail.budgetTab')}</Text>
+                    </TouchableOpacity>
                     <TouchableOpacity 
                         style={[styles.filterChip, { backgroundColor: colors.card, borderColor: colors.border }, activeFilter === 'all' && { backgroundColor: colors.text, borderColor: colors.text }]}
                         onPress={() => setActiveFilter('all')}
@@ -4374,6 +4450,195 @@ export default function TripDetails() {
                             )}
                         </View>
                     )}
+
+                    {activeFilter === 'budget' && (
+                        <View>
+                            {/* Hero — estimated total */}
+                            <View style={[styles.budgetHeroCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                                <View style={styles.budgetHeroHeader}>
+                                    <Text style={[styles.budgetHeroLabel, { color: colors.textMuted }]}>{t('tripDetail.estimatedTotal')}</Text>
+                                    <View style={[styles.budgetSourceTag, { backgroundColor: isLiveFlightData ? 'rgba(16, 185, 129, 0.15)' : 'rgba(100, 116, 139, 0.15)' }]}>
+                                        <Ionicons name={isLiveFlightData ? 'flash' : 'sparkles'} size={11} color={isLiveFlightData ? '#10B981' : colors.textMuted} />
+                                        <Text style={[styles.budgetSourceText, { color: isLiveFlightData ? '#10B981' : colors.textMuted }]}>
+                                            {isLiveFlightData ? t('tripDetail.livePrices') : t('tripDetail.estimatedLabel')}
+                                        </Text>
+                                    </View>
+                                </View>
+                                <Text style={[styles.budgetHeroAmount, { color: colors.text }]}>{formatMoney(grandTotal)}</Text>
+                                <Text style={[styles.budgetHeroSub, { color: colors.textMuted }]}>
+                                    {t('tripDetail.forTravelersNights', { travelers, nights: duration })}
+                                </Text>
+
+                                {/* Proportional category bar */}
+                                {grandTotal > 0 && budgetCategories.length > 0 && (
+                                    <View style={styles.budgetBarTrack}>
+                                        {budgetCategories.map((c) => (
+                                            <View
+                                                key={c.key}
+                                                style={{
+                                                    width: `${(c.amount / grandTotal) * 100}%`,
+                                                    backgroundColor: c.color,
+                                                    height: '100%',
+                                                }}
+                                            />
+                                        ))}
+                                    </View>
+                                )}
+
+                                {/* Category legend */}
+                                <View style={styles.budgetLegend}>
+                                    {budgetCategories.map((c) => (
+                                        <View key={c.key} style={styles.budgetLegendRow}>
+                                            <View style={styles.budgetLegendLeft}>
+                                                <View style={[styles.budgetLegendDot, { backgroundColor: c.color }]} />
+                                                <Ionicons name={c.icon} size={15} color={colors.textMuted} />
+                                                <Text style={[styles.budgetLegendLabel, { color: colors.text }]}>{c.label}</Text>
+                                            </View>
+                                            <View style={styles.budgetLegendRight}>
+                                                <Text style={[styles.budgetLegendAmount, { color: colors.text }]}>{formatMoney(c.amount)}</Text>
+                                                <Text style={[styles.budgetLegendPct, { color: colors.textMuted }]}>
+                                                    {Math.round((c.amount / grandTotal) * 100)}%
+                                                </Text>
+                                            </View>
+                                        </View>
+                                    ))}
+                                </View>
+                            </View>
+
+                            {/* Per-person & per-day stat cards */}
+                            <View style={styles.budgetStatsRow}>
+                                <View style={[styles.budgetStatCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                                    <Ionicons name="person" size={18} color={colors.primary} />
+                                    <Text style={[styles.budgetStatValue, { color: colors.text }]}>{formatMoney(pricePerPerson)}</Text>
+                                    <Text style={[styles.budgetStatLabel, { color: colors.textMuted }]}>{t('tripDetail.perPerson')}</Text>
+                                </View>
+                                <View style={[styles.budgetStatCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                                    <Ionicons name="today" size={18} color={colors.primary} />
+                                    <Text style={[styles.budgetStatValue, { color: colors.text }]}>{formatMoney(perDay)}</Text>
+                                    <Text style={[styles.budgetStatLabel, { color: colors.textMuted }]}>{t('tripDetail.perDay')}</Text>
+                                </View>
+                                <View style={[styles.budgetStatCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                                    <Ionicons name="walk" size={18} color={colors.primary} />
+                                    <Text style={[styles.budgetStatValue, { color: colors.text }]}>{formatMoney(perPersonPerDay)}</Text>
+                                    <Text style={[styles.budgetStatLabel, { color: colors.textMuted }]}>{t('tripDetail.perPersonPerDay')}</Text>
+                                </View>
+                            </View>
+
+                            {/* Budget vs target */}
+                            {targetBudget > 0 && (
+                                <View style={[styles.budgetTargetCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                                    <View style={styles.budgetTargetHeader}>
+                                        <Text style={[styles.budgetTargetTitle, { color: colors.text }]}>{t('tripDetail.budgetVsTarget')}</Text>
+                                        <View style={[styles.budgetTargetBadge, { backgroundColor: isOverBudget ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)' }]}>
+                                            <Ionicons name={isOverBudget ? 'trending-up' : 'checkmark-circle'} size={13} color={isOverBudget ? '#EF4444' : '#10B981'} />
+                                            <Text style={[styles.budgetTargetBadgeText, { color: isOverBudget ? '#EF4444' : '#10B981' }]}>
+                                                {isOverBudget
+                                                    ? t('tripDetail.overBudget', { amount: formatMoney(Math.abs(budgetDelta)) })
+                                                    : t('tripDetail.underBudget', { amount: formatMoney(budgetDelta) })}
+                                            </Text>
+                                        </View>
+                                    </View>
+                                    <View style={[styles.budgetTargetTrack, { backgroundColor: colors.border }]}>
+                                        <View style={{ width: `${budgetUsedPct}%`, height: '100%', borderRadius: 6, backgroundColor: isOverBudget ? '#EF4444' : '#10B981' }} />
+                                    </View>
+                                    <Text style={[styles.budgetTargetCaption, { color: colors.textMuted }]}>
+                                        {t('tripDetail.ofBudget', { used: formatMoney(grandTotal), total: formatMoney(targetBudget) })}
+                                    </Text>
+                                </View>
+                            )}
+
+                            {/* Selectable flight */}
+                            {Array.isArray(flightOptions) && flightOptions.length > 0 && (
+                                <View style={styles.budgetPickerSection}>
+                                    <View style={styles.budgetPickerHeader}>
+                                        <Ionicons name="airplane" size={16} color={colors.text} />
+                                        <Text style={[styles.budgetPickerTitle, { color: colors.text }]}>{t('tripDetail.selectFlight')}</Text>
+                                    </View>
+                                    {flightOptions.map((opt: any, idx: number) => {
+                                        const isSelected = idx === selectedFlightIndex;
+                                        const isCheapest = opt.isBestPrice === true;
+                                        return (
+                                            <TouchableOpacity
+                                                key={opt.id || idx}
+                                                style={[styles.budgetOption, { backgroundColor: colors.card, borderColor: isSelected ? colors.primary : colors.border }]}
+                                                onPress={() => selectBudgetFlight(idx)}
+                                                activeOpacity={0.7}
+                                            >
+                                                <Ionicons name={isSelected ? 'radio-button-on' : 'radio-button-off'} size={20} color={isSelected ? colors.primary : colors.textMuted} />
+                                                <View style={styles.budgetOptionBody}>
+                                                    <View style={styles.budgetOptionTitleRow}>
+                                                        <Text style={[styles.budgetOptionTitle, { color: colors.text }]} numberOfLines={1}>
+                                                            {opt.outbound?.airline || opt.airline || t('tripDetail.flightOption', { number: idx + 1 })}
+                                                        </Text>
+                                                        {isCheapest && (
+                                                            <View style={[styles.budgetCheapestTag, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
+                                                                <Text style={styles.budgetCheapestText}>{t('tripDetail.cheapest')}</Text>
+                                                            </View>
+                                                        )}
+                                                    </View>
+                                                    <Text style={[styles.budgetOptionMeta, { color: colors.textMuted }]} numberOfLines={1}>
+                                                        {opt.checkedBaggageIncluded ? t('tripDetail.bagIncluded') : t('tripDetail.bagExtra')}
+                                                    </Text>
+                                                </View>
+                                                <View style={styles.budgetOptionPriceCol}>
+                                                    <Text style={[styles.budgetOptionPrice, { color: colors.text }]}>{formatMoney(opt.pricePerPerson || 0)}</Text>
+                                                    <Text style={[styles.budgetOptionPriceUnit, { color: colors.textMuted }]}>{t('tripDetail.perPersonShort')}</Text>
+                                                </View>
+                                            </TouchableOpacity>
+                                        );
+                                    })}
+                                </View>
+                            )}
+
+                            {/* Selectable stay */}
+                            {allAccommodations.length > 0 && (
+                                <View style={styles.budgetPickerSection}>
+                                    <View style={styles.budgetPickerHeader}>
+                                        <Ionicons name="bed" size={16} color={colors.text} />
+                                        <Text style={[styles.budgetPickerTitle, { color: colors.text }]}>{t('tripDetail.selectStay')}</Text>
+                                    </View>
+                                    {allAccommodations.map((acc: any, idx: number) => {
+                                        const isSelected = idx === selectedHotelIndex;
+                                        const accCheapest = allAccommodations.every((other: any) => (acc.pricePerNight || Infinity) <= (other.pricePerNight || Infinity));
+                                        const accOriginal = typeof acc.originalPrice === 'number' && acc.originalPrice > (acc.pricePerNight || 0) ? acc.originalPrice : null;
+                                        return (
+                                            <TouchableOpacity
+                                                key={acc.id || acc.name || idx}
+                                                style={[styles.budgetOption, { backgroundColor: colors.card, borderColor: isSelected ? colors.primary : colors.border }]}
+                                                onPress={() => selectBudgetStay(idx)}
+                                                activeOpacity={0.7}
+                                            >
+                                                <Ionicons name={isSelected ? 'radio-button-on' : 'radio-button-off'} size={20} color={isSelected ? colors.primary : colors.textMuted} />
+                                                <View style={styles.budgetOptionBody}>
+                                                    <View style={styles.budgetOptionTitleRow}>
+                                                        <Text style={[styles.budgetOptionTitle, { color: colors.text }]} numberOfLines={1}>{acc.name}</Text>
+                                                        {accCheapest && (
+                                                            <View style={[styles.budgetCheapestTag, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
+                                                                <Text style={styles.budgetCheapestText}>{t('tripDetail.cheapest')}</Text>
+                                                            </View>
+                                                        )}
+                                                    </View>
+                                                    <Text style={[styles.budgetOptionMeta, { color: colors.textMuted }]} numberOfLines={1}>
+                                                        {(acc.type === 'airbnb' ? t('tripDetail.airbnbType') : t('tripDetail.hotelType'))}
+                                                        {acc.dealLabel ? ` · ${acc.dealLabel}` : ''}
+                                                    </Text>
+                                                </View>
+                                                <View style={styles.budgetOptionPriceCol}>
+                                                    {accOriginal && (
+                                                        <Text style={[styles.budgetOptionOriginal, { color: colors.textMuted }]}>{formatMoney(accOriginal)}</Text>
+                                                    )}
+                                                    <Text style={[styles.budgetOptionPrice, { color: colors.text }]}>{formatMoney(acc.pricePerNight || 0)}</Text>
+                                                    <Text style={[styles.budgetOptionPriceUnit, { color: colors.textMuted }]}>{t('tripDetail.perNightShort')}</Text>
+                                                </View>
+                                            </TouchableOpacity>
+                                        );
+                                    })}
+                                </View>
+                            )}
+
+                            <Text style={[styles.budgetDisclaimer, { color: colors.textMuted }]}>{t('tripDetail.budgetDisclaimer')}</Text>
+                        </View>
+                    )}
                 </View>
             </ScrollView>
 
@@ -4908,6 +5173,228 @@ const styles = StyleSheet.create({
     },
     filterTextActive: {
         color: "white",
+    },
+    // ─── Budget breakdown ───
+    budgetHeroCard: {
+        borderRadius: 16,
+        borderWidth: 1,
+        padding: 20,
+        marginTop: 8,
+        marginBottom: 12,
+    },
+    budgetHeroHeader: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+    },
+    budgetHeroLabel: {
+        fontSize: 13,
+        fontWeight: "600",
+        textTransform: "uppercase",
+        letterSpacing: 0.5,
+    },
+    budgetSourceTag: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 12,
+    },
+    budgetSourceText: {
+        fontSize: 11,
+        fontWeight: "700",
+    },
+    budgetHeroAmount: {
+        fontSize: 40,
+        fontWeight: "800",
+        marginTop: 8,
+    },
+    budgetHeroSub: {
+        fontSize: 14,
+        fontWeight: "500",
+        marginTop: 2,
+    },
+    budgetBarTrack: {
+        flexDirection: "row",
+        height: 12,
+        borderRadius: 6,
+        overflow: "hidden",
+        marginTop: 18,
+    },
+    budgetLegend: {
+        marginTop: 16,
+        gap: 12,
+    },
+    budgetLegendRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+    },
+    budgetLegendLeft: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        flex: 1,
+    },
+    budgetLegendDot: {
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+    },
+    budgetLegendLabel: {
+        fontSize: 15,
+        fontWeight: "600",
+    },
+    budgetLegendRight: {
+        flexDirection: "row",
+        alignItems: "baseline",
+        gap: 6,
+    },
+    budgetLegendAmount: {
+        fontSize: 15,
+        fontWeight: "700",
+    },
+    budgetLegendPct: {
+        fontSize: 12,
+        fontWeight: "600",
+        minWidth: 34,
+        textAlign: "right",
+    },
+    budgetStatsRow: {
+        flexDirection: "row",
+        gap: 10,
+        marginBottom: 12,
+    },
+    budgetStatCard: {
+        flex: 1,
+        borderRadius: 14,
+        borderWidth: 1,
+        paddingVertical: 16,
+        paddingHorizontal: 8,
+        alignItems: "center",
+        gap: 6,
+    },
+    budgetStatValue: {
+        fontSize: 17,
+        fontWeight: "800",
+    },
+    budgetStatLabel: {
+        fontSize: 11,
+        fontWeight: "600",
+        textAlign: "center",
+    },
+    budgetTargetCard: {
+        borderRadius: 16,
+        borderWidth: 1,
+        padding: 18,
+        marginBottom: 12,
+    },
+    budgetTargetHeader: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        marginBottom: 14,
+    },
+    budgetTargetTitle: {
+        fontSize: 15,
+        fontWeight: "700",
+    },
+    budgetTargetBadge: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 12,
+    },
+    budgetTargetBadgeText: {
+        fontSize: 12,
+        fontWeight: "700",
+    },
+    budgetTargetTrack: {
+        height: 12,
+        borderRadius: 6,
+        overflow: "hidden",
+    },
+    budgetTargetCaption: {
+        fontSize: 13,
+        fontWeight: "500",
+        marginTop: 10,
+    },
+    budgetPickerSection: {
+        marginBottom: 16,
+    },
+    budgetPickerHeader: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        marginBottom: 10,
+    },
+    budgetPickerTitle: {
+        fontSize: 16,
+        fontWeight: "700",
+    },
+    budgetOption: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+        borderRadius: 14,
+        borderWidth: 1.5,
+        padding: 14,
+        marginBottom: 8,
+    },
+    budgetOptionBody: {
+        flex: 1,
+    },
+    budgetOptionTitleRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+    },
+    budgetOptionTitle: {
+        fontSize: 15,
+        fontWeight: "700",
+        flexShrink: 1,
+    },
+    budgetCheapestTag: {
+        paddingHorizontal: 7,
+        paddingVertical: 2,
+        borderRadius: 8,
+    },
+    budgetCheapestText: {
+        fontSize: 10,
+        fontWeight: "800",
+        color: "#10B981",
+        textTransform: "uppercase",
+    },
+    budgetOptionMeta: {
+        fontSize: 13,
+        fontWeight: "500",
+        marginTop: 3,
+    },
+    budgetOptionPriceCol: {
+        alignItems: "flex-end",
+    },
+    budgetOptionOriginal: {
+        fontSize: 12,
+        fontWeight: "500",
+        textDecorationLine: "line-through",
+    },
+    budgetOptionPrice: {
+        fontSize: 16,
+        fontWeight: "800",
+    },
+    budgetOptionPriceUnit: {
+        fontSize: 11,
+        fontWeight: "500",
+    },
+    budgetDisclaimer: {
+        fontSize: 12,
+        fontWeight: "500",
+        lineHeight: 17,
+        marginTop: 4,
+        marginBottom: 8,
     },
     itineraryContainer: {
         paddingHorizontal: 16,
