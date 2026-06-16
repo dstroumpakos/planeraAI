@@ -2,7 +2,7 @@
 
 import { v } from "convex/values";
 import { internalAction } from "./_generated/server";
-import { internal } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import OpenAI from "openai";
 import * as duffel from "./flights/duffel";
 import { AIRPORTS } from "../lib/airports";
@@ -1495,6 +1495,27 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                 dayByDayItinerary = generateBasicItinerary(trip, activities, restaurants);
             }
 
+            // Inject admin-curated affiliate attraction links (runs for all paths).
+            try {
+                const destinationCity = extractDestinationCity(trip.destination);
+                const attractionLinks = await ctx.runQuery(
+                    api.lowFareRadar.getActiveAttractionLinksForDestination,
+                    { destinationCity },
+                ) as AttractionAffiliateLink[];
+
+                dayByDayItinerary = enrichItineraryWithAffiliateAttractions(
+                    dayByDayItinerary,
+                    trip.destination,
+                    trip.interests || [],
+                    attractionLinks || [],
+                );
+            } catch (affiliateErr) {
+                console.warn(
+                    "⚠️ Affiliate attraction enrichment skipped:",
+                    affiliateErr instanceof Error ? affiliateErr.message : affiliateErr,
+                );
+            }
+
             console.log("📍 STEP 4/5 complete: post-processing finished");
 
             const result = {
@@ -2413,6 +2434,8 @@ interface ItineraryActivity {
     whyThisFits?: string | null;
     walkability?: string | null;
     culinaryTags?: string[] | null;
+    affiliateProvider?: string;
+    affiliateSource?: string;
 }
 
 interface RestaurantInfo {
@@ -2423,6 +2446,133 @@ interface RestaurantInfo {
     reviewCount?: number;
     address?: string;
     tripAdvisorUrl?: string;
+}
+
+interface AttractionAffiliateLink {
+    destinationCity: string;
+    activityTitle: string;
+    displayTitle: string;
+    affiliateUrl: string;
+    partner?: string;
+    price?: number;
+    currency?: string;
+    topSite: boolean;
+    travelStyles?: string[];
+    active: boolean;
+}
+
+function normalizeAffiliateKey(value: string | undefined | null): string {
+    if (!value) return "";
+    return value
+        .trim()
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/\s+/g, " ");
+}
+
+function extractDestinationCity(destination: string): string {
+    return normalizeAffiliateKey(destination.split(",")[0]);
+}
+
+function getBestInsertionDayIndex(days: ItineraryDay[]): number {
+    if (days.length === 0) return 0;
+    let bestIdx = 0;
+    let minCount = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < days.length; i++) {
+        const count = days[i].activities?.length ?? 0;
+        if (count < minCount) {
+            minCount = count;
+            bestIdx = i;
+        }
+    }
+    return bestIdx;
+}
+
+function enrichItineraryWithAffiliateAttractions(
+    dayByDayItinerary: ItineraryDay[],
+    destination: string,
+    interests: string[],
+    links: AttractionAffiliateLink[],
+): ItineraryDay[] {
+    if (!Array.isArray(dayByDayItinerary) || dayByDayItinerary.length === 0) {
+        return dayByDayItinerary;
+    }
+
+    const activeLinks = links.filter((l) => l.active);
+    if (activeLinks.length === 0) {
+        return dayByDayItinerary;
+    }
+
+    const travelStyles = new Set((interests || []).map((i) => normalizeAffiliateKey(i)));
+    const activityMap = new Map<string, AttractionAffiliateLink>();
+    for (const link of activeLinks) {
+        const key1 = normalizeAffiliateKey(link.activityTitle);
+        const key2 = normalizeAffiliateKey(link.displayTitle);
+        if (key1) activityMap.set(key1, link);
+        if (key2) activityMap.set(key2, link);
+    }
+
+    const existingTitles = new Set<string>();
+    for (const day of dayByDayItinerary) {
+        if (!day.activities) continue;
+        for (const activity of day.activities) {
+            const key = normalizeAffiliateKey(activity.title);
+            if (!key) continue;
+            existingTitles.add(key);
+            const match = activityMap.get(key);
+            if (match) {
+                activity.bookingUrl = match.affiliateUrl;
+                activity.affiliateProvider = match.partner || "getyourguide";
+                activity.affiliateSource = "admin_curated";
+                if (match.price !== undefined && match.price !== null) {
+                    activity.price = match.price;
+                    if (match.currency) activity.currency = match.currency;
+                }
+            }
+        }
+    }
+
+    const sortedLinks = [...activeLinks].sort((a, b) => Number(b.topSite) - Number(a.topSite));
+    let nonTopInserted = 0;
+    const nonTopInsertLimit = Math.max(1, dayByDayItinerary.length);
+
+    for (const link of sortedLinks) {
+        const key = normalizeAffiliateKey(link.activityTitle);
+        if (!key || existingTitles.has(key)) continue;
+
+        if (!link.topSite && nonTopInserted >= nonTopInsertLimit) {
+            continue;
+        }
+
+        const linkStyles = new Set((link.travelStyles || []).map((s) => normalizeAffiliateKey(s)));
+        const hasStyleMatch = [...linkStyles].some((s) => travelStyles.has(s));
+        const shouldInsert = link.topSite || hasStyleMatch;
+        if (!shouldInsert) continue;
+
+        const idx = getBestInsertionDayIndex(dayByDayItinerary);
+        if (!dayByDayItinerary[idx].activities) {
+            dayByDayItinerary[idx].activities = [];
+        }
+
+        dayByDayItinerary[idx].activities!.push({
+            time: "11:00 AM",
+            title: link.displayTitle || link.activityTitle,
+            description: `Recommended experience in ${destination}`,
+            type: "activity",
+            duration: "2-3 hours",
+            price: link.price ?? undefined,
+            currency: link.currency ?? undefined,
+            bookingUrl: link.affiliateUrl,
+            tips: null,
+            affiliateProvider: link.partner || "getyourguide",
+            affiliateSource: "admin_forced_insertion",
+        });
+        existingTitles.add(key);
+        if (!link.topSite) nonTopInserted++;
+    }
+
+    return dayByDayItinerary;
 }
 
 

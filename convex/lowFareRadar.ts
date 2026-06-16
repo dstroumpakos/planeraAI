@@ -36,6 +36,212 @@ export const listActive = query({
   },
 });
 
+/** Read active attraction affiliate mappings for one destination (used by itinerary generation). */
+export const getActiveAttractionLinksForDestination = query({
+  args: {
+    destinationCity: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const destinationCity = normalizeKey(args.destinationCity);
+    return await ctx.db
+      .query("attractionAffiliateLinks")
+      .withIndex("by_destination", (q) => q.eq("destinationCity", destinationCity))
+      .collect()
+      .then((rows) => rows.filter((r) => r.active));
+  },
+});
+
+// ─── Attraction affiliate links (admin-curated, GetYourGuide) ───
+
+const attractionFields = {
+  destinationCity: v.string(),
+  destinationCountry: v.optional(v.string()),
+  activityTitle: v.string(),
+  displayTitle: v.optional(v.string()),
+  affiliateUrl: v.string(),
+  partner: v.optional(v.string()),
+  price: v.optional(v.float64()),
+  currency: v.optional(v.string()),
+  topSite: v.optional(v.boolean()),
+  travelStyles: v.optional(v.array(v.string())),
+  notes: v.optional(v.string()),
+  active: v.optional(v.boolean()),
+};
+
+/** List attraction affiliate mappings (admin only) */
+export const listAttractionLinks = query({
+  args: {
+    adminKey: v.string(),
+    destinationCity: v.optional(v.string()),
+    activeOnly: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    validateAdminKey(args.adminKey);
+
+    let rows;
+    if (args.destinationCity) {
+      rows = await ctx.db
+        .query("attractionAffiliateLinks")
+        .withIndex("by_destination", (q) => q.eq("destinationCity", normalizeKey(args.destinationCity!)))
+        .collect();
+    } else if (args.activeOnly) {
+      rows = await ctx.db
+        .query("attractionAffiliateLinks")
+        .withIndex("by_active", (q) => q.eq("active", true))
+        .collect();
+    } else {
+      rows = await ctx.db.query("attractionAffiliateLinks").collect();
+    }
+
+    return rows.sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
+  },
+});
+
+/** Create a new attraction affiliate mapping */
+export const createAttractionLink = mutation({
+  args: {
+    adminKey: v.string(),
+    ...attractionFields,
+  },
+  handler: async (ctx, args) => {
+    validateAdminKey(args.adminKey);
+    validateAffiliateUrl(args.affiliateUrl);
+
+    const destinationCity = normalizeKey(args.destinationCity);
+    const activityTitle = normalizeKey(args.activityTitle);
+
+    const existing = await ctx.db
+      .query("attractionAffiliateLinks")
+      .withIndex("by_destination_activity", (q) =>
+        q.eq("destinationCity", destinationCity).eq("activityTitle", activityTitle)
+      )
+      .first();
+    if (existing) {
+      throw new ConvexError("Attraction mapping already exists for this destination + activity");
+    }
+
+    return await ctx.db.insert("attractionAffiliateLinks", {
+      destinationCity,
+      destinationCountry: args.destinationCountry?.toLowerCase(),
+      activityTitle,
+      displayTitle: args.displayTitle?.trim() || args.activityTitle.trim(),
+      affiliateUrl: args.affiliateUrl.trim(),
+      partner: (args.partner || "getyourguide").toLowerCase(),
+      price: args.price,
+      currency: args.currency?.trim().toUpperCase() || undefined,
+      topSite: !!args.topSite,
+      travelStyles: args.travelStyles?.map((s) => normalizeKey(s)).filter(Boolean),
+      notes: args.notes?.trim(),
+      active: args.active ?? true,
+      createdAt: Date.now(),
+    });
+  },
+});
+
+/** Update an attraction affiliate mapping */
+export const updateAttractionLink = mutation({
+  args: {
+    adminKey: v.string(),
+    id: v.id("attractionAffiliateLinks"),
+    destinationCity: v.optional(v.string()),
+    destinationCountry: v.optional(v.string()),
+    activityTitle: v.optional(v.string()),
+    displayTitle: v.optional(v.string()),
+    affiliateUrl: v.optional(v.string()),
+    partner: v.optional(v.string()),
+    price: v.optional(v.float64()),
+    currency: v.optional(v.string()),
+    topSite: v.optional(v.boolean()),
+    travelStyles: v.optional(v.array(v.string())),
+    notes: v.optional(v.string()),
+    active: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    validateAdminKey(args.adminKey);
+
+    const existing = await ctx.db.get(args.id);
+    if (!existing) throw new ConvexError("Attraction mapping not found");
+
+    if (args.affiliateUrl !== undefined) {
+      validateAffiliateUrl(args.affiliateUrl);
+    }
+
+    const nextDestinationCity =
+      args.destinationCity !== undefined ? normalizeKey(args.destinationCity) : existing.destinationCity;
+    const nextActivityTitle =
+      args.activityTitle !== undefined ? normalizeKey(args.activityTitle) : existing.activityTitle;
+
+    // Ensure uniqueness when changing keys
+    if (
+      nextDestinationCity !== existing.destinationCity ||
+      nextActivityTitle !== existing.activityTitle
+    ) {
+      const conflict = await ctx.db
+        .query("attractionAffiliateLinks")
+        .withIndex("by_destination_activity", (q) =>
+          q.eq("destinationCity", nextDestinationCity).eq("activityTitle", nextActivityTitle)
+        )
+        .first();
+      if (conflict && conflict._id !== args.id) {
+        throw new ConvexError("Another mapping already uses this destination + activity");
+      }
+    }
+
+    const updates: Record<string, any> = { updatedAt: Date.now() };
+    if (args.destinationCity !== undefined) updates.destinationCity = nextDestinationCity;
+    if (args.destinationCountry !== undefined) updates.destinationCountry = args.destinationCountry?.toLowerCase();
+    if (args.activityTitle !== undefined) updates.activityTitle = nextActivityTitle;
+    if (args.displayTitle !== undefined)
+      updates.displayTitle = args.displayTitle?.trim() || nextActivityTitle;
+    if (args.affiliateUrl !== undefined) updates.affiliateUrl = args.affiliateUrl.trim();
+    if (args.partner !== undefined) updates.partner = args.partner?.toLowerCase();
+    if (args.price !== undefined) updates.price = args.price;
+    if (args.currency !== undefined) updates.currency = args.currency?.trim().toUpperCase() || undefined;
+    if (args.topSite !== undefined) updates.topSite = !!args.topSite;
+    if (args.travelStyles !== undefined)
+      updates.travelStyles = args.travelStyles?.map((s: string) => normalizeKey(s)).filter(Boolean);
+    if (args.notes !== undefined) updates.notes = args.notes?.trim();
+    if (args.active !== undefined) updates.active = args.active;
+
+    await ctx.db.patch(args.id, updates);
+  },
+});
+
+/** Delete an attraction mapping */
+export const deleteAttractionLink = mutation({
+  args: {
+    adminKey: v.string(),
+    id: v.id("attractionAffiliateLinks"),
+  },
+  handler: async (ctx, args) => {
+    validateAdminKey(args.adminKey);
+    await ctx.db.delete(args.id);
+  },
+});
+
+function normalizeKey(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ");
+}
+
+function validateAffiliateUrl(url: string) {
+  let parsed: URL;
+  try {
+    parsed = new URL(url.trim());
+  } catch {
+    throw new ConvexError("Invalid affiliate URL");
+  }
+
+  const host = parsed.hostname.toLowerCase();
+  if (!host.includes("getyourguide.")) {
+    throw new ConvexError("Affiliate URL must be a GetYourGuide link");
+  }
+}
+
 /** Get deals matching a user's home airport (for app home page) */
 export const getDealsForUser = authQuery({
   args: {},
