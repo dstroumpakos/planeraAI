@@ -884,6 +884,8 @@
     "includedInFare": "Inclus dans le tarif",
     "included": "Inclus",
     "bookThisFlight": "Réserver ce Vol",
+    "bookOnGetYourGuide": "Réserver sur GetYourGuide",
+    "bookNow": "Réserver Maintenant",
     "flightDetailsUnavailable": "Détails du vol indisponibles",
     "checkFlightAvailability": "Vérifier la Disponibilité des Vols",
     "aiGenerated": "Généré par IA",

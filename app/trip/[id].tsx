@@ -3288,6 +3288,28 @@ export default function TripDetails() {
                                                                         <Ionicons name="chevron-forward" size={12} color="#00AA6C" />
                                                                     </TouchableOpacity>
                                                                 )}
+
+                                                                {/* Affiliate booking button (admin-curated GetYourGuide links) */}
+                                                                {act.bookingUrl && act.affiliateProvider && (
+                                                                    <TouchableOpacity
+                                                                        style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.primary, borderRadius: 10, paddingVertical: 10, marginTop: 6 }}
+                                                                        onPress={(e) => {
+                                                                            e.stopPropagation();
+                                                                            Linking.openURL(act.bookingUrl);
+                                                                        }}
+                                                                        activeOpacity={0.85}
+                                                                    >
+                                                                        <Ionicons name="ticket-outline" size={15} color="#000" />
+                                                                        <Text style={{ color: '#000', fontSize: 13, fontWeight: '700' }}>
+                                                                            {act.affiliateProvider === 'getyourguide'
+                                                                                ? t('tripDetail.bookOnGetYourGuide', { defaultValue: 'Book on GetYourGuide' })
+                                                                                : t('tripDetail.bookNow', { defaultValue: 'Book Now' })}
+                                                                            {(act.price !== undefined && act.price !== null)
+                                                                                ? ` · ${act.currency === 'USD' ? '$' : act.currency === 'GBP' ? '£' : act.currency === 'EUR' ? '€' : (act.currency ? act.currency + ' ' : '')}${act.price}`
+                                                                                : ''}
+                                                                        </Text>
+                                                                    </TouchableOpacity>
+                                                                )}
                                                             </View>
                                                         </TouchableOpacity>
                                                     ))}

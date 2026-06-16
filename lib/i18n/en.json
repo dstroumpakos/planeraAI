@@ -879,6 +879,8 @@
     "includedInFare": "Included in fare",
     "included": "Included",
     "bookThisFlight": "Book This Flight",
+    "bookOnGetYourGuide": "Book on GetYourGuide",
+    "bookNow": "Book Now",
     "flightDetailsUnavailable": "Flight details unavailable",
     "checkFlightAvailability": "Check Flight Availability",
     "aiGenerated": "AI Generated",
