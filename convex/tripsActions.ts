@@ -2489,6 +2489,48 @@ function getBestInsertionDayIndex(days: ItineraryDay[]): number {
     return bestIdx;
 }
 
+// Fuzzy title match: exact, or word-boundary containment where the contained
+// side has >= 2 words. This lets an admin link titled "Sagrada Familia Ticket"
+// match a generated activity "Sagrada Família" (and vice versa) without matching
+// overly generic single-word titles like "Barcelona".
+function affiliateTitlesMatch(activityKey: string, linkKey: string): boolean {
+    if (!activityKey || !linkKey) return false;
+    if (activityKey === linkKey) return true;
+    const shorter = activityKey.length <= linkKey.length ? activityKey : linkKey;
+    const longer = activityKey.length <= linkKey.length ? linkKey : activityKey;
+    if (shorter.split(" ").length < 2) return false;
+    return (
+        longer.startsWith(shorter + " ") ||
+        longer.endsWith(" " + shorter) ||
+        longer.includes(" " + shorter + " ")
+    );
+}
+
+// Find the affiliate link that best matches a generated activity title.
+// Prefers an exact normalized match, then falls back to fuzzy matching.
+function findMatchingAffiliateLink(
+    activityKey: string,
+    links: AttractionAffiliateLink[],
+): AttractionAffiliateLink | undefined {
+    for (const link of links) {
+        if (
+            normalizeAffiliateKey(link.activityTitle) === activityKey ||
+            normalizeAffiliateKey(link.displayTitle) === activityKey
+        ) {
+            return link;
+        }
+    }
+    for (const link of links) {
+        if (
+            affiliateTitlesMatch(activityKey, normalizeAffiliateKey(link.activityTitle)) ||
+            affiliateTitlesMatch(activityKey, normalizeAffiliateKey(link.displayTitle))
+        ) {
+            return link;
+        }
+    }
+    return undefined;
+}
+
 function enrichItineraryWithAffiliateAttractions(
     dayByDayItinerary: ItineraryDay[],
     destination: string,
@@ -2505,22 +2547,26 @@ function enrichItineraryWithAffiliateAttractions(
     }
 
     const travelStyles = new Set((interests || []).map((i) => normalizeAffiliateKey(i)));
-    const activityMap = new Map<string, AttractionAffiliateLink>();
-    for (const link of activeLinks) {
-        const key1 = normalizeAffiliateKey(link.activityTitle);
-        const key2 = normalizeAffiliateKey(link.displayTitle);
-        if (key1) activityMap.set(key1, link);
-        if (key2) activityMap.set(key2, link);
-    }
 
-    const existingTitles = new Set<string>();
+    // Track which links have already been applied to an existing activity so we
+    // don't force-insert a duplicate card in Pass 2.
+    const handledLinkKeys = new Set<string>();
+    const markLinkHandled = (link: AttractionAffiliateLink) => {
+        const k1 = normalizeAffiliateKey(link.activityTitle);
+        const k2 = normalizeAffiliateKey(link.displayTitle);
+        if (k1) handledLinkKeys.add(k1);
+        if (k2) handledLinkKeys.add(k2);
+    };
+
+    // Pass 1: enhance existing matching activities with the affiliate booking link.
+    const existingActivityKeys: string[] = [];
     for (const day of dayByDayItinerary) {
         if (!day.activities) continue;
         for (const activity of day.activities) {
             const key = normalizeAffiliateKey(activity.title);
             if (!key) continue;
-            existingTitles.add(key);
-            const match = activityMap.get(key);
+            existingActivityKeys.push(key);
+            const match = findMatchingAffiliateLink(key, activeLinks);
             if (match) {
                 activity.bookingUrl = match.affiliateUrl;
                 activity.affiliateProvider = match.partner || "getyourguide";
@@ -2529,17 +2575,24 @@ function enrichItineraryWithAffiliateAttractions(
                     activity.price = match.price;
                     if (match.currency) activity.currency = match.currency;
                 }
+                markLinkHandled(match);
             }
         }
     }
 
+    // Pass 2: force-insert links that weren't matched to any existing activity.
     const sortedLinks = [...activeLinks].sort((a, b) => Number(b.topSite) - Number(a.topSite));
     let nonTopInserted = 0;
     const nonTopInsertLimit = Math.max(1, dayByDayItinerary.length);
 
     for (const link of sortedLinks) {
         const key = normalizeAffiliateKey(link.activityTitle);
-        if (!key || existingTitles.has(key)) continue;
+        const displayKey = normalizeAffiliateKey(link.displayTitle);
+        if (!key) continue;
+        // Skip if already applied to an existing activity, or if it fuzzy-matches
+        // any existing activity title (prevents duplicate cards).
+        if (handledLinkKeys.has(key) || (displayKey && handledLinkKeys.has(displayKey))) continue;
+        if (existingActivityKeys.some((ak) => affiliateTitlesMatch(ak, key) || affiliateTitlesMatch(ak, displayKey))) continue;
 
         if (!link.topSite && nonTopInserted >= nonTopInsertLimit) {
             continue;
@@ -2568,7 +2621,7 @@ function enrichItineraryWithAffiliateAttractions(
             affiliateProvider: link.partner || "getyourguide",
             affiliateSource: "admin_forced_insertion",
         });
-        existingTitles.add(key);
+        existingActivityKeys.push(key);
         if (!link.topSite) nonTopInserted++;
     }
 
