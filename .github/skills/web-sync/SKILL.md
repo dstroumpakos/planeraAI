@@ -108,10 +108,18 @@ After syncing changes to the web repo:
 2. **Website**: Requires manual deployment to VPS:
 ```powershell
 cd C:\Users\nioni\planeraai-web
-tar -cf planeraai-web.tar --exclude=node_modules --exclude=.next --exclude=.git -C .. planeraai-web
-scp planeraai-web.tar deploy@46.225.183.187:/home/deploy/
-ssh deploy@46.225.183.187 "cd /home/deploy && rm -rf planeraai-web/node_modules planeraai-web/.next && tar -xf planeraai-web.tar && rm planeraai-web.tar && cd planeraai-web && npm install && npm run build && pm2 restart planeraai-web"
+# Verify the build compiles locally BEFORE deploying — the remote step deletes
+# .next before rebuilding, so a broken build takes the live site down.
+npm run build
+tar -cf ..\planeraai-web.tar --exclude=node_modules --exclude=.next --exclude=.git --exclude=*.tar -C .. planeraai-web
+scp ..\planeraai-web.tar deploy@46.225.183.187:/home/deploy/
+ssh deploy@46.225.183.187 "cd /home/deploy && rm -rf planeraai-web/node_modules planeraai-web/.next && tar -xf planeraai-web.tar && rm planeraai-web.tar && cd planeraai-web && npm install --legacy-peer-deps --no-audit --no-fund && npm run build && pm2 restart planeraai-web"
 ```
+
+> **Deploy gotchas (learned the hard way):**
+> - **Always pass `--legacy-peer-deps`** to the remote `npm install`. The web repo uses React 19 + Next 16; a plain `npm install` fails with `ERESOLVE` on the VPS, leaving `next` uninstalled so the build can't run. (The web repo now ships an `.npmrc` with `legacy-peer-deps=true`, but keep the flag for safety.)
+> - **Never pipe `npm run build` through `tail`/`head` inside an `&&` chain.** The pipe's exit code (0) masks a build failure, so `pm2 restart` runs against a missing build and the process crash-loops. If you need to trim output, redirect to a log file (`> build.log 2>&1`) and `tail` it only on failure.
+> - **Verify after deploy:** `curl -s -o /dev/null -w "%{http_code}" https://planeraai.app/` should return `200`, and `pm2 jlist` should show the restart counter holding steady (not climbing).
 
 ## Checklist Template
 After syncing:

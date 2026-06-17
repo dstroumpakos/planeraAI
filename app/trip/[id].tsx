@@ -3090,27 +3090,43 @@ export default function TripDetails() {
                                                     </TouchableOpacity>
                                                 )}
 
-                                                {/* Affiliate booking button + price (admin-curated GetYourGuide links) */}
-                                                {activity.bookingUrl && activity.affiliateProvider && (
-                                                    <TouchableOpacity
-                                                        style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.primary, borderRadius: 10, paddingVertical: 10, marginTop: 8 }}
-                                                        onPress={(e) => {
-                                                            e.stopPropagation();
-                                                            Linking.openURL(activity.bookingUrl);
-                                                        }}
-                                                        activeOpacity={0.85}
-                                                    >
-                                                        <Ionicons name="ticket-outline" size={15} color="#000" />
-                                                        <Text style={{ color: '#000', fontSize: 13, fontWeight: '700' }}>
-                                                            {activity.affiliateProvider === 'getyourguide'
-                                                                ? t('tripDetail.bookOnGetYourGuide', { defaultValue: 'Book on GetYourGuide' })
-                                                                : t('tripDetail.bookNow', { defaultValue: 'Book Now' })}
-                                                            {(activity.price !== undefined && activity.price !== null)
-                                                                ? ` · ${activity.currency === 'USD' ? '$' : activity.currency === 'GBP' ? '£' : activity.currency === 'EUR' ? '€' : (activity.currency ? activity.currency + ' ' : '')}${activity.price}`
-                                                                : ''}
-                                                        </Text>
-                                                    </TouchableOpacity>
-                                                )}
+                                                {/* Affiliate booking CTA (admin-curated GetYourGuide links) */}
+                                                {activity.bookingUrl && activity.affiliateProvider && (() => {
+                                                    const isGyg = activity.affiliateProvider === 'getyourguide';
+                                                    const hasPrice = activity.price !== undefined && activity.price !== null;
+                                                    const symbol = activity.currency === 'USD' ? '$' : activity.currency === 'GBP' ? '£' : activity.currency === 'EUR' ? '€' : (activity.currency ? activity.currency + ' ' : '');
+                                                    const priceStr = hasPrice ? `${symbol}${activity.price}` : '';
+                                                    return (
+                                                        <TouchableOpacity
+                                                            style={[styles.gygCtaButton, { backgroundColor: colors.primary }]}
+                                                            onPress={(e) => {
+                                                                e.stopPropagation();
+                                                                Linking.openURL(activity.bookingUrl);
+                                                            }}
+                                                            activeOpacity={0.85}
+                                                        >
+                                                            <View style={styles.gygCtaTopRow}>
+                                                                <View style={styles.gygCtaLabelWrap}>
+                                                                    <Ionicons name="ticket" size={16} color="#000" />
+                                                                    <Text style={styles.gygCtaTitle} numberOfLines={1}>
+                                                                        {isGyg
+                                                                            ? t('tripDetail.gygReserveSpot', { defaultValue: 'Reserve your spot' })
+                                                                            : t('tripDetail.bookNow', { defaultValue: 'Book Now' })}
+                                                                        {priceStr
+                                                                            ? ` · ${t('tripDetail.priceFrom', { defaultValue: 'from' })} ${priceStr}`
+                                                                            : ''}
+                                                                    </Text>
+                                                                </View>
+                                                                <Ionicons name="arrow-forward" size={15} color="#000" />
+                                                            </View>
+                                                            {isGyg && (
+                                                                <Text style={styles.gygCtaSub} numberOfLines={1}>
+                                                                    {t('tripDetail.gygTrust', { defaultValue: 'Free cancellation · Powered by GetYourGuide' })}
+                                                                </Text>
+                                                            )}
+                                                        </TouchableOpacity>
+                                                    );
+                                                })()}
                                             </View>
                                             <View style={styles.googleMapsIcon}>
                                                 <Ionicons 
@@ -6437,6 +6453,38 @@ const styles = StyleSheet.create({
         color: "white",
         fontSize: 14,
         fontWeight: "600",
+    },
+    // GetYourGuide / affiliate experience CTA (two-line: action + trust)
+    gygCtaButton: {
+        borderRadius: 10,
+        paddingVertical: 9,
+        paddingHorizontal: 12,
+        marginTop: 8,
+    },
+    gygCtaTopRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 8,
+    },
+    gygCtaLabelWrap: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 7,
+        flex: 1,
+    },
+    gygCtaTitle: {
+        color: "#000",
+        fontSize: 13.5,
+        fontWeight: "800",
+        flexShrink: 1,
+    },
+    gygCtaSub: {
+        color: "rgba(0,0,0,0.62)",
+        fontSize: 11,
+        fontWeight: "600",
+        marginTop: 3,
+        marginLeft: 23,
     },
     // Baggage option styles
     baggageOptionLeft: {
