@@ -3108,7 +3108,7 @@ export default function TripDetails() {
                                                             <View style={styles.gygCtaTopRow}>
                                                                 <View style={styles.gygCtaLabelWrap}>
                                                                     <Ionicons name="ticket" size={16} color="#000" />
-                                                                    <Text style={styles.gygCtaTitle} numberOfLines={1}>
+                                                                    <Text style={styles.gygCtaTitle} numberOfLines={2}>
                                                                         {isGyg
                                                                             ? t('tripDetail.gygReserveSpot', { defaultValue: 'Reserve your spot' })
                                                                             : t('tripDetail.bookNow', { defaultValue: 'Book Now' })}
@@ -3120,7 +3120,7 @@ export default function TripDetails() {
                                                                 <Ionicons name="arrow-forward" size={15} color="#000" />
                                                             </View>
                                                             {isGyg && (
-                                                                <Text style={styles.gygCtaSub} numberOfLines={1}>
+                                                                <Text style={styles.gygCtaSub} numberOfLines={2}>
                                                                     {t('tripDetail.gygTrust', { defaultValue: 'Free cancellation · Powered by GetYourGuide' })}
                                                                 </Text>
                                                             )}
