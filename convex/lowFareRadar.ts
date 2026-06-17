@@ -236,9 +236,8 @@ function validateAffiliateUrl(url: string) {
     throw new ConvexError("Invalid affiliate URL");
   }
 
-  const host = parsed.hostname.toLowerCase();
-  if (!host.includes("getyourguide.")) {
-    throw new ConvexError("Affiliate URL must be a GetYourGuide link");
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new ConvexError("Affiliate URL must be an http(s) link");
   }
 }
 
