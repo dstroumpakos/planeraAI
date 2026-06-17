@@ -727,6 +727,8 @@ export default defineSchema({
         travelStyles: v.optional(v.array(v.string())),
         notes: v.optional(v.string()),
         active: v.boolean(),
+        clicks: v.optional(v.float64()), // # of times users tapped this booking link
+        lastClickedAt: v.optional(v.float64()),
         createdAt: v.float64(),
         updatedAt: v.optional(v.float64()),
     })

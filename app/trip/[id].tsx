@@ -799,6 +799,7 @@ export default function TripDetails() {
     const unlikeInsight = useAuthenticatedMutation(api.insights.unlike as any);
     // @ts-ignore
     const trackClick = useMutation(api.bookings.trackClick);
+    const trackAttractionClick = useMutation((api as any).lowFareRadar.trackAttractionClick);
     const resolveBookingUrl = useAction(api.flightsResolve.resolveBookingUrl);
     const insights = useQuery(api.insights.getDestinationInsights, trip ? { destination: trip.destination } : "skip");
     const myLikedInsightIds = useQuery((api as any).insights.getMyLikedInsightIds, token ? { token } : "skip");
@@ -2906,6 +2907,7 @@ export default function TripDetails() {
                                             // Curated affiliate attraction: tapping the card opens OUR exact
                                             // booking link (not a generic search / Maps).
                                             if (activity.bookingUrl && activity.affiliateProvider) {
+                                                if (activity.affiliateLinkId) trackAttractionClick({ id: activity.affiliateLinkId }).catch(() => {});
                                                 Linking.openURL(activity.bookingUrl);
                                                 return;
                                             }
@@ -3101,6 +3103,7 @@ export default function TripDetails() {
                                                             style={[styles.gygCtaButton, { backgroundColor: colors.primary }]}
                                                             onPress={(e) => {
                                                                 e.stopPropagation();
+                                                                if (activity.affiliateLinkId) trackAttractionClick({ id: activity.affiliateLinkId }).catch(() => {});
                                                                 Linking.openURL(activity.bookingUrl);
                                                             }}
                                                             activeOpacity={0.85}

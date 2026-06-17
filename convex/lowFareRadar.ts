@@ -709,6 +709,21 @@ export const trackBookingClick = mutation({
   },
 });
 
+/** Increment click count when a user taps an attraction affiliate booking link */
+export const trackAttractionClick = mutation({
+  args: {
+    id: v.id("attractionAffiliateLinks"),
+  },
+  handler: async (ctx, args) => {
+    const link = await ctx.db.get(args.id);
+    if (!link) return;
+    await ctx.db.patch(args.id, {
+      clicks: (link.clicks ?? 0) + 1,
+      lastClickedAt: Date.now(),
+    });
+  },
+});
+
 /** Increment planTripClicks when a user generates a trip from a deal */
 export const trackPlanTripClick = mutation({
   args: {

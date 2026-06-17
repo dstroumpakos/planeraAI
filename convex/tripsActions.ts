@@ -2461,6 +2461,7 @@ interface ItineraryActivity {
     culinaryTags?: string[] | null;
     affiliateProvider?: string;
     affiliateSource?: string;
+    affiliateLinkId?: string;
 }
 
 interface RestaurantInfo {
@@ -2474,6 +2475,7 @@ interface RestaurantInfo {
 }
 
 interface AttractionAffiliateLink {
+    _id?: string;
     destinationCity: string;
     activityTitle: string;
     displayTitle: string;
@@ -2582,6 +2584,7 @@ function enrichItineraryWithAffiliateAttractions(
                 activity.bookingUrl = match.affiliateUrl;
                 activity.affiliateProvider = match.partner || "getyourguide";
                 activity.affiliateSource = "admin_curated";
+                activity.affiliateLinkId = match._id;
                 if (match.price !== undefined && match.price !== null) {
                     activity.price = match.price;
                     if (match.currency) activity.currency = match.currency;
@@ -2634,6 +2637,7 @@ function enrichItineraryWithAffiliateAttractions(
             tips: null,
             affiliateProvider: link.partner || "getyourguide",
             affiliateSource: "admin_forced_insertion",
+            affiliateLinkId: link._id,
         });
         affiliateInsertPos++;
         existingActivityKeys.push(key);
