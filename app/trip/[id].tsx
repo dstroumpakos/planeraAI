@@ -5543,7 +5543,9 @@ const styles = StyleSheet.create({
     },
     timelineLine: {
         position: "absolute",
-        top: 40,
+        // Start below the icon + time block so the connector doesn't cut
+        // through the time labels (which stack under the icon).
+        top: 88,
         bottom: -24,
         width: 2,
         backgroundColor: "#E2E8F0",
