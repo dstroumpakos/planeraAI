@@ -1570,8 +1570,20 @@ export default function TripDetails() {
     const totalFlightCost = flightPricePerPerson * travelers;
     const totalAccommodationCost = accommodationPricePerNight * duration;
     const totalDailyExpenses = dailyExpensesPerPerson * travelers * duration;
-    
-    const grandTotal = totalFlightCost + totalBaggageCost + totalAccommodationCost + totalDailyExpenses;
+
+    // Curated bookable experiences (GetYourGuide etc.): sum their ticket prices
+    // across the itinerary (per person × travelers) so they show in the budget.
+    const totalExperiencesCost = (itinerary?.dayByDayItinerary || []).reduce((sum: number, day: any) => {
+        const acts = day?.activities || [];
+        return sum + acts.reduce((s: number, a: any) => {
+            if (a?.affiliateProvider && typeof a?.price === 'number' && a.price > 0) {
+                return s + a.price * travelers;
+            }
+            return s;
+        }, 0);
+    }, 0);
+
+    const grandTotal = totalFlightCost + totalBaggageCost + totalAccommodationCost + totalDailyExpenses + totalExperiencesCost;
     const pricePerPerson = grandTotal / travelers;
 
     // ─── Budget breakdown (marketing view) ───
@@ -1586,6 +1598,7 @@ export default function TripDetails() {
         { key: 'flights', label: t('tripDetail.flightsCost'), amount: totalFlightCost, color: '#3B82F6', icon: 'airplane' as const },
         { key: 'stays', label: t('tripDetail.staysCost'), amount: totalAccommodationCost, color: '#8B5CF6', icon: 'bed' as const },
         { key: 'daily', label: t('tripDetail.dailyCost'), amount: totalDailyExpenses, color: '#10B981', icon: 'wallet' as const },
+        { key: 'experiences', label: t('tripDetail.experiencesCost', { defaultValue: 'Experiences' }), amount: totalExperiencesCost, color: '#EC4899', icon: 'ticket' as const },
         { key: 'baggage', label: t('tripDetail.baggageCost'), amount: totalBaggageCost, color: '#F59E0B', icon: 'briefcase' as const },
     ].filter((c) => c.amount > 0);
     const perDay = duration > 0 ? grandTotal / duration : grandTotal;
@@ -2890,6 +2903,12 @@ export default function TripDetails() {
                                         }}
                                         delayLongPress={500}
                                         onPress={() => {
+                                            // Curated affiliate attraction: tapping the card opens OUR exact
+                                            // booking link (not a generic search / Maps).
+                                            if (activity.bookingUrl && activity.affiliateProvider) {
+                                                Linking.openURL(activity.bookingUrl);
+                                                return;
+                                            }
                                             const title = activity.title?.toLowerCase() || '';
                                             const description = activity.description?.toLowerCase() || '';
                                             const type = activity.type?.toLowerCase() || '';
@@ -3068,6 +3087,28 @@ export default function TripDetails() {
                                                             </Text>
                                                         )}
                                                         <Ionicons name="chevron-forward" size={12} color="#00AA6C" />
+                                                    </TouchableOpacity>
+                                                )}
+
+                                                {/* Affiliate booking button + price (admin-curated GetYourGuide links) */}
+                                                {activity.bookingUrl && activity.affiliateProvider && (
+                                                    <TouchableOpacity
+                                                        style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.primary, borderRadius: 10, paddingVertical: 10, marginTop: 8 }}
+                                                        onPress={(e) => {
+                                                            e.stopPropagation();
+                                                            Linking.openURL(activity.bookingUrl);
+                                                        }}
+                                                        activeOpacity={0.85}
+                                                    >
+                                                        <Ionicons name="ticket-outline" size={15} color="#000" />
+                                                        <Text style={{ color: '#000', fontSize: 13, fontWeight: '700' }}>
+                                                            {activity.affiliateProvider === 'getyourguide'
+                                                                ? t('tripDetail.bookOnGetYourGuide', { defaultValue: 'Book on GetYourGuide' })
+                                                                : t('tripDetail.bookNow', { defaultValue: 'Book Now' })}
+                                                            {(activity.price !== undefined && activity.price !== null)
+                                                                ? ` · ${activity.currency === 'USD' ? '$' : activity.currency === 'GBP' ? '£' : activity.currency === 'EUR' ? '€' : (activity.currency ? activity.currency + ' ' : '')}${activity.price}`
+                                                                : ''}
+                                                        </Text>
                                                     </TouchableOpacity>
                                                 )}
                                             </View>
@@ -3286,28 +3327,6 @@ export default function TripDetails() {
                                                                             </Text>
                                                                         )}
                                                                         <Ionicons name="chevron-forward" size={12} color="#00AA6C" />
-                                                                    </TouchableOpacity>
-                                                                )}
-
-                                                                {/* Affiliate booking button (admin-curated GetYourGuide links) */}
-                                                                {act.bookingUrl && act.affiliateProvider && (
-                                                                    <TouchableOpacity
-                                                                        style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: colors.primary, borderRadius: 10, paddingVertical: 10, marginTop: 6 }}
-                                                                        onPress={(e) => {
-                                                                            e.stopPropagation();
-                                                                            Linking.openURL(act.bookingUrl);
-                                                                        }}
-                                                                        activeOpacity={0.85}
-                                                                    >
-                                                                        <Ionicons name="ticket-outline" size={15} color="#000" />
-                                                                        <Text style={{ color: '#000', fontSize: 13, fontWeight: '700' }}>
-                                                                            {act.affiliateProvider === 'getyourguide'
-                                                                                ? t('tripDetail.bookOnGetYourGuide', { defaultValue: 'Book on GetYourGuide' })
-                                                                                : t('tripDetail.bookNow', { defaultValue: 'Book Now' })}
-                                                                            {(act.price !== undefined && act.price !== null)
-                                                                                ? ` · ${act.currency === 'USD' ? '$' : act.currency === 'GBP' ? '£' : act.currency === 'EUR' ? '€' : (act.currency ? act.currency + ' ' : '')}${act.price}`
-                                                                                : ''}
-                                                                        </Text>
                                                                     </TouchableOpacity>
                                                                 )}
                                                             </View>

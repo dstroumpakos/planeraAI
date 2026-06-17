@@ -905,6 +905,7 @@
     "flightsCost": "Vols",
     "staysCost": "Hébergement",
     "dailyCost": "Dépenses quotidiennes",
+    "experiencesCost": "Expériences",
     "baggageCost": "Bagages",
     "perPerson": "Par personne",
     "perDay": "Par jour",
