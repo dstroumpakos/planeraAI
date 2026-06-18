@@ -148,6 +148,32 @@ export function timeToMinutes(value: string | undefined): number {
     return hours * 60 + minutes;
 }
 
+// Time/position fields that belong to a day SLOT rather than to the activity
+// itself. When activities are reordered within a day, the slots stay put (so the
+// time column stays chronological) and the activities move between them.
+const SLOT_FIELDS = ["time", "startTime", "endTime", "duration", "durationMinutes", "travelFromPrevious"] as const;
+
+/**
+ * Reassign the day's time slots by position. `orderedActivities` is the day in
+ * its original (chronological) order — its slot fields are the canonical slots.
+ * `newOrder` is the same activities permuted; each lands in a slot by index, so
+ * position 0 always keeps the earliest time, etc. Lengths should match (use for
+ * within-day reorder). Returns a NEW array; inputs are not mutated.
+ */
+export function reassignTimeSlots(
+    orderedActivities: ItineraryActivityLike[],
+    newOrder: ItineraryActivityLike[]
+): ItineraryActivityLike[] {
+    const slots = orderedActivities.map((a) => {
+        const slot: Record<string, unknown> = {};
+        for (const f of SLOT_FIELDS) {
+            if (a && f in a) slot[f] = (a as any)[f];
+        }
+        return slot;
+    });
+    return newOrder.map((a, i) => ({ ...a, ...(slots[i] || {}) }));
+}
+
 /**
  * Re-sort a single day's activities by start time (stable for equal/unknown
  * times) so the day stays chronologically ordered after a time edit. Returns a

@@ -4,7 +4,7 @@ import { internalMutation, internalQuery, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { isSubscriptionActiveWithGrace } from "./helpers/subscription";
 import { getDistanceMeters } from "./helpers/geo";
-import { assignActivityIds, dedupeVenues, resequenceDayTimes } from "./helpers/itinerary";
+import { assignActivityIds, dedupeVenues, resequenceDayTimes, reassignTimeSlots } from "./helpers/itinerary";
 
 export const create = authMutation({
     args: {
@@ -1116,7 +1116,12 @@ export const moveActivity = authMutation({
         if (args.fromDayIndex < 0 || args.fromDayIndex >= days.length) throw new Error("Invalid source day");
         if (args.toDayIndex < 0 || args.toDayIndex >= days.length) throw new Error("Invalid target day");
 
-        const fromDay = { ...days[args.fromDayIndex], activities: [...(days[args.fromDayIndex].activities || [])] };
+        const sameDay = args.fromDayIndex === args.toDayIndex;
+        // Snapshot the source day's original (chronological) order BEFORE any
+        // splice so a same-day reorder can keep the time column in place.
+        const originalSourceActivities = [...(days[args.fromDayIndex].activities || [])];
+
+        const fromDay = { ...days[args.fromDayIndex], activities: [...originalSourceActivities] };
         if (args.fromActivityIndex < 0 || args.fromActivityIndex >= fromDay.activities.length) {
             throw new Error("Invalid source activity");
         }
@@ -1131,6 +1136,18 @@ export const moveActivity = authMutation({
         const insertIndex = Math.max(0, Math.min(args.toActivityIndex, targetDay.activities.length));
         targetDay.activities.splice(insertIndex, 0, moved);
         days[args.toDayIndex] = targetDay;
+
+        if (sameDay) {
+            // Reorder within a day: times belong to POSITIONS, not activities —
+            // keep the chronological slots fixed and let the activities move
+            // between them (otherwise the time column runs backwards).
+            const reordered = reassignTimeSlots(originalSourceActivities, days[args.toDayIndex].activities);
+            days[args.toDayIndex] = { ...days[args.toDayIndex], activities: reordered };
+        } else {
+            // Cross-day move: the moved activity carries its old time into a new
+            // day, so re-sort the target day by time to keep it chronological.
+            days[args.toDayIndex] = resequenceDayTimes(days[args.toDayIndex]);
+        }
 
         // The first activity of any touched day has no predecessor to walk from.
         days[args.fromDayIndex] = clearFirstTravel(days[args.fromDayIndex]);

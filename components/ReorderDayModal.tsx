@@ -7,6 +7,16 @@ import { useTranslation } from "react-i18next";
 
 const ROW_HEIGHT = 64;
 
+// Time/position fields belong to the day SLOT, not the activity — kept in sync
+// with reassignTimeSlots() in convex/helpers/itinerary.ts so the modal shows the
+// same chronological times the server will persist.
+const SLOT_FIELDS = ["time", "startTime", "endTime", "duration", "durationMinutes", "travelFromPrevious"];
+function pickSlot(a: any): Record<string, any> {
+    const slot: Record<string, any> = {};
+    for (const f of SLOT_FIELDS) if (a && f in a) slot[f] = a[f];
+    return slot;
+}
+
 interface ReorderDayModalProps {
     visible: boolean;
     dayNumber: number;
@@ -83,10 +93,15 @@ export default function ReorderDayModal({
                 draggingRef.current = null;
                 setDraggingIndex(null);
                 if (to !== from) {
-                    const next = [...itemsRef.current];
+                    // Slots stay fixed to positions; activities move between them
+                    // so the time column stays chronological (mirrors backend).
+                    const cur = itemsRef.current;
+                    const slots = cur.map(pickSlot);
+                    const next = [...cur];
                     const [moved] = next.splice(from, 1);
                     next.splice(to, 0, moved);
-                    setItems(next);
+                    const remapped = next.map((a, i) => ({ ...a, ...(slots[i] || {}) }));
+                    setItems(remapped);
                     onReorder(from, to);
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 }
