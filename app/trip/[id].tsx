@@ -12,6 +12,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { BlurView } from "expo-blur";
 import { useDestinationImage } from "@/lib/useImages";
 import ActivityCard from "@/components/ActivityCard";
+import TripGenerationView, { EnrichingToast } from "@/components/TripGenerationView";
 import { ImageWithAttribution } from "@/components/ImageWithAttribution";
 import { useTheme } from "@/lib/ThemeContext";
 import { LinearGradient } from "expo-linear-gradient";
@@ -1315,184 +1316,11 @@ export default function TripDetails() {
     }
 
     if (trip.status === "generating") {
-        const currentImage = loadingImages[currentImageIndex];
-        
+        const bg = loadingImages[currentImageIndex]?.url
+            ? optimizeUnsplashUrl(loadingImages[currentImageIndex].url, IMAGE_SIZES.HERO)
+            : undefined;
         return (
-            <View style={styles.loadingContainer}>
-                {/* Background Image Slideshow */}
-                {currentImage ? (
-                    <Image 
-                        source={{ uri: optimizeUnsplashUrl(currentImage.url, IMAGE_SIZES.HERO) }} 
-                        style={styles.loadingBackgroundImage}
-                        blurRadius={Platform.OS === 'ios' ? 1 : 0.5}
-                        cachePolicy="disk"
-                        transition={500}
-                    />
-                ) : (
-                    <View style={[styles.loadingBackgroundImage, { backgroundColor: '#1A1A1A' }]} />
-                )}
-                
-                {/* Dark Overlay */}
-                <LinearGradient
-                    colors={['rgba(0,0,0,0.3)', 'rgba(0,0,0,0.7)', 'rgba(0,0,0,0.9)']}
-                    style={styles.loadingOverlay}
-                />
-                
-                {/* Content */}
-                <SafeAreaView style={styles.loadingContent}>
-                    {/* Back Button */}
-                    <TouchableOpacity 
-                        style={styles.loadingBackButton} 
-                        onPress={() => router.back()}
-                    >
-                        <Ionicons name="chevron-back" size={24} color="white" />
-                    </TouchableOpacity>
-                    
-                    {/* Center Content */}
-                    <ScrollView 
-                        style={styles.loadingCenterContent}
-                        contentContainerStyle={styles.loadingCenterContentInner}
-                        showsVerticalScrollIndicator={false}
-                    >
-                        {/* Trip Title with Route */}
-                        <View style={styles.loadingTitleContainer}>
-                            <Text style={styles.loadingDestination}>{trip.origin || t('tripDetail.unknown')}</Text>
-                            <Ionicons name="arrow-down" size={20} color="#FFE500" style={styles.loadingArrow} />
-                            <Text style={styles.loadingDestination}>{trip.destination}</Text>
-                        </View>
-                        
-                        {/* Trip Details */}
-                        <View style={styles.loadingTripDetails}>
-                            <Text style={styles.loadingTripDetailText}>
-                                {t('tripDetail.travelerCount', { count: trip.travelers || 1 })} • {t('tripDetail.daysCount', { count: Math.ceil((trip.endDate - trip.startDate) / (1000 * 60 * 60 * 24)) })}
-                            </Text>
-                        </View>
-                        
-                        {/* Animated Plane Icon */}
-                        <View style={styles.loadingIconContainer}>
-                            <Ionicons name="airplane" size={48} color="#FFE500" />
-                        </View>
-                        
-                        {/* Status Text */}
-                        <Text style={styles.loadingTitle}>{t('tripDetail.aiDesigning')}</Text>
-                        <Text style={styles.loadingSubtitle}>
-                            {loadingMessages[loadingMessageIndex]}
-                        </Text>
-                        
-                        {/* Progress Bar */}
-                        <View style={styles.progressBarContainer}>
-                            <View style={styles.progressBarBackground}>
-                                <View 
-                                    style={[
-                                        styles.progressBarFill, 
-                                        { width: `${Math.min(loadingProgress, 100)}%` }
-                                    ]} 
-                                />
-                            </View>
-                            <Text style={styles.progressText}>{Math.round(loadingProgress)}%</Text>
-                        </View>
-                        
-                        {/* Loading Steps */}
-                        <View style={styles.loadingSteps}>
-                            <View style={styles.loadingStep}>
-                                <Ionicons 
-                                    name={loadingProgress > 15 ? "checkmark-circle" : "ellipse-outline"} 
-                                    size={20} 
-                                    color={loadingProgress > 15 ? "#10B981" : "rgba(255,255,255,0.5)"} 
-                                />
-                                <Text style={[styles.loadingStepText, loadingProgress > 15 && styles.loadingStepComplete]}>
-                                    {t('tripDetail.analyzingPreferences')}
-                                </Text>
-                            </View>
-                            <View style={styles.loadingStep}>
-                                <Ionicons 
-                                    name={loadingProgress > 35 ? "checkmark-circle" : "ellipse-outline"} 
-                                    size={20} 
-                                    color={loadingProgress > 35 ? "#10B981" : "rgba(255,255,255,0.5)"} 
-                                />
-                                <Text style={[styles.loadingStepText, loadingProgress > 35 && styles.loadingStepComplete]}>
-                                    {t('tripDetail.selectingSights')}
-                                </Text>
-                            </View>
-                            <View style={styles.loadingStep}>
-                                <Ionicons 
-                                    name={loadingProgress > 55 ? "checkmark-circle" : "ellipse-outline"} 
-                                    size={20} 
-                                    color={loadingProgress > 55 ? "#10B981" : "rgba(255,255,255,0.5)"} 
-                                />
-                                <Text style={[styles.loadingStepText, loadingProgress > 55 && styles.loadingStepComplete]}>
-                                    {t('tripDetail.planningSchedule')}
-                                </Text>
-                            </View>
-                            <View style={styles.loadingStep}>
-                                <Ionicons 
-                                    name={loadingProgress > 75 ? "checkmark-circle" : "ellipse-outline"} 
-                                    size={20} 
-                                    color={loadingProgress > 75 ? "#10B981" : "rgba(255,255,255,0.5)"} 
-                                />
-                                <Text style={[styles.loadingStepText, loadingProgress > 75 && styles.loadingStepComplete]}>
-                                    {t('tripDetail.optimizingRoutes')}
-                                </Text>
-                            </View>
-                            <View style={styles.loadingStep}>
-                                <Ionicons 
-                                    name={loadingProgress > 90 ? "checkmark-circle" : "ellipse-outline"} 
-                                    size={20} 
-                                    color={loadingProgress > 90 ? "#10B981" : "rgba(255,255,255,0.5)"} 
-                                />
-                                <Text style={[styles.loadingStepText, loadingProgress > 90 && styles.loadingStepComplete]}>
-                                    {t('tripDetail.finalizingItinerary')}
-                                </Text>
-                            </View>
-                        </View>
-                        
-                        {/* Helper Text */}
-                        <Text style={styles.loadingHelperText}>
-                            {t('tripDetail.usuallyTakes')}
-                        </Text>
-                        
-                    </ScrollView>
-
-                    {/* Bottom section: notification hint + attribution, outside center content */}
-                    <View style={styles.loadingBottomSection}>
-                        {/* Leave screen hint */}
-                        <TouchableOpacity 
-                            style={styles.leaveHintContainer} 
-                            onPress={() => router.back()}
-                            activeOpacity={0.7}
-                        >
-                            <Ionicons name="notifications-outline" size={16} color="rgba(255,255,255,0.7)" />
-                            <Text style={styles.leaveHintText}>
-                                {t('tripDetail.leaveScreenHint')}
-                            </Text>
-                        </TouchableOpacity>
-                        
-                        {/* Photo Attribution */}
-                        {currentImage && (
-                            <View style={styles.loadingAttribution}>
-                                <Text style={styles.loadingAttributionText}>
-                                    {t('tripDetail.photoBy', { photographer: currentImage.photographer })}
-                                </Text>
-                            </View>
-                        )}
-                    </View>
-                </SafeAreaView>
-                
-                {/* Image Indicators */}
-                {loadingImages.length > 1 && (
-                    <View style={styles.imageIndicators}>
-                        {loadingImages.map((_, index) => (
-                            <View 
-                                key={index} 
-                                style={[
-                                    styles.imageIndicator,
-                                    currentImageIndex === index && styles.imageIndicatorActive
-                                ]} 
-                            />
-                        ))}
-                    </View>
-                )}
-            </View>
+            <TripGenerationView trip={trip} backgroundUrl={bg} onBack={() => router.back()} />
         );
     }
 
@@ -2567,6 +2395,7 @@ export default function TripDetails() {
     return (
         <View style={[styles.container, { backgroundColor: colors.background }]}>
             <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor="transparent" translucent={true} />
+            <EnrichingToast phase={trip.generationProgress?.phase} destination={trip.destination} />
             {/* Header - Minimal with just back button */}
             <SafeAreaView style={[styles.header, { backgroundColor: 'transparent', position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, borderBottomWidth: 0 }]}>
                 <View style={styles.headerContent}>

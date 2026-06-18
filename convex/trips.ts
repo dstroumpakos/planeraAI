@@ -473,6 +473,160 @@ export const updateItinerary = internalMutation({
     },
 });
 
+// ========================= Streaming day-by-day reveal =========================
+// These mutations power the live "watch your trip build" experience. The
+// generation action streams the itinerary one day at a time (NDJSON) and calls
+// these to append each day and patch its enrichment independently.
+
+/** Read the streamed day list for off-critical-path enrichment. */
+export const getItineraryDays = internalQuery({
+    args: { tripId: v.id("trips") },
+    returns: v.any(),
+    handler: async (ctx: any, args: any) => {
+        const trip = await ctx.db.get(args.tripId);
+        const days = trip?.itinerary?.dayByDayItinerary;
+        return Array.isArray(days) ? days : [];
+    },
+});
+
+/** Patch just the live progress object (phase / day counts). */
+export const setGenerationProgress = internalMutation({
+    args: {
+        tripId: v.id("trips"),
+        phase: v.union(
+            v.literal("planning"),
+            v.literal("building"),
+            v.literal("enriching"),
+            v.literal("done"),
+        ),
+        daysReady: v.optional(v.float64()),
+        totalDays: v.optional(v.float64()),
+    },
+    returns: v.null(),
+    handler: async (ctx: any, args: any) => {
+        const trip = await ctx.db.get(args.tripId);
+        if (!trip) return null;
+        const prev = trip.generationProgress ?? { phase: "planning", daysReady: 0, totalDays: 0 };
+        await ctx.db.patch(args.tripId, {
+            generationProgress: {
+                phase: args.phase,
+                daysReady: args.daysReady ?? prev.daysReady ?? 0,
+                totalDays: args.totalDays ?? prev.totalDays ?? 0,
+            },
+        });
+        return null;
+    },
+});
+
+/**
+ * Append one freshly-streamed day to the itinerary so it appears on screen
+ * immediately (un-enriched). Creates the itinerary scaffold on the first day.
+ */
+export const appendItineraryDay = internalMutation({
+    args: {
+        tripId: v.id("trips"),
+        day: v.any(),
+        totalDays: v.optional(v.float64()),
+    },
+    returns: v.null(),
+    handler: async (ctx: any, args: any) => {
+        const trip = await ctx.db.get(args.tripId);
+        if (!trip) return null;
+
+        const itinerary = trip.itinerary ?? {};
+        const days = Array.isArray(itinerary.dayByDayItinerary)
+            ? [...itinerary.dayByDayItinerary]
+            : [];
+        days.push(args.day);
+
+        const prev = trip.generationProgress ?? { phase: "building", daysReady: 0, totalDays: 0 };
+        const totalDays = args.totalDays ?? prev.totalDays ?? days.length;
+
+        await ctx.db.patch(args.tripId, {
+            itinerary: { ...itinerary, dayByDayItinerary: days },
+            generationProgress: {
+                phase: "building",
+                daysReady: days.length,
+                totalDays,
+            },
+        });
+        return null;
+    },
+});
+
+/**
+ * Day-scoped enrichment patch. Overwrites only dayByDayItinerary[dayIndex] so
+ * concurrent per-day enrichment writes don't clobber each other (Convex OCC
+ * serializes them). Flips phase -> "done" once every day has been enriched.
+ */
+export const patchDayEnrichment = internalMutation({
+    args: {
+        tripId: v.id("trips"),
+        dayIndex: v.float64(),
+        day: v.any(),
+    },
+    returns: v.null(),
+    handler: async (ctx: any, args: any) => {
+        const trip = await ctx.db.get(args.tripId);
+        if (!trip || !trip.itinerary) return null;
+
+        const itinerary = trip.itinerary;
+        const days = Array.isArray(itinerary.dayByDayItinerary)
+            ? [...itinerary.dayByDayItinerary]
+            : [];
+        if (args.dayIndex < 0 || args.dayIndex >= days.length) return null;
+
+        // Mark this day as enriched so we can detect completion.
+        days[args.dayIndex] = { ...args.day, _enriched: true };
+
+        const prev = trip.generationProgress ?? { phase: "enriching", daysReady: days.length, totalDays: days.length };
+        const totalDays = prev.totalDays || days.length;
+        const allDaysPresent = days.length >= totalDays;
+        const allEnriched = allDaysPresent && days.every((d: any) => d && d._enriched);
+
+        await ctx.db.patch(args.tripId, {
+            itinerary: { ...itinerary, dayByDayItinerary: days },
+            generationProgress: {
+                phase: allEnriched ? "done" : "enriching",
+                daysReady: days.length,
+                totalDays,
+            },
+        });
+        return null;
+    },
+});
+
+/**
+ * Finalize the base itinerary once the full stream is in: attach the
+ * non-day-list parts of the result (flights, hotels, etc.) and the authoritative
+ * final day list, flip status to "completed" so the trip is viewable, and move
+ * into the "enriching" phase (or "done" if there's nothing to enrich).
+ */
+export const writeBaseItinerary = internalMutation({
+    args: {
+        tripId: v.id("trips"),
+        itineraryExtras: v.any(), // { flights, hotels, activities, restaurants, transportation, estimatedDailyExpenses }
+        days: v.array(v.any()),
+        totalDays: v.float64(),
+    },
+    returns: v.null(),
+    handler: async (ctx: any, args: any) => {
+        const trip = await ctx.db.get(args.tripId);
+        if (!trip) return null;
+
+        await ctx.db.patch(args.tripId, {
+            itinerary: { ...args.itineraryExtras, dayByDayItinerary: args.days },
+            status: "completed",
+            generationProgress: {
+                phase: args.days.length > 0 ? "enriching" : "done",
+                daysReady: args.days.length,
+                totalDays: args.totalDays || args.days.length,
+            },
+        });
+        return null;
+    },
+});
+
 /**
  * Heartbeat: tiny no-op mutation called between major steps of the
  * generation action. Writing to Convex periodically prevents the

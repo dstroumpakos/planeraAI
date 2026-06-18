@@ -47,6 +47,18 @@ export default defineSchema({
         })),
         // Backward compatibility: keep raw itinerary
         itinerary: v.optional(v.any()),
+        // Live generation progress for the streaming day-by-day reveal.
+        // Drives the "watch your trip build" UI (real progress, not a fake bar).
+        generationProgress: v.optional(v.object({
+            phase: v.union(
+                v.literal("planning"),   // data fetch + before first day streams
+                v.literal("building"),   // days are streaming in
+                v.literal("enriching"),  // all days present, per-day enrichment running
+                v.literal("done"),
+            ),
+            daysReady: v.float64(),
+            totalDays: v.float64(),
+        })),
         // New structured itinerary items (optional, for future use)
         itineraryItems: v.optional(v.array(v.object({
             day: v.float64(),

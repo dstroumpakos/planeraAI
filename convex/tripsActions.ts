@@ -1075,7 +1075,7 @@ export const generate = internalAction({
                 );
             }
 
-            let dayByDayItinerary;
+            let dayByDayItinerary: any[] = [];
             if (hasOpenAIKey) {
                 try {
                     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -1227,14 +1227,14 @@ For local experiences (cooking classes, workshops, food tours, neighborhood walk
 - Set "type": "local-experience"
 - Include a detailed description of what makes it authentic/local
 
-Include specific activities, restaurants, and attractions for each day. Format as JSON with structure:
+Include specific activities, restaurants, and attractions for each day.
+
+**OUTPUT FORMAT — NDJSON (CRITICAL):** Output the itinerary as newline-delimited JSON. Emit EXACTLY ONE day object per line, one line per day, in order (Day 1 first). Do NOT wrap the days in an array, do NOT use a "dailyPlan" wrapper, do NOT add markdown code fences, and do NOT add any commentary before, between, or after the lines. Each line must be a single complete, valid JSON object of exactly this shape:
 {
-  "dailyPlan": [
-    {
-      "day": 1,
-      "date": "2024-01-15",
-      "title": "Day 1 in ${trip.destination}",
-      "activities": [
+  "day": 1,
+  "date": "2024-01-15",
+  "title": "Day 1 in ${trip.destination}",
+  "activities": [
         {
           "time": "09:00",
           "startTime": "09:00",
@@ -1290,9 +1290,8 @@ Include specific activities, restaurants, and attractions for each day. Format a
           "culinaryTags": ["local", "casual", "quick-bite"]
         }
       ]
-    }
-  ]
 }
+(Then a newline, then the next day's object on its own line, and so on for every day. One line = one day. No array brackets around the days.)
 
 **ACTIVITY TIMING RULES:**
 - First activity of each day: set "travelFromPrevious" to null
@@ -1371,150 +1370,143 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                         ? `You are an expert local travel itinerary planner with deep, first-hand knowledge of ${trip.destination}. Return only valid JSON. Recommend ONLY real, specific, named venues that genuinely exist — never generic placeholders or invented places. Ensure the destination's iconic must-see landmarks are covered across the trip; a traveler should never miss the signature sights of ${trip.destination}. Always include realistic prices and booking information for activities. IMPORTANT: Generate ${effectiveTripDays} days of activities (Days 1-${effectiveTripDays}). Day ${tripDays} is departure day with no activities. Respect arrival and departure time constraints.${budgetSystemNote} The traveler's budget tier is ${budgetGuidance.budgetTier.toUpperCase()} (€${budgetGuidance.dailyBudgetPerPerson}/person/day). All recommendations must respect this budget.${languageInstruction}`
                         : `You are an expert local travel itinerary planner with deep, first-hand knowledge of ${trip.destination}. Return only valid JSON. Recommend ONLY real, specific, named venues that genuinely exist — never generic placeholders or invented places. Ensure the destination's iconic must-see landmarks are covered across the trip; a traveler should never miss the signature sights of ${trip.destination}. Always include realistic prices and booking information for activities. IMPORTANT: You must generate the complete itinerary for ALL ${tripDays} days requested. If arrival/departure times are specified, adjust activities accordingly - fewer activities on partial days.${budgetSystemNote} The traveler's budget tier is ${budgetGuidance.budgetTier.toUpperCase()} (€${budgetGuidance.dailyBudgetPerPerson}/person/day). All recommendations must respect this budget.${languageInstruction}`;
 
-                    // Hard timeout on the OpenAI call. Convex Node actions are killed
-                    // after ~10 minutes total wall-clock time. We cap the OpenAI call
-                    // at 7 minutes so there is always headroom for post-processing
-                    // (TripAdvisor merge, image lookups, DB write). We use Promise.race
-                    // because the bundled OpenAI SDK does not reliably honor
-                    // AbortController signals — the race throws regardless, and the
-                    // outer catch will fall back to the basic itinerary.
+                    // Stream the itinerary as NDJSON - one day object per line - so each
+                    // day can be revealed the instant it finishes generating. It is still a
+                    // single OpenAI request; streaming just delivers the response
+                    // progressively, in day order. A hard timeout aborts the stream so a
+                    // stuck call still falls back to the basic itinerary.
                     const OPENAI_TIMEOUT_MS = 7 * 60 * 1000;
                     const openAIController = new AbortController();
-                    let openAITimeoutId: ReturnType<typeof setTimeout> | undefined;
+                    const openAITimeoutId: ReturnType<typeof setTimeout> = setTimeout(
+                        () => openAIController.abort(),
+                        OPENAI_TIMEOUT_MS,
+                    );
                     const openAIStartedAt = Date.now();
-                    const completion = await Promise.race([
-                        openai.chat.completions.create(
+
+                    dayByDayItinerary = [];
+
+                    // Remove Day 1 activities scheduled before the buffered arrival time.
+                    const applyArrivalBuffer = (day: any, index: number) => {
+                        if (index !== 0) return;
+                        if (!timeAwareGuidance.firstDayStartTime || !day || !Array.isArray(day.activities)) return;
+                        const bufferTime = timeAwareGuidance.firstDayStartTime;
+                        const before = day.activities.length;
+                        day.activities = day.activities.filter((a: any) => {
+                            const t = a.startTime || a.time;
+                            if (!t) return true;
+                            return t >= bufferTime;
+                        });
+                        const removed = before - day.activities.length;
+                        if (removed > 0) console.log(`Arrival buffer enforced: removed ${removed} Day 1 activities before ${bufferTime}`);
+                    };
+
+                    // Tolerant single-line parser: ignores fences, wrappers and partial
+                    // lines so one malformed line never corrupts the rest.
+                    const parseDayLine = (raw: string): any | null => {
+                        let line = raw.trim();
+                        if (!line || line.startsWith("```") || line.startsWith("[")) return null;
+                        if (line.endsWith(",")) line = line.slice(0, -1);
+                        if (!line.startsWith("{") || line.includes('"dailyPlan"')) return null;
+                        try {
+                            const obj = JSON.parse(line);
+                            if (obj && Array.isArray(obj.activities)) return obj;
+                        } catch { /* incomplete line - wait for more chunks */ }
+                        return null;
+                    };
+
+                    // Append one parsed day to memory + DB so it appears on screen live.
+                    const appendDay = async (day: any) => {
+                        day.day = dayByDayItinerary.length + 1;
+                        applyArrivalBuffer(day, dayByDayItinerary.length);
+                        dayByDayItinerary.push(day);
+                        try {
+                            await ctx.runMutation(internal.trips.appendItineraryDay, {
+                                tripId, day, totalDays: effectiveTripDays,
+                            });
+                        } catch (appendErr) {
+                            console.warn("appendItineraryDay failed:", appendErr);
+                        }
+                    };
+
+                    let rawCompletion = "";
+                    try {
+                        await ctx.runMutation(internal.trips.setGenerationProgress, {
+                            tripId, phase: "building", daysReady: 0, totalDays: effectiveTripDays,
+                        });
+                        const stream = await openai.chat.completions.create(
                             {
                                 messages: [
                                     { role: "system", content: systemPrompt },
                                     { role: "user", content: itineraryPrompt },
                                 ],
                                 model: "gpt-5.4-2026-03-05",
-                                response_format: { type: "json_object" },
                                 max_completion_tokens: maxTokens,
-                                // Cap gpt-5.5's hidden reasoning. Without this, the
-                                // model can spend 14k+ tokens "thinking" on a 7-day
-                                // plan and emit zero visible output (finish_reason
-                                // "length"). Itinerary planning is a structured-data
-                                // task and does not need deep reasoning.
+                                // Itinerary planning is a structured-data task and does not
+                                // need deep reasoning; keep hidden reasoning bounded.
                                 reasoning_effort: "low",
+                                stream: true,
                             } as any,
                             { signal: openAIController.signal },
-                        ).finally(() => {
-                            if (openAITimeoutId) clearTimeout(openAITimeoutId);
-                        }),
-                        new Promise<never>((_, reject) => {
-                            openAITimeoutId = setTimeout(() => {
-                                openAIController.abort();
-                                reject(
-                                    new Error(
-                                        `OpenAI call exceeded ${OPENAI_TIMEOUT_MS / 1000}s timeout`,
-                                    ),
-                                );
-                            }, OPENAI_TIMEOUT_MS);
-                        }),
-                    ]);
-                    console.log(
-                        `\u23F1\uFE0F OpenAI call took ${Date.now() - openAIStartedAt}ms`,
-                    );
-
-                    // Log usage so we can see how much went to reasoning vs output.
-                    const usage = (completion as any).usage;
-                    if (usage) {
-                        const reasoningTokens =
-                            usage.completion_tokens_details?.reasoning_tokens ?? 0;
-                        console.log(
-                            `📊 OpenAI usage: prompt=${usage.prompt_tokens}, completion=${usage.completion_tokens} (reasoning=${reasoningTokens}, visible=${usage.completion_tokens - reasoningTokens})`,
                         );
+
+                        let buffer = "";
+                        for await (const chunk of stream as any) {
+                            const delta = chunk?.choices?.[0]?.delta?.content || "";
+                            if (!delta) continue;
+                            rawCompletion += delta;
+                            buffer += delta;
+                            let nl: number;
+                            while ((nl = buffer.indexOf("\n")) >= 0) {
+                                const line = buffer.slice(0, nl);
+                                buffer = buffer.slice(nl + 1);
+                                const day = parseDayLine(line);
+                                if (day) await appendDay(day);
+                            }
+                        }
+                        // Flush a trailing day with no terminating newline.
+                        const lastDay = parseDayLine(buffer);
+                        if (lastDay) await appendDay(lastDay);
+                    } finally {
+                        clearTimeout(openAITimeoutId);
+                    }
+                    console.log(`OpenAI stream took ${Date.now() - openAIStartedAt}ms, ${dayByDayItinerary.length} days`);
+
+                    // Fallback: streaming produced no parseable days - try a whole-text
+                    // parse in case the model emitted a single JSON object/array anyway.
+                    if (dayByDayItinerary.length === 0 && rawCompletion.trim()) {
+                        try {
+                            const cleaned = rawCompletion.replace(/```json|```/g, "").trim();
+                            const parsed = JSON.parse(cleaned);
+                            const days = Array.isArray(parsed) ? parsed : (parsed.dailyPlan || []);
+                            for (const day of days) await appendDay(day);
+                            console.log(`Whole-text fallback recovered ${dayByDayItinerary.length} days`);
+                        } catch (e) {
+                            console.warn("Whole-text fallback parse failed:", e);
+                        }
                     }
 
-                    console.log("🔍 OpenAI response:", JSON.stringify(completion.choices[0], null, 2));
-                    
-                    // Check if response was truncated
-                    if (completion.choices[0].finish_reason === "length") {
-                        console.warn("⚠️ OpenAI response was truncated due to length limit");
-                    }
-                    
-                    const itineraryContent = completion.choices[0].message.content;
-                    if (itineraryContent) {
-                        const itineraryData = JSON.parse(itineraryContent);
-                        dayByDayItinerary = itineraryData.dailyPlan || [];
-                        console.log(`✅ OpenAI generated ${dayByDayItinerary.length} days of itinerary (requested ${tripDays})`);
-                        
-                        // Check if OpenAI generated enough days - if not, supplement with fallback
+                    if (dayByDayItinerary.length > 0) {
+                        console.log(`OpenAI generated ${dayByDayItinerary.length} days (requested ${tripDays})`);
+                        // Supplement missing days from the basic itinerary.
                         if (dayByDayItinerary.length < tripDays) {
-                            console.warn(`⚠️ OpenAI only generated ${dayByDayItinerary.length}/${tripDays} days, supplementing with fallback`);
+                            console.warn(`Only ${dayByDayItinerary.length}/${tripDays} days - supplementing`);
                             const fallbackItinerary = generateBasicItinerary(trip, activities, restaurants);
-                            
-                            // Add missing days from fallback
                             for (let i = dayByDayItinerary.length; i < tripDays; i++) {
                                 if (fallbackItinerary[i]) {
-                                    // Update the day number and date for the fallback day
                                     const dayDate = new Date(trip.startDate + i * 24 * 60 * 60 * 1000);
-                                    const missingDay = {
+                                    await appendDay({
                                         ...fallbackItinerary[i],
-                                        day: i + 1,
                                         date: dayDate.toISOString().split('T')[0],
                                         title: `Day ${i + 1} in ${trip.destination}`,
-                                    };
-                                    dayByDayItinerary.push(missingDay);
+                                    });
                                 }
                             }
-                            console.log(`✅ Supplemented to ${dayByDayItinerary.length} days`);
+                            console.log(`Supplemented to ${dayByDayItinerary.length} days`);
                         }
-                        
-                        // Heartbeat after the long OpenAI call.
-                        console.log("📍 STEP 2/5 complete: OpenAI returned itinerary");
+                        console.log("STEP 2/5 complete: OpenAI streamed itinerary");
                         await ctx.runMutation(internal.trips.heartbeatGeneration, { tripId });
-
-                        // Merge TripAdvisor data into restaurant activities.
-                        // This step does sequential TripAdvisor API calls and can stall
-                        // if the upstream is slow. Wrap in a hard timeout so we never
-                        // block trip completion on enrichment.
-                        console.log("📍 STEP 3/5 starting: merge TripAdvisor restaurant data");
-                        const MERGE_TIMEOUT_MS = 45_000;
-                        try {
-                            dayByDayItinerary = await Promise.race([
-                                mergeRestaurantDataIntoItinerary(dayByDayItinerary, restaurants, trip.destination),
-                                new Promise<never>((_, reject) =>
-                                    setTimeout(
-                                        () => reject(new Error("TripAdvisor merge timed out")),
-                                        MERGE_TIMEOUT_MS,
-                                    ),
-                                ),
-                            ]);
-                            console.log("📍 STEP 3/5 complete: TripAdvisor merge");
-                        } catch (mergeErr) {
-                            console.warn(
-                                "⚠️ TripAdvisor merge skipped (timeout or error):",
-                                mergeErr instanceof Error ? mergeErr.message : mergeErr,
-                            );
-                            // Keep the un-enriched OpenAI itinerary — better to complete
-                            // the trip than leave it stuck in "generating".
-                        }
-                        await ctx.runMutation(internal.trips.heartbeatGeneration, { tripId });
-
-                        // POST-PROCESSING: Enforce arrival day buffer
-                        // Even if the AI ignores the prompt, we fix Day 1 activities that start too early
-                        if (timeAwareGuidance.firstDayStartTime && dayByDayItinerary.length > 0) {
-                            const bufferTime = timeAwareGuidance.firstDayStartTime; // e.g., "18:00"
-                            const day1 = dayByDayItinerary[0];
-                            if (day1 && day1.activities) {
-                                const originalCount = day1.activities.length;
-                                day1.activities = day1.activities.filter((activity: any) => {
-                                    const actStartTime = activity.startTime || activity.time;
-                                    if (!actStartTime) return true;
-                                    // Compare time strings "HH:MM" — remove activities before the buffer
-                                    return actStartTime >= bufferTime;
-                                });
-                                const removed = originalCount - day1.activities.length;
-                                if (removed > 0) {
-                                    console.log(`🛡️ Arrival buffer enforced: removed ${removed} Day 1 activities before ${bufferTime}`);
-                                }
-                            }
-                        }
                     } else {
-                        console.warn("⚠️ OpenAI returned empty content, using fallback");
+                        console.warn("OpenAI returned no usable days, using fallback");
                         dayByDayItinerary = generateBasicItinerary(trip, activities, restaurants);
                     }
                 } catch (error) {
@@ -1526,44 +1518,28 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                 dayByDayItinerary = generateBasicItinerary(trip, activities, restaurants);
             }
 
-            // Inject admin-curated affiliate attraction links (runs for all paths).
-            try {
-                dayByDayItinerary = enrichItineraryWithAffiliateAttractions(
-                    dayByDayItinerary,
-                    trip.destination,
-                    trip.interests || [],
-                    curatedAttractionLinks || [],
-                );
-            } catch (affiliateErr) {
-                console.warn(
-                    "⚠️ Affiliate attraction enrichment skipped:",
-                    affiliateErr instanceof Error ? affiliateErr.message : affiliateErr,
-                );
-            }
-
-            console.log("📍 STEP 4/5 complete: post-processing finished");
-
-            const result = {
+            // Assemble the non-day parts of the itinerary and finalize the base
+            // (un-enriched) trip so it becomes viewable immediately. Per-day
+            // enrichment (affiliate links + TripAdvisor) runs off the critical path.
+            console.log("STEP 4/5: writing base itinerary");
+            const itineraryExtras = {
                 flights,
                 hotels,
                 activities,
                 restaurants,
                 transportation,
-                dayByDayItinerary,
-               estimatedDailyExpenses: calculateDailyExpenses(Number(trip.budgetTotal)),
+                estimatedDailyExpenses: calculateDailyExpenses(Number(trip.budgetTotal)),
             };
 
-            console.log("📍 STEP 5/5 starting: write itinerary to DB");
-            console.log("✅ Trip generation complete!");
-
-            await ctx.runMutation(internal.trips.updateItinerary, {
+            await ctx.runMutation(internal.trips.writeBaseItinerary, {
                 tripId,
-                itinerary: result,
-                status: "completed",
+                itineraryExtras,
+                days: dayByDayItinerary,
+                totalDays: dayByDayItinerary.length,
             });
-            console.log("📍 STEP 5/5 complete: itinerary saved");
+            console.log("STEP 4/5 complete: base itinerary saved (viewable)");
 
-            // Send push notification that trip is ready
+            // Notify the traveler as soon as the trip is viewable (~1 min sooner).
             await ctx.runAction(internal.notifications.sendPushNotification, {
                 userId: trip.userId,
                 title: "Your trip is ready! ✈️",
@@ -1571,6 +1547,16 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                 data: { tripId, screen: "trip" },
                 tripId,
                 type: "trip_ready",
+            });
+
+            // Enrich each day off the critical path: affiliate links (DB) + TripAdvisor
+            // ratings (per-day, sequential) patch in live without extra API calls.
+            await ctx.scheduler.runAfter(0, internal.tripsActions.enrichItinerary, {
+                tripId,
+                destination: trip.destination,
+                interests: trip.interests || [],
+                restaurants,
+                curatedAttractionLinks: curatedAttractionLinks || [],
             });
 
         } catch (error: unknown) {
@@ -1603,6 +1589,76 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
             }
             
             throw new Error(`Failed to generate trip: ${errorMessage}`);
+        }
+    },
+});
+
+/**
+ * Off-critical-path enrichment. Runs after the base itinerary is already viewable.
+ * Affiliate links (DB-only, whole-trip dedup) are applied once; TripAdvisor
+ * ratings are merged per-day and each day is patched independently so they pop in
+ * live, one day at a time. Uses no more API calls than the old all-at-once merge.
+ */
+export const enrichItinerary = internalAction({
+    args: {
+        tripId: v.id("trips"),
+        destination: v.string(),
+        interests: v.array(v.string()),
+        restaurants: v.array(v.any()),
+        curatedAttractionLinks: v.array(v.any()),
+    },
+    handler: async (ctx: any, args: any) => {
+        try {
+            const days: any[] = await ctx.runQuery(internal.trips.getItineraryDays, {
+                tripId: args.tripId,
+            });
+            if (!Array.isArray(days) || days.length === 0) {
+                await ctx.runMutation(internal.trips.setGenerationProgress, {
+                    tripId: args.tripId, phase: "done",
+                });
+                return;
+            }
+
+            // 1) Affiliate links — whole-trip pass (DB-only, no external calls).
+            let enrichedDays = days;
+            try {
+                enrichedDays = enrichItineraryWithAffiliateAttractions(
+                    days as any,
+                    args.destination,
+                    args.interests || [],
+                    (args.curatedAttractionLinks || []) as any,
+                );
+            } catch (affErr) {
+                console.warn("Affiliate enrichment skipped:", affErr);
+            }
+
+            // 2) TripAdvisor ratings — per day, patched live so each fills in on its own.
+            const PER_DAY_TIMEOUT_MS = 20_000;
+            for (let i = 0; i < enrichedDays.length; i++) {
+                let day = enrichedDays[i];
+                try {
+                    const [mergedDay] = await Promise.race([
+                        mergeRestaurantDataIntoItinerary([day] as any, args.restaurants as any, args.destination),
+                        new Promise<never>((_, reject) =>
+                            setTimeout(() => reject(new Error("per-day TripAdvisor merge timed out")), PER_DAY_TIMEOUT_MS),
+                        ),
+                    ]) as any[];
+                    if (mergedDay) day = mergedDay;
+                } catch (mergeErr) {
+                    console.warn(`Day ${i + 1} TripAdvisor merge skipped:`, mergeErr instanceof Error ? mergeErr.message : mergeErr);
+                }
+                await ctx.runMutation(internal.trips.patchDayEnrichment, {
+                    tripId: args.tripId,
+                    dayIndex: i,
+                    day,
+                });
+            }
+        } catch (err) {
+            console.warn("enrichItinerary failed, marking done:", err);
+            // Never leave the trip stuck in the enriching phase.
+            await ctx.runMutation(internal.trips.setGenerationProgress, {
+                tripId: args.tripId, phase: "done",
+            });
         }
     },
 });
