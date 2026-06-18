@@ -22,6 +22,7 @@ import { useToken } from "@/lib/useAuthenticatedMutation";
 import { ImageWithAttribution } from "@/components/ImageWithAttribution";
 import { useTheme } from "@/lib/ThemeContext";
 import { useTranslation } from "react-i18next";
+import { useHideTabBarOnScroll } from "@/lib/tabBarVisibility";
 import { LanguagePickerModal } from "@/components/LanguagePickerModal";
 import { FirstTripPopup } from "@/components/FirstTripGuide";
 import { LowFareRadar } from "@/components/LowFareRadar";
@@ -32,6 +33,7 @@ export default function HomeScreen() {
   const router = useRouter();
   const { isAuthenticated, isLoading: authLoading } = useConvexAuth();
   const { colors, isDarkMode } = useTheme();
+  const hideOnScroll = useHideTabBarOnScroll();
   const { token, isLoading: tokenLoading } = useToken();
   const { t, i18n } = useTranslation();
   const [destinationImages, setDestinationImages] = useState<Record<string, any>>({});
@@ -228,10 +230,12 @@ export default function HomeScreen() {
         }}
       />
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      <ScrollView 
+      <ScrollView
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
+        onScroll={hideOnScroll}
+        scrollEventThrottle={16}
       >
         {/* Header */}
         <View style={styles.header}>

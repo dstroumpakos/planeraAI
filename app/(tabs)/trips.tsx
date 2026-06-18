@@ -8,11 +8,13 @@ import { Id } from "@/convex/_generated/dataModel";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useTheme } from "@/lib/ThemeContext";
 import { useTranslation } from "react-i18next";
+import { useHideTabBarOnScroll } from "@/lib/tabBarVisibility";
 
 export default function TripsScreen() {
     const router = useRouter();
     const { token } = useToken();
     const { colors, isDarkMode } = useTheme();
+    const hideOnScroll = useHideTabBarOnScroll();
     const { t, i18n } = useTranslation();
     const trips = useQuery(api.trips.list as any, { token: token || "skip" });
     const deleteTrip = useAuthenticatedMutation(api.trips.deleteTrip as any);
@@ -76,6 +78,8 @@ export default function TripsScreen() {
                     data={tripsList}
                     keyExtractor={(item) => item._id}
                     contentContainerStyle={styles.listContent}
+                    onScroll={hideOnScroll}
+                    scrollEventThrottle={16}
                     renderItem={({ item }) => (
                         <TouchableOpacity 
                             style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]} 

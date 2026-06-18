@@ -12,6 +12,7 @@ import { useToken, useAuthenticatedMutation } from "@/lib/useAuthenticatedMutati
 import { useState } from "react";
 import * as ImagePicker from "expo-image-picker";
 import { useTheme } from "@/lib/ThemeContext";
+import { useHideTabBarOnScroll } from "@/lib/tabBarVisibility";
 import * as Haptics from "expo-haptics";
 import { Id } from "@/convex/_generated/dataModel";
 import Constants from "expo-constants";
@@ -75,6 +76,7 @@ export default function Profile() {
     const deleteAccount = useAuthenticatedMutation(api.users.deleteAccount as any);
     
     const { isDarkMode, toggleDarkMode, colors } = useTheme();
+    const hideOnScroll = useHideTabBarOnScroll();
     const { t, i18n } = useTranslation();
     const [menuVisible, setMenuVisible] = useState(false);
     const [uploading, setUploading] = useState(false);
@@ -508,7 +510,7 @@ export default function Profile() {
                 </TouchableOpacity>
             </Modal>
 
-            <ScrollView style={styles.content} contentContainerStyle={styles.scrollContent}>
+            <ScrollView style={styles.content} contentContainerStyle={styles.scrollContent} onScroll={hideOnScroll} scrollEventThrottle={16}>
                 {/* Profile Card */}
                 <View style={styles.profileSection}>
                     <View style={styles.avatarContainer}>
