@@ -4,6 +4,7 @@ import { internalMutation, internalQuery, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { isSubscriptionActiveWithGrace } from "./helpers/subscription";
 import { getDistanceMeters } from "./helpers/geo";
+import { assignActivityIds, dedupeVenues, resequenceDayTimes } from "./helpers/itinerary";
 
 export const create = authMutation({
     args: {
@@ -631,13 +632,21 @@ export const writeBaseItinerary = internalMutation({
         const trip = await ctx.db.get(args.tripId);
         if (!trip) return null;
 
+        // Guardrail: stamp stable ids (for the editable/DnD UI) and drop any
+        // venue that the model repeated across the trip before persisting.
+        const withIds = assignActivityIds(args.days);
+        const { days, removedCount } = dedupeVenues(withIds);
+        if (removedCount > 0) {
+            console.log(`writeBaseItinerary: deduped ${removedCount} repeated venue(s)`);
+        }
+
         await ctx.db.patch(args.tripId, {
-            itinerary: { ...args.itineraryExtras, dayByDayItinerary: args.days },
+            itinerary: { ...args.itineraryExtras, dayByDayItinerary: days },
             status: "completed",
             generationProgress: {
-                phase: args.days.length > 0 ? "enriching" : "done",
-                daysReady: args.days.length,
-                totalDays: args.totalDays || args.days.length,
+                phase: days.length > 0 ? "enriching" : "done",
+                daysReady: days.length,
+                totalDays: args.totalDays || days.length,
             },
         });
         return null;
@@ -1037,10 +1046,15 @@ export const updateActivity = authMutation({
 
         activities[args.activityIndex] = { ...activities[args.activityIndex], ...args.updates };
         day.activities = activities;
-        days[args.dayIndex] = day;
+
+        // A time edit can reorder the day — re-sort by start time so the day
+        // stays chronological. Then run the whole-trip de-dup guardrail in case
+        // the edit collided a venue with another day.
+        days[args.dayIndex] = resequenceDayTimes(day);
+        const { days: dedupedDays } = dedupeVenues(days);
 
         await ctx.db.patch(args.tripId, {
-            itinerary: { ...trip.itinerary, dayByDayItinerary: days },
+            itinerary: { ...trip.itinerary, dayByDayItinerary: dedupedDays },
         });
     },
 });
@@ -1063,6 +1077,151 @@ export const scheduleReplaceActivity = authMutation({
             tripId: args.tripId,
             dayIndex: args.dayIndex,
             activityIndex: args.activityIndex,
+            language: args.language,
+        });
+    },
+});
+
+// Clear travelFromPrevious on the first activity of a day (it has no predecessor
+// to walk from). Returns a new day object; input is not mutated.
+function clearFirstTravel(day: any): any {
+    if (!day || !Array.isArray(day.activities) || day.activities.length === 0) return day;
+    const activities = day.activities.map((a: any, i: number) =>
+        i === 0 && a && a.travelFromPrevious ? { ...a, travelFromPrevious: null } : a
+    );
+    return { ...day, activities };
+}
+
+/**
+ * Move an activity within a day or across days (drag-and-drop backend).
+ * Splices the activity out of the source day and inserts it into the target
+ * day at `toActivityIndex`. Covers both reorder-within-day and cross-day move.
+ */
+export const moveActivity = authMutation({
+    args: {
+        token: v.string(),
+        tripId: v.id("trips"),
+        fromDayIndex: v.number(),
+        fromActivityIndex: v.number(),
+        toDayIndex: v.number(),
+        toActivityIndex: v.number(),
+    },
+    handler: async (ctx: any, args: any) => {
+        const trip = await ctx.db.get(args.tripId);
+        if (!trip) throw new Error("Trip not found");
+        if (trip.userId !== ctx.user.userId) throw new Error("Unauthorized");
+        if (!trip.itinerary?.dayByDayItinerary) throw new Error("No itinerary");
+
+        const days = [...trip.itinerary.dayByDayItinerary];
+        if (args.fromDayIndex < 0 || args.fromDayIndex >= days.length) throw new Error("Invalid source day");
+        if (args.toDayIndex < 0 || args.toDayIndex >= days.length) throw new Error("Invalid target day");
+
+        const fromDay = { ...days[args.fromDayIndex], activities: [...(days[args.fromDayIndex].activities || [])] };
+        if (args.fromActivityIndex < 0 || args.fromActivityIndex >= fromDay.activities.length) {
+            throw new Error("Invalid source activity");
+        }
+
+        // Pull the moved activity out of the source day.
+        const [moved] = fromDay.activities.splice(args.fromActivityIndex, 1);
+        days[args.fromDayIndex] = fromDay;
+
+        // Insert into the target day (re-read after the source splice so a
+        // same-day move sees the post-removal array). Clamp the insert index.
+        const targetDay = { ...days[args.toDayIndex], activities: [...(days[args.toDayIndex].activities || [])] };
+        const insertIndex = Math.max(0, Math.min(args.toActivityIndex, targetDay.activities.length));
+        targetDay.activities.splice(insertIndex, 0, moved);
+        days[args.toDayIndex] = targetDay;
+
+        // The first activity of any touched day has no predecessor to walk from.
+        days[args.fromDayIndex] = clearFirstTravel(days[args.fromDayIndex]);
+        days[args.toDayIndex] = clearFirstTravel(days[args.toDayIndex]);
+
+        const withIds = assignActivityIds(days);
+        const { days: dedupedDays } = dedupeVenues(withIds);
+
+        await ctx.db.patch(args.tripId, {
+            itinerary: { ...trip.itinerary, dayByDayItinerary: dedupedDays },
+        });
+    },
+});
+
+/** Insert a user-provided (manual) activity into a day at a given index. */
+export const addActivityManual = authMutation({
+    args: {
+        token: v.string(),
+        tripId: v.id("trips"),
+        dayIndex: v.number(),
+        insertIndex: v.number(),
+        activity: v.any(),
+    },
+    handler: async (ctx: any, args: any) => {
+        const trip = await ctx.db.get(args.tripId);
+        if (!trip) throw new Error("Trip not found");
+        if (trip.userId !== ctx.user.userId) throw new Error("Unauthorized");
+        if (!trip.itinerary?.dayByDayItinerary) throw new Error("No itinerary");
+
+        const days = [...trip.itinerary.dayByDayItinerary];
+        if (args.dayIndex < 0 || args.dayIndex >= days.length) throw new Error("Invalid day");
+
+        const day = { ...days[args.dayIndex], activities: [...(days[args.dayIndex].activities || [])] };
+        const insertIndex = Math.max(0, Math.min(args.insertIndex, day.activities.length));
+        day.activities.splice(insertIndex, 0, args.activity);
+
+        // Re-sort by time so a manually-timed activity lands in chronological order.
+        days[args.dayIndex] = clearFirstTravel(resequenceDayTimes(day));
+
+        const withIds = assignActivityIds(days);
+        const { days: dedupedDays } = dedupeVenues(withIds);
+
+        await ctx.db.patch(args.tripId, {
+            itinerary: { ...trip.itinerary, dayByDayItinerary: dedupedDays },
+        });
+    },
+});
+
+/** Schedule AI generation of a new activity inserted into a day. */
+export const scheduleAddActivityAI = authMutation({
+    args: {
+        token: v.string(),
+        tripId: v.id("trips"),
+        dayIndex: v.number(),
+        insertIndex: v.number(),
+        language: v.optional(v.string()),
+    },
+    handler: async (ctx: any, args: any) => {
+        const trip = await ctx.db.get(args.tripId);
+        if (!trip) throw new Error("Trip not found");
+        if (trip.userId !== ctx.user.userId) throw new Error("Unauthorized");
+
+        await (ctx as any).scheduler.runAfter(0, (internal as any).tripsActions.addActivityAI, {
+            tripId: args.tripId,
+            dayIndex: args.dayIndex,
+            insertIndex: args.insertIndex,
+            language: args.language,
+        });
+    },
+});
+
+/** Schedule AI regeneration of a whole day (keeping the rest of the trip). */
+export const scheduleRegenerateDay = authMutation({
+    args: {
+        token: v.string(),
+        tripId: v.id("trips"),
+        dayIndex: v.number(),
+        language: v.optional(v.string()),
+    },
+    handler: async (ctx: any, args: any) => {
+        const trip = await ctx.db.get(args.tripId);
+        if (!trip) throw new Error("Trip not found");
+        if (trip.userId !== ctx.user.userId) throw new Error("Unauthorized");
+        if (!trip.itinerary?.dayByDayItinerary) throw new Error("No itinerary");
+
+        const days = trip.itinerary.dayByDayItinerary;
+        if (args.dayIndex < 0 || args.dayIndex >= days.length) throw new Error("Invalid day");
+
+        await (ctx as any).scheduler.runAfter(0, (internal as any).tripsActions.regenerateDayAction, {
+            tripId: args.tripId,
+            dayIndex: args.dayIndex,
             language: args.language,
         });
     },

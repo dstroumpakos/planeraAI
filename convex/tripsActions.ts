@@ -8,6 +8,7 @@ import * as duffel from "./flights/duffel";
 import { AIRPORTS } from "../lib/airports";
 import { resolveAirport } from "../lib/destinationAirports";
 import { FEATURES } from "./_features";
+import { assignActivityIds, dedupeVenues, resequenceDayTimes } from "./helpers/itinerary";
 import {
     normalizeBookingOption,
     normalizeFlightOption,
@@ -1648,6 +1649,17 @@ export const enrichItinerary = internalAction({
                 ]) as any[];
             } catch (mergeErr) {
                 console.warn("TripAdvisor merge skipped:", mergeErr instanceof Error ? mergeErr.message : mergeErr);
+            }
+
+            // Guardrail: the restaurant merge fills generic "Lunch"/"Dinner" slots
+            // with real venue names, which can surface a duplicate the base pass
+            // couldn't see. Re-run the de-dup across the whole (now final-titled)
+            // trip and backfill any ids the merge may have missed before writing.
+            enrichedDays = assignActivityIds(enrichedDays);
+            const { days: dedupedDays, removedCount } = dedupeVenues(enrichedDays);
+            enrichedDays = dedupedDays;
+            if (removedCount > 0) {
+                console.log(`enrichItinerary: deduped ${removedCount} repeated venue(s) post-enrichment`);
             }
 
             // Patch each day on its own so ratings/booking buttons pop in day-by-day.
@@ -3517,6 +3529,276 @@ Return a single JSON object (NOT an array) with the replacement activity:
             status: "completed" as const,
         });
 
+        return null;
+    },
+});
+
+const ITINERARY_LANGUAGE_NAMES: Record<string, string> = {
+    en: "English", el: "Greek", es: "Spanish",
+    fr: "French", de: "German", ar: "Arabic",
+};
+
+/**
+ * Generate ONE new activity for a day's open slot and insert it at `insertIndex`.
+ * The prompt is given every title already in the trip with a hard "do NOT
+ * suggest any of these" instruction so it can't introduce a duplicate; the
+ * de-dup guardrail runs afterwards as a backstop.
+ */
+export const addActivityAI = internalAction({
+    args: {
+        tripId: v.id("trips"),
+        dayIndex: v.number(),
+        insertIndex: v.number(),
+        language: v.optional(v.string()),
+    },
+    returns: v.null(),
+    handler: async (ctx, args) => {
+        const { tripId, dayIndex, insertIndex, language } = args;
+        const lang = language || "en";
+        const langName = ITINERARY_LANGUAGE_NAMES[lang] || "English";
+
+        const trip = await ctx.runQuery(internal.trips.getTripDetails, { tripId });
+        if (!trip) throw new Error("Trip not found");
+        if (!trip.itinerary?.dayByDayItinerary) throw new Error("No itinerary");
+
+        const days = trip.itinerary.dayByDayItinerary;
+        if (dayIndex < 0 || dayIndex >= days.length) throw new Error("Invalid day");
+        const day = days[dayIndex];
+        const activities = day.activities || [];
+        const clampedInsert = Math.max(0, Math.min(insertIndex, activities.length));
+
+        // Every venue already in the trip — the model must avoid all of them.
+        const allTitles = days
+            .flatMap((d: any) => (d.activities || []).map((a: any) => a.title))
+            .filter(Boolean)
+            .join(", ");
+
+        const prevActivity = clampedInsert > 0 ? activities[clampedInsert - 1] : null;
+        const nextActivity = clampedInsert < activities.length ? activities[clampedInsert] : null;
+        const fallbackTime =
+            (prevActivity?.endTime || prevActivity?.time) ||
+            (nextActivity?.startTime || nextActivity?.time) ||
+            "12:00";
+
+        const prompt = `You are a travel itinerary planner for ${trip.destination}.
+Add ONE new activity to this day. It MUST be different from — and must NOT repeat — any of these existing trip activities: ${allTitles || "(none)"}.
+
+Slot context:
+- It will be placed between: ${prevActivity ? `"${prevActivity.title}" (ends ${prevActivity.endTime || prevActivity.time || "?"} at ${prevActivity.address || prevActivity.title})` : "the start of the day"} AND ${nextActivity ? `"${nextActivity.title}" (starts ${nextActivity.startTime || nextActivity.time || "?"} at ${nextActivity.address || nextActivity.title})` : "the end of the day"}
+- Pick a realistic start time that fits the slot${prevActivity || nextActivity ? "" : ` (around ${fallbackTime})`}
+- Must be in ${trip.destination}
+- Include realistic travelFromPrevious walking time from the previous location${prevActivity ? "" : " (use null — it will be the first activity)"}
+${lang !== "en" ? `- Write ALL text content (title, description, tips, address) in ${langName}` : ""}
+
+Return a single JSON object (NOT an array):
+{
+  "time": "${fallbackTime}",
+  "startTime": "${fallbackTime}",
+  "endTime": "",
+  "title": "New activity name",
+  "description": "Brief description",
+  "address": "Full address, ${trip.destination}",
+  "type": "attraction|museum|restaurant|tour|free|local-experience",
+  "price": 0,
+  "currency": "EUR",
+  "skipTheLine": false,
+  "skipTheLinePrice": 0,
+  "durationMinutes": 60,
+  "duration": "1 hour",
+  "tips": "Useful tip",
+  "isLocalExperience": false,
+  "travelFromPrevious": ${prevActivity ? '{"walkingMinutes": 10, "distanceKm": 0.8, "description": "Short walk"}' : "null"},
+  "culinaryMoment": null,
+  "culinaryType": null,
+  "whyThisFits": null,
+  "priceRange": null,
+  "walkability": null,
+  "culinaryTags": null
+}`;
+
+        if (!process.env.OPENAI_API_KEY) throw new Error("OpenAI API key not configured");
+
+        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+        const completion = await openai.chat.completions.create({
+            messages: [
+                { role: "system", content: `You are a travel planner. Return only valid JSON for a single activity.${lang !== "en" ? ` Write all content in ${langName}.` : ""}` },
+                { role: "user", content: prompt },
+            ],
+            model: "gpt-5.4-2026-03-05",
+            response_format: { type: "json_object" },
+            max_completion_tokens: 1000,
+        });
+
+        const content = completion.choices[0]?.message?.content;
+        if (!content) throw new Error("No response from AI");
+        const newActivity = JSON.parse(content);
+
+        // Insert, re-sequence the day by time, then run the guardrail.
+        const updatedDays = [...days];
+        const updatedDay = { ...updatedDays[dayIndex], activities: [...activities] };
+        updatedDay.activities.splice(clampedInsert, 0, newActivity);
+        updatedDays[dayIndex] = resequenceDayTimes(updatedDay);
+
+        const withIds = assignActivityIds(updatedDays);
+        const { days: dedupedDays } = dedupeVenues(withIds);
+
+        await ctx.runMutation(internal.trips.updateItinerary, {
+            tripId,
+            itinerary: { ...trip.itinerary, dayByDayItinerary: dedupedDays },
+            status: "completed" as const,
+        });
+        return null;
+    },
+});
+
+/**
+ * Regenerate a single day's activities, keeping the rest of the trip intact.
+ * Respects the budget tier and interests, avoids every venue used on the OTHER
+ * days, then de-dups across the whole trip and re-enriches just this day
+ * (affiliate links + TripAdvisor restaurant data) using the same helpers as the
+ * full-trip enrichment pass.
+ */
+export const regenerateDayAction = internalAction({
+    args: {
+        tripId: v.id("trips"),
+        dayIndex: v.number(),
+        language: v.optional(v.string()),
+    },
+    returns: v.null(),
+    handler: async (ctx, args) => {
+        const { tripId, dayIndex, language } = args;
+        const lang = language || "en";
+        const langName = ITINERARY_LANGUAGE_NAMES[lang] || "English";
+
+        const trip = await ctx.runQuery(internal.trips.getTripDetails, { tripId });
+        if (!trip) throw new Error("Trip not found");
+        if (!trip.itinerary?.dayByDayItinerary) throw new Error("No itinerary");
+
+        const days = trip.itinerary.dayByDayItinerary;
+        if (dayIndex < 0 || dayIndex >= days.length) throw new Error("Invalid day");
+
+        const tripDays = Math.max(1, Math.ceil((trip.endDate - trip.startDate) / (24 * 60 * 60 * 1000)));
+        const effectiveTravelerCount = trip.travelerCount ?? trip.travelers ?? 1;
+        const budgetGuidance = generateBudgetGuidance(
+            trip.budgetTotal ?? (typeof trip.budget === "number" ? trip.budget : undefined),
+            effectiveTravelerCount,
+            tripDays,
+            trip.destination,
+        );
+
+        const currentDay = days[dayIndex];
+        // Venues used on the OTHER days — the new day must avoid all of these.
+        const otherDayTitles = days
+            .filter((_: any, i: number) => i !== dayIndex)
+            .flatMap((d: any) => (d.activities || []).map((a: any) => a.title))
+            .filter(Boolean)
+            .join(", ");
+
+        const interestsLine = (trip.interests || []).join(", ") || "general sightseeing";
+
+        const prompt = `You are a travel itinerary planner for ${trip.destination}.
+Regenerate the activities for ONE day of an existing trip. Keep it geographically logical and well-paced.
+
+${budgetGuidance.guidance}
+
+Traveler interests: ${interestsLine}.
+This is day ${currentDay.day ?? dayIndex + 1} of a ${tripDays}-day trip.
+
+HARD RULE — do NOT use any venue already used on the other days of this trip: ${otherDayTitles || "(none)"}.
+Generate a FRESH, different set of activities for this day, respecting the budget tier (${budgetGuidance.budgetTier}).
+${lang !== "en" ? `Write ALL text content (titles, descriptions, tips, addresses) in ${langName}.` : ""}
+
+Return a single JSON object (NOT an array) of this exact shape:
+{
+  "day": ${currentDay.day ?? dayIndex + 1},
+  "title": "Short title for the day",
+  "activities": [
+    {
+      "time": "09:00",
+      "startTime": "09:00",
+      "endTime": "11:00",
+      "title": "Activity name",
+      "description": "Brief description",
+      "address": "Full address, ${trip.destination}",
+      "type": "attraction|museum|restaurant|tour|free|local-experience",
+      "price": 0,
+      "currency": "EUR",
+      "skipTheLine": false,
+      "skipTheLinePrice": 0,
+      "durationMinutes": 120,
+      "duration": "2 hours",
+      "tips": "Useful tip",
+      "isLocalExperience": false,
+      "travelFromPrevious": null,
+      "culinaryMoment": null,
+      "culinaryType": null,
+      "whyThisFits": null,
+      "priceRange": null,
+      "walkability": null,
+      "culinaryTags": null
+    }
+  ]
+}
+The first activity's travelFromPrevious MUST be null. Each subsequent activity should include realistic travelFromPrevious walking time from the previous one.`;
+
+        if (!process.env.OPENAI_API_KEY) throw new Error("OpenAI API key not configured");
+
+        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+        const completion = await openai.chat.completions.create({
+            messages: [
+                { role: "system", content: `You are a travel planner. Return only valid JSON for a single day with an activities array.${lang !== "en" ? ` Write all content in ${langName}.` : ""}` },
+                { role: "user", content: prompt },
+            ],
+            model: "gpt-5.4-2026-03-05",
+            response_format: { type: "json_object" },
+            max_completion_tokens: 3000,
+        });
+
+        const content = completion.choices[0]?.message?.content;
+        if (!content) throw new Error("No response from AI");
+        const newDay = JSON.parse(content);
+        if (!newDay || !Array.isArray(newDay.activities)) throw new Error("AI returned a malformed day");
+
+        // Re-enrich just this day, mirroring enrichItinerary's two passes.
+        let enrichedDay: any = { ...newDay, day: currentDay.day ?? dayIndex + 1 };
+        try {
+            const curatedCity = extractDestinationCity(trip.destination);
+            const curatedAttractionLinks = ((await ctx.runQuery(
+                api.lowFareRadar.getActiveAttractionLinksForDestination,
+                { destinationCity: curatedCity },
+            )) as any[]) || [];
+            enrichedDay = enrichItineraryWithAffiliateAttractions(
+                [enrichedDay] as any,
+                trip.destination,
+                trip.interests || [],
+                curatedAttractionLinks as any,
+            )[0];
+        } catch (affErr) {
+            console.warn("regenerateDayAction: affiliate enrichment skipped:", affErr);
+        }
+
+        try {
+            const restaurants = await searchRestaurants(trip.destination);
+            const merged = await mergeRestaurantDataIntoItinerary([enrichedDay] as any, restaurants as any, trip.destination);
+            enrichedDay = merged[0];
+        } catch (restErr) {
+            console.warn("regenerateDayAction: restaurant enrichment skipped:", restErr instanceof Error ? restErr.message : restErr);
+        }
+
+        // Write the new day back, then id-stamp + de-dup across the whole trip.
+        const updatedDays = [...days];
+        updatedDays[dayIndex] = enrichedDay;
+        const withIds = assignActivityIds(updatedDays);
+        const { days: dedupedDays, removedCount } = dedupeVenues(withIds);
+        if (removedCount > 0) {
+            console.log(`regenerateDayAction: deduped ${removedCount} repeated venue(s)`);
+        }
+
+        await ctx.runMutation(internal.trips.updateItinerary, {
+            tripId,
+            itinerary: { ...trip.itinerary, dayByDayItinerary: dedupedDays },
+            status: "completed" as const,
+        });
         return null;
     },
 });

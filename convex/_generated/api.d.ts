@@ -36,6 +36,7 @@ import type * as flights_fallback from "../flights/fallback.js";
 import type * as functions from "../functions.js";
 import type * as helpers_achievements from "../helpers/achievements.js";
 import type * as helpers_geo from "../helpers/geo.js";
+import type * as helpers_itinerary from "../helpers/itinerary.js";
 import type * as helpers_reportError from "../helpers/reportError.js";
 import type * as helpers_subscription from "../helpers/subscription.js";
 import type * as helpers_unsplash from "../helpers/unsplash.js";
@@ -121,6 +122,7 @@ declare const fullApi: ApiFromModules<{
   functions: typeof functions;
   "helpers/achievements": typeof helpers_achievements;
   "helpers/geo": typeof helpers_geo;
+  "helpers/itinerary": typeof helpers_itinerary;
   "helpers/reportError": typeof helpers_reportError;
   "helpers/subscription": typeof helpers_subscription;
   "helpers/unsplash": typeof helpers_unsplash;

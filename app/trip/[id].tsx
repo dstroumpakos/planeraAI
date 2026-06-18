@@ -26,6 +26,11 @@ import { TripGuideTooltip, GuideStep } from "@/components/FirstTripGuide";
 import ShareTripCard, { ShareTripCardHandle } from "@/components/ShareTripCard";
 import PackageCard from "@/components/PackageCard";
 import PackageInquiryModal from "@/components/PackageInquiryModal";
+import ActivityActionSheet from "@/components/ActivityActionSheet";
+import EditTimeModal from "@/components/EditTimeModal";
+import AddActivityModal, { ManualActivityInput } from "@/components/AddActivityModal";
+import MoveToDayModal from "@/components/MoveToDayModal";
+import ReorderDayModal from "@/components/ReorderDayModal";
 import {
     buildFlightLink,
     buildHotelLink,
@@ -789,6 +794,16 @@ export default function TripDetails() {
     const removeActivityMut = useAuthenticatedMutation(api.trips.removeActivity as any);
     // @ts-ignore
     const replaceActivityMut = useAuthenticatedMutation(api.trips.scheduleReplaceActivity as any);
+    // @ts-ignore — Editable itinerary (Phase 2 backend)
+    const updateActivityMut = useAuthenticatedMutation(api.trips.updateActivity as any);
+    // @ts-ignore
+    const moveActivityMut = useAuthenticatedMutation(api.trips.moveActivity as any);
+    // @ts-ignore
+    const addActivityManualMut = useAuthenticatedMutation(api.trips.addActivityManual as any);
+    // @ts-ignore
+    const scheduleAddActivityAIMut = useAuthenticatedMutation(api.trips.scheduleAddActivityAI as any);
+    // @ts-ignore
+    const scheduleRegenerateDayMut = useAuthenticatedMutation(api.trips.scheduleRegenerateDay as any);
     // @ts-ignore
     const createShareLinkMut = useAuthenticatedMutation(api.tripShareLinks.createShareLink as any);
     // @ts-ignore
@@ -884,10 +899,118 @@ export default function TripDetails() {
     const [selectedHotelIndex, setSelectedHotelIndex] = useState<number | null>(null);
     const [replacingActivity, setReplacingActivity] = useState<string | null>(null); // "dayIndex-actIndex"
 
-    // Clear replacing state when the itinerary changes (AI finished)
+    // ===== Editable itinerary (Phase 3 UI) =====
+    // Which activity's action sheet is open, plus the edit-time / add-activity
+    // targets and the per-day / per-slot async loading keys. These mirror the
+    // existing `replacingActivity` optimistic pattern and auto-clear when the
+    // itinerary changes (server finished).
+    const [actionSheetTarget, setActionSheetTarget] = useState<{ dayIndex: number; actIndex: number } | null>(null);
+    const [editTimeTarget, setEditTimeTarget] = useState<{ dayIndex: number; actIndex: number } | null>(null);
+    const [addManualTarget, setAddManualTarget] = useState<{ dayIndex: number; insertIndex: number } | null>(null);
+    const [regeneratingDay, setRegeneratingDay] = useState<number | null>(null);
+    const [addingActivity, setAddingActivity] = useState<number | null>(null); // dayIndex with a pending AI/manual add
+    const [moveTarget, setMoveTarget] = useState<{ dayIndex: number; actIndex: number } | null>(null);
+    const [reorderDayIndex, setReorderDayIndex] = useState<number | null>(null); // day open in the drag-reorder sheet
+
+    // Clear all transient editing/loading state when the itinerary changes
+    // (the server write landed and the query refreshed).
     useEffect(() => {
         if (replacingActivity) setReplacingActivity(null);
+        if (regeneratingDay !== null) setRegeneratingDay(null);
+        if (addingActivity !== null) setAddingActivity(null);
     }, [trip?.itinerary]);
+
+    const activeActionActivity =
+        actionSheetTarget && trip?.itinerary?.dayByDayItinerary?.[actionSheetTarget.dayIndex]?.activities?.[actionSheetTarget.actIndex];
+    const editTimeActivity =
+        editTimeTarget && trip?.itinerary?.dayByDayItinerary?.[editTimeTarget.dayIndex]?.activities?.[editTimeTarget.actIndex];
+    const editTimeDayActivities: any[] =
+        (editTimeTarget && trip?.itinerary?.dayByDayItinerary?.[editTimeTarget.dayIndex]?.activities) || [];
+
+    // ----- Editable itinerary handlers -----
+    const handleEditTimeSave = useCallback((start: string, end: string) => {
+        if (!editTimeTarget || !trip?._id) return;
+        const { dayIndex, actIndex } = editTimeTarget;
+        setEditTimeTarget(null);
+        updateActivityMut({
+            tripId: trip._id,
+            dayIndex,
+            activityIndex: actIndex,
+            updates: { time: start, startTime: start, endTime: end },
+        }).catch((err: any) => console.error("Edit time failed:", err));
+    }, [editTimeTarget, trip?._id]);
+
+    const handleAddManual = useCallback((activity: ManualActivityInput) => {
+        if (!addManualTarget || !trip?._id) return;
+        const { dayIndex, insertIndex } = addManualTarget;
+        setAddManualTarget(null);
+        setAddingActivity(dayIndex);
+        addActivityManualMut({ tripId: trip._id, dayIndex, insertIndex, activity })
+            .catch((err: any) => {
+                console.error("Add manual activity failed:", err);
+                setAddingActivity(null);
+            });
+    }, [addManualTarget, trip?._id]);
+
+    const handleAddAI = useCallback((dayIndex: number, insertIndex: number) => {
+        if (!trip?._id) return;
+        setAddingActivity(dayIndex);
+        scheduleAddActivityAIMut({ tripId: trip._id, dayIndex, insertIndex, language: i18n.language })
+            .catch((err: any) => {
+                console.error("Add AI activity failed:", err);
+                setAddingActivity(null);
+            });
+    }, [trip?._id]);
+
+    // Move an activity to the END of another day (cross-day move via picker).
+    const handleMoveToDay = useCallback((toDayIndex: number) => {
+        if (!moveTarget || !trip?._id) return;
+        const { dayIndex, actIndex } = moveTarget;
+        const toActivities = trip?.itinerary?.dayByDayItinerary?.[toDayIndex]?.activities || [];
+        setMoveTarget(null);
+        moveActivityMut({
+            tripId: trip._id,
+            fromDayIndex: dayIndex,
+            fromActivityIndex: actIndex,
+            toDayIndex,
+            toActivityIndex: toActivities.length,
+        }).catch((err: any) => console.error("Move activity failed:", err));
+    }, [moveTarget, trip?._id, trip?.itinerary]);
+
+    // Persist a single within-day reorder from the drag-reorder sheet.
+    const handleReorderWithinDay = useCallback((dayIndex: number, from: number, to: number) => {
+        if (!trip?._id || from === to) return;
+        moveActivityMut({
+            tripId: trip._id,
+            fromDayIndex: dayIndex,
+            fromActivityIndex: from,
+            toDayIndex: dayIndex,
+            toActivityIndex: to,
+        }).catch((err: any) => console.error("Reorder activity failed:", err));
+    }, [trip?._id]);
+
+    const handleRegenerateDay = useCallback((dayIndex: number) => {
+        if (!trip?._id) return;
+        Alert.alert(
+            t('tripDetail.regenerateDay'),
+            t('tripDetail.regenerateDayConfirm'),
+            [
+                { text: t('common.cancel'), style: 'cancel' },
+                {
+                    text: t('tripDetail.regenerateDay'),
+                    onPress: () => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                        setRegeneratingDay(dayIndex);
+                        scheduleRegenerateDayMut({ tripId: trip._id, dayIndex, language: i18n.language })
+                            .catch((err: any) => {
+                                console.error("Regenerate day failed:", err);
+                                setRegeneratingDay(null);
+                            });
+                    },
+                },
+            ]
+        );
+    }, [trip?._id, t]);
 
     const [accommodationType, setAccommodationType] = useState<'all' | 'hotel' | 'airbnb'>('all');
     const [staysSortBy, setStaysSortBy] = useState<'recommended' | 'price' | 'rating'>('recommended');
@@ -2604,10 +2727,40 @@ export default function TripDetails() {
                                     </View>
                                     <Text style={[styles.daySubtitle, { color: colors.textMuted }]}>{day.title || t('tripDetail.exploreDest', { destination: trip.destination })}</Text>
                                 </View>
-                                <View style={[styles.energyBadge, { backgroundColor: isDarkMode ? `${energyColor}33` : `${energyColor}22` }]}>
-                                    <Text style={[styles.energyText, { color: energyColor }]}>{energyLevel}</Text>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                    {(day.activities?.length || 0) > 1 && (
+                                        <TouchableOpacity
+                                            onPress={() => setReorderDayIndex(index)}
+                                            disabled={regeneratingDay !== null}
+                                            style={[styles.dayRegenBtn, { borderColor: colors.border }]}
+                                            activeOpacity={0.7}
+                                            accessibilityLabel={t('tripDetail.reorderDay')}
+                                        >
+                                            <Ionicons name="reorder-three" size={18} color={colors.textMuted} />
+                                        </TouchableOpacity>
+                                    )}
+                                    <TouchableOpacity
+                                        onPress={() => handleRegenerateDay(index)}
+                                        disabled={regeneratingDay !== null}
+                                        style={[styles.dayRegenBtn, { borderColor: colors.border, opacity: regeneratingDay !== null && regeneratingDay !== index ? 0.4 : 1 }]}
+                                        activeOpacity={0.7}
+                                        accessibilityLabel={t('tripDetail.regenerateDay')}
+                                    >
+                                        <Ionicons name="refresh" size={16} color={colors.textMuted} />
+                                    </TouchableOpacity>
+                                    <View style={[styles.energyBadge, { backgroundColor: isDarkMode ? `${energyColor}33` : `${energyColor}22` }]}>
+                                        <Text style={[styles.energyText, { color: energyColor }]}>{energyLevel}</Text>
+                                    </View>
                                 </View>
                             </View>
+
+                            {/* Day-level loading banner while a regenerate-day is in flight. */}
+                            {regeneratingDay === index && (
+                                <View style={[styles.dayLoadingBanner, { backgroundColor: isDarkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)' }]}>
+                                    <ActivityIndicator size="small" color={colors.primary} />
+                                    <Text style={{ color: colors.textMuted, fontSize: 13, marginLeft: 8 }}>{t('tripDetail.regeneratingDay')}</Text>
+                                </View>
+                            )}
 
                             {/* Trip detail guide — Itinerary tooltip (first day only) */}
                             {index === 0 && currentDetailGuideKey === 'itinerary' && (
@@ -2697,39 +2850,7 @@ export default function TripDetails() {
                                         onLongPress={() => {
                                             if (replacingActivity) return;
                                             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-                                            Alert.alert(
-                                                activity.title,
-                                                t('tripDetail.replaceActivityMsg'),
-                                                [
-                                                    { text: t('common.cancel'), style: 'cancel' },
-                                                    {
-                                                        text: t('tripDetail.replaceActivity'),
-                                                        onPress: () => {
-                                                            setReplacingActivity(`${index}-${actIndex}`);
-                                                            replaceActivityMut({
-                                                                tripId: trip._id,
-                                                                dayIndex: index,
-                                                                activityIndex: actIndex,
-                                                                language: i18n.language,
-                                                            }).catch((err: any) => {
-                                                                console.error("Replace activity failed:", err);
-                                                                setReplacingActivity(null);
-                                                            });
-                                                        },
-                                                    },
-                                                    {
-                                                        text: t('common.delete'),
-                                                        style: 'destructive',
-                                                        onPress: () => {
-                                                            removeActivityMut({
-                                                                tripId: trip._id,
-                                                                dayIndex: index,
-                                                                activityIndex: actIndex,
-                                                            }).catch((err: any) => console.error("Remove activity failed:", err));
-                                                        },
-                                                    },
-                                                ]
-                                            );
+                                            setActionSheetTarget({ dayIndex: index, actIndex });
                                         }}
                                         delayLongPress={500}
                                         onPress={() => {
@@ -2973,6 +3094,35 @@ export default function TripDetails() {
                                 </View>
                                 );
                             })}
+
+                            {/* Add-activity footer: AI suggestion or manual entry at end of day. */}
+                            {addingActivity === index ? (
+                                <View style={[styles.addActivityRow, { borderColor: colors.border }]}>
+                                    <ActivityIndicator size="small" color={colors.primary} />
+                                    <Text style={{ color: colors.textMuted, fontSize: 14, marginLeft: 8 }}>{t('tripDetail.addingActivity')}</Text>
+                                </View>
+                            ) : (
+                                <View style={styles.addActivityFooter}>
+                                    <TouchableOpacity
+                                        style={[styles.addActivityBtn, { borderColor: colors.border }]}
+                                        onPress={() => handleAddAI(index, day.activities.length)}
+                                        disabled={addingActivity !== null}
+                                        activeOpacity={0.7}
+                                    >
+                                        <Ionicons name="sparkles-outline" size={16} color={colors.text} />
+                                        <Text style={[styles.addActivityText, { color: colors.text }]}>{t('tripDetail.addActivityAI')}</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={[styles.addActivityBtn, { borderColor: colors.border }]}
+                                        onPress={() => setAddManualTarget({ dayIndex: index, insertIndex: day.activities.length })}
+                                        disabled={addingActivity !== null}
+                                        activeOpacity={0.7}
+                                    >
+                                        <Ionicons name="create-outline" size={16} color={colors.text} />
+                                        <Text style={[styles.addActivityText, { color: colors.text }]}>{t('tripDetail.addActivityManual')}</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            )}
 
                             {/* Trip detail guide — Activity tooltip (first day only) */}
                             {index === 0 && currentDetailGuideKey === 'activity' && (
@@ -4932,6 +5082,62 @@ export default function TripDetails() {
                 packageInfo={inquiryPackage}
                 tripId={id as string}
             />
+
+            {/* ===== Editable itinerary modals (Phase 3) ===== */}
+            <ActivityActionSheet
+                visible={!!actionSheetTarget}
+                activityTitle={activeActionActivity?.title}
+                onClose={() => setActionSheetTarget(null)}
+                onEditTime={() => actionSheetTarget && setEditTimeTarget(actionSheetTarget)}
+                onReplaceAI={() => {
+                    if (!actionSheetTarget || !trip?._id) return;
+                    const { dayIndex, actIndex } = actionSheetTarget;
+                    setReplacingActivity(`${dayIndex}-${actIndex}`);
+                    replaceActivityMut({ tripId: trip._id, dayIndex, activityIndex: actIndex, language: i18n.language })
+                        .catch((err: any) => { console.error("Replace activity failed:", err); setReplacingActivity(null); });
+                }}
+                onAddAI={() => actionSheetTarget && handleAddAI(actionSheetTarget.dayIndex, actionSheetTarget.actIndex + 1)}
+                onAddManual={() => actionSheetTarget && setAddManualTarget({ dayIndex: actionSheetTarget.dayIndex, insertIndex: actionSheetTarget.actIndex + 1 })}
+                onMove={() => actionSheetTarget && setMoveTarget(actionSheetTarget)}
+                onRemove={() => {
+                    if (!actionSheetTarget || !trip?._id) return;
+                    const { dayIndex, actIndex } = actionSheetTarget;
+                    removeActivityMut({ tripId: trip._id, dayIndex, activityIndex: actIndex })
+                        .catch((err: any) => console.error("Remove activity failed:", err));
+                }}
+            />
+
+            <EditTimeModal
+                visible={!!editTimeTarget}
+                initialStart={editTimeActivity ? (editTimeActivity.startTime || editTimeActivity.time || "") : ""}
+                initialEnd={editTimeActivity?.endTime || ""}
+                prevEnd={editTimeTarget && editTimeTarget.actIndex > 0 ? (editTimeDayActivities[editTimeTarget.actIndex - 1]?.endTime || editTimeDayActivities[editTimeTarget.actIndex - 1]?.time) : undefined}
+                nextStart={editTimeTarget && editTimeTarget.actIndex < editTimeDayActivities.length - 1 ? (editTimeDayActivities[editTimeTarget.actIndex + 1]?.startTime || editTimeDayActivities[editTimeTarget.actIndex + 1]?.time) : undefined}
+                onClose={() => setEditTimeTarget(null)}
+                onSave={handleEditTimeSave}
+            />
+
+            <AddActivityModal
+                visible={!!addManualTarget}
+                onClose={() => setAddManualTarget(null)}
+                onAdd={handleAddManual}
+            />
+
+            <MoveToDayModal
+                visible={!!moveTarget}
+                dayCount={trip?.itinerary?.dayByDayItinerary?.length || 0}
+                currentDayIndex={moveTarget?.dayIndex ?? 0}
+                onClose={() => setMoveTarget(null)}
+                onSelectDay={handleMoveToDay}
+            />
+
+            <ReorderDayModal
+                visible={reorderDayIndex !== null}
+                dayNumber={(reorderDayIndex ?? 0) + 1}
+                activities={(reorderDayIndex !== null && trip?.itinerary?.dayByDayItinerary?.[reorderDayIndex]?.activities) || []}
+                onClose={() => setReorderDayIndex(null)}
+                onReorder={(from, to) => reorderDayIndex !== null && handleReorderWithinDay(reorderDayIndex, from, to)}
+            />
         </View>
     );
 }
@@ -5290,6 +5496,52 @@ const styles = StyleSheet.create({
     },
     daySection: {
         marginBottom: 32,
+    },
+    dayRegenBtn: {
+        width: 32,
+        height: 32,
+        borderRadius: 16,
+        borderWidth: 1,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    dayLoadingBanner: {
+        flexDirection: "row",
+        alignItems: "center",
+        paddingVertical: 10,
+        paddingHorizontal: 14,
+        borderRadius: 12,
+        marginBottom: 12,
+    },
+    addActivityFooter: {
+        flexDirection: "row",
+        gap: 10,
+        marginTop: 4,
+    },
+    addActivityBtn: {
+        flex: 1,
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 6,
+        paddingVertical: 12,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderStyle: "dashed",
+    },
+    addActivityText: {
+        fontSize: 14,
+        fontWeight: "600",
+    },
+    addActivityRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        paddingVertical: 14,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderStyle: "dashed",
+        marginTop: 4,
     },
     dayHeader: {
         flexDirection: "row",
