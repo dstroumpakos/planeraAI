@@ -417,6 +417,16 @@ export const getTripDetails = internalQuery({
             dealFlightData: v.optional(v.any()),
             status: v.string(),
             itinerary: v.optional(v.any()),
+            generationProgress: v.optional(v.object({
+                phase: v.union(
+                    v.literal("planning"),
+                    v.literal("building"),
+                    v.literal("enriching"),
+                    v.literal("done"),
+                ),
+                daysReady: v.number(),
+                totalDays: v.number(),
+            })),
         })
     ),
     handler: async (ctx: any, args: any) => {
@@ -501,19 +511,26 @@ export const setGenerationProgress = internalMutation({
         ),
         daysReady: v.optional(v.float64()),
         totalDays: v.optional(v.float64()),
+        // When true, clears any previously-streamed days so a regeneration starts
+        // from an empty list instead of appending onto stale data.
+        resetItinerary: v.optional(v.boolean()),
     },
     returns: v.null(),
     handler: async (ctx: any, args: any) => {
         const trip = await ctx.db.get(args.tripId);
         if (!trip) return null;
         const prev = trip.generationProgress ?? { phase: "planning", daysReady: 0, totalDays: 0 };
-        await ctx.db.patch(args.tripId, {
+        const patch: any = {
             generationProgress: {
                 phase: args.phase,
                 daysReady: args.daysReady ?? prev.daysReady ?? 0,
                 totalDays: args.totalDays ?? prev.totalDays ?? 0,
             },
-        });
+        };
+        if (args.resetItinerary) {
+            patch.itinerary = { ...(trip.itinerary ?? {}), dayByDayItinerary: [] };
+        }
+        await ctx.db.patch(args.tripId, patch);
         return null;
     },
 });

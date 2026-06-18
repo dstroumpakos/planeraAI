@@ -1432,6 +1432,7 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                     try {
                         await ctx.runMutation(internal.trips.setGenerationProgress, {
                             tripId, phase: "building", daysReady: 0, totalDays: effectiveTripDays,
+                            resetItinerary: true,
                         });
                         const stream = await openai.chat.completions.create(
                             {
@@ -1632,25 +1633,29 @@ export const enrichItinerary = internalAction({
                 console.warn("Affiliate enrichment skipped:", affErr);
             }
 
-            // 2) TripAdvisor ratings — per day, patched live so each fills in on its own.
-            const PER_DAY_TIMEOUT_MS = 20_000;
+            // 2) TripAdvisor ratings — merged ONCE across the whole itinerary so each
+            //    restaurant is assigned to a single day (the merge dedups via a shared
+            //    pool; running it per-day would reset that pool and repeat the same
+            //    restaurant on every day). We then patch each day individually so they
+            //    still fill in live, one at a time.
+            const MERGE_TIMEOUT_MS = 60_000;
+            try {
+                enrichedDays = await Promise.race([
+                    mergeRestaurantDataIntoItinerary(enrichedDays as any, args.restaurants as any, args.destination),
+                    new Promise<never>((_, reject) =>
+                        setTimeout(() => reject(new Error("TripAdvisor merge timed out")), MERGE_TIMEOUT_MS),
+                    ),
+                ]) as any[];
+            } catch (mergeErr) {
+                console.warn("TripAdvisor merge skipped:", mergeErr instanceof Error ? mergeErr.message : mergeErr);
+            }
+
+            // Patch each day on its own so ratings/booking buttons pop in day-by-day.
             for (let i = 0; i < enrichedDays.length; i++) {
-                let day = enrichedDays[i];
-                try {
-                    const [mergedDay] = await Promise.race([
-                        mergeRestaurantDataIntoItinerary([day] as any, args.restaurants as any, args.destination),
-                        new Promise<never>((_, reject) =>
-                            setTimeout(() => reject(new Error("per-day TripAdvisor merge timed out")), PER_DAY_TIMEOUT_MS),
-                        ),
-                    ]) as any[];
-                    if (mergedDay) day = mergedDay;
-                } catch (mergeErr) {
-                    console.warn(`Day ${i + 1} TripAdvisor merge skipped:`, mergeErr instanceof Error ? mergeErr.message : mergeErr);
-                }
                 await ctx.runMutation(internal.trips.patchDayEnrichment, {
                     tripId: args.tripId,
                     dayIndex: i,
-                    day,
+                    day: enrichedDays[i],
                 });
             }
         } catch (err) {
