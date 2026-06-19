@@ -23,16 +23,31 @@ function AuthenticatedRedirect() {
     const [languageDismissed, setLanguageDismissed] = useState(false);
     // @ts-ignore
     const settings = useQuery(api.users.getSettings as any, token ? { token } : "skip");
+    // Prefetch the Home screen's core data right here so this "loading your
+    // profile" screen stays up until Home is actually ready. Convex caches these
+    // results, so when we redirect, Home mounts already-populated in one shot
+    // instead of flashing a half-built layout (placeholder avatar, missing
+    // badges, trending fallback). Args mirror Home's queries so the cache hits.
+    // @ts-ignore
+    const plan = useQuery(api.users.getPlan as any, token ? { token } : "skip");
+    // @ts-ignore
+    const deals = useQuery(api.lowFareRadar.getDealsForUser as any, token ? { token } : "skip");
+    const profileImg = useQuery(
+        api.users.getProfileImageUrl as any,
+        token && settings?.profilePicture ? { storageId: settings.profilePicture, token } : "skip"
+    );
+
+    const loadingProfileScreen = (
+        <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={COLORS.primary} />
+            <Text style={styles.loadingText}>{t('auth.loadingProfile')}</Text>
+        </View>
+    );
 
     // Still loading settings from Convex
     if (settings === undefined) {
         console.log("[Index] AuthenticatedRedirect: Loading settings...");
-        return (
-            <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color={COLORS.primary} />
-                <Text style={styles.loadingText}>{t('auth.loadingProfile')}</Text>
-            </View>
-        );
+        return loadingProfileScreen;
     }
 
     console.log("[Index] AuthenticatedRedirect: Settings loaded, onboardingCompleted:", settings.onboardingCompleted);
@@ -49,9 +64,18 @@ function AuthenticatedRedirect() {
         );
     }
 
-    // If onboarding not completed, redirect to onboarding
+    // If onboarding not completed, redirect to onboarding (no need for Home data yet)
     if (!settings.onboardingCompleted) {
         return <Redirect href="/onboarding" />;
+    }
+
+    // Heading to Home — keep the loading-profile screen up until its core data
+    // has landed, so Home appears fully populated. The profile image only
+    // matters when the user actually has one set.
+    const profileReady = !settings.profilePicture || profileImg !== undefined;
+    if (plan === undefined || deals === undefined || !profileReady) {
+        console.log("[Index] AuthenticatedRedirect: Warming Home data...");
+        return loadingProfileScreen;
     }
 
     // Otherwise go to tabs

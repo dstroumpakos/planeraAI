@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   View,
   Text,
@@ -28,6 +28,8 @@ import { FirstTripPopup } from "@/components/FirstTripGuide";
 import { LowFareRadar } from "@/components/LowFareRadar";
 import StreakWidget from "@/components/StreakWidget";
 import AchievementUnlocked from "@/components/AchievementUnlocked";
+import AirplaneIntro from "@/components/AirplaneIntro";
+import Animated, { useSharedValue, useAnimatedStyle, withTiming, withSequence, Easing } from "react-native-reanimated";
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -44,6 +46,39 @@ export default function HomeScreen() {
   const checkIn = useMutation(api.streaks.checkIn as any);
   const trackBookingClick = useMutation(api.lowFareRadar.trackBookingClick as any);
   const [checkedIn, setCheckedIn] = useState(false);
+
+  // One-shot airplane intro: flies up and slides INTO the search field when Home
+  // first appears. We capture the field's full window rect so a replica of it can
+  // sit above the plane and "swallow" it at the end.
+  const searchRef = useRef<any>(null);
+  const introMeasured = useRef(false);
+  const [introRect, setIntroRect] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [introDone, setIntroDone] = useState(false);
+  // Gold glow pulse on the search field as the plane slides into it.
+  const fieldGlow = useSharedValue(0);
+  const fieldGlowStyle = useAnimatedStyle(() => ({
+    opacity: fieldGlow.value * 0.6,
+    transform: [{ scale: 0.94 + fieldGlow.value * 0.12 }],
+  }));
+  const triggerFieldGlow = useCallback(() => {
+    fieldGlow.value = withSequence(
+      withTiming(1, { duration: 160 }),
+      withTiming(0, { duration: 720, easing: Easing.out(Easing.quad) })
+    );
+  }, []);
+  const handleSearchLayout = useCallback(() => {
+    if (introMeasured.current) return;
+    // Measure on the next frame so window coordinates are final. Only lock in
+    // once we get valid coords, so a too-early layout pass can retry.
+    requestAnimationFrame(() => {
+      searchRef.current?.measureInWindow?.((x: number, y: number, w: number, h: number) => {
+        if (w > 0 && h > 0 && !introMeasured.current) {
+          introMeasured.current = true;
+          setIntroRect({ x, y, w, h });
+        }
+      });
+    });
+  }, []);
 
   // Debug logging
   useEffect(() => {
@@ -172,28 +207,6 @@ export default function HomeScreen() {
     );
   }
 
-  // Keep the loading screen up until the core data has actually arrived, so we
-  // never flash a half-built Home — placeholder avatar, missing streak/credits
-  // badges, and the trending fallback before the real radar deals load.
-  // (Queries return `undefined` while in flight.) The profile image only matters
-  // when the user actually has one set.
-  const profileImageReady = !userSettings?.profilePicture || getProfileImageUrl !== undefined;
-  const homeDataReady =
-    userSettings !== undefined &&
-    userPlan !== undefined &&
-    lowFareData !== undefined &&
-    profileImageReady;
-
-  if (!homeDataReady) {
-    return (
-      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
-        </View>
-      </SafeAreaView>
-    );
-  }
-
   const userName = userSettings?.name?.split(" ")[0] || t("home.traveler");
 
   const getGreeting = () => {
@@ -290,7 +303,9 @@ export default function HomeScreen() {
         </View>
 
         {/* Search Bar */}
-        <TouchableOpacity 
+        <TouchableOpacity
+          ref={searchRef}
+          onLayout={handleSearchLayout}
           style={[styles.searchContainer, { backgroundColor: colors.card }]}
           onPress={() => router.push("/create-trip")}
           activeOpacity={0.7}
@@ -591,6 +606,52 @@ export default function HomeScreen() {
         )}
       </ScrollView>
     </SafeAreaView>
+    {/* Airplane intro: flies on top of the content, then slides INTO the search
+        field — a replica of the field sits above the plane and swallows it. */}
+    {introRect && !introDone && (
+      <>
+        <AirplaneIntro
+          targetX={introRect.x + introRect.w / 2}
+          targetY={introRect.y + introRect.h / 2}
+          color={colors.primary}
+          imageSource={require("@/assets/images/airplane-intro.png")}
+          onArrive={triggerFieldGlow}
+          onDone={() => setIntroDone(true)}
+        />
+        <View
+          pointerEvents="none"
+          style={{ position: "absolute", left: introRect.x, top: introRect.y, width: introRect.w, height: introRect.h }}
+        >
+          {/* Gold glow halo that pulses when the plane slides into the field. */}
+          <Animated.View
+            style={[
+              {
+                position: "absolute",
+                top: -14,
+                left: -14,
+                right: -14,
+                bottom: -14,
+                borderRadius: 38,
+                backgroundColor: colors.primary,
+                shadowColor: colors.primary,
+                shadowOpacity: 1,
+                shadowRadius: 16,
+                shadowOffset: { width: 0, height: 0 },
+              },
+              fieldGlowStyle,
+            ]}
+          />
+          {/* Replica of the search field (sits above the plane so it's swallowed). */}
+          <View style={{ flex: 1, flexDirection: "row", alignItems: "center", borderRadius: 30, padding: 8, backgroundColor: colors.card }}>
+            <Ionicons name="search-outline" size={20} color={colors.textMuted} style={styles.searchIcon} />
+            <Text style={[styles.searchPlaceholder, { color: colors.textMuted }]}>{t("home.whereToGo")}</Text>
+            <View style={[styles.searchButton, { backgroundColor: colors.primary }]}>
+              <Ionicons name="arrow-forward" size={20} color={colors.text} />
+            </View>
+          </View>
+        </View>
+      </>
+    )}
     <AchievementUnlocked />
     </>
   );
