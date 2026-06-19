@@ -172,6 +172,28 @@ export default function HomeScreen() {
     );
   }
 
+  // Keep the loading screen up until the core data has actually arrived, so we
+  // never flash a half-built Home — placeholder avatar, missing streak/credits
+  // badges, and the trending fallback before the real radar deals load.
+  // (Queries return `undefined` while in flight.) The profile image only matters
+  // when the user actually has one set.
+  const profileImageReady = !userSettings?.profilePicture || getProfileImageUrl !== undefined;
+  const homeDataReady =
+    userSettings !== undefined &&
+    userPlan !== undefined &&
+    lowFareData !== undefined &&
+    profileImageReady;
+
+  if (!homeDataReady) {
+    return (
+      <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={colors.primary} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   const userName = userSettings?.name?.split(" ")[0] || t("home.traveler");
 
   const getGreeting = () => {

@@ -1,12 +1,12 @@
-import React, { useEffect } from "react";
-import { View, TouchableOpacity, StyleSheet, Platform } from "react-native";
+import React, { useEffect, useRef, useState } from "react";
+import { View, TouchableOpacity, StyleSheet, Platform, LayoutChangeEvent } from "react-native";
 import { BlurView } from "expo-blur";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import type { BottomTabBarProps } from "@react-navigation/bottom-tabs";
 import * as Haptics from "expo-haptics";
-import Animated, { useAnimatedStyle, withTiming, LinearTransition, FadeIn, FadeOut } from "react-native-reanimated";
+import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming } from "react-native-reanimated";
 import { useTheme } from "@/lib/ThemeContext";
 import { useTabBarTranslateY } from "@/lib/tabBarVisibility";
 
@@ -20,15 +20,46 @@ const TAB_ICONS: Record<string, { active: keyof typeof Ionicons.glyphMap; inacti
 };
 
 const PILL_HEIGHT = 64;
+const PILL_PAD = 8;
+const HILITE_W = 50;
+const HILITE_H = 42;
 const CREATE_SIZE = 56;
-const ITEM_SPRING = LinearTransition.springify().damping(18).stiffness(190).mass(0.6);
+const SPRING = { damping: 16, stiffness: 180, mass: 0.7 };
+
+/** A single tab icon that springs up in scale when it becomes active. */
+function TabIcon({
+    focused,
+    activeIcon,
+    inactiveIcon,
+    activeColor,
+}: {
+    focused: boolean;
+    activeIcon: keyof typeof Ionicons.glyphMap;
+    inactiveIcon: keyof typeof Ionicons.glyphMap;
+    activeColor: string;
+}) {
+    const scale = useSharedValue(focused ? 1.1 : 1);
+    useEffect(() => {
+        scale.value = withSpring(focused ? 1.1 : 1, SPRING);
+    }, [focused]);
+    const style = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+    return (
+        <Animated.View style={style}>
+            <Ionicons
+                name={focused ? activeIcon : inactiveIcon}
+                size={25}
+                color={focused ? activeColor : "rgba(235,235,245,0.55)"}
+            />
+        </Animated.View>
+    );
+}
 
 /**
  * Floating pill tab bar (Instagram/Threads style): a rounded, translucent bar
- * detached from the screen edges. The active tab expands into a tinted
- * (brand-yellow) pill showing its icon + label while the rest stay icon-only,
- * and a prominent raised yellow "+" create button sits in the middle. The whole
- * bar tucks away on scroll-down and returns on scroll-up.
+ * detached from the screen edges, icon-only, with a brand-tinted highlight that
+ * springs across to the active tab and a prominent raised yellow "+" create
+ * button in the middle. The whole bar tucks away on scroll-down, returns on
+ * scroll-up. Equal-width slots keep spacing even and never collide with the "+".
  */
 export default function FloatingTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
     const { colors, isDarkMode } = useTheme();
@@ -36,15 +67,47 @@ export default function FloatingTabBar({ state, descriptors, navigation }: Botto
     const router = useRouter();
     const translateY = useTabBarTranslateY();
 
-    // Always reveal the bar when the active tab changes (it may have been tucked
-    // away by scrolling on the previous screen).
+    const [pillWidth, setPillWidth] = useState(0);
+    const measured = useRef(false);
+    const routeCount = state.routes.length;
+    const createIndex = state.routes.findIndex((r) => r.name === "create");
+    const slotWidth = pillWidth > 0 ? (pillWidth - PILL_PAD * 2) / routeCount : 0;
+
+    const highlightX = useSharedValue(0);
+    const highlightOpacity = useSharedValue(0);
+    const targetX = (index: number) => PILL_PAD + index * slotWidth + (slotWidth - HILITE_W) / 2;
+
+    useEffect(() => {
+        if (slotWidth <= 0) return;
+        const onCreate = state.index === createIndex;
+        const x = targetX(state.index);
+        if (!measured.current) {
+            highlightX.value = x;
+            highlightOpacity.value = onCreate ? 0 : 1;
+            measured.current = true;
+        } else {
+            highlightX.value = withSpring(x, SPRING);
+            highlightOpacity.value = withTiming(onCreate ? 0 : 1, { duration: 140 });
+        }
+    }, [state.index, slotWidth]);
+
+    // Reveal the bar whenever the active tab changes (it may have been hidden).
     useEffect(() => {
         if (translateY) translateY.value = withTiming(0, { duration: 160 });
     }, [state.index]);
 
+    const highlightStyle = useAnimatedStyle(() => ({
+        transform: [{ translateX: highlightX.value }],
+        opacity: highlightOpacity.value,
+    }));
     const hideStyle = useAnimatedStyle(() => ({
         transform: [{ translateY: translateY ? translateY.value : 0 }],
     }));
+
+    const onLayout = (e: LayoutChangeEvent) => {
+        const w = e.nativeEvent.layout.width;
+        if (Math.abs(w - pillWidth) > 0.5) setPillWidth(w);
+    };
 
     const handlePress = (routeName: string, routeKey: string, isFocused: boolean) => {
         Haptics.selectionAsync();
@@ -74,16 +137,24 @@ export default function FloatingTabBar({ state, descriptors, navigation }: Botto
                             borderColor: "rgba(255,255,255,0.08)",
                         },
                     ]}
+                    onLayout={onLayout}
                 >
+                    {/* Sliding brand-tinted highlight behind the active icon. */}
+                    {slotWidth > 0 && (
+                        <Animated.View
+                            pointerEvents="none"
+                            style={[styles.highlight, { backgroundColor: "rgba(255,229,0,0.16)" }, highlightStyle]}
+                        />
+                    )}
+
                     {state.routes.map((route, index) => {
                         const cfg = TAB_ICONS[route.name];
                         const isFocused = state.index === index;
                         const { options } = descriptors[route.key];
-                        const label = typeof options.title === "string" ? options.title : route.name;
 
-                        // Center route reserves a fixed spacer; the raised button is on top.
+                        // Center route reserves an equal empty slot; button drawn on top.
                         if (cfg === "create") {
-                            return <View key={route.key} style={styles.createSpacer} />;
+                            return <View key={route.key} style={styles.slot} />;
                         }
 
                         return (
@@ -91,34 +162,17 @@ export default function FloatingTabBar({ state, descriptors, navigation }: Botto
                                 key={route.key}
                                 accessibilityRole="button"
                                 accessibilityState={isFocused ? { selected: true } : {}}
-                                accessibilityLabel={label}
+                                accessibilityLabel={typeof options.title === "string" ? options.title : route.name}
                                 onPress={() => handlePress(route.name, route.key, isFocused)}
                                 activeOpacity={0.7}
                                 style={styles.slot}
                             >
-                                <Animated.View
-                                    layout={ITEM_SPRING}
-                                    style={[
-                                        styles.itemPill,
-                                        isFocused && { backgroundColor: "rgba(255,229,0,0.16)", paddingHorizontal: 14 },
-                                    ]}
-                                >
-                                    <Ionicons
-                                        name={isFocused ? cfg.active : cfg.inactive}
-                                        size={24}
-                                        color={isFocused ? colors.primary : "rgba(235,235,245,0.55)"}
-                                    />
-                                    {isFocused && (
-                                        <Animated.Text
-                                            entering={FadeIn.duration(160)}
-                                            exiting={FadeOut.duration(120)}
-                                            numberOfLines={1}
-                                            style={[styles.itemLabel, { color: colors.primary }]}
-                                        >
-                                            {label}
-                                        </Animated.Text>
-                                    )}
-                                </Animated.View>
+                                <TabIcon
+                                    focused={isFocused}
+                                    activeIcon={cfg.active}
+                                    inactiveIcon={cfg.inactive}
+                                    activeColor={colors.primary}
+                                />
                             </TouchableOpacity>
                         );
                     })}
@@ -166,31 +220,24 @@ const styles = StyleSheet.create({
     pill: {
         flexDirection: "row",
         alignItems: "center",
-        justifyContent: "space-between",
         height: PILL_HEIGHT,
         borderRadius: PILL_HEIGHT / 2,
         borderWidth: StyleSheet.hairlineWidth,
-        paddingHorizontal: 10,
+        paddingHorizontal: PILL_PAD,
         overflow: "hidden",
     },
+    highlight: {
+        position: "absolute",
+        left: 0,
+        top: (PILL_HEIGHT - HILITE_H) / 2,
+        width: HILITE_W,
+        height: HILITE_H,
+        borderRadius: 16,
+    },
     slot: {
+        flex: 1,
         alignItems: "center",
         justifyContent: "center",
-    },
-    itemPill: {
-        flexDirection: "row",
-        alignItems: "center",
-        height: 44,
-        paddingHorizontal: 12,
-        borderRadius: 22,
-    },
-    itemLabel: {
-        marginLeft: 7,
-        fontSize: 14,
-        fontWeight: "600",
-    },
-    createSpacer: {
-        width: CREATE_SIZE,
         height: "100%",
     },
     createOverlay: {
@@ -200,9 +247,9 @@ const styles = StyleSheet.create({
     },
     createGlow: {
         position: "absolute",
-        width: CREATE_SIZE + 16,
-        height: CREATE_SIZE + 16,
-        borderRadius: (CREATE_SIZE + 16) / 2,
+        width: CREATE_SIZE + 18,
+        height: CREATE_SIZE + 18,
+        borderRadius: (CREATE_SIZE + 18) / 2,
         opacity: 0.22,
         marginTop: -22,
     },
@@ -216,7 +263,7 @@ const styles = StyleSheet.create({
         borderWidth: 4, // ring that notches the button out of the bar
         shadowColor: "#FFE500",
         shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.45,
+        shadowOpacity: 0.5,
         shadowRadius: 12,
         elevation: 8,
     },

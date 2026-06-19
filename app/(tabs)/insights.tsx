@@ -932,7 +932,7 @@ export default function AtlasScreen() {
                         { 
                             backgroundColor: colors.background,
                             borderTopColor: colors.border,
-                            paddingBottom: keyboardVisible ? 8 : Math.max(insets.bottom, 80),
+                            paddingBottom: keyboardVisible ? 8 : Math.max(insets.bottom, 12) + 84,
                         }
                     ]}>
                         <View style={[styles.inputWrapper, { backgroundColor: colors.card, borderColor: colors.border }]}>
