@@ -649,6 +649,57 @@ export const writeBaseItinerary = internalMutation({
                 totalDays: args.totalDays || days.length,
             },
         });
+
+        // Record this completed trip for SEO aggregation (powers the website's
+        // /explore published itineraries). Best-effort: a failure here must never
+        // break trip completion, so it's isolated in try/catch. Inlined rather
+        // than calling publishedItineraries.upsertAggregation because a mutation
+        // cannot invoke another mutation.
+        try {
+            const raw = (trip.destination || "").trim();
+            const city = raw.split(",")[0].trim();
+            const citySlug = city
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, "-")
+                .replace(/^-+|-+$/g, "");
+            if (citySlug) {
+                const country = raw.includes(",")
+                    ? raw.slice(raw.indexOf(",") + 1).trim()
+                    : undefined;
+                const durationDays = Math.max(
+                    1,
+                    Math.ceil((trip.endDate - trip.startDate) / (1000 * 60 * 60 * 24)),
+                );
+                const destinationKey = `${citySlug}-${durationDays}`;
+                const existingAgg = await ctx.db
+                    .query("tripAggregations")
+                    .withIndex("by_destination_key", (q: any) =>
+                        q.eq("destinationKey", destinationKey),
+                    )
+                    .unique();
+                if (existingAgg) {
+                    if (!existingAgg.tripIds.includes(args.tripId)) {
+                        await ctx.db.patch(existingAgg._id, {
+                            tripIds: [...existingAgg.tripIds, args.tripId],
+                            count: existingAgg.tripIds.length + 1,
+                            lastUpdated: Date.now(),
+                        });
+                    }
+                } else {
+                    await ctx.db.insert("tripAggregations", {
+                        destinationKey,
+                        destination: city,
+                        country,
+                        durationDays,
+                        tripIds: [args.tripId],
+                        count: 1,
+                        lastUpdated: Date.now(),
+                    });
+                }
+            }
+        } catch (e) {
+            console.error("writeBaseItinerary: failed to record trip aggregation", e);
+        }
         return null;
     },
 });
@@ -909,6 +960,13 @@ export const get = authQuery({
             status: v.union(v.literal("pending"), v.literal("generating"), v.literal("completed"), v.literal("failed"), v.literal("archived")),
             itinerary: v.optional(v.any()),
             itineraryItems: v.optional(v.any()),
+            // Live day-by-day generation progress (drives streaming UI). Kept in
+            // the returns validator so clients receive `phase` while generating.
+            generationProgress: v.optional(v.object({
+                phase: v.union(v.literal("planning"), v.literal("building"), v.literal("enriching"), v.literal("done")),
+                daysReady: v.number(),
+                totalDays: v.number(),
+            })),
             isMultiCity: v.optional(v.boolean()),
             destinations: v.optional(v.any()),
             optimizedRoute: v.optional(v.any()),

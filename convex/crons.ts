@@ -49,4 +49,14 @@ crons.interval(
     {},
 );
 
+// Publish SEO itineraries: daily, aggregate destinations that have enough real
+// completed trips into curated public itineraries (written as drafts pending
+// approval). Daily cadence batches the OpenAI cost.
+crons.interval(
+    "publish-pending-aggregations",
+    { hours: 24 },
+    internal.publishedItinerariesActions.publishPendingAggregations,
+    {},
+);
+
 export default crons;

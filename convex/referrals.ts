@@ -136,7 +136,7 @@ export const applyReferralCode = authMutation({
         userId: referrer.userId,
         plan: "free",
         tripsGenerated: 0,
-        tripCredits: 2, // 1 default + 1 referral reward
+        tripCredits: 6, // 5 default + 1 referral reward
       });
     }
 
@@ -154,7 +154,7 @@ export const applyReferralCode = authMutation({
         userId: userId,
         plan: "free",
         tripsGenerated: 0,
-        tripCredits: 2, // 1 default + 1 referral reward
+        tripCredits: 6, // 5 default + 1 referral reward
       });
     }
 

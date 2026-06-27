@@ -46,7 +46,7 @@ export const getPlan = authQuery({
             return { 
                 plan: "free", 
                 tripsGenerated: 0,
-                tripCredits: 1,
+                tripCredits: 5,
                 subscriptionExpiresAt: null,
                 isSubscriptionActive: false,
                 _needsCreation: true,
@@ -84,7 +84,7 @@ export const ensureUserPlan = authMutation({
                 userId: ctx.user.userId,
                 plan: "free",
                 tripsGenerated: 0,
-                tripCredits: 1, // Free tier gets 1 trip
+                tripCredits: 5, // New users get 5 free trip credits
             });
         }
         return { success: true };

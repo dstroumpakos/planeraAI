@@ -963,6 +963,8 @@ export default defineSchema({
         bestFor: v.array(v.string()),
         bestSeason: v.string(),
         heroImage: v.string(),
+        // Unsplash attribution for the hero image (photographer + links).
+        heroImageData: v.optional(v.any()),
         days: v.any(),
         practicalInfo: v.any(),
         faqs: v.array(v.object({
@@ -972,9 +974,17 @@ export default defineSchema({
         relatedItineraries: v.array(v.string()),
         sourceTripCount: v.float64(),
         lastAggregated: v.float64(),
+        // Per-locale translations of the text fields (el/es/fr/de/ar). English
+        // stays canonical in the top-level fields; client overlays the active locale.
+        translations: v.optional(v.any()),
+        // Draft→approve gate: only "published" rows are served to the website.
+        // "rejected" is sticky so the cron won't regenerate a dismissed draft.
+        // Optional for backward-compat with any pre-existing rows (treated as published).
+        status: v.optional(v.union(v.literal("draft"), v.literal("published"), v.literal("rejected"))),
     })
         .index("by_slug", ["slug"])
-        .index("by_destination", ["destination"]),
+        .index("by_destination", ["destination"])
+        .index("by_status", ["status"]),
 
     // WorldPrint — user's living globe profile
     worldPrintProfile: defineTable({

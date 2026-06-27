@@ -105,7 +105,7 @@ export const upsertUserAndCreateSession = internalMutation({
         userId: uniqueUserId,
         plan: "free",
         tripsGenerated: 0,
-        tripCredits: 1, // Free tier gets 1 trip
+        tripCredits: 5, // New users get 5 free trip credits
       });
       console.log("[AuthNativeDb] Created user plan:", newPlanId);
     }

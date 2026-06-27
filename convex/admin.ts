@@ -895,3 +895,89 @@ export const deleteUserSessions = mutation({
         return { deleted: sessions.length };
     },
 });
+
+// ===========================================
+// PUBLISHED ITINERARY REVIEW (SEO /explore drafts)
+// ===========================================
+
+/** List draft itineraries awaiting admin approval (web admin review page). */
+export const listItineraryDrafts = query({
+    args: { token: v.string() },
+    handler: async (ctx, args) => {
+        const userId = await getUserIdFromToken(ctx, args.token);
+        if (!userId) throw new Error("Unauthorized");
+        await assertAdmin(ctx, userId);
+
+        const drafts = await ctx.db
+            .query("publishedItineraries")
+            .withIndex("by_status", (q: any) => q.eq("status", "draft"))
+            .collect();
+
+        // Return a trimmed, serializable shape for the review UI.
+        return drafts
+            .map((d: any) => ({
+                _id: d._id,
+                slug: d.slug,
+                destination: d.destination,
+                country: d.country,
+                continent: d.continent,
+                durationDays: d.durationDays,
+                title: d.title,
+                metaDescription: d.metaDescription,
+                intro: d.intro,
+                budgetLevel: d.budgetLevel,
+                budgetPerDayEur: d.budgetPerDayEur,
+                bestSeason: d.bestSeason,
+                bestFor: d.bestFor || [],
+                sourceTripCount: d.sourceTripCount || 0,
+                dayCount: Array.isArray(d.days) ? d.days.length : 0,
+                faqCount: Array.isArray(d.faqs) ? d.faqs.length : 0,
+                translationCount: d.translations ? Object.keys(d.translations).length : 0,
+                lastAggregated: d.lastAggregated,
+            }))
+            .sort((a: any, b: any) => a.slug.localeCompare(b.slug));
+    },
+});
+
+/** Approve a draft itinerary → make it live on the website. */
+export const approvePublishedItinerary = mutation({
+    args: { token: v.string(), slug: v.string() },
+    handler: async (ctx, args) => {
+        const userId = await getUserIdFromToken(ctx, args.token);
+        if (!userId) throw new Error("Unauthorized");
+        await assertAdmin(ctx, userId);
+
+        const row = await ctx.db
+            .query("publishedItineraries")
+            .withIndex("by_slug", (q: any) => q.eq("slug", args.slug))
+            .unique();
+        if (!row) throw new Error("Itinerary not found");
+
+        await ctx.db.patch(row._id, { status: "published" });
+        return { ok: true };
+    },
+});
+
+/**
+ * Reject a draft itinerary. Marks it "rejected" (sticky) rather than deleting,
+ * so the daily aggregation cron won't just regenerate it on the next run.
+ */
+export const rejectPublishedItinerary = mutation({
+    args: { token: v.string(), slug: v.string() },
+    handler: async (ctx, args) => {
+        const userId = await getUserIdFromToken(ctx, args.token);
+        if (!userId) throw new Error("Unauthorized");
+        await assertAdmin(ctx, userId);
+
+        const row = await ctx.db
+            .query("publishedItineraries")
+            .withIndex("by_slug", (q: any) => q.eq("slug", args.slug))
+            .unique();
+        if (!row) throw new Error("Itinerary not found");
+        // Only drafts are rejectable from here — never hide a live page by mistake.
+        if (row.status !== "draft") throw new Error("Only drafts can be rejected");
+
+        await ctx.db.patch(row._id, { status: "rejected" });
+        return { ok: true };
+    },
+});

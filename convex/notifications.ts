@@ -677,3 +677,100 @@ export const broadcastStreakRewards = internalAction({
         return { targeted: users.length, sent, skipped, dryRun: false };
     },
 });
+
+// ─── One-off backfill: top up free users who used their original credit ───
+
+/**
+ * Free, non-subscribed users who have generated at least one trip AND have no
+ * credits left — i.e. they used up their original single free credit before the
+ * new "5 free credits" policy. Returns enough to grant credits + notify.
+ */
+export const getUsedUpFreeUsers = internalQuery({
+    args: {},
+    handler: async (ctx): Promise<Array<{ userId: string; planId: any }>> => {
+        const now = Date.now();
+        const plans = await ctx.db.query("userPlans").collect();
+        const result: Array<{ userId: string; planId: any }> = [];
+        for (const p of plans) {
+            const isPremiumActive =
+                p.plan === "premium" && !!p.subscriptionExpiresAt && p.subscriptionExpiresAt > now;
+            const credits = p.tripCredits ?? 0;
+            const generated = p.tripsGenerated ?? 0;
+            if (!isPremiumActive && credits <= 0 && generated >= 1) {
+                result.push({ userId: p.userId, planId: p._id });
+            }
+        }
+        return result;
+    },
+});
+
+/** Set a plan's trip credits to an exact amount (used by the backfill). */
+export const setTripCredits = internalMutation({
+    args: { planId: v.id("userPlans"), credits: v.number() },
+    handler: async (ctx, args) => {
+        await ctx.db.patch(args.planId, { tripCredits: args.credits });
+        return null;
+    },
+});
+
+// Marketing copy for the credit gift (master push-notification toggle still respected).
+const CREDIT_GIFT = {
+    title: "🎁 5 free trips, on us!",
+    body: "Good news — we've added 5 free AI trip plans to your account. Your next adventure is one tap away. Where to? ✈️",
+};
+
+/**
+ * Admin one-off: grant 5 trip credits to every free user who used up their
+ * original credit, and notify them with the marketing message. Pass
+ * `dryRun: true` to only count recipients without writing or sending.
+ */
+export const backfillFreeCreditsAndNotify = internalAction({
+    args: { dryRun: v.optional(v.boolean()), credits: v.optional(v.number()) },
+    handler: async (
+        ctx,
+        args,
+    ): Promise<{ targeted: number; granted: number; sent: number; skipped: number; dryRun: boolean }> => {
+        const grant = args.credits ?? 5;
+        const users: Array<{ userId: string; planId: any }> = await ctx.runQuery(
+            internal.notifications.getUsedUpFreeUsers,
+            {},
+        );
+
+        if (args.dryRun) {
+            console.log(`🎁 [dryRun] credit backfill would grant ${grant} credits to ${users.length} user(s)`);
+            return { targeted: users.length, granted: 0, sent: 0, skipped: 0, dryRun: true };
+        }
+
+        let granted = 0;
+        let sent = 0;
+        let skipped = 0;
+        for (const u of users) {
+            try {
+                await ctx.runMutation(internal.notifications.setTripCredits, {
+                    planId: u.planId,
+                    credits: grant,
+                });
+                granted++;
+            } catch (err) {
+                console.error(`backfill: failed to grant credits to ${u.userId}`, err);
+                skipped++;
+                continue;
+            }
+            try {
+                await ctx.runAction(internal.notifications.sendPushNotification, {
+                    userId: u.userId,
+                    title: CREDIT_GIFT.title,
+                    body: CREDIT_GIFT.body,
+                    type: "credit_gift",
+                    data: { screen: "create-trip" },
+                });
+                sent++;
+            } catch (err) {
+                console.error(`backfill: failed to notify ${u.userId}`, err);
+            }
+        }
+
+        console.log(`🎁 credit backfill complete — targeted ${users.length}, granted ${granted}, notified ${sent}, skipped ${skipped}`);
+        return { targeted: users.length, granted, sent, skipped, dryRun: false };
+    },
+});
