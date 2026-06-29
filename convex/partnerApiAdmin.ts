@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { ConvexError } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { mutation, query, action } from "./_generated/server";
+import { api, internal } from "./_generated/api";
 import { sha256Hex, buildCacheKey, normalizeDestinationKey } from "./partnerApiAuth";
 import { CURATED_CITIES, DEFAULT_DURATIONS } from "./partnerPregenConfig";
 
@@ -312,4 +313,249 @@ export const getPregenerationStatus = query({
     };
   },
 });
+
+// ---------------------------------------------------------------------------
+// Partner applications (inbound "Become a partner" submissions)
+// ---------------------------------------------------------------------------
+
+const INVITE_TTL_MS = 1000 * 60 * 60 * 24 * 7; // 7 days
+const PORTAL_BASE_URL = "https://www.planeraai.app";
+
+/** List partner applications (newest first) for the admin review queue. */
+export const listApplications = query({
+  args: { adminToken: v.string() },
+  handler: async (ctx, args) => {
+    assertAdmin(args.adminToken);
+    const apps = await ctx.db
+      .query("partnerApplications")
+      .withIndex("by_created")
+      .order("desc")
+      .take(200);
+    return apps.map((a) => ({
+      id: a._id,
+      companyName: a.companyName,
+      website: a.website ?? null,
+      contactName: a.contactName,
+      email: a.email,
+      partnershipTypes: a.partnershipTypes,
+      monthlyVolume: a.monthlyVolume ?? null,
+      message: a.message ?? null,
+      status: a.status,
+      createdAt: a.createdAt,
+      reviewedAt: a.reviewedAt ?? null,
+    }));
+  },
+});
+
+/** Update an application's review status (dismiss / re-open / mark invited). */
+export const setApplicationStatus = mutation({
+  args: {
+    adminToken: v.string(),
+    id: v.id("partnerApplications"),
+    status: v.union(
+      v.literal("new"),
+      v.literal("invited"),
+      v.literal("dismissed")
+    ),
+  },
+  handler: async (ctx, args) => {
+    assertAdmin(args.adminToken);
+    const app = await ctx.db.get(args.id);
+    if (!app) throw new ConvexError("Application not found.");
+    await ctx.db.patch(args.id, {
+      status: args.status,
+      reviewedAt: Date.now(),
+    });
+    return { ok: true };
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Supplier product review queue (self-serve partner products)
+// ---------------------------------------------------------------------------
+
+/** List supplier product listings for review (pending first, newest first). */
+export const listPendingProducts = query({
+  args: {
+    adminToken: v.string(),
+    status: v.optional(
+      v.union(
+        v.literal("pending"),
+        v.literal("approved"),
+        v.literal("rejected"),
+        v.literal("archived")
+      )
+    ),
+  },
+  handler: async (ctx, args) => {
+    assertAdmin(args.adminToken);
+    const status = args.status ?? "pending";
+    const products = await ctx.db
+      .query("partnerProducts")
+      .withIndex("by_status_created", (q) => q.eq("status", status))
+      .order("desc")
+      .take(200);
+
+    // Enrich with the submitting partner's name/email.
+    const out = [];
+    for (const p of products) {
+      const account = await ctx.db.get(p.accountId);
+      out.push({
+        id: p._id,
+        partnerName: account?.partnerName ?? p.partnerRef,
+        partnerEmail: account?.email ?? null,
+        type: p.type,
+        title: p.title,
+        description: p.description ?? null,
+        destination: p.destination ?? null,
+        city: p.city ?? null,
+        country: p.country ?? null,
+        price: p.price ?? null,
+        currency: p.currency ?? null,
+        bookingUrl: p.bookingUrl ?? null,
+        imageUrls: p.imageUrls ?? [],
+        status: p.status,
+        rejectionReason: p.rejectionReason ?? null,
+        createdAt: p.createdAt,
+        updatedAt: p.updatedAt,
+      });
+    }
+    return out;
+  },
+});
+
+/** Approve or reject a supplier product listing. */
+export const setProductStatus = mutation({
+  args: {
+    adminToken: v.string(),
+    productId: v.id("partnerProducts"),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("approved"),
+      v.literal("rejected"),
+      v.literal("archived")
+    ),
+    rejectionReason: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    assertAdmin(args.adminToken);
+    const product = await ctx.db.get(args.productId);
+    if (!product) throw new ConvexError("Product not found.");
+    await ctx.db.patch(args.productId, {
+      status: args.status,
+      rejectionReason:
+        args.status === "rejected" ? args.rejectionReason?.trim() || undefined : undefined,
+      reviewedAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    return { ok: true };
+  },
+});
+
+/**
+ * Invite a partner from the admin dashboard: create (or re-issue) their portal
+ * account and email a signup link. Optionally tied to an application, which is
+ * marked "invited" on success. Gated by the standalone PARTNER_ADMIN_TOKEN.
+ */
+export const invitePartner = action({
+  args: {
+    adminToken: v.string(),
+    email: v.string(),
+    partnerName: v.string(),
+    partnerRef: v.optional(v.string()),
+    rateLimitPerMin: v.optional(v.float64()),
+    dailyCap: v.optional(v.float64()),
+    monthlyCap: v.optional(v.float64()),
+    applicationId: v.optional(v.id("partnerApplications")),
+  },
+  handler: async (
+    ctx,
+    args
+  ): Promise<{ ok: boolean; email: string; signupUrl: string; emailSent: boolean }> => {
+    assertAdmin(args.adminToken);
+
+    const email = args.email.trim().toLowerCase();
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      throw new ConvexError("Enter a valid email address.");
+    }
+    const partnerName = args.partnerName.trim();
+    if (!partnerName) throw new ConvexError("Partner name is required.");
+    const partnerRef =
+      args.partnerRef?.trim() ||
+      email.split("@")[0].replace(/[^a-z0-9]+/g, "-");
+
+    const invite = await ctx.runMutation(internal.partnerPortal.createInvite, {
+      email,
+      partnerName,
+      partnerRef,
+      rateLimitPerMin: args.rateLimitPerMin ?? DEFAULTS.rateLimitPerMin,
+      dailyCap: args.dailyCap ?? DEFAULTS.dailyCap,
+      monthlyCap: args.monthlyCap ?? DEFAULTS.monthlyCap,
+      inviteTtlMs: INVITE_TTL_MS,
+    });
+
+    const signupUrl = `${PORTAL_BASE_URL}/partners/signup?token=${invite.rawToken}`;
+    const html = inviteEmailHtml({ partnerName, signupUrl });
+    const text =
+      `You've been invited to the Planera AI Partner API.\n\n` +
+      `Create your account and password here (link valid 7 days):\n${signupUrl}\n\n` +
+      `Once signed in you can generate your own API key and start building.\n\n` +
+      `Docs: ${PORTAL_BASE_URL}/partners/docs`;
+
+    let emailSent = false;
+    try {
+      const res = await ctx.runAction(internal.postmark.sendRawEmail, {
+        to: email,
+        subject: "Your Planera AI Partner API invitation",
+        html,
+        text,
+      });
+      emailSent = !!(res as any)?.success;
+    } catch (e) {
+      console.error("[partnerApiAdmin.invitePartner] email send failed:", e);
+    }
+
+    if (args.applicationId) {
+      await ctx.runMutation(api.partnerApiAdmin.setApplicationStatus, {
+        adminToken: args.adminToken,
+        id: args.applicationId,
+        status: "invited",
+      });
+    }
+
+    return { ok: true, email, signupUrl, emailSent };
+  },
+});
+
+function inviteEmailHtml(opts: { partnerName: string; signupUrl: string }): string {
+  const esc = (s: string) =>
+    s
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  const { partnerName, signupUrl } = opts;
+  return `<!DOCTYPE html><html><body style="margin:0;background:#0b0b0f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <div style="max-width:520px;margin:0 auto;padding:40px 24px;">
+    <div style="text-align:center;margin-bottom:28px;">
+      <img src="${PORTAL_BASE_URL}/logo.png" alt="Planera AI" width="150" style="display:inline-block;width:150px;height:auto;border:0;outline:none;text-decoration:none;" />
+    </div>
+    <div style="background:#16161c;border:1px solid #26262e;border-radius:16px;border-top:4px solid #FFE500;padding:32px;">
+      <h1 style="margin:0 0 12px;color:#fff;font-size:22px;">You're invited to the Planera AI Partner API</h1>
+      <p style="margin:0 0 20px;color:#b8b8c4;font-size:15px;line-height:1.6;">
+        Hi ${esc(partnerName)}, an account has been created for you. Set your
+        password to get started — then generate your own API key and start
+        building AI travel itineraries into your product.
+      </p>
+      <div style="text-align:center;margin:28px 0;">
+        <a href="${signupUrl}" style="display:inline-block;background:#FFE500;color:#111;text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:10px;">Create your account</a>
+      </div>
+      <p style="margin:0 0 8px;color:#8a8a96;font-size:13px;line-height:1.6;">
+        This link is valid for 7 days. If the button doesn't work, paste this URL
+        into your browser:
+      </p>
+      <p style="margin:0;word-break:break-all;color:#FFE500;font-size:12px;">${signupUrl}</p>
+    </div>
+  </div></body></html>`;
+}
 

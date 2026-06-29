@@ -6,6 +6,7 @@ import {
   internalMutation,
   internalQuery,
 } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { sha256Hex } from "./partnerApiAuth";
 
 /**
@@ -252,6 +253,168 @@ export const acceptInvite = mutation({
   },
 });
 
+// ---------------------------------------------------------------------------
+// Self-serve supplier signup + email verification (no invite required)
+// ---------------------------------------------------------------------------
+
+const EMAIL_VERIFY_TTL_MS = 1000 * 60 * 60 * 24; // 24 hours
+
+function partnerRefFromCompany(companyName: string): string {
+  const slug = companyName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+  return `${slug || "partner"}-${randomToken().slice(0, 6)}`;
+}
+
+/**
+ * Self-serve supplier signup. Creates a `partnerAccounts` row with
+ * `kind:"supplier"` in status "pending_verification", stores the PBKDF2
+ * password hash, and emails a one-time verification link (scheduled, so a mail
+ * hiccup can't fail the form). The account only becomes usable after
+ * `verifyEmail`. Suppliers don't use the API, so their key caps are 0.
+ */
+export const signup = mutation({
+  args: {
+    companyName: v.string(),
+    email: v.string(),
+    password: v.string(),
+    acceptedTerms: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    const companyName = args.companyName.trim();
+    const email = args.email.trim().toLowerCase();
+    if (!companyName) throw new ConvexError("Company name is required.");
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      throw new ConvexError("Enter a valid email address.");
+    }
+    if (args.password.length < 8) {
+      throw new ConvexError("Password must be at least 8 characters.");
+    }
+    if (!args.acceptedTerms) {
+      throw new ConvexError("You must accept the Partner Terms to continue.");
+    }
+
+    const existing = await ctx.db
+      .query("partnerAccounts")
+      .withIndex("by_email", (q) => q.eq("email", email))
+      .first();
+    if (existing && existing.status === "active") {
+      throw new ConvexError(
+        "An account already exists for this email. Try signing in."
+      );
+    }
+
+    const now = Date.now();
+    const passwordHash = await hashPassword(args.password);
+    const rawToken = randomToken();
+    const emailVerifyTokenHash = await sha256Hex(rawToken);
+    const emailVerifyExpiresAt = now + EMAIL_VERIFY_TTL_MS;
+
+    if (existing) {
+      // Re-use a prior pending/disabled row: refresh the signup.
+      await ctx.db.patch(existing._id, {
+        partnerName: companyName,
+        kind: "supplier",
+        passwordHash,
+        status: "pending_verification",
+        emailVerifyTokenHash,
+        emailVerifyExpiresAt,
+        acceptedTermsAt: now,
+      });
+    } else {
+      await ctx.db.insert("partnerAccounts", {
+        email,
+        partnerName: companyName,
+        partnerRef: partnerRefFromCompany(companyName),
+        kind: "supplier",
+        passwordHash,
+        status: "pending_verification",
+        emailVerifyTokenHash,
+        emailVerifyExpiresAt,
+        rateLimitPerMin: 0,
+        dailyCap: 0,
+        monthlyCap: 0,
+        createdAt: now,
+        acceptedTermsAt: now,
+      });
+    }
+
+    const verifyUrl = `${PARTNERS_BASE_URL}/partners/verify?token=${rawToken}`;
+    await ctx.scheduler.runAfter(0, internal.postmark.sendRawEmail, {
+      to: email,
+      subject: "Verify your Planera partner account",
+      html: verifyEmailHtml({ companyName, verifyUrl }),
+      text:
+        `Welcome to Planera partners, ${companyName}.\n\n` +
+        `Verify your email to activate your account (link valid 24 hours):\n${verifyUrl}\n\n` +
+        `If you didn't create this account you can ignore this email.`,
+    });
+
+    return { ok: true as const, email };
+  },
+});
+
+/**
+ * Consume an email-verification token: activate the account and return a
+ * session token so the supplier lands straight in their product dashboard.
+ */
+export const verifyEmail = mutation({
+  args: { token: v.string() },
+  handler: async (ctx, args) => {
+    const tokenHash = await sha256Hex(args.token.trim());
+    const account = await ctx.db
+      .query("partnerAccounts")
+      .withIndex("by_emailVerifyTokenHash", (q) =>
+        q.eq("emailVerifyTokenHash", tokenHash)
+      )
+      .first();
+    if (!account || account.status !== "pending_verification") {
+      throw new ConvexError("This verification link is invalid or already used.");
+    }
+    if (account.emailVerifyExpiresAt && account.emailVerifyExpiresAt < Date.now()) {
+      throw new ConvexError("This verification link has expired. Sign up again.");
+    }
+
+    const now = Date.now();
+    await ctx.db.patch(account._id, {
+      status: "active",
+      emailVerifyTokenHash: undefined,
+      emailVerifyExpiresAt: undefined,
+      activatedAt: now,
+      lastLoginAt: now,
+    });
+
+    const sessionToken = randomSecret("ps_");
+    await ctx.db.insert("partnerAccountSessions", {
+      accountId: account._id,
+      tokenHash: await sha256Hex(sessionToken),
+      createdAt: now,
+      expiresAt: now + SESSION_TTL_MS,
+    });
+    return { token: sessionToken, partnerName: account.partnerName };
+  },
+});
+
+function verifyEmailHtml(opts: { companyName: string; verifyUrl: string }): string {
+  const { companyName, verifyUrl } = opts;
+  const esc = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return `<!DOCTYPE html><html><body style="margin:0;background:#0b0b0f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <div style="max-width:520px;margin:0 auto;padding:40px 24px;">
+    <div style="background:#16161c;border:1px solid #26262e;border-radius:16px;border-top:4px solid #FFE500;padding:32px;">
+      <h1 style="margin:0 0 8px;color:#fff;font-size:20px;">Verify your email</h1>
+      <p style="margin:0 0 20px;color:#b5b5bd;font-size:14px;line-height:1.6;">Welcome to Planera partners, ${esc(companyName)}. Confirm your email to activate your account and start adding products.</p>
+      <div style="text-align:center;margin:24px 0;">
+        <a href="${verifyUrl}" style="display:inline-block;background:#FFE500;color:#111;text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:10px;">Verify email</a>
+      </div>
+      <p style="margin:0 0 6px;color:#8a8a96;font-size:12px;">Or paste this link (valid 24 hours):</p>
+      <p style="margin:0;word-break:break-all;color:#FFE500;font-size:12px;">${verifyUrl}</p>
+    </div>
+  </div></body></html>`;
+}
+
 /** Log in with email + password. Returns a session token. */
 export const login = mutation({
   args: { email: v.string(), password: v.string() },
@@ -385,6 +548,7 @@ export const getMe = query({
       email: account.email,
       partnerName: account.partnerName,
       partnerRef: account.partnerRef,
+      kind: account.kind ?? "api",
       limits: {
         rateLimitPerMin: account.rateLimitPerMin,
         dailyCap: account.dailyCap,
@@ -531,3 +695,124 @@ export const changePassword = mutation({
     return { ok: true };
   },
 });
+
+// ---------------------------------------------------------------------------
+// Public "Become a partner" application (no auth)
+// ---------------------------------------------------------------------------
+
+const APPLICATION_NOTIFY_EMAIL = "sales@planeraai.app";
+const PARTNERS_BASE_URL = "https://www.planeraai.app";
+
+/**
+ * Submit a partner application from the public marketing site. Stored as a
+ * `partnerApplications` row in status "new" and a notification email is sent to
+ * the sales inbox (scheduled, so a mail hiccup can't fail the form). An operator
+ * reviews it in /partner-admin and clicks "Invite" to start the portal flow.
+ */
+export const submitApplication = mutation({
+  args: {
+    companyName: v.string(),
+    website: v.optional(v.string()),
+    contactName: v.string(),
+    email: v.string(),
+    partnershipTypes: v.array(v.string()),
+    monthlyVolume: v.optional(v.string()),
+    message: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const companyName = args.companyName.trim();
+    const contactName = args.contactName.trim();
+    const email = args.email.trim().toLowerCase();
+    if (!companyName) throw new ConvexError("Company name is required.");
+    if (!contactName) throw new ConvexError("Your name is required.");
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      throw new ConvexError("Enter a valid email address.");
+    }
+    const types = args.partnershipTypes.filter((t) => t.trim());
+    if (types.length === 0) {
+      throw new ConvexError("Pick at least one way you'd like to partner.");
+    }
+
+    const website = args.website?.trim() || undefined;
+    const message = args.message?.trim() || undefined;
+    const monthlyVolume = args.monthlyVolume?.trim() || undefined;
+    const now = Date.now();
+
+    const id = await ctx.db.insert("partnerApplications", {
+      companyName,
+      website,
+      contactName,
+      email,
+      partnershipTypes: types,
+      monthlyVolume,
+      message,
+      status: "new",
+      createdAt: now,
+    });
+
+    const html = applicationEmailHtml({
+      companyName,
+      website,
+      contactName,
+      email,
+      types,
+      monthlyVolume,
+      message,
+    });
+    const text =
+      `New partner application\n\n` +
+      `Company: ${companyName}\n` +
+      `Website: ${website ?? "—"}\n` +
+      `Contact: ${contactName} <${email}>\n` +
+      `Partnership: ${types.join(", ")}\n` +
+      `Volume: ${monthlyVolume ?? "—"}\n\n` +
+      `${message ?? "(no message)"}\n\n` +
+      `Review & invite in ${PARTNERS_BASE_URL}/partner-admin`;
+
+    await ctx.scheduler.runAfter(0, internal.postmark.sendRawEmail, {
+      to: APPLICATION_NOTIFY_EMAIL,
+      subject: `New partner application — ${companyName}`,
+      html,
+      text,
+    });
+
+    return { ok: true as const, id };
+  },
+});
+
+function applicationEmailHtml(opts: {
+  companyName: string;
+  website?: string;
+  contactName: string;
+  email: string;
+  types: string[];
+  monthlyVolume?: string;
+  message?: string;
+}): string {
+  const esc = (s: string) =>
+    s
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  const row = (label: string, value: string) =>
+    `<tr><td style="padding:6px 12px 6px 0;color:#8a8a96;font-size:13px;vertical-align:top;">${label}</td><td style="padding:6px 0;color:#fff;font-size:14px;">${value}</td></tr>`;
+  return `<!DOCTYPE html><html><body style="margin:0;background:#0b0b0f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <div style="max-width:560px;margin:0 auto;padding:40px 24px;">
+    <div style="background:#16161c;border:1px solid #26262e;border-radius:16px;border-top:4px solid #FFE500;padding:32px;">
+      <h1 style="margin:0 0 4px;color:#fff;font-size:20px;">New partner application</h1>
+      <p style="margin:0 0 20px;color:#8a8a96;font-size:13px;">From the planeraai.app/partners form.</p>
+      <table style="width:100%;border-collapse:collapse;">
+        ${row("Company", esc(opts.companyName))}
+        ${opts.website ? row("Website", esc(opts.website)) : ""}
+        ${row("Contact", `${esc(opts.contactName)} &lt;${esc(opts.email)}&gt;`)}
+        ${row("Partnership", esc(opts.types.join(", ")))}
+        ${opts.monthlyVolume ? row("Volume", esc(opts.monthlyVolume)) : ""}
+        ${opts.message ? row("Message", esc(opts.message)) : ""}
+      </table>
+      <div style="text-align:center;margin:28px 0 4px;">
+        <a href="${PARTNERS_BASE_URL}/partner-admin" style="display:inline-block;background:#FFE500;color:#111;text-decoration:none;font-weight:700;font-size:14px;padding:12px 24px;border-radius:10px;">Review &amp; invite</a>
+      </div>
+    </div>
+  </div></body></html>`;
+}

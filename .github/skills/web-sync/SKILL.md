@@ -113,13 +113,19 @@ cd C:\Users\nioni\planeraai-web
 npm run build
 tar -cf ..\planeraai-web.tar --exclude=node_modules --exclude=.next --exclude=.git --exclude=*.tar -C .. planeraai-web
 scp ..\planeraai-web.tar deploy@46.225.183.187:/home/deploy/
-ssh deploy@46.225.183.187 "cd /home/deploy && rm -rf planeraai-web/node_modules planeraai-web/.next && tar -xf planeraai-web.tar && rm planeraai-web.tar && cd planeraai-web && npm install --legacy-peer-deps --no-audit --no-fund && npm run build && pm2 restart planeraai-web"
+ssh deploy@46.225.183.187 "cd /home/deploy && rm -rf planeraai-web/node_modules planeraai-web/.next planeraai-web/src && tar -xf planeraai-web.tar && rm planeraai-web.tar && cd planeraai-web && npm install --legacy-peer-deps --no-audit --no-fund && npm run build && pm2 restart planeraai-web"
 ```
 
 > **Deploy gotchas (learned the hard way):**
+> - **Wipe `planeraai-web/src` before extracting** (note it's in the `rm -rf` above). `tar` extraction overwrites files but never *deletes* files missing from the archive, so any source file you renamed/removed locally lingers on the VPS. This bit us with the `middleware.ts` → `proxy.ts` rename: the stale `src/middleware.ts` survived and Next 16 hard-errors when both `middleware` and `proxy` exist (`Both middleware file ... and proxy file ... are detected`). Clearing `src` guarantees a fresh source tree. **Do NOT `rm -rf planeraai-web` (the whole dir)** — that deletes the server's root-level `.env.local`/env files (not in the tar), taking the site down with missing env vars. Scope the wipe to `src` (+ `node_modules`/`.next`).
 > - **Always pass `--legacy-peer-deps`** to the remote `npm install`. The web repo uses React 19 + Next 16; a plain `npm install` fails with `ERESOLVE` on the VPS, leaving `next` uninstalled so the build can't run. (The web repo now ships an `.npmrc` with `legacy-peer-deps=true`, but keep the flag for safety.)
 > - **Never pipe `npm run build` through `tail`/`head` inside an `&&` chain.** The pipe's exit code (0) masks a build failure, so `pm2 restart` runs against a missing build and the process crash-loops. If you need to trim output, redirect to a log file (`> build.log 2>&1`) and `tail` it only on failure.
 > - **Verify after deploy:** `curl -s -o /dev/null -w "%{http_code}" https://planeraai.app/` should return `200`, and `pm2 jlist` should show the restart counter holding steady (not climbing).
+
+> **Next 16 conventions (web repo is on Next 16 + Turbopack):**
+> - **Routing middleware lives in `src/proxy.ts`, not `src/middleware.ts`.** Next 16 renamed the convention; the file exports a function named `proxy` (the `config` matcher export is unchanged). The old name still "works" but prints a deprecation warning and, worse, collides if both files exist (see deploy gotcha above).
+> - **Don't load local assets in metadata image routes via `fetch(new URL("../../public/x.png", import.meta.url))`.** Under Turbopack that resolves to a relative `/_next/static/media/...png` path, and `fetch` can't parse it without an origin during static generation (`Failed to parse URL` / `ERR_INVALID_URL`). Instead use the Node runtime and read the file directly: `await readFile(join(process.cwd(), "public", "x.png"))`, then pass a `data:image/png;base64,...` URI to `<img src>`. See `src/app/opengraph-image.tsx`.
+> - **Avoid `export const runtime = "edge"` on metadata/image routes unless you actually need edge.** Edge runtime disables static generation for that route (build warning + a dynamic `ƒ` route). Removing it lets routes like `apple-icon`/`opengraph-image` prerender as static `○`.
 
 ## Checklist Template
 After syncing:

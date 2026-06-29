@@ -352,4 +352,101 @@ http.route({
   }),
 });
 
+// ---------------------------------------------------------------------------
+// Partner Products API — bulk product ingestion for supplier partners.
+//   POST /v1/products  — body { products: [ { type, title, ... } ] }
+// Auth: per-partner Bearer key (same keys as /v1/itineraries). Ingested rows
+// land in the review queue (status "pending") under the key's partner account.
+// ---------------------------------------------------------------------------
+
+const MAX_PRODUCTS_PER_REQUEST = 1000;
+// Supplier keys carry rateLimitPerMin=0 (they don't use the itinerary API), so
+// the products endpoint applies its own default when the key's limit is unset.
+const PRODUCTS_RATE_LIMIT_PER_MIN = 120;
+
+http.route({
+  path: "/v1/products",
+  method: "OPTIONS",
+  handler: httpAction(async () => corsPreflight()),
+});
+
+http.route({
+  path: "/v1/products",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const auth = await authenticatePartner(ctx, request);
+    if ("error" in auth) return auth.error;
+    const { key } = auth;
+
+    if (!key.accountId) {
+      return partnerError(
+        "forbidden",
+        "This API key is not linked to a partner account."
+      );
+    }
+
+    const rate = await ctx.runMutation(internal.partnerApiAuth.checkRequestRate, {
+      keyId: key._id,
+      rateLimitPerMin: key.rateLimitPerMin > 0 ? key.rateLimitPerMin : PRODUCTS_RATE_LIMIT_PER_MIN,
+    });
+    if (!rate.allowed) {
+      return partnerError(
+        "rate_limited",
+        "Rate limit exceeded. Slow down and retry shortly.",
+        { "Retry-After": String(rate.retryAfter) }
+      );
+    }
+    await ctx.runMutation(internal.partnerApiAuth.touchKey, { keyId: key._id });
+
+    let body: any;
+    try {
+      body = await request.json();
+    } catch {
+      return partnerError("validation_error", "Request body must be valid JSON.");
+    }
+    const products = Array.isArray(body?.products) ? body.products : null;
+    if (!products) {
+      return partnerError("validation_error", "`products` must be an array.");
+    }
+    if (products.length === 0) {
+      return partnerError("validation_error", "`products` is empty.");
+    }
+    if (products.length > MAX_PRODUCTS_PER_REQUEST) {
+      return partnerError(
+        "validation_error",
+        `Send at most ${MAX_PRODUCTS_PER_REQUEST} products per request.`
+      );
+    }
+
+    // Coerce each row to the ingest shape; the mutation validates/normalizes and
+    // skips bad rows, returning per-row errors.
+    const rows = products.map((p: any) => ({
+      type: ["flight", "hotel", "tour", "experience", "other"].includes(p?.type)
+        ? p.type
+        : "other",
+      title: typeof p?.title === "string" ? p.title : "",
+      description: typeof p?.description === "string" ? p.description : undefined,
+      destination: typeof p?.destination === "string" ? p.destination : undefined,
+      city: typeof p?.city === "string" ? p.city : undefined,
+      country: typeof p?.country === "string" ? p.country : undefined,
+      price: typeof p?.price === "number" ? p.price : undefined,
+      currency: typeof p?.currency === "string" ? p.currency : undefined,
+      bookingUrl: typeof p?.bookingUrl === "string" ? p.bookingUrl : undefined,
+      imageUrls: Array.isArray(p?.imageUrls)
+        ? p.imageUrls.filter((u: any) => typeof u === "string")
+        : undefined,
+    }));
+
+    const result = await ctx.runMutation(internal.partnerProducts.ingestForAccount, {
+      accountId: key.accountId,
+      partnerRef: key.partnerRef,
+      products: rows,
+    });
+    return partnerJson(
+      { created: result.created, skipped: result.errors.length, errors: result.errors },
+      202
+    );
+  }),
+});
+
 export default http;

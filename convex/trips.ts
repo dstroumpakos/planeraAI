@@ -31,6 +31,8 @@ export const create = authMutation({
         departureTime: v.optional(v.string()),
         // Language preference for AI-generated itinerary content
         language: v.optional(v.string()),
+        // Platform the request came from: "ios" | "android" | "web"
+        platform: v.optional(v.string()),
          // Disabled in V1 - traveler profiles not used
         selectedTravelerIds: v.optional(v.array(v.id("travelers"))),
     },
@@ -131,6 +133,8 @@ export const create = authMutation({
             departureTime: args.departureTime,
             // Language preference for AI-generated content
             language: args.language || "en",
+            // Platform the trip was generated from (ios/android/web)
+            platform: args.platform,
             // V1: Disabled - not passing traveler profiles
             selectedTravelerIds: undefined,
         });
@@ -205,6 +209,8 @@ export const createFromDeal = authMutation({
         originCountry: v.optional(v.string()),
         destinationCityFallback: v.optional(v.string()),
         originCityFallback: v.optional(v.string()),
+        // Platform the request came from: "ios" | "android" | "web"
+        platform: v.optional(v.string()),
     },
     returns: v.id("trips"),
     handler: async (ctx: any, args: any) => {
@@ -339,6 +345,7 @@ export const createFromDeal = authMutation({
                 ? `${deal.returnDate}T${deal.returnDeparture}:00`
                 : undefined,
             language: args.language || "en",
+            platform: args.platform,
             tripType: "deal",
             dealId: args.dealId,
             dealFlightData,

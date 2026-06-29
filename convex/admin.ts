@@ -232,6 +232,7 @@ export const getStats = query({
                     startDate: t.startDate,
                     endDate: t.endDate,
                     status: t.status,
+                    platform: t.platform || "unknown",
                     createdAt: t._creationTime,
                     userId: t.userId,
                     userName: owner?.name || "Unknown",

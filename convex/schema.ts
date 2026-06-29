@@ -95,6 +95,9 @@ export default defineSchema({
         errorMessage: v.optional(v.string()),
         // Language preference for AI-generated content (e.g., "en", "el", "es", "fr", "de", "ar")
         language: v.optional(v.string()),
+        // Platform the trip was generated from: "ios" | "android" | "web" (optional;
+        // older trips predate this field and surface as "unknown" in admin)
+        platform: v.optional(v.string()),
         // Location-based: tracks whether user is physically at the destination
         userAtDestination: v.optional(v.boolean()),
         lastLocationCheckAt: v.optional(v.float64()),
@@ -1218,14 +1221,22 @@ export default defineSchema({
         email: v.string(),              // lowercased, unique login
         partnerName: v.string(),        // company / brand label
         partnerRef: v.string(),         // stable partner identifier
+        // "api" = API consumer (invited, manages keys/usage). "supplier" =
+        // self-serve product supplier (signs up + verifies email, manages
+        // product listings). Missing = legacy API account.
+        kind: v.optional(v.union(v.literal("api"), v.literal("supplier"))),
         passwordHash: v.optional(v.string()), // set once invite is accepted
         status: v.union(
             v.literal("invited"),
+            v.literal("pending_verification"), // self-serve signup, email not yet verified
             v.literal("active"),
             v.literal("disabled")
         ),
         inviteTokenHash: v.optional(v.string()), // SHA-256 of one-time invite token
         inviteExpiresAt: v.optional(v.float64()),
+        // Self-serve email verification (supplier signup).
+        emailVerifyTokenHash: v.optional(v.string()), // SHA-256 of one-time verify token
+        emailVerifyExpiresAt: v.optional(v.float64()),
         // Default limits applied to keys this partner creates.
         rateLimitPerMin: v.float64(),
         dailyCap: v.float64(),
@@ -1238,6 +1249,7 @@ export default defineSchema({
     })
         .index("by_email", ["email"])
         .index("by_inviteTokenHash", ["inviteTokenHash"])
+        .index("by_emailVerifyTokenHash", ["emailVerifyTokenHash"])
         .index("by_partnerRef", ["partnerRef"]),
 
     // Partner portal sessions (separate from app user sessions). Token is
@@ -1339,5 +1351,65 @@ export default defineSchema({
         lastSeenAt: v.float64(),
     })
         .index("by_cityToken", ["cityToken"]),
+
+    // Inbound "Become a partner" applications from the public marketing site.
+    // An operator reviews them in /partner-admin and clicks "Invite", which
+    // runs the existing invite → signup → portal flow (creates partnerAccounts).
+    // status: "new" → "invited" | "dismissed".
+    partnerApplications: defineTable({
+        companyName: v.string(),
+        website: v.optional(v.string()),
+        contactName: v.string(),
+        email: v.string(),                   // lowercased contact email
+        partnershipTypes: v.array(v.string()), // e.g. ["airlines","hotels"]
+        monthlyVolume: v.optional(v.string()),
+        message: v.optional(v.string()),
+        status: v.union(
+            v.literal("new"),
+            v.literal("invited"),
+            v.literal("dismissed")
+        ),
+        createdAt: v.float64(),
+        reviewedAt: v.optional(v.float64()),
+    })
+        .index("by_status_created", ["status", "createdAt"])
+        .index("by_created", ["createdAt"]),
+
+    // Product / offer listings submitted by self-serve supplier partners
+    // (`partnerAccounts.kind === "supplier"`). New/edited listings land in
+    // status "pending" and an operator approves them in /partner-admin before
+    // they go live. status: "pending" → "approved" | "rejected" | "archived".
+    partnerProducts: defineTable({
+        accountId: v.id("partnerAccounts"),
+        partnerRef: v.string(),
+        type: v.union(
+            v.literal("flight"),
+            v.literal("hotel"),
+            v.literal("tour"),
+            v.literal("experience"),
+            v.literal("other")
+        ),
+        title: v.string(),
+        description: v.optional(v.string()),
+        destination: v.optional(v.string()), // free-text city/region as supplied
+        city: v.optional(v.string()),
+        country: v.optional(v.string()),
+        price: v.optional(v.float64()),
+        currency: v.optional(v.string()),    // ISO 4217, e.g. "EUR"
+        bookingUrl: v.optional(v.string()),
+        imageUrls: v.optional(v.array(v.string())),
+        status: v.union(
+            v.literal("pending"),
+            v.literal("approved"),
+            v.literal("rejected"),
+            v.literal("archived")
+        ),
+        rejectionReason: v.optional(v.string()),
+        createdAt: v.float64(),
+        updatedAt: v.float64(),
+        reviewedAt: v.optional(v.float64()),
+    })
+        .index("by_account", ["accountId"])
+        .index("by_status_created", ["status", "createdAt"]),
 });
 
