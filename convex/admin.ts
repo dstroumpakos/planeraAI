@@ -200,16 +200,32 @@ export const getStats = query({
         );
 
         // Last 10 newly registered users
-        const recentUsers = [...allUserSettings]
-            .sort((a: any, b: any) => (b._creationTime || 0) - (a._creationTime || 0))
-            .slice(0, 10)
-            .map((u: any) => ({
-                userId: u.userId,
-                name: u.name || "Unknown",
-                email: u.email || "Unknown",
-                image: u.image,
-                createdAt: u._creationTime,
-            }));
+        const recentUsers = await Promise.all(
+            [...allUserSettings]
+                .sort((a: any, b: any) => (b._creationTime || 0) - (a._creationTime || 0))
+                .slice(0, 10)
+                .map(async (u: any) => {
+                    // Platform the user signed up from. New signups store this directly;
+                    // older users predate the field, so fall back to the platform of any
+                    // push token they've registered (mobile devices record ios/android).
+                    let platform = u.platform;
+                    if (!platform) {
+                        const pushToken = await ctx.db
+                            .query("pushTokens")
+                            .withIndex("by_user", (q: any) => q.eq("userId", u.userId))
+                            .first();
+                        platform = pushToken?.platform;
+                    }
+                    return {
+                        userId: u.userId,
+                        name: u.name || "Unknown",
+                        email: u.email || "Unknown",
+                        image: u.image,
+                        platform: platform || "unknown",
+                        createdAt: u._creationTime,
+                    };
+                })
+        );
 
         // Build a quick lookup of userSettings by userId
         const userSettingsByUserId: Record<string, any> = {};

@@ -200,6 +200,8 @@ export const signInWithGoogle = action({
     idToken: v.string(),
     // Optional: user info from Google Sign-In SDK (name might not be in token)
     displayName: v.optional(v.string()),
+    // Platform the user signed up from: "ios" | "android" | "web"
+    platform: v.optional(v.string()),
   },
   returns: v.object({
     success: v.boolean(),
@@ -257,6 +259,7 @@ export const signInWithGoogle = action({
         name: args.displayName || claims.name,
         picture: claims.picture,
         sessionToken,
+        platform: args.platform,
       });
       
       console.log("[AuthNative] Google sign-in successful:", {
@@ -303,6 +306,8 @@ export const signInWithApple = action({
         familyName: v.optional(v.union(v.string(), v.null())),
       })
     ),
+    // Platform the user signed up from: "ios" | "android" | "web"
+    platform: v.optional(v.string()),
   },
   returns: v.object({
     success: v.boolean(),
@@ -366,6 +371,7 @@ export const signInWithApple = action({
           name,
           picture: undefined,
           sessionToken,
+          platform: args.platform,
         }
       );
 
@@ -443,6 +449,8 @@ export const signInWithEmail = action({
     password: v.string(),
     isSignUp: v.optional(v.boolean()),
     name: v.optional(v.string()),
+    // Platform the user signed up from: "ios" | "android" | "web"
+    platform: v.optional(v.string()),
   },
   returns: v.object({
     success: v.boolean(),
@@ -511,6 +519,7 @@ export const signInWithEmail = action({
           email,
           name: args.name,
           passwordHash,
+          platform: args.platform,
         });
         isNewUser = !existing;
       } else {
@@ -535,6 +544,7 @@ export const signInWithEmail = action({
           name: args.name,
           picture: undefined,
           sessionToken,
+          platform: args.platform,
         }
       );
 

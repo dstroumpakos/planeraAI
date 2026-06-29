@@ -178,6 +178,9 @@ export default defineSchema({
         passwordHash: v.optional(v.string()),
         // Auth provider type: "email", "apple", "google", "anonymous"
         authProvider: v.optional(v.string()),
+        // Platform the user signed up from: "ios" | "android" | "web" (optional;
+        // older users predate this and are backfilled from push tokens in admin)
+        platform: v.optional(v.string()),
         darkMode: v.optional(v.boolean()),
         homeAirport: v.optional(v.string()),
         defaultTravelers: v.optional(v.float64()),

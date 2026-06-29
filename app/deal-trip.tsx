@@ -180,6 +180,7 @@ export default function DealTripScreen() {
         originCountry,
         destinationCityFallback: destinationCityFromAirports,
         originCityFallback: originCityFromAirports,
+        platform: Platform.OS,
       });
 
       // Mark first-trip guide as seen so it never shows again

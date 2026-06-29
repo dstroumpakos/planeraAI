@@ -25,6 +25,8 @@ export const upsertUserAndCreateSession = internalMutation({
     name: v.optional(v.string()),
     picture: v.optional(v.string()),
     sessionToken: v.string(),
+    // Platform the user signed up from: "ios" | "android" | "web"
+    platform: v.optional(v.string()),
   },
   returns: v.object({
     userId: v.string(),
@@ -68,6 +70,7 @@ export const upsertUserAndCreateSession = internalMutation({
         email: args.email,
         name: args.name,
         profilePicture: undefined,
+        platform: args.platform,
         onboardingCompleted: false,
         darkMode: false,
         pushNotifications: true,
@@ -224,6 +227,8 @@ export const createOrUpgradeEmailUser = internalMutation({
     email: v.string(),
     name: v.optional(v.string()),
     passwordHash: v.string(),
+    // Platform the user signed up from: "ios" | "android" | "web"
+    platform: v.optional(v.string()),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -248,6 +253,7 @@ export const createOrUpgradeEmailUser = internalMutation({
         name: args.name,
         passwordHash: args.passwordHash,
         authProvider: "email",
+        platform: args.platform,
         onboardingCompleted: false,
         darkMode: false,
         pushNotifications: true,

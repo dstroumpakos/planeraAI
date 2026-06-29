@@ -881,6 +881,8 @@ export default function CreateTripScreen() {
                 departureTime: formData.departureTime || undefined,
                 // Language preference for AI-generated content
                 language: i18n.language || "en",
+                // Platform the trip was generated from (ios/android)
+                platform: Platform.OS,
             });
             
             // Mark first-trip guide as seen so it never shows again
