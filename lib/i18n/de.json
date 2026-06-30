@@ -1,5 +1,12 @@
 {
+  "invite": {
+    "joining": "Reise wird beigetreten…",
+    "invalid": "Diese Einladung ist ungültig oder wurde bereits verwendet.",
+    "failed": "Beitritt zu dieser Reise nicht möglich. Bitte den Eigentümer um eine neue Einladung.",
+    "cantJoin": "Beitritt zur Reise nicht möglich"
+  },
   "common": {
+    "goHome": "Zur Startseite",
     "loading": "Laden...",
     "error": "Fehler",
     "success": "Erfolg",
@@ -328,6 +335,8 @@
     "aiDisabledMsg": "Atlas benötigt KI-Datenverarbeitung. Sie können dies in Einstellungen → Reisepräferenzen aktivieren."
   },
   "profile": {
+    "rateApp": "Planera AI bewerten",
+    "rateAppSubtitle": "Hinterlasse eine Bewertung im App Store",
     "profile": "Profil",
     "planeraUser": "Planera-Benutzer",
     "premiumMember": "Planera Premium-Mitglied",

@@ -185,6 +185,21 @@ export default function Profile() {
         await toggleDarkMode();
     };
 
+    // Send the user to the App Store "write a review" page. We open the page
+    // directly (rather than the native rate-limited prompt) since this is an
+    // explicit, user-initiated action that should always do something.
+    const APP_STORE_ID = "6758346139";
+    const handleRateApp = async () => {
+        const deepLink = `itms-apps://apps.apple.com/app/id${APP_STORE_ID}?action=write-review`;
+        const webLink = `https://apps.apple.com/app/id${APP_STORE_ID}?action=write-review`;
+        try {
+            const canOpen = await Linking.canOpenURL(deepLink);
+            await Linking.openURL(canOpen ? deepLink : webLink);
+        } catch {
+            Linking.openURL(webLink).catch(() => {});
+        }
+    };
+
     const handlePickImage = async () => {
         try {
             const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -372,6 +387,14 @@ export default function Profile() {
             iconBg: isDarkMode ? "#1D3D2E" : "#D1FAE5",
             iconColor: "#10B981",
             action: () => router.push("/settings/referrals" as any)
+        },
+        {
+            title: t('profile.rateApp', { defaultValue: 'Rate Planera AI' }),
+            subtitle: t('profile.rateAppSubtitle', { defaultValue: 'Leave a review on the App Store' }),
+            icon: "star-outline",
+            iconBg: isDarkMode ? "#3D2E00" : "#FEF3C7",
+            iconColor: "#F59E0B",
+            action: handleRateApp
         },
         // {
         //     title: "Traveler Profiles",

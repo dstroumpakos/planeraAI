@@ -118,7 +118,10 @@ export default defineSchema({
     })
         .index("by_user", ["userId"])
         .index("by_status", ["status"])
-        .index("by_tripCardId", ["tripCardId"]),
+        .index("by_tripCardId", ["tripCardId"])
+        // Date-range lookups for notifications (avoid scanning all completed trips)
+        .index("by_status_startDate", ["status", "startDate"])
+        .index("by_status_endDate", ["status", "endDate"]),
 
     userPlans: defineTable({
         userId: v.string(),
@@ -1414,5 +1417,20 @@ export default defineSchema({
     })
         .index("by_account", ["accountId"])
         .index("by_status_created", ["status", "createdAt"]),
+
+    // Cached singleton for site-wide trip aggregates. Recomputed by a cron so
+    // the public landing query and the admin dashboard never scan the (large)
+    // trips table on every request.
+    landingStats: defineTable({
+        tripsCount: v.float64(),
+        usersCount: v.float64(),
+        destinationsCount: v.float64(),
+        // Admin-dashboard aggregates (optional: populated by the same recompute).
+        completedTripsCount: v.optional(v.float64()),
+        topTripDestinations: v.optional(
+            v.array(v.object({ destination: v.string(), count: v.float64() })),
+        ),
+        updatedAt: v.float64(),
+    }),
 });
 

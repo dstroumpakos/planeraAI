@@ -11,16 +11,27 @@ import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useTranslation } from "react-i18next";
 import { LanguagePickerModal } from "@/components/LanguagePickerModal";
+import * as SecureStore from "expo-secure-store";
 
 // Fallback colors for when theme is not available (e.g., during initial load)
 const COLORS = LIGHT_COLORS;
 const ENABLE_GOOGLE = false;
+// Mirror of PENDING_INVITE_KEY in app/invite/[token].tsx — a trip invite the
+// user opened before signing in, to be resumed once authenticated.
+const PENDING_INVITE_KEY = "pendingInviteToken";
 
 // Component to handle authenticated user redirect based on onboarding status
 function AuthenticatedRedirect() {
     const { token } = useToken();
     const { t } = useTranslation();
     const [languageDismissed, setLanguageDismissed] = useState(false);
+    // undefined = still reading, null = none, string = invite token to resume.
+    const [pendingInvite, setPendingInvite] = useState<string | null | undefined>(undefined);
+    useEffect(() => {
+        SecureStore.getItemAsync(PENDING_INVITE_KEY)
+            .then((v) => setPendingInvite(v ?? null))
+            .catch(() => setPendingInvite(null));
+    }, []);
     // @ts-ignore
     const settings = useQuery(api.users.getSettings as any, token ? { token } : "skip");
     // Prefetch the Home screen's core data right here so this "loading your
@@ -76,6 +87,15 @@ function AuthenticatedRedirect() {
     if (plan === undefined || deals === undefined || !profileReady) {
         console.log("[Index] AuthenticatedRedirect: Warming Home data...");
         return loadingProfileScreen;
+    }
+
+    // Resume a trip invite the user opened before signing in. The invite screen
+    // clears the stashed token and accepts it, so this won't loop.
+    if (pendingInvite === undefined) {
+        return loadingProfileScreen;
+    }
+    if (pendingInvite) {
+        return <Redirect href={`/invite/${pendingInvite}`} />;
     }
 
     // Otherwise go to tabs

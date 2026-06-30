@@ -1,5 +1,12 @@
 {
+  "invite": {
+    "joining": "Uniéndote al viaje…",
+    "invalid": "Esta invitación no es válida o ya se ha utilizado.",
+    "failed": "No se pudo unir a este viaje. Pide una nueva invitación al organizador.",
+    "cantJoin": "No se puede unir al viaje"
+  },
   "common": {
+    "goHome": "Ir al inicio",
     "loading": "Cargando...",
     "error": "Error",
     "success": "Éxito",
@@ -328,6 +335,8 @@
     "aiDisabledMsg": "Atlas requiere procesamiento de datos IA para funcionar. Puedes activarlo en Configuración → Preferencias de Viaje."
   },
   "profile": {
+    "rateApp": "Valora Planera AI",
+    "rateAppSubtitle": "Deja una reseña en la App Store",
     "profile": "Perfil",
     "planeraUser": "Usuario de Planera",
     "premiumMember": "Miembro Premium de Planera",

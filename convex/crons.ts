@@ -59,4 +59,13 @@ crons.interval(
     {},
 );
 
+// Recompute cached public landing-page stats (trips/users/destinations counts)
+// so the public query reads a singleton instead of scanning the trips table.
+crons.interval(
+    "recompute-landing-stats",
+    { hours: 1 },
+    internal.publicStats.recomputeLandingStats,
+    {},
+);
+
 export default crons;

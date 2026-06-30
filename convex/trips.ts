@@ -418,6 +418,8 @@ export const getTripDetails = internalQuery({
             departureTime: v.optional(v.string()),
             // Language preference
             language: v.optional(v.string()),
+            // Platform the trip was created from ("web" | "ios" | "android")
+            platform: v.optional(v.string()),
             selectedTravelerIds: v.optional(v.array(v.id("travelers"))),
             // Deal trip fields
             tripType: v.optional(v.string()),
@@ -1530,17 +1532,16 @@ export const getTrendingDestinations = query({
         interests: v.array(v.string()),
     })),
     handler: async (ctx: any) => {
-        // Get completed trips only (using status index)
-        const completedTrips = await ctx.db
-            .query("trips")
-            .withIndex("by_status", (q: any) => q.eq("status", "completed"))
-            .collect();
-
-        // Filter for trips from the last 30 days
+        // Only read completed trips from the last 30 days. _creationTime is the
+        // implicit final column of every index, so we can range on it here and
+        // avoid reading the entire (large) completed-trips history.
         const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
-        const recentTrips = completedTrips.filter((trip: any) => 
-            trip._creationTime >= thirtyDaysAgo
-        );
+        const recentTrips = await ctx.db
+            .query("trips")
+            .withIndex("by_status", (q: any) =>
+                q.eq("status", "completed").gte("_creationTime", thirtyDaysAgo),
+            )
+            .collect();
 
         // If no recent trips, return empty array
         if (recentTrips.length === 0) {

@@ -11,6 +11,7 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { useState, useEffect, useRef, useCallback } from "react";
 import { BlurView } from "expo-blur";
 import { useDestinationImage } from "@/lib/useImages";
+import { maybeAskForReview } from "@/lib/reviewPrompt";
 import ActivityCard from "@/components/ActivityCard";
 import TripGenerationView, { EnrichingToast } from "@/components/TripGenerationView";
 import { ImageWithAttribution } from "@/components/ImageWithAttribution";
@@ -1109,6 +1110,21 @@ export default function TripDetails() {
             return () => clearTimeout(timer);
         }
     }, [userSettings, trip?.itinerary?.dayByDayItinerary]);
+
+    // Ask for an App Store review once the user is looking at a finished
+    // itinerary — a genuine "this delivered value" moment. Gated (once ever,
+    // not before the 2nd trip, iOS-rate-limited) inside maybeAskForReview, and
+    // held until after the one-time detail guide so they don't overlap.
+    const reviewAskedRef = useRef(false);
+    useEffect(() => {
+        if (reviewAskedRef.current) return;
+        const itineraryReady = (trip?.itinerary?.dayByDayItinerary?.length ?? 0) > 0;
+        if (itineraryReady && trip?.status === "completed" && userSettings?.hasSeenTripDetailGuide) {
+            reviewAskedRef.current = true;
+            const timer = setTimeout(() => { maybeAskForReview(); }, 3500);
+            return () => clearTimeout(timer);
+        }
+    }, [trip?.status, trip?.itinerary?.dayByDayItinerary, userSettings?.hasSeenTripDetailGuide]);
 
     // Default the budget view to the cheapest flight + cheapest stay (until the user picks another)
     useEffect(() => {
@@ -2551,7 +2567,7 @@ export default function TripDetails() {
                         onPress={async () => {
                             try {
                                 const result = await createInviteMut({ tripId: trip._id, role: "viewer" });
-                                const inviteUrl = `https://planeraai.app/invite?token=${result.inviteToken}`;
+                                const inviteUrl = `https://planeraai.app/invite/${result.inviteToken}`;
                                 await Share.share({ message: `${t('tripDetail.joinMyTrip', { destination: trip.destination })}\n${inviteUrl}` });
                             } catch (err) {
                                 console.error("Invite failed:", err);

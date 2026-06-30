@@ -5,7 +5,7 @@
     "version": "1.2.2",
     "orientation": "portrait",
     "icon": "./assets/images/appicon-1024x1024-01-9h6cls.jpg",
-    "scheme": "myapp",
+    "scheme": "planeraai",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
@@ -17,6 +17,10 @@
       "supportsTablet": false,
       "newArchEnabled": true,
       "bundleIdentifier": "com.dstroump.planeraaitravelplanner",
+      "associatedDomains": [
+        "applinks:planeraai.app",
+        "applinks:www.planeraai.app"
+      ],
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSPhotoLibraryUsageDescription": "Planera needs access to your photo library so you can select a profile photo.",

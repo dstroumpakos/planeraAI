@@ -117,9 +117,12 @@ export const getStats = query({
         // Get all REAL users from userSettings (this is where sign-ups are stored)
         const allUserSettings = await ctx.db.query("userSettings").collect();
         
-        // Get all trips
-        const allTrips = await ctx.db.query("trips").collect();
-        
+        // Trip aggregates come from the cached singleton (recomputed by cron) so
+        // we never scan the large trips table here. Recent trips are a cheap
+        // indexed take(10).
+        const cachedTripStats = await ctx.db.query("landingStats").first();
+        const recentTripDocs = await ctx.db.query("trips").order("desc").take(10);
+
         // Get all user plans for premium count
         const allPlans = await ctx.db.query("userPlans").collect();
         const premiumUsersCount = allPlans.filter((p: any) => p.plan === "premium").length;
@@ -127,10 +130,7 @@ export const getStats = query({
         // Get active sessions (not expired)
         const allSessions = await ctx.db.query("sessions").collect();
         const activeSessions = allSessions.filter((s: any) => s.expiresAt > Date.now());
-        
-        // Completed trips
-        const completedTrips = allTrips.filter((t: any) => t.status === "completed");
-        
+
         // Top destinations by insights
         const destinationCounts: Record<string, number> = {};
         allInsights.forEach((insight: any) => {
@@ -139,19 +139,9 @@ export const getStats = query({
             }
         });
         
-        // Top destinations by trips
-        const tripDestinationCounts: Record<string, number> = {};
-        allTrips.forEach((trip: any) => {
-            if (trip.destination) {
-                tripDestinationCounts[trip.destination] = (tripDestinationCounts[trip.destination] || 0) + 1;
-            }
-        });
-        
-        const topTripDestinations = Object.entries(tripDestinationCounts)
-            .sort(([, a], [, b]) => b - a)
-            .slice(0, 5)
-            .map(([destination, count]) => ({ destination, count }));
-        
+        // Top destinations by trips — from the cached aggregate.
+        const topTripDestinations = cachedTripStats?.topTripDestinations ?? [];
+
         const topDestinations = Object.entries(destinationCounts)
             .sort(([, a], [, b]) => b - a)
             .slice(0, 5)
@@ -236,9 +226,7 @@ export const getStats = query({
         }
 
         // Last 10 generated trips (most recent first)
-        const recentTrips = [...allTrips]
-            .sort((a: any, b: any) => (b._creationTime || 0) - (a._creationTime || 0))
-            .slice(0, 10)
+        const recentTrips = recentTripDocs
             .map((t: any) => {
                 const owner = userSettingsByUserId[t.userId];
                 return {
@@ -265,8 +253,8 @@ export const getStats = query({
             totalUsersCount: allUserSettings.length,
             premiumUsersCount,
             activeSessionsCount: activeSessions.length,
-            totalTripsCount: allTrips.length,
-            completedTripsCount: completedTrips.length,
+            totalTripsCount: cachedTripStats?.tripsCount ?? 0,
+            completedTripsCount: cachedTripStats?.completedTripsCount ?? 0,
             topDestinations,
             topTripDestinations,
             mostLikedInsights,

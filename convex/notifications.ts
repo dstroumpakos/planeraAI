@@ -136,15 +136,14 @@ export const getTripsForNotifications = internalQuery({
     args: {},
     handler: async (ctx) => {
         const now = Date.now();
-        const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
-        const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
-        const oneYearMs = 365 * 24 * 60 * 60 * 1000;
-
-        // Get all completed trips
-        const allTrips = await ctx.db
-            .query("trips")
-            .withIndex("by_status", (q) => q.eq("status", "completed"))
-            .collect();
+        const dayMs = 24 * 60 * 60 * 1000;
+        const sevenDaysMs = 7 * dayMs;
+        const thirtyDaysMs = 30 * dayMs;
+        // Longest trip we'll detect as "currently active" via the startDate
+        // window. Covers essentially all real trips; trips longer than this that
+        // started before the window aren't flagged active — an acceptable edge
+        // case that keeps reads bounded. Tunable if reads grow.
+        const maxTripMs = 60 * dayMs;
 
         const results: {
             upcoming: any[];
@@ -158,11 +157,22 @@ export const getTripsForNotifications = internalQuery({
             anniversary: [],
         };
 
-        for (const trip of allTrips) {
-            const startDate = trip.startDate;
-            const endDate = trip.endDate;
-            const daysUntilStart = Math.ceil((startDate - now) / (24 * 60 * 60 * 1000));
-            const daysSinceEnd = Math.ceil((now - endDate) / (24 * 60 * 60 * 1000));
+        // Upcoming (start within 7 days) and active (currently ongoing) trips:
+        // both live in a bounded startDate window, so query that range instead
+        // of scanning every completed trip.
+        const startWindowTrips = await ctx.db
+            .query("trips")
+            .withIndex("by_status_startDate", (q) =>
+                q
+                    .eq("status", "completed")
+                    .gte("startDate", now - maxTripMs)
+                    .lte("startDate", now + sevenDaysMs),
+            )
+            .collect();
+
+        for (const trip of startWindowTrips) {
+            const { startDate, endDate } = trip;
+            const daysUntilStart = Math.ceil((startDate - now) / dayMs);
 
             // Upcoming: 7, 3, or 1 day(s) before start
             if (daysUntilStart >= 0 && daysUntilStart <= 7) {
@@ -171,16 +181,40 @@ export const getTripsForNotifications = internalQuery({
 
             // Currently active (between start and end date)
             if (now >= startDate && now <= endDate) {
-                const currentDay = Math.ceil((now - startDate) / (24 * 60 * 60 * 1000)) + 1;
+                const currentDay = Math.ceil((now - startDate) / dayMs) + 1;
                 results.active.push({ ...trip, currentDay });
             }
+        }
 
-            // Post-trip: ended 1-30 days ago
+        // Post-trip: ended 1-30 days ago — bounded endDate window.
+        const recentlyEndedTrips = await ctx.db
+            .query("trips")
+            .withIndex("by_status_endDate", (q) =>
+                q
+                    .eq("status", "completed")
+                    .gte("endDate", now - thirtyDaysMs)
+                    .lte("endDate", now - dayMs),
+            )
+            .collect();
+        for (const trip of recentlyEndedTrips) {
+            const daysSinceEnd = Math.ceil((now - trip.endDate) / dayMs);
             if (daysSinceEnd >= 1 && daysSinceEnd <= 30) {
                 results.recentlyEnded.push({ ...trip, daysSinceEnd });
             }
+        }
 
-            // Anniversary: ended roughly 1 year ago (±2 days tolerance)
+        // Anniversary: ended roughly 1 year ago (±2 days tolerance) — bounded window.
+        const anniversaryTrips = await ctx.db
+            .query("trips")
+            .withIndex("by_status_endDate", (q) =>
+                q
+                    .eq("status", "completed")
+                    .gte("endDate", now - 367 * dayMs)
+                    .lte("endDate", now - 363 * dayMs),
+            )
+            .collect();
+        for (const trip of anniversaryTrips) {
+            const daysSinceEnd = Math.ceil((now - trip.endDate) / dayMs);
             if (daysSinceEnd >= 363 && daysSinceEnd <= 367) {
                 results.anniversary.push({ ...trip, daysSinceEnd });
             }
