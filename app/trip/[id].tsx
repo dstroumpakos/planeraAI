@@ -3490,15 +3490,61 @@ export default function TripDetails() {
                                             </>
                                         )}
 
-                                        {/* Book button for deals with bookingUrl */}
-                                        {selected.bookingUrl && (
-                                            <TouchableOpacity
-                                                style={{ backgroundColor: colors.primary, borderRadius: 10, paddingVertical: 12, alignItems: 'center', marginTop: 4 }}
-                                                onPress={() => Linking.openURL(selected.bookingUrl)}
-                                            >
-                                                <Text style={{ color: '#000', fontSize: 15, fontWeight: '700' }}>{t('tripDetail.bookThisFlight', { defaultValue: 'Book This Flight' })}</Text>
-                                            </TouchableOpacity>
-                                        )}
+                                        {/* Book buttons.
+                                            Rule 1: one link covers both legs → single button.
+                                            Rule 2: separate tickets (outbound + return sold
+                                            apart) → one button per leg. */}
+                                        {(() => {
+                                            const openBooking = async (url?: string, request?: { url?: string; postData?: string }) => {
+                                                let target = url || "";
+                                                if (request?.url && request?.postData) {
+                                                    try {
+                                                        const resolved = await resolveBookingUrl({ url: request.url, postData: request.postData });
+                                                        if (resolved?.ok && resolved.url) target = resolved.url;
+                                                    } catch {}
+                                                }
+                                                if (target) Linking.openURL(target);
+                                            };
+                                            const hasCombined = Boolean(selected.bookingUrl || selected.bookingRequest?.url);
+                                            const hasOutboundLink = Boolean(selected.outboundBookingUrl || selected.outboundBookingRequest?.url);
+                                            const hasReturnLink = Boolean(selected.returnBookingUrl || selected.returnBookingRequest?.url);
+
+                                            if (hasCombined) {
+                                                return (
+                                                    <TouchableOpacity
+                                                        style={{ backgroundColor: colors.primary, borderRadius: 10, paddingVertical: 12, alignItems: 'center', marginTop: 4 }}
+                                                        onPress={() => openBooking(selected.bookingUrl, selected.bookingRequest)}
+                                                    >
+                                                        <Text style={{ color: '#000', fontSize: 15, fontWeight: '700' }}>{t('tripDetail.bookThisFlight', { defaultValue: 'Book This Flight' })}</Text>
+                                                    </TouchableOpacity>
+                                                );
+                                            }
+                                            if (hasOutboundLink || hasReturnLink) {
+                                                return (
+                                                    <View style={{ gap: 8, marginTop: 4 }}>
+                                                        {hasOutboundLink && (
+                                                            <TouchableOpacity
+                                                                style={{ backgroundColor: colors.primary, borderRadius: 10, paddingVertical: 12, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}
+                                                                onPress={() => openBooking(selected.outboundBookingUrl, selected.outboundBookingRequest)}
+                                                            >
+                                                                <Ionicons name="airplane" size={15} color="#000" />
+                                                                <Text style={{ color: '#000', fontSize: 15, fontWeight: '700' }}>{t('tripDetail.bookOutboundFlight', { defaultValue: 'Book Outbound Flight' })}</Text>
+                                                            </TouchableOpacity>
+                                                        )}
+                                                        {hasReturnLink && (
+                                                            <TouchableOpacity
+                                                                style={{ borderColor: colors.primary, borderWidth: 1.5, borderRadius: 10, paddingVertical: 12, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}
+                                                                onPress={() => openBooking(selected.returnBookingUrl, selected.returnBookingRequest)}
+                                                            >
+                                                                <Ionicons name="airplane" size={15} color={colors.primary} style={{ transform: [{ scaleX: -1 }] }} />
+                                                                <Text style={{ color: colors.text, fontSize: 15, fontWeight: '700' }}>{t('tripDetail.bookReturnFlight', { defaultValue: 'Book Return Flight' })}</Text>
+                                                            </TouchableOpacity>
+                                                        )}
+                                                    </View>
+                                                );
+                                            }
+                                            return null;
+                                        })()}
                                     </View>
                                 );
                             })()}

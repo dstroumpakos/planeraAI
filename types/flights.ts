@@ -48,6 +48,9 @@ export interface FlightSearchInput {
   returnTimes?: string;
   deepSearch?: boolean;
   noCache?: boolean;
+  // Round-trip leg 2: pass the departure_token of a selected outbound option
+  // to fetch its return-flight options (each carrying a booking_token).
+  departureToken?: string;
 }
 
 export interface FlightBookingOptionsInput {
@@ -55,6 +58,13 @@ export interface FlightBookingOptionsInput {
   currency?: string;
   hl?: string;
   gl?: string;
+  // SerpApi's booking_options endpoint requires the full route + dates
+  // alongside the booking_token, otherwise it errors. Thread them through.
+  departureId?: string;
+  arrivalId?: string;
+  outboundDate?: string; // YYYY-MM-DD
+  returnDate?: string; // YYYY-MM-DD (round trip)
+  adults?: number;
 }
 
 // --------------------------- Normalized output ------------------------------

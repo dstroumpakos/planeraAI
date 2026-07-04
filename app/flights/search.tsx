@@ -9,8 +9,12 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "convex/react";
+import { api } from "@/convex/_generated/api";
+import { useToken } from "@/lib/useAuthenticatedMutation";
 import { useTheme } from "@/lib/ThemeContext";
 import { useFlightSearch } from "@/hooks/useFlightSearch";
 import { resolveAirport } from "@/lib/destinationAirports";
@@ -19,6 +23,7 @@ import { FlightSearchForm } from "@/components/flights/FlightSearchForm";
 import { AirportsSummaryCard } from "@/components/flights/AirportsSummaryCard";
 import { PriceInsightsCard } from "@/components/flights/PriceInsightsCard";
 import { FlightResultsList } from "@/components/flights/FlightResultsList";
+import { FlightResultCard } from "@/components/flights/FlightResultCard";
 import { BookingOptionsSheet } from "@/components/flights/BookingOptionsSheet";
 import type {
   FlightSearchInput,
@@ -50,20 +55,35 @@ export default function FlightsSearchScreen() {
     [params.arrivalCityName]
   );
 
+  // Prefill "From" with the user's home airport when no explicit departure
+  // was passed in (e.g. when opened from the home screen button).
+  const { token } = useToken();
+  const userSettings = useQuery(api.users.getSettings as any, { token: token || "skip" });
+  const homeIata = useMemo(() => {
+    const raw = (userSettings as any)?.homeAirport as string | undefined;
+    if (!raw) return undefined;
+    const matches = raw.toUpperCase().match(/\b([A-Z]{3})\b/g);
+    return matches ? matches[matches.length - 1] : undefined;
+  }, [userSettings]);
+
   const initial: Partial<FlightSearchInput> = useMemo(
     () => ({
-      departureId: params.departureId,
+      departureId: params.departureId || homeIata,
       arrivalId: params.arrivalId,
       outboundDate: params.outboundDate,
       returnDate: params.returnDate,
       adults: params.adults ? Number(params.adults) : undefined,
       currency: params.currency ?? "EUR",
-      type: params.returnDate ? "round_trip" : "one_way",
+      type: "round_trip",
     }),
-    [params.departureId, params.arrivalId, params.outboundDate, params.returnDate, params.adults, params.currency]
+    [params.departureId, params.arrivalId, params.outboundDate, params.returnDate, params.adults, params.currency, homeIata]
   );
 
-  const { data, loading, error, searchFlights } = useFlightSearch();
+  // Two-step round-trip flow: search returns outbound options; picking one
+  // triggers a follow-up search (departure_token) for its return options.
+  const outbound = useFlightSearch();
+  const returnLeg = useFlightSearch();
+  const [selectedOutbound, setSelectedOutbound] = useState<NormalizedFlightOption | null>(null);
   const [selected, setSelected] = useState<NormalizedFlightOption | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [currentCurrency, setCurrentCurrency] = useState(
@@ -76,28 +96,50 @@ export default function FlightsSearchScreen() {
   const onSubmit = async (input: FlightSearchInput) => {
     setCurrentCurrency(input.currency ?? "EUR");
     setLastInput(input);
+    setSelectedOutbound(null);
+    returnLeg.reset();
     try {
-      await searchFlights(input);
+      await outbound.searchFlights(input);
     } catch {
       // error is surfaced via `error` state
     }
   };
 
-  // Navigate to the deal-trip screen (flight-search mode) with the selected
-  // flight locked in and dates/destination/travelers prefilled.
-  const onCreateTrip = (option: NormalizedFlightOption) => {
+  const selectOutbound = async (option: NormalizedFlightOption) => {
     if (!lastInput) return;
+    if (!option.departureToken) {
+      // No return-leg token (rare) — fall back to booking options directly.
+      if (option.bookingToken) {
+        setSelected(option);
+        setSheetOpen(true);
+      }
+      return;
+    }
+    setSelectedOutbound(option);
+    try {
+      await returnLeg.searchFlights({
+        ...lastInput,
+        departureToken: option.departureToken,
+      });
+    } catch {
+      // error is surfaced via returnLeg.error
+    }
+  };
+
+  const changeOutbound = () => {
+    setSelectedOutbound(null);
+    returnLeg.reset();
+  };
+
+  const timeOf = (iso?: string | null) => iso?.split(" ")[1] ?? "";
+  const minsToLabel = (mins?: number | null) =>
+    mins != null ? `${Math.floor(mins / 60)}h ${mins % 60}m` : "";
+
+  const mapLeg = (option: NormalizedFlightOption) => {
     const segments = option.flights;
     const first = segments[0];
     const lastSeg = segments[segments.length - 1] ?? first;
     const stops = Math.max(0, segments.length - 1);
-    const timeOf = (iso?: string | null) => iso?.split(" ")[1] ?? "";
-    const minsToLabel = (mins?: number | null) =>
-      mins != null ? `${Math.floor(mins / 60)}h ${mins % 60}m` : "";
-
-    const originAirport = AIRPORTS.find((a) => a.code === lastInput.departureId);
-    const destAirport = AIRPORTS.find((a) => a.code === lastInput.arrivalId);
-
     const mappedSegments =
       stops > 0
         ? segments.map((s) => ({
@@ -110,29 +152,61 @@ export default function FlightsSearchScreen() {
             duration: minsToLabel(s.durationMinutes),
           }))
         : null;
+    return {
+      airline: first?.airline ?? "",
+      flightNumber: segments.map((s) => s.flightNumber).filter(Boolean).join(" • "),
+      departure: timeOf(first?.departureAirport.time),
+      arrival: timeOf(lastSeg?.arrivalAirport.time),
+      duration: minsToLabel(option.totalDurationMinutes),
+      stops,
+      segments: mappedSegments,
+      firstSeg: first,
+      lastSeg,
+    };
+  };
 
+  // Navigate to the deal-trip screen (flight-search mode) with both legs
+  // locked in and dates/destination/travelers prefilled.
+  const onCreateTrip = (returnOption: NormalizedFlightOption) => {
+    if (!lastInput || !selectedOutbound) return;
+    const out = mapLeg(selectedOutbound);
+    const ret = mapLeg(returnOption);
+
+    const originAirport = AIRPORTS.find((a) => a.code === lastInput.departureId);
+    const destAirport = AIRPORTS.find((a) => a.code === lastInput.arrivalId);
     const adults = lastInput.adults || 1;
+    // In the return-leg step SerpApi prices are the full round-trip fare.
+    const price = returnOption.price ?? selectedOutbound.price;
+
     router.push({
       pathname: "/deal-trip",
       params: {
         origin: lastInput.departureId,
-        originCity: originAirport?.city || first?.departureAirport.name || lastInput.departureId,
+        originCity: originAirport?.city || out.firstSeg?.departureAirport.name || lastInput.departureId,
         destination: lastInput.arrivalId,
         destinationCity:
-          params.arrivalCityName || destAirport?.city || lastSeg?.arrivalAirport.name || lastInput.arrivalId,
-        airline: first?.airline ?? "",
-        flightNumber: segments.map((s) => s.flightNumber).filter(Boolean).join(" • "),
+          params.arrivalCityName || destAirport?.city || out.lastSeg?.arrivalAirport.name || lastInput.arrivalId,
+        airline: out.airline,
+        flightNumber: out.flightNumber,
         outboundDate: lastInput.outboundDate,
-        outboundDeparture: timeOf(first?.departureAirport.time),
-        outboundArrival: timeOf(lastSeg?.arrivalAirport.time),
-        outboundDuration: minsToLabel(option.totalDurationMinutes),
-        outboundStops: String(stops),
-        outboundSegments: mappedSegments ? JSON.stringify(mappedSegments) : "",
+        outboundDeparture: out.departure,
+        outboundArrival: out.arrival,
+        outboundDuration: out.duration,
+        outboundStops: String(out.stops),
+        outboundSegments: out.segments ? JSON.stringify(out.segments) : "",
         returnDate: lastInput.returnDate || "",
-        price: option.price != null ? String(option.price) : "0",
-        totalPrice: option.price != null && adults > 1 ? String(option.price * adults) : "",
+        returnDeparture: ret.departure,
+        returnArrival: ret.arrival,
+        returnAirline: ret.airline,
+        returnFlightNumber: ret.flightNumber,
+        returnDuration: ret.duration,
+        returnStops: String(ret.stops),
+        returnSegments: ret.segments ? JSON.stringify(ret.segments) : "",
+        price: price != null ? String(price) : "0",
+        totalPrice: price != null && adults > 1 ? String(price * adults) : "",
         currency: lastInput.currency || currentCurrency,
         travelers: String(adults),
+        bookingToken: returnOption.bookingToken || "",
       },
     } as any);
   };
@@ -148,6 +222,54 @@ export default function FlightsSearchScreen() {
     },
     headerTitle: { color: colors.text, fontWeight: "700", fontSize: 18 },
     content: { padding: 16, gap: 14 },
+    hero: { gap: 8, marginBottom: 2 },
+    heroTopRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+    heroBadge: {
+      width: 46,
+      height: 46,
+      borderRadius: 23,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    heroTitle: {
+      flex: 1,
+      color: colors.text,
+      fontWeight: "800",
+      fontSize: 24,
+      letterSpacing: -0.4,
+      lineHeight: 29,
+    },
+    heroSubtitle: { color: colors.textSecondary, fontSize: 14, lineHeight: 20 },
+    trustRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 2 },
+    trustChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 5,
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+      borderRadius: 999,
+      backgroundColor: colors.lightGray,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    trustText: { color: colors.text, fontSize: 11, fontWeight: "600" },
+    stepRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      marginTop: 4,
+    },
+    stepBadge: {
+      width: 22,
+      height: 22,
+      borderRadius: 11,
+      backgroundColor: colors.primary,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    stepBadgeText: { color: "#000000", fontWeight: "800", fontSize: 12 },
+    stepTitle: { flex: 1, color: colors.text, fontWeight: "700", fontSize: 16 },
+    changeLink: { color: colors.primary, fontWeight: "700", fontSize: 13 },
     error: { color: colors.error, textAlign: "center", paddingVertical: 12 },
     skeleton: {
       backgroundColor: colors.lightGray,
@@ -174,26 +296,71 @@ export default function FlightsSearchScreen() {
         <TouchableOpacity onPress={() => router.back()} hitSlop={10}>
           <Ionicons name="chevron-back" size={24} color={colors.text} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Find flights</Text>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        {/* Hero */}
+        <View style={styles.hero}>
+          <View style={styles.heroTopRow}>
+            <LinearGradient
+              colors={[colors.primary, "#34C759"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.heroBadge}
+            >
+              <Ionicons name="airplane" size={22} color="#000000" />
+            </LinearGradient>
+            <Text style={styles.heroTitle}>
+              {t("flights.heroTitle", { defaultValue: "Find your perfect flight" })}
+            </Text>
+          </View>
+          <Text style={styles.heroSubtitle}>
+            {t("flights.heroSubtitle", {
+              defaultValue:
+                "Compare live round-trip fares and turn the best deal into a complete AI-planned trip.",
+            })}
+          </Text>
+          <View style={styles.trustRow}>
+            <View style={styles.trustChip}>
+              <Ionicons name="flash" size={11} color={colors.primary} />
+              <Text style={styles.trustText}>
+                {t("flights.trustRealtime", { defaultValue: "Real-time prices" })}
+              </Text>
+            </View>
+            <View style={styles.trustChip}>
+              <Ionicons name="globe-outline" size={11} color={colors.primary} />
+              <Text style={styles.trustText}>
+                {t("flights.trustAirlines", { defaultValue: "Hundreds of airlines" })}
+              </Text>
+            </View>
+            <View style={styles.trustChip}>
+              <Ionicons name="sparkles" size={11} color={colors.primary} />
+              <Text style={styles.trustText}>
+                {t("flights.trustOneTap", { defaultValue: "Trip-ready in one tap" })}
+              </Text>
+            </View>
+          </View>
+        </View>
+
         <FlightSearchForm
           initial={initial}
-          loading={loading}
+          loading={outbound.loading}
           onSubmit={onSubmit}
         />
 
-        {loading && (
+        {outbound.loading && (
           <View style={{ gap: 10 }}>
             <View style={styles.skeleton} />
             <View style={styles.skeleton} />
           </View>
         )}
 
-        {!loading && error && <Text style={styles.error}>{error}</Text>}
+        {!outbound.loading && outbound.error && (
+          <Text style={styles.error}>{outbound.error}</Text>
+        )}
 
-        {!loading && data && (
+        {/* Step 1 — pick the outbound flight */}
+        {!outbound.loading && outbound.data && !selectedOutbound && (
           <>
             {arrivalInfo && !arrivalInfo.hasOwnAirport && arrivalInfo.nearestCity && (
               <View style={styles.banner}>
@@ -217,21 +384,83 @@ export default function FlightsSearchScreen() {
                 </Text>
               </View>
             )}
-            <AirportsSummaryCard airports={data.airports} />
+            <AirportsSummaryCard airports={outbound.data.airports} />
             <PriceInsightsCard
-              priceInsights={data.priceInsights}
+              priceInsights={outbound.data.priceInsights}
               currency={currentCurrency}
             />
+            <View style={styles.stepRow}>
+              <View style={styles.stepBadge}>
+                <Text style={styles.stepBadgeText}>1</Text>
+              </View>
+              <Text style={styles.stepTitle}>
+                {t("flights.chooseOutbound", { defaultValue: "Choose your outbound flight" })}
+              </Text>
+            </View>
             <FlightResultsList
-              bestFlights={data.bestFlights}
-              otherFlights={data.otherFlights}
+              bestFlights={outbound.data.bestFlights}
+              otherFlights={outbound.data.otherFlights}
               currency={currentCurrency}
-              onSelect={(o) => {
-                setSelected(o);
-                setSheetOpen(true);
-              }}
-              onCreateTrip={onCreateTrip}
+              onSelect={selectOutbound}
+              ctaLabel={t("flights.selectFlight", { defaultValue: "Select this flight" })}
             />
+          </>
+        )}
+
+        {/* Step 2 — pick the return flight */}
+        {selectedOutbound && (
+          <>
+            <View style={styles.stepRow}>
+              <View style={styles.stepBadge}>
+                <Ionicons name="checkmark" size={13} color="#000000" />
+              </View>
+              <Text style={styles.stepTitle}>
+                {t("flights.outboundSelected", { defaultValue: "Outbound selected" })}
+              </Text>
+              <TouchableOpacity onPress={changeOutbound} hitSlop={8}>
+                <Text style={styles.changeLink}>
+                  {t("flights.change", { defaultValue: "Change" })}
+                </Text>
+              </TouchableOpacity>
+            </View>
+            <FlightResultCard
+              option={selectedOutbound}
+              currency={currentCurrency}
+              hideCta
+            />
+
+            <View style={styles.stepRow}>
+              <View style={styles.stepBadge}>
+                <Text style={styles.stepBadgeText}>2</Text>
+              </View>
+              <Text style={styles.stepTitle}>
+                {t("flights.chooseReturn", { defaultValue: "Choose your return flight" })}
+              </Text>
+            </View>
+
+            {returnLeg.loading && (
+              <View style={{ gap: 10 }}>
+                <View style={styles.skeleton} />
+                <View style={styles.skeleton} />
+              </View>
+            )}
+
+            {!returnLeg.loading && returnLeg.error && (
+              <Text style={styles.error}>{returnLeg.error}</Text>
+            )}
+
+            {!returnLeg.loading && returnLeg.data && (
+              <FlightResultsList
+                bestFlights={returnLeg.data.bestFlights}
+                otherFlights={returnLeg.data.otherFlights}
+                currency={currentCurrency}
+                onSelect={(o) => {
+                  setSelected(o);
+                  setSheetOpen(true);
+                }}
+                onCreateTrip={onCreateTrip}
+              />
+            )}
           </>
         )}
       </ScrollView>
@@ -239,7 +468,19 @@ export default function FlightsSearchScreen() {
       <BookingOptionsSheet
         visible={sheetOpen}
         flightOption={selected}
+        outboundOption={selectedOutbound}
         currency={currentCurrency}
+        searchContext={
+          lastInput
+            ? {
+                departureId: lastInput.departureId,
+                arrivalId: lastInput.arrivalId,
+                outboundDate: lastInput.outboundDate,
+                returnDate: lastInput.returnDate,
+                adults: lastInput.adults,
+              }
+            : undefined
+        }
         onClose={() => setSheetOpen(false)}
       />
     </SafeAreaView>

@@ -72,6 +72,9 @@ export default function DealTripScreen() {
   const returnSegments = params.returnSegments ? JSON.parse(params.returnSegments as string) : null;
   const flightNumber = (params.flightNumber as string) || undefined;
   const outboundDuration = (params.outboundDuration as string) || undefined;
+  const returnFlightNumber = (params.returnFlightNumber as string) || undefined;
+  const returnDuration = (params.returnDuration as string) || undefined;
+  const bookingToken = (params.bookingToken as string) || undefined;
   const prefilledTravelers = Math.min(12, Math.max(1, parseInt(params.travelers as string) || 1));
 
   const [budgetTotal, setBudgetTotal] = useState("");
@@ -204,9 +207,18 @@ export default function DealTripScreen() {
             outboundStops,
             outboundSegments: outboundSegments || undefined,
             returnDate: returnDate || undefined,
+            returnDeparture: returnDeparture || undefined,
+            returnArrival: returnArrival || undefined,
+            returnAirline: returnAirline || undefined,
+            returnFlightNumber,
+            returnDuration,
+            returnStops,
+            returnSegments: returnSegments || undefined,
             pricePerPerson: Number(price) || 0,
             totalPrice: totalPrice ? Number(totalPrice) : undefined,
             currency,
+            bookingToken,
+            searchAdults: prefilledTravelers,
             budgetTotal: Number(budgetTotal),
             travelerCount,
             interests,
@@ -365,8 +377,10 @@ export default function DealTripScreen() {
               <View style={[styles.flightDetailItem, { backgroundColor: colors.primary + "18" }]}>
                 <Ionicons name="git-branch-outline" size={13} color={colors.primary} />
                 <Text style={[styles.flightDetailText, { color: colors.primary, fontWeight: "700" }]} numberOfLines={1}>
-                  {outboundStops} stop{outboundStops > 1 ? "s" : ""}
-                  {outboundSegments ? ` via ${outboundSegments.slice(0, -1).map((s: any) => s.arrivalAirport).join(", ")}` : ""}
+                  {outboundStops === 1
+                    ? t("flights.oneStop", { defaultValue: "1 stop" })
+                    : t("flights.stopsCount", { count: outboundStops, defaultValue: `${outboundStops} stops` })}
+                  {outboundSegments ? ` ${t("flights.via", { defaultValue: "via" })} ${outboundSegments.slice(0, -1).map((s: any) => s.arrivalAirport).join(", ")}` : ""}
                 </Text>
               </View>
             )}
@@ -427,8 +441,10 @@ export default function DealTripScreen() {
                   <View style={[styles.flightDetailItem, { backgroundColor: colors.primary + "18" }]}>
                     <Ionicons name="git-branch-outline" size={13} color={colors.primary} />
                     <Text style={[styles.flightDetailText, { color: colors.primary, fontWeight: "700" }]} numberOfLines={1}>
-                      {returnStops} stop{returnStops > 1 ? "s" : ""}
-                      {returnSegments ? ` via ${returnSegments.slice(0, -1).map((s: any) => s.arrivalAirport).join(", ")}` : ""}
+                      {returnStops === 1
+                        ? t("flights.oneStop", { defaultValue: "1 stop" })
+                        : t("flights.stopsCount", { count: returnStops, defaultValue: `${returnStops} stops` })}
+                      {returnSegments ? ` ${t("flights.via", { defaultValue: "via" })} ${returnSegments.slice(0, -1).map((s: any) => s.arrivalAirport).join(", ")}` : ""}
                     </Text>
                   </View>
                 )}

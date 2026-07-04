@@ -1,5 +1,6 @@
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
+import { useTranslation } from "react-i18next";
 import { useTheme } from "@/lib/ThemeContext";
 import type { PriceInsights } from "@/types/flights";
 
@@ -18,22 +19,23 @@ export const PriceInsightsCard: React.FC<Props> = ({
   currency = "EUR",
 }) => {
   const { colors } = useTheme();
+  const { t } = useTranslation();
   if (!priceInsights) return null;
   const level = (priceInsights.priceLevel || "").toLowerCase();
 
   const tone =
     level === "low"
-      ? { bg: "#E8F7EE", fg: "#0F8A3B", label: "Low price" }
+      ? { bg: "#E8F7EE", fg: "#0F8A3B", label: t("flights.lowPrice", { defaultValue: "Low price" }) }
       : level === "high"
-        ? { bg: "#FDECEC", fg: "#B82626", label: "Higher than usual" }
-        : { bg: colors.lightGray, fg: colors.text, label: "Typical price" };
+        ? { bg: "#FDECEC", fg: "#B82626", label: t("flights.higherThanUsual", { defaultValue: "Higher than usual" }) }
+        : { bg: colors.lightGray, fg: colors.text, label: t("flights.typicalPrice", { defaultValue: "Typical price" }) };
 
   const body =
     level === "low"
-      ? "This fare looks low compared with the usual range."
+      ? t("flights.fareLowBody", { defaultValue: "This fare looks low compared with the usual range." })
       : level === "high"
-        ? "This fare looks higher than usual."
-        : "This fare looks typical for this route.";
+        ? t("flights.fareHighBody", { defaultValue: "This fare looks higher than usual." })
+        : t("flights.fareTypicalBody", { defaultValue: "This fare looks typical for this route." });
 
   const styles = StyleSheet.create({
     card: {
@@ -74,7 +76,11 @@ export const PriceInsightsCard: React.FC<Props> = ({
       {low != null && high != null && (
         <View style={styles.rangeRow}>
           <Text style={styles.rangeText}>
-            Typical range: {formatPrice(low, currency)} – {formatPrice(high, currency)}
+            {t("flights.typicalRange", {
+              low: formatPrice(low, currency),
+              high: formatPrice(high, currency),
+              defaultValue: `Typical range: ${formatPrice(low, currency)} – ${formatPrice(high, currency)}`,
+            })}
           </Text>
         </View>
       )}

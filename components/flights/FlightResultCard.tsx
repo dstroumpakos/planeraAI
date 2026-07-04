@@ -11,6 +11,14 @@ interface Props {
   onPress?: () => void;
   /** When set, shows a secondary "Create trip with this flight" button. */
   onCreateTrip?: () => void;
+  /**
+   * Overrides the primary button label (e.g. "Select this flight" in the
+   * outbound step of a round-trip search). When set, the button is enabled
+   * as long as the option can advance the flow (departure or booking token).
+   */
+  ctaLabel?: string;
+  /** Hides the action button entirely (read-only display, e.g. in sheets). */
+  hideCta?: boolean;
 }
 
 function formatDuration(mins?: number | null): string {
@@ -60,6 +68,8 @@ export const FlightResultCard: React.FC<Props> = ({
   currency = "EUR",
   onPress,
   onCreateTrip,
+  ctaLabel,
+  hideCta,
 }) => {
   const { colors } = useTheme();
   const { t } = useTranslation();
@@ -67,6 +77,9 @@ export const FlightResultCard: React.FC<Props> = ({
   const last = option.flights[option.flights.length - 1] ?? first;
   const stops = option.flights.length > 0 ? option.flights.length - 1 : 0;
   const hasBookingToken = Boolean(option.bookingToken);
+  const ctaEnabled = ctaLabel
+    ? Boolean(option.departureToken || option.bookingToken)
+    : hasBookingToken;
 
   const styles = StyleSheet.create({
     card: {
@@ -93,13 +106,13 @@ export const FlightResultCard: React.FC<Props> = ({
     stopsText: { color: colors.textMuted, fontSize: 11 },
     badgesRow: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
     button: {
-      backgroundColor: hasBookingToken ? colors.primary : colors.lightGray,
+      backgroundColor: ctaEnabled ? colors.primary : colors.lightGray,
       borderRadius: 12,
       paddingVertical: 12,
       alignItems: "center",
     },
     buttonText: {
-      color: hasBookingToken ? "#1A1A1A" : colors.textMuted,
+      color: ctaEnabled ? "#1A1A1A" : colors.textMuted,
       fontWeight: "700",
       fontSize: 14,
     },
@@ -123,11 +136,11 @@ export const FlightResultCard: React.FC<Props> = ({
 
   const dealBadge =
     option.dealScore === "strong_deal" ? (
-      <Badge label="Low price" tone="good" />
+      <Badge label={t("flights.lowPrice", { defaultValue: "Low price" })} tone="good" />
     ) : option.dealScore === "expensive" ? (
-      <Badge label="Higher than usual" tone="bad" />
+      <Badge label={t("flights.higherThanUsual", { defaultValue: "Higher than usual" })} tone="bad" />
     ) : option.dealScore === "normal" ? (
-      <Badge label="Typical price" tone="neutral" />
+      <Badge label={t("flights.typicalPrice", { defaultValue: "Typical price" })} tone="neutral" />
     ) : null;
 
   const hasOvernightLayover = option.layovers.some((l) => l.overnight);
@@ -171,8 +184,10 @@ export const FlightResultCard: React.FC<Props> = ({
           <View style={styles.line} />
           <Text style={styles.stopsText}>
             {stops === 0
-              ? "Nonstop"
-              : `${stops} stop${stops > 1 ? "s" : ""}`}
+              ? t("flights.nonstop", { defaultValue: "Nonstop" })
+              : stops === 1
+                ? t("flights.oneStop", { defaultValue: "1 stop" })
+                : t("flights.stopsCount", { count: stops, defaultValue: `${stops} stops` })}
           </Text>
         </View>
         <View style={styles.timeCol}>
@@ -183,31 +198,43 @@ export const FlightResultCard: React.FC<Props> = ({
 
       <View style={styles.badgesRow}>
         {dealBadge}
-        {stops === 0 && <Badge label="Nonstop" tone="good" />}
-        {stops === 1 && <Badge label="1 stop" tone="neutral" />}
-        {hasOvernightLayover && <Badge label="Overnight layover" tone="warn" />}
-        {hasOftenDelayed && <Badge label="Often delayed" tone="warn" />}
+        {stops === 0 && <Badge label={t("flights.nonstop", { defaultValue: "Nonstop" })} tone="good" />}
+        {stops === 1 && <Badge label={t("flights.oneStop", { defaultValue: "1 stop" })} tone="neutral" />}
+        {hasOvernightLayover && (
+          <Badge label={t("flights.overnightLayover", { defaultValue: "Overnight layover" })} tone="warn" />
+        )}
+        {hasOftenDelayed && (
+          <Badge label={t("flights.oftenDelayed", { defaultValue: "Often delayed" })} tone="warn" />
+        )}
       </View>
 
       {option.carbonEmissions?.thisFlight != null && (
         <Text style={styles.co2}>
           CO₂: {Math.round(option.carbonEmissions.thisFlight / 1000)} kg
           {option.carbonEmissions.differencePercent != null
-            ? ` (${option.carbonEmissions.differencePercent > 0 ? "+" : ""}${option.carbonEmissions.differencePercent}% vs typical)`
+            ? ` ${t("flights.co2VsTypical", {
+                percent: `${option.carbonEmissions.differencePercent > 0 ? "+" : ""}${option.carbonEmissions.differencePercent}`,
+                defaultValue: `(${option.carbonEmissions.differencePercent}% vs typical)`,
+              })}`
             : ""}
         </Text>
       )}
 
+      {!hideCta && (
       <TouchableOpacity
         style={styles.button}
-        disabled={!hasBookingToken}
+        disabled={!ctaEnabled}
         onPress={onPress}
         activeOpacity={0.8}
       >
         <Text style={styles.buttonText}>
-          {hasBookingToken ? "View booking options" : "Check availability unavailable"}
+          {!ctaEnabled
+            ? t("flights.availabilityUnavailable", { defaultValue: "Availability check unavailable" })
+            : ctaLabel ??
+              t("flights.viewBookingOptions", { defaultValue: "View booking options" })}
         </Text>
       </TouchableOpacity>
+      )}
 
       {onCreateTrip && (
         <TouchableOpacity

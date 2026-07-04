@@ -8,17 +8,30 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import { useTranslation } from "react-i18next";
 import { useTheme } from "@/lib/ThemeContext";
 import { useFlightBookingOptions } from "@/hooks/useFlightBookingOptions";
 import type { NormalizedFlightOption } from "@/types/flights";
 import { FlightResultCard } from "./FlightResultCard";
 import { BookingOptionCard } from "./BookingOptionCard";
 
+interface BookingSearchContext {
+  departureId?: string;
+  arrivalId?: string;
+  outboundDate?: string;
+  returnDate?: string;
+  adults?: number;
+}
+
 interface Props {
   visible: boolean;
   onClose: () => void;
   flightOption: NormalizedFlightOption | null;
+  /** In a round-trip flow: the selected outbound leg, shown above the return. */
+  outboundOption?: NormalizedFlightOption | null;
+  /** Route + dates from the search — required by SerpApi's booking endpoint. */
+  searchContext?: BookingSearchContext;
   currency?: string;
 }
 
@@ -26,9 +39,12 @@ export const BookingOptionsSheet: React.FC<Props> = ({
   visible,
   onClose,
   flightOption,
+  outboundOption,
+  searchContext,
   currency = "EUR",
 }) => {
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const { bookingOptions, loading, error, getBookingOptions, reset } =
     useFlightBookingOptions();
 
@@ -37,10 +53,15 @@ export const BookingOptionsSheet: React.FC<Props> = ({
       getBookingOptions({
         bookingToken: flightOption.bookingToken,
         currency,
+        departureId: searchContext?.departureId,
+        arrivalId: searchContext?.arrivalId,
+        outboundDate: searchContext?.outboundDate,
+        returnDate: searchContext?.returnDate,
+        adults: searchContext?.adults,
       }).catch(() => {});
     }
     if (!visible) reset();
-  }, [visible, flightOption?.bookingToken, currency, getBookingOptions, reset]);
+  }, [visible, flightOption?.bookingToken, currency, searchContext, getBookingOptions, reset]);
 
   const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: colors.background },
@@ -56,6 +77,12 @@ export const BookingOptionsSheet: React.FC<Props> = ({
     close: { color: colors.text, fontWeight: "600", fontSize: 16 },
     scroll: { padding: 16, gap: 12 },
     section: { color: colors.text, fontWeight: "700", fontSize: 15, marginTop: 4 },
+    providersNote: {
+      color: colors.textMuted,
+      fontSize: 12,
+      lineHeight: 16,
+      marginBottom: 2,
+    },
     disclaimer: {
       color: colors.textSecondary,
       fontSize: 12,
@@ -69,28 +96,51 @@ export const BookingOptionsSheet: React.FC<Props> = ({
   });
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose} statusBarTranslucent>
+      {/* A Modal renders in its own native view hierarchy, so the app's
+          SafeAreaProvider insets don't reach here — re-wrap so the header
+          clears the status bar / notch instead of sliding under it. */}
+      <SafeAreaProvider>
       <SafeAreaView style={styles.container} edges={["top"]}>
         <View style={styles.header}>
-          <Text style={styles.title}>Booking options</Text>
+          <Text style={styles.title}>
+            {t("flights.bookingOptions", { defaultValue: "Booking options" })}
+          </Text>
           <TouchableOpacity onPress={onClose}>
-            <Text style={styles.close}>Done</Text>
+            <Text style={styles.close}>{t("common.done", { defaultValue: "Done" })}</Text>
           </TouchableOpacity>
         </View>
         <ScrollView contentContainerStyle={styles.scroll}>
           <Text style={styles.disclaimer}>
-            Planera helps you discover flight options. Booking and payment are
-            completed directly with external providers. Prices and availability may change.
+            {t("flights.searchDisclaimer", {
+              defaultValue:
+                "Planera helps you discover flight options. Booking and payment are completed directly with external providers. Prices and availability may change.",
+            })}
           </Text>
 
-          {flightOption && (
+          {outboundOption && (
             <>
-              <Text style={styles.section}>Selected flight</Text>
-              <FlightResultCard option={flightOption} currency={currency} />
+              <Text style={styles.section}>
+                {t("flights.outbound", { defaultValue: "Outbound" })}
+              </Text>
+              <FlightResultCard option={outboundOption} currency={currency} hideCta />
             </>
           )}
 
-          <Text style={styles.section}>Providers</Text>
+          {flightOption && (
+            <>
+              <Text style={styles.section}>
+                {outboundOption
+                  ? t("flights.return", { defaultValue: "Return" })
+                  : t("flights.selectedFlight", { defaultValue: "Selected flight" })}
+              </Text>
+              <FlightResultCard option={flightOption} currency={currency} hideCta />
+            </>
+          )}
+
+          <Text style={styles.section}>
+            {t("flights.providers", { defaultValue: "Providers" })}
+          </Text>
 
           {loading && (
             <ActivityIndicator color={colors.text} style={{ marginVertical: 24 }} />
@@ -102,17 +152,35 @@ export const BookingOptionsSheet: React.FC<Props> = ({
             <View style={{ gap: 10 }}>
               {bookingOptions.bookingOptions.length === 0 ? (
                 <Text style={styles.empty}>
-                  No providers available for this flight right now.
+                  {t("flights.noProviders", {
+                    defaultValue: "No providers available for this flight right now.",
+                  })}
                 </Text>
               ) : (
-                bookingOptions.bookingOptions.map((o) => (
-                  <BookingOptionCard key={o.id} option={o} />
-                ))
+                <>
+                  <Text style={styles.providersNote}>
+                    {t("flights.providersNote", {
+                      defaultValue:
+                        "Live prices from each booking site — may differ from the headline fare and include different baggage.",
+                    })}
+                  </Text>
+                  {/* Sort cheapest-first; options without a price fall last. */}
+                  {[...bookingOptions.bookingOptions]
+                    .sort(
+                      (a, b) =>
+                        (a.price ?? Number.POSITIVE_INFINITY) -
+                        (b.price ?? Number.POSITIVE_INFINITY)
+                    )
+                    .map((o) => (
+                      <BookingOptionCard key={o.id} option={o} />
+                    ))}
+                </>
               )}
             </View>
           )}
         </ScrollView>
       </SafeAreaView>
+      </SafeAreaProvider>
     </Modal>
   );
 };

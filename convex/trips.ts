@@ -418,13 +418,34 @@ export const createFromFlight = authMutation({
             arrivalTime: v.string(),
             duration: v.optional(v.string()),
         }))),
-        // Return leg: SerpApi round-trip results only carry the outbound leg
-        // details up front, so we only get the date here.
+        // Return leg (present when the user completed the two-step
+        // outbound + return selection in the search screen).
         returnDate: v.optional(v.string()),
+        returnDeparture: v.optional(v.string()),
+        returnArrival: v.optional(v.string()),
+        returnAirline: v.optional(v.string()),
+        returnFlightNumber: v.optional(v.string()),
+        returnDuration: v.optional(v.string()),
+        returnStops: v.optional(v.float64()),
+        returnSegments: v.optional(v.array(v.object({
+            airline: v.string(),
+            flightNumber: v.optional(v.string()),
+            departureAirport: v.string(),
+            departureTime: v.string(),
+            arrivalAirport: v.string(),
+            arrivalTime: v.string(),
+            duration: v.optional(v.string()),
+        }))),
         // Pricing
         pricePerPerson: v.float64(),
         totalPrice: v.optional(v.float64()),
         currency: v.string(),
+        // SerpApi booking token of the selected itinerary — used to fetch
+        // booking link(s) right after creation (tokens are short-lived).
+        bookingToken: v.optional(v.string()),
+        // Passenger count the flight search ran with. The booking token is
+        // tied to it, so it may differ from the trip's final travelerCount.
+        searchAdults: v.optional(v.float64()),
         // Trip preferences filled in by the user
         budgetTotal: v.float64(),
         travelerCount: v.float64(),
@@ -502,7 +523,15 @@ export const createFromFlight = authMutation({
                     stops: args.outboundStops ?? 0,
                     segments: args.outboundSegments || undefined,
                 },
-                return: undefined,
+                return: args.returnDate && args.returnDeparture ? {
+                    airline: args.returnAirline || args.airline,
+                    flightNumber: args.returnFlightNumber || "",
+                    departure: args.returnDeparture,
+                    arrival: args.returnArrival || "",
+                    duration: args.returnDuration || "",
+                    stops: args.returnStops ?? 0,
+                    segments: args.returnSegments || undefined,
+                } : undefined,
                 pricePerPerson: args.pricePerPerson,
                 totalPrice: args.totalPrice || args.pricePerPerson * args.travelerCount,
                 currency: args.currency,
@@ -529,6 +558,9 @@ export const createFromFlight = authMutation({
         const arrivalTime = args.outboundDate && args.outboundArrival
             ? `${args.outboundDate}T${args.outboundArrival}:00`
             : undefined;
+        const departureTime = args.returnDate && args.returnDeparture
+            ? `${args.returnDate}T${args.returnDeparture}:00`
+            : undefined;
 
         const tripId = await ctx.db.insert("trips", {
             userId: ctx.user.userId,
@@ -548,6 +580,7 @@ export const createFromFlight = authMutation({
             skipHotel: args.skipHotel ?? false,
             preferredFlightTime: "any",
             arrivalTime,
+            departureTime,
             language: args.language || "en",
             platform: args.platform,
             // Reuse the deal trip type so the locked-flight rendering applies;
@@ -576,12 +609,87 @@ export const createFromFlight = authMutation({
             skipHotel: args.skipHotel ?? false,
             preferredFlightTime: "any",
             arrivalTime,
+            departureTime,
             language: args.language || "en",
         });
+
+        // Fetch booking link(s) for the locked flight while the token is
+        // still valid. Best-effort — the trip works without them.
+        if (args.bookingToken) {
+            await ctx.scheduler.runAfter(0, internal.flightsSerpApi.enrichTripBooking, {
+                tripId,
+                bookingToken: args.bookingToken,
+                departureId: args.origin,
+                arrivalId: args.destination,
+                outboundDate: args.outboundDate,
+                returnDate: args.returnDate,
+                currency: args.currency,
+                adults: args.searchAdults ?? args.travelerCount,
+            });
+        }
 
         await ctx.scheduler.runAfter(0, internal.achievements.checkAndUnlock, { userId: ctx.user.userId });
 
         return tripId;
+    },
+});
+
+// Store booking link(s) on a flight-search trip's locked flight data.
+// Called by flightsSerpApi.enrichTripBooking right after trip creation.
+// Patches dealFlightData and, if generation already copied it into the
+// itinerary, the itinerary's flights block too (avoids the race between
+// enrichment and AI generation, both scheduled at creation time).
+export const setFlightBookingData = internalMutation({
+    args: {
+        tripId: v.id("trips"),
+        bookingUrl: v.optional(v.string()),
+        bookingRequest: v.optional(v.object({ url: v.string(), postData: v.string() })),
+        outboundBookingUrl: v.optional(v.string()),
+        outboundBookingRequest: v.optional(v.object({ url: v.string(), postData: v.string() })),
+        returnBookingUrl: v.optional(v.string()),
+        returnBookingRequest: v.optional(v.object({ url: v.string(), postData: v.string() })),
+    },
+    returns: v.null(),
+    handler: async (ctx: any, args: any) => {
+        const trip = await ctx.db.get(args.tripId);
+        if (!trip) return null;
+
+        const bookingFields: Record<string, any> = {};
+        if (args.bookingUrl) bookingFields.bookingUrl = args.bookingUrl;
+        if (args.bookingRequest) bookingFields.bookingRequest = args.bookingRequest;
+        if (args.outboundBookingUrl) bookingFields.outboundBookingUrl = args.outboundBookingUrl;
+        if (args.outboundBookingRequest) bookingFields.outboundBookingRequest = args.outboundBookingRequest;
+        if (args.returnBookingUrl) bookingFields.returnBookingUrl = args.returnBookingUrl;
+        if (args.returnBookingRequest) bookingFields.returnBookingRequest = args.returnBookingRequest;
+        if (Object.keys(bookingFields).length === 0) return null;
+
+        const patch: Record<string, any> = {};
+
+        if (trip.dealFlightData?.options?.length) {
+            patch.dealFlightData = {
+                ...trip.dealFlightData,
+                options: trip.dealFlightData.options.map((o: any, i: number) =>
+                    i === 0 ? { ...o, ...bookingFields } : o
+                ),
+            };
+        }
+
+        if (trip.itinerary?.flights?.options?.length) {
+            patch.itinerary = {
+                ...trip.itinerary,
+                flights: {
+                    ...trip.itinerary.flights,
+                    options: trip.itinerary.flights.options.map((o: any, i: number) =>
+                        i === 0 ? { ...o, ...bookingFields } : o
+                    ),
+                },
+            };
+        }
+
+        if (Object.keys(patch).length > 0) {
+            await ctx.db.patch(args.tripId, patch);
+        }
+        return null;
     },
 });
 

@@ -271,6 +271,7 @@ export function createFlightSearchCacheKey(input: FlightSearchInput): string {
     input.stops ?? "any",
     String(input.bags ?? 0),
     input.maxPrice != null ? String(input.maxPrice) : "",
+    input.departureToken ?? "",
   ];
   return parts.join("|");
 }
