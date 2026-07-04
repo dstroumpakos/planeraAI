@@ -19,6 +19,12 @@ interface Props {
   ctaLabel?: string;
   /** Hides the action button entirely (read-only display, e.g. in sheets). */
   hideCta?: boolean;
+  /**
+   * Number of travelers the search ran with. SerpApi's option price is the
+   * TOTAL for all travelers, so when > 1 we caption it to avoid confusion
+   * with the per-person provider prices in the booking sheet.
+   */
+  travelers?: number;
 }
 
 function formatDuration(mins?: number | null): string {
@@ -70,9 +76,11 @@ export const FlightResultCard: React.FC<Props> = ({
   onCreateTrip,
   ctaLabel,
   hideCta,
+  travelers,
 }) => {
   const { colors } = useTheme();
   const { t } = useTranslation();
+  const showTotalCaption = Boolean(travelers && travelers > 1);
   const first = option.flights[0];
   const last = option.flights[option.flights.length - 1] ?? first;
   const stops = option.flights.length > 0 ? option.flights.length - 1 : 0;
@@ -95,7 +103,9 @@ export const FlightResultCard: React.FC<Props> = ({
     airlineCol: { flex: 1 },
     airline: { color: colors.text, fontWeight: "600", fontSize: 14 },
     flightNo: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
-    price: { color: colors.text, fontWeight: "700", fontSize: 18 },
+    price: { color: colors.text, fontWeight: "700", fontSize: 18, textAlign: "right" },
+    priceCaption: { color: colors.textMuted, fontSize: 10, marginTop: 2, textAlign: "right" },
+    priceCol: { alignItems: "flex-end", maxWidth: 120 },
     timesRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
     timeCol: { alignItems: "center", minWidth: 72 },
     time: { color: colors.text, fontWeight: "700", fontSize: 16 },
@@ -165,11 +175,21 @@ export const FlightResultCard: React.FC<Props> = ({
               .join(" • ") || ""}
           </Text>
         </View>
-        <Text style={styles.price}>
-          {option.price != null
-            ? `${currency} ${Math.round(option.price).toLocaleString()}`
-            : "—"}
-        </Text>
+        <View style={styles.priceCol}>
+          <Text style={styles.price}>
+            {option.price != null
+              ? `${currency} ${Math.round(option.price).toLocaleString()}`
+              : "—"}
+          </Text>
+          {showTotalCaption && option.price != null && (
+            <Text style={styles.priceCaption} numberOfLines={2}>
+              {t("flights.totalForTravelers", {
+                count: travelers,
+                defaultValue: `Total for ${travelers} travelers`,
+              })}
+            </Text>
+          )}
+        </View>
       </View>
 
       <View style={styles.timesRow}>

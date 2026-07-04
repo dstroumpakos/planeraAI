@@ -12,6 +12,7 @@ interface Props {
   onSelect: (option: NormalizedFlightOption) => void;
   onCreateTrip?: (option: NormalizedFlightOption) => void;
   ctaLabel?: string;
+  travelers?: number;
 }
 
 export const FlightResultsList: React.FC<Props> = ({
@@ -21,6 +22,7 @@ export const FlightResultsList: React.FC<Props> = ({
   onSelect,
   onCreateTrip,
   ctaLabel,
+  travelers,
 }) => {
   const { colors } = useTheme();
   const { t } = useTranslation();
@@ -85,6 +87,7 @@ export const FlightResultsList: React.FC<Props> = ({
             onPress={() => onSelect(item.option)}
             onCreateTrip={onCreateTrip ? () => onCreateTrip(item.option) : undefined}
             ctaLabel={ctaLabel}
+            travelers={travelers}
           />
         )
       }

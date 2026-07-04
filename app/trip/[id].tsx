@@ -34,6 +34,7 @@ import EditTimeModal from "@/components/EditTimeModal";
 import AddActivityModal, { ManualActivityInput } from "@/components/AddActivityModal";
 import MoveToDayModal from "@/components/MoveToDayModal";
 import ReorderDayModal from "@/components/ReorderDayModal";
+import { TripFlightProviders } from "@/components/flights/TripFlightProviders";
 import {
     buildFlightLink,
     buildHotelLink,
@@ -3548,6 +3549,17 @@ export default function TripDetails() {
                                     </View>
                                 );
                             })()}
+
+                            {/* Booking providers for flight-search trips —
+                                same provider list as the search booking sheet. */}
+                            {trip.tripType === 'deal' &&
+                                Array.isArray(trip.itinerary?.flights?.options) &&
+                                trip.itinerary.flights.options[0]?.bookingProviders?.length > 0 && (
+                                    <TripFlightProviders
+                                        providers={trip.itinerary.flights.options[0].bookingProviders}
+                                        travelers={trip.travelerCount ?? trip.travelers ?? 1}
+                                    />
+                                )}
 
                             {/* Trip.com Search Card */}
                             <TouchableOpacity

@@ -648,6 +648,14 @@ export const setFlightBookingData = internalMutation({
         outboundBookingRequest: v.optional(v.object({ url: v.string(), postData: v.string() })),
         returnBookingUrl: v.optional(v.string()),
         returnBookingRequest: v.optional(v.object({ url: v.string(), postData: v.string() })),
+        // Full provider list (mirrors the booking sheet) for the Flights tab.
+        bookingProviders: v.optional(v.array(v.object({
+            bookWith: v.union(v.string(), v.null()),
+            price: v.union(v.float64(), v.null()),
+            airlineLogos: v.array(v.string()),
+            extensions: v.array(v.string()),
+            bookingRequest: v.object({ url: v.string(), postData: v.string() }),
+        }))),
     },
     returns: v.null(),
     handler: async (ctx: any, args: any) => {
@@ -661,6 +669,9 @@ export const setFlightBookingData = internalMutation({
         if (args.outboundBookingRequest) bookingFields.outboundBookingRequest = args.outboundBookingRequest;
         if (args.returnBookingUrl) bookingFields.returnBookingUrl = args.returnBookingUrl;
         if (args.returnBookingRequest) bookingFields.returnBookingRequest = args.returnBookingRequest;
+        if (args.bookingProviders && args.bookingProviders.length > 0) {
+            bookingFields.bookingProviders = args.bookingProviders;
+        }
         if (Object.keys(bookingFields).length === 0) return null;
 
         const patch: Record<string, any> = {};

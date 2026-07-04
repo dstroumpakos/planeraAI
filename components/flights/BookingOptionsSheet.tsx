@@ -9,6 +9,8 @@ import {
   View,
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "@/lib/ThemeContext";
 import { useFlightBookingOptions } from "@/hooks/useFlightBookingOptions";
@@ -33,6 +35,12 @@ interface Props {
   /** Route + dates from the search — required by SerpApi's booking endpoint. */
   searchContext?: BookingSearchContext;
   currency?: string;
+  /**
+   * When provided (round-trip flow with both legs chosen), shows a primary
+   * "Create trip with these flights" CTA that builds an AI itinerary from the
+   * selected flights — same handoff as the results list.
+   */
+  onCreateTrip?: () => void;
 }
 
 export const BookingOptionsSheet: React.FC<Props> = ({
@@ -42,11 +50,14 @@ export const BookingOptionsSheet: React.FC<Props> = ({
   outboundOption,
   searchContext,
   currency = "EUR",
+  onCreateTrip,
 }) => {
   const { colors } = useTheme();
   const { t } = useTranslation();
   const { bookingOptions, loading, error, getBookingOptions, reset } =
     useFlightBookingOptions();
+  const travelers = searchContext?.adults ?? 1;
+  const multiTraveler = travelers > 1;
 
   useEffect(() => {
     if (visible && flightOption?.bookingToken) {
@@ -82,6 +93,41 @@ export const BookingOptionsSheet: React.FC<Props> = ({
       fontSize: 12,
       lineHeight: 16,
       marginBottom: 2,
+    },
+    travelerBanner: {
+      flexDirection: "row",
+      alignItems: "flex-start",
+      gap: 8,
+      padding: 12,
+      borderRadius: 12,
+      backgroundColor: "#FFF4E0",
+      borderWidth: 1,
+      borderColor: "#F0C674",
+      marginTop: 2,
+    },
+    travelerBannerText: { flex: 1, color: "#7A5200", fontSize: 12, lineHeight: 17 },
+    createTripWrap: { borderRadius: 14, overflow: "hidden", marginTop: 4 },
+    createTripBtn: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+      paddingVertical: 15,
+    },
+    createTripText: { color: "#1A1A1A", fontWeight: "800", fontSize: 15 },
+    createTripHint: {
+      color: colors.textMuted,
+      fontSize: 11,
+      lineHeight: 15,
+      textAlign: "center",
+      marginTop: 2,
+    },
+    orDivider: {
+      color: colors.textMuted,
+      fontSize: 12,
+      fontWeight: "600",
+      textAlign: "center",
+      marginTop: 6,
     },
     disclaimer: {
       color: colors.textSecondary,
@@ -123,7 +169,7 @@ export const BookingOptionsSheet: React.FC<Props> = ({
               <Text style={styles.section}>
                 {t("flights.outbound", { defaultValue: "Outbound" })}
               </Text>
-              <FlightResultCard option={outboundOption} currency={currency} hideCta />
+              <FlightResultCard option={outboundOption} currency={currency} hideCta travelers={searchContext?.adults} />
             </>
           )}
 
@@ -134,7 +180,41 @@ export const BookingOptionsSheet: React.FC<Props> = ({
                   ? t("flights.return", { defaultValue: "Return" })
                   : t("flights.selectedFlight", { defaultValue: "Selected flight" })}
               </Text>
-              <FlightResultCard option={flightOption} currency={currency} hideCta />
+              <FlightResultCard option={flightOption} currency={currency} hideCta travelers={searchContext?.adults} />
+            </>
+          )}
+
+          {/* Primary path: turn these flights into a full AI-planned trip. */}
+          {onCreateTrip && (
+            <>
+              <TouchableOpacity
+                style={styles.createTripWrap}
+                onPress={onCreateTrip}
+                activeOpacity={0.9}
+              >
+                <LinearGradient
+                  colors={[colors.primary, "#34C759"]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.createTripBtn}
+                >
+                  <Ionicons name="sparkles" size={18} color="#1A1A1A" />
+                  <Text style={styles.createTripText}>
+                    {t("flights.createTripWithFlights", {
+                      defaultValue: "Create trip with these flights",
+                    })}
+                  </Text>
+                </LinearGradient>
+              </TouchableOpacity>
+              <Text style={styles.createTripHint}>
+                {t("flights.createTripHint", {
+                  defaultValue:
+                    "We'll build your itinerary around these flights — book them below whenever you're ready.",
+                })}
+              </Text>
+              <Text style={styles.orDivider}>
+                {t("flights.orBookDirectly", { defaultValue: "or book directly" })}
+              </Text>
             </>
           )}
 
@@ -164,6 +244,17 @@ export const BookingOptionsSheet: React.FC<Props> = ({
                         "Live prices from each booking site — may differ from the headline fare and include different baggage.",
                     })}
                   </Text>
+                  {multiTraveler && (
+                    <View style={styles.travelerBanner}>
+                      <Ionicons name="people" size={16} color="#7A5200" />
+                      <Text style={styles.travelerBannerText}>
+                        {t("flights.multiTravelerBookingNote", {
+                          count: travelers,
+                          defaultValue: `Booking for ${travelers} travelers. Confirm the number of passengers on the provider's site before paying — some providers may require booking each traveler separately.`,
+                        })}
+                      </Text>
+                    </View>
+                  )}
                   {/* Sort cheapest-first; options without a price fall last. */}
                   {[...bookingOptions.bookingOptions]
                     .sort(
@@ -172,7 +263,7 @@ export const BookingOptionsSheet: React.FC<Props> = ({
                         (b.price ?? Number.POSITIVE_INFINITY)
                     )
                     .map((o) => (
-                      <BookingOptionCard key={o.id} option={o} />
+                      <BookingOptionCard key={o.id} option={o} travelers={searchContext?.adults} />
                     ))}
                 </>
               )}

@@ -175,8 +175,11 @@ export default function FlightsSearchScreen() {
     const originAirport = AIRPORTS.find((a) => a.code === lastInput.departureId);
     const destAirport = AIRPORTS.find((a) => a.code === lastInput.arrivalId);
     const adults = lastInput.adults || 1;
-    // In the return-leg step SerpApi prices are the full round-trip fare.
-    const price = returnOption.price ?? selectedOutbound.price;
+    // SerpApi's option price is the TOTAL round-trip fare for ALL searched
+    // travelers, so derive per-person from it — don't multiply again.
+    const totalFare = returnOption.price ?? selectedOutbound.price;
+    const perPersonFare =
+      totalFare != null && adults > 0 ? Math.round(totalFare / adults) : totalFare;
 
     router.push({
       pathname: "/deal-trip",
@@ -202,8 +205,8 @@ export default function FlightsSearchScreen() {
         returnDuration: ret.duration,
         returnStops: String(ret.stops),
         returnSegments: ret.segments ? JSON.stringify(ret.segments) : "",
-        price: price != null ? String(price) : "0",
-        totalPrice: price != null && adults > 1 ? String(price * adults) : "",
+        price: perPersonFare != null ? String(perPersonFare) : "0",
+        totalPrice: totalFare != null && adults > 1 ? String(Math.round(totalFare)) : "",
         currency: lastInput.currency || currentCurrency,
         travelers: String(adults),
         bookingToken: returnOption.bookingToken || "",
@@ -403,6 +406,7 @@ export default function FlightsSearchScreen() {
               currency={currentCurrency}
               onSelect={selectOutbound}
               ctaLabel={t("flights.selectFlight", { defaultValue: "Select this flight" })}
+              travelers={lastInput?.adults}
             />
           </>
         )}
@@ -427,6 +431,7 @@ export default function FlightsSearchScreen() {
               option={selectedOutbound}
               currency={currentCurrency}
               hideCta
+              travelers={lastInput?.adults}
             />
 
             <View style={styles.stepRow}>
@@ -459,6 +464,7 @@ export default function FlightsSearchScreen() {
                   setSheetOpen(true);
                 }}
                 onCreateTrip={onCreateTrip}
+                travelers={lastInput?.adults}
               />
             )}
           </>
@@ -478,6 +484,14 @@ export default function FlightsSearchScreen() {
                 outboundDate: lastInput.outboundDate,
                 returnDate: lastInput.returnDate,
                 adults: lastInput.adults,
+              }
+            : undefined
+        }
+        onCreateTrip={
+          selectedOutbound && selected
+            ? () => {
+                setSheetOpen(false);
+                onCreateTrip(selected);
               }
             : undefined
         }

@@ -414,7 +414,8 @@ export const enrichTripBooking = internalAction({
       p.append("booking_token", args.bookingToken);
       p.append("currency", (args.currency ?? "EUR").toUpperCase());
       p.append("hl", "en");
-      p.append("adults", String(args.adults && args.adults > 0 ? args.adults : 1));
+      // NOTE: no `adults` param — the booking_token already encodes the
+      // passenger count, and sending adults here triggers an HTTP 400.
 
       const raw = await callSerpApi(p);
       const opts: any[] = Array.isArray(raw?.booking_options) ? raw.booking_options : [];
@@ -422,7 +423,26 @@ export const enrichTripBooking = internalAction({
       const toRequest = (br: any) =>
         br?.url && br?.post_data ? { url: String(br.url), postData: String(br.post_data) } : undefined;
 
-      // Rule 1 — prefer a provider that books both legs with one link.
+      // Full provider list (mirrors the in-app booking sheet) so the trip's
+      // Flights tab can offer the same choice of booking sites. Each entry
+      // keeps the POST-based booking_request, resolved at tap-time.
+      const bookingProviders = opts
+        .map((o) => {
+          const leg = o?.together ?? o?.departing ?? o?.returning ?? o;
+          return {
+            bookWith: leg?.book_with ?? null,
+            price: Number(leg?.price) || null,
+            airlineLogos: Array.isArray(leg?.airline_logos) ? leg.airline_logos : [],
+            extensions: Array.isArray(leg?.extensions) ? leg.extensions.slice(0, 3) : [],
+            bookingRequest: toRequest(leg?.booking_request) ?? null,
+          };
+        })
+        .filter((p) => p.bookingRequest)
+        .sort((a, b) => (a.price ?? Infinity) - (b.price ?? Infinity));
+
+      // Primary booking link for the prominent button:
+      //   Rule 1 — one provider books both legs with a single link.
+      //   Rule 2 — separate tickets: one link per leg.
       const together = opts
         .map((o) => ({
           price: Number(o?.together?.price) || Infinity,
@@ -431,16 +451,6 @@ export const enrichTripBooking = internalAction({
         .filter((c) => c.request)
         .sort((a, b) => a.price - b.price);
 
-      if (together.length > 0) {
-        await ctx.runMutation(internal.trips.setFlightBookingData, {
-          tripId: args.tripId,
-          bookingRequest: together[0].request,
-        });
-        console.log("[SerpApi] trip booking enriched (together)");
-        return null;
-      }
-
-      // Rule 2 — separate tickets: one link per leg.
       const separate = opts
         .map((o) => ({
           price:
@@ -451,13 +461,20 @@ export const enrichTripBooking = internalAction({
         .filter((c) => c.outbound && c.ret)
         .sort((a, b) => a.price - b.price);
 
-      if (separate.length > 0) {
-        await ctx.runMutation(internal.trips.setFlightBookingData, {
-          tripId: args.tripId,
-          outboundBookingRequest: separate[0].outbound,
-          returnBookingRequest: separate[0].ret,
-        });
-        console.log("[SerpApi] trip booking enriched (separate tickets)");
+      const patch: any = { tripId: args.tripId };
+      if (bookingProviders.length > 0) patch.bookingProviders = bookingProviders;
+      if (together.length > 0) {
+        patch.bookingRequest = together[0].request;
+      } else if (separate.length > 0) {
+        patch.outboundBookingRequest = separate[0].outbound;
+        patch.returnBookingRequest = separate[0].ret;
+      }
+
+      if (patch.bookingProviders || patch.bookingRequest || patch.outboundBookingRequest) {
+        await ctx.runMutation(internal.trips.setFlightBookingData, patch);
+        console.log(
+          `[SerpApi] trip booking enriched (providers=${bookingProviders.length}, together=${together.length}, separate=${separate.length})`
+        );
       }
       return null;
     } catch (err) {

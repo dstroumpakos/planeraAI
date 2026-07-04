@@ -8,9 +8,15 @@ import type { NormalizedBookingOption } from "@/types/flights";
 
 interface Props {
   option: NormalizedBookingOption;
+  /**
+   * Travelers from the search. Provider prices are PER PERSON, while the
+   * flight card shows the TOTAL — so when > 1 we label per-person and also
+   * show the ×N total so the two are directly comparable.
+   */
+  travelers?: number;
 }
 
-export const BookingOptionCard: React.FC<Props> = ({ option }) => {
+export const BookingOptionCard: React.FC<Props> = ({ option, travelers }) => {
   const { colors } = useTheme();
   const { t } = useTranslation();
   const resolveBookingUrl = useAction(api.flightsResolve.resolveBookingUrl);
@@ -29,7 +35,9 @@ export const BookingOptionCard: React.FC<Props> = ({ option }) => {
     logoRow: { flexDirection: "row", gap: 4 },
     logo: { width: 28, height: 28, borderRadius: 6, backgroundColor: colors.lightGray },
     provider: { color: colors.text, fontWeight: "700", fontSize: 14, flex: 1 },
+    priceCol: { alignItems: "flex-end" },
     price: { color: colors.text, fontWeight: "700", fontSize: 16 },
+    priceCaption: { color: colors.textMuted, fontSize: 10, marginTop: 1, textAlign: "right" },
     title: { color: colors.textSecondary, fontSize: 12 },
     extension: { color: colors.textMuted, fontSize: 11 },
     button: {
@@ -79,6 +87,7 @@ export const BookingOptionCard: React.FC<Props> = ({ option }) => {
   };
 
   const localEur = option.localPrices?.find((p) => p.currency === "EUR");
+  const multiTraveler = Boolean(travelers && travelers > 1);
 
   return (
     <View style={styles.card}>
@@ -92,9 +101,22 @@ export const BookingOptionCard: React.FC<Props> = ({ option }) => {
         <Text style={styles.provider} numberOfLines={1}>
           {option.bookWith ?? t("flights.provider", { defaultValue: "Provider" })}
         </Text>
-        <Text style={styles.price}>
-          {option.price != null ? `€ ${Math.round(option.price).toLocaleString()}` : "—"}
-        </Text>
+        <View style={styles.priceCol}>
+          <Text style={styles.price}>
+            {option.price != null ? `€ ${Math.round(option.price).toLocaleString()}` : "—"}
+          </Text>
+          {multiTraveler && option.price != null && (
+            <Text style={styles.priceCaption} numberOfLines={2}>
+              {t("flights.perPersonAndTotal", {
+                total: `€ ${Math.round(option.price * (travelers as number)).toLocaleString()}`,
+                count: travelers,
+                defaultValue: `per person · € ${Math.round(
+                  option.price * (travelers as number)
+                ).toLocaleString()} for ${travelers}`,
+              })}
+            </Text>
+          )}
+        </View>
       </View>
 
       {option.optionTitle && <Text style={styles.title}>{option.optionTitle}</Text>}
