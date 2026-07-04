@@ -37,7 +37,7 @@ export function ImageWithAttribution({
     if (!photographerUrl) return;
     try {
       await Linking.openURL(photographerUrl);
-      if (onDownload && downloadLocation) {
+      if (onDownload) {
         onDownload();
       }
     } catch (error) {

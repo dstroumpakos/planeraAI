@@ -192,8 +192,8 @@ export default function MyFlightsScreen() {
     );
   }
 
-  const upcomingBookings = bookings?.filter((b) => b.isUpcoming) || [];
-  const pastBookings = bookings?.filter((b) => b.isPast) || [];
+  const upcomingBookings = bookings?.filter((b: any) => b.isUpcoming) || [];
+  const pastBookings = bookings?.filter((b: any) => b.isPast) || [];
   const displayedBookings = activeTab === "upcoming" ? upcomingBookings : pastBookings;
 
   const renderFlightSegment = (

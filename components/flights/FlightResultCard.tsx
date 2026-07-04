@@ -1,5 +1,7 @@
 import React from "react";
 import { Image, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { useTranslation } from "react-i18next";
 import { useTheme } from "@/lib/ThemeContext";
 import type { NormalizedFlightOption } from "@/types/flights";
 
@@ -7,6 +9,8 @@ interface Props {
   option: NormalizedFlightOption;
   currency?: string;
   onPress?: () => void;
+  /** When set, shows a secondary "Create trip with this flight" button. */
+  onCreateTrip?: () => void;
 }
 
 function formatDuration(mins?: number | null): string {
@@ -55,8 +59,10 @@ export const FlightResultCard: React.FC<Props> = ({
   option,
   currency = "EUR",
   onPress,
+  onCreateTrip,
 }) => {
   const { colors } = useTheme();
+  const { t } = useTranslation();
   const first = option.flights[0];
   const last = option.flights[option.flights.length - 1] ?? first;
   const stops = option.flights.length > 0 ? option.flights.length - 1 : 0;
@@ -94,6 +100,21 @@ export const FlightResultCard: React.FC<Props> = ({
     },
     buttonText: {
       color: hasBookingToken ? "#1A1A1A" : colors.textMuted,
+      fontWeight: "700",
+      fontSize: 14,
+    },
+    createTripButton: {
+      flexDirection: "row",
+      justifyContent: "center",
+      alignItems: "center",
+      gap: 6,
+      borderRadius: 12,
+      paddingVertical: 12,
+      borderWidth: 1.5,
+      borderColor: colors.primary,
+    },
+    createTripText: {
+      color: colors.text,
       fontWeight: "700",
       fontSize: 14,
     },
@@ -187,6 +208,21 @@ export const FlightResultCard: React.FC<Props> = ({
           {hasBookingToken ? "View booking options" : "Check availability unavailable"}
         </Text>
       </TouchableOpacity>
+
+      {onCreateTrip && (
+        <TouchableOpacity
+          style={styles.createTripButton}
+          onPress={onCreateTrip}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="sparkles" size={16} color={colors.primary} />
+          <Text style={styles.createTripText}>
+            {t("flights.createTripWithFlight", {
+              defaultValue: "Create trip with this flight",
+            })}
+          </Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 };

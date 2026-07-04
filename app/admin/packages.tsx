@@ -152,7 +152,7 @@ export default function AdminPackagesScreen() {
                     visible={!!partnerModal}
                     initial={partnerModal}
                     onClose={() => setPartnerModal(null)}
-                    onSave={async (data) => {
+                    onSave={async (data: any) => {
                         if (!token) return;
                         try {
                             if (data._id) {
@@ -172,7 +172,7 @@ export default function AdminPackagesScreen() {
                     visible={!!packageModal}
                     initial={packageModal}
                     onClose={() => setPackageModal(null)}
-                    onSave={async (data) => {
+                    onSave={async (data: any) => {
                         if (!token) return;
                         try {
                             if (data._id) {
@@ -185,7 +185,7 @@ export default function AdminPackagesScreen() {
                             Alert.alert("Error", e?.message || "Failed to save package");
                         }
                     }}
-                    onDelete={async (id) => {
+                    onDelete={async (id: any) => {
                         if (!token) return;
                         Alert.alert("Delete package?", "It will be deactivated (soft-delete).", [
                             { text: "Cancel", style: "cancel" },

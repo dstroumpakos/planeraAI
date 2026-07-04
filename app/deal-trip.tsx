@@ -48,8 +48,9 @@ export default function DealTripScreen() {
   const { token } = useToken();
   const { t, i18n } = useTranslation();
 
-  // Parse deal data from params
-  const dealId = params.dealId as string;
+  // Parse deal data from params. dealId is absent when the flight comes from
+  // the flight search screen instead of a Low Fare Radar deal.
+  const dealId = (params.dealId as string) || undefined;
   const origin = params.origin as string;
   const originCity = params.originCity as string;
   const destination = params.destination as string;
@@ -69,9 +70,12 @@ export default function DealTripScreen() {
   const returnStops = parseInt(params.returnStops as string) || 0;
   const outboundSegments = params.outboundSegments ? JSON.parse(params.outboundSegments as string) : null;
   const returnSegments = params.returnSegments ? JSON.parse(params.returnSegments as string) : null;
+  const flightNumber = (params.flightNumber as string) || undefined;
+  const outboundDuration = (params.outboundDuration as string) || undefined;
+  const prefilledTravelers = Math.min(12, Math.max(1, parseInt(params.travelers as string) || 1));
 
   const [budgetTotal, setBudgetTotal] = useState("");
-  const [travelerCount, setTravelerCount] = useState(1);
+  const [travelerCount, setTravelerCount] = useState(prefilledTravelers);
   const [interests, setInterests] = useState<string[]>([]);
   const [localExperiences, setLocalExperiences] = useState<string[]>([]);
   const [skipHotel, setSkipHotel] = useState(false);
@@ -81,6 +85,7 @@ export default function DealTripScreen() {
   const userSettings = useQuery(api.users.getSettings as any, { token: token || "skip" });
   const userPlan = useQuery(api.users.getPlan as any, { token: token || "skip" });
   const createFromDeal = useAuthenticatedMutation(api.trips.createFromDeal as any);
+  const createFromFlight = useAuthenticatedMutation(api.trips.createFromFlight as any);
   const updateAiConsent = useMutation(api.users.updateAiConsent as any);
   const markGuideSeen = useMutation(api.users.markFirstTripGuideSeen as any);
 
@@ -168,20 +173,48 @@ export default function DealTripScreen() {
       const destinationCityFromAirports = AIRPORTS.find(a => a.code === destination)?.city;
       const originCityFromAirports = AIRPORTS.find(a => a.code === origin)?.city;
 
-      const tripId = await createFromDeal({
-        dealId: dealId as Id<"lowFareRadar">,
-        budgetTotal: Number(budgetTotal),
-        travelerCount,
-        interests,
-        localExperiences,
-        skipHotel,
-        language: i18n.language || "en",
-        destinationCountry,
-        originCountry,
-        destinationCityFallback: destinationCityFromAirports,
-        originCityFallback: originCityFromAirports,
-        platform: Platform.OS,
-      });
+      const tripId = dealId
+        ? await createFromDeal({
+            dealId: dealId as Id<"lowFareRadar">,
+            budgetTotal: Number(budgetTotal),
+            travelerCount,
+            interests,
+            localExperiences,
+            skipHotel,
+            language: i18n.language || "en",
+            destinationCountry,
+            originCountry,
+            destinationCityFallback: destinationCityFromAirports,
+            originCityFallback: originCityFromAirports,
+            platform: Platform.OS,
+          })
+        : await createFromFlight({
+            origin,
+            destination,
+            originCity: originCity || originCityFromAirports,
+            destinationCity: destinationCity || destinationCityFromAirports,
+            originCountry,
+            destinationCountry,
+            airline,
+            flightNumber,
+            outboundDate,
+            outboundDeparture: outboundDeparture || undefined,
+            outboundArrival: outboundArrival || undefined,
+            outboundDuration,
+            outboundStops,
+            outboundSegments: outboundSegments || undefined,
+            returnDate: returnDate || undefined,
+            pricePerPerson: Number(price) || 0,
+            totalPrice: totalPrice ? Number(totalPrice) : undefined,
+            currency,
+            budgetTotal: Number(budgetTotal),
+            travelerCount,
+            interests,
+            localExperiences,
+            skipHotel,
+            language: i18n.language || "en",
+            platform: Platform.OS,
+          });
 
       // Mark first-trip guide as seen so it never shows again
       if (token) {
@@ -267,9 +300,11 @@ export default function DealTripScreen() {
               end={{ x: 1, y: 0 }}
               style={styles.dealBadge}
             >
-              <Ionicons name="pulse" size={12} color="#000" />
+              <Ionicons name={dealId ? "pulse" : "search"} size={12} color="#000" />
               <Text style={styles.dealBadgeText}>
-                {t("dealTrip.fromRadar", { defaultValue: "Low Fare Radar" })}
+                {dealId
+                  ? t("dealTrip.fromRadar", { defaultValue: "Low Fare Radar" })
+                  : t("dealTrip.fromFlightSearch", { defaultValue: "Flight Search" })}
               </Text>
             </LinearGradient>
             <View style={styles.lockedPill}>
@@ -398,6 +433,21 @@ export default function DealTripScreen() {
                   </View>
                 )}
               </ScrollView>
+            </>
+          ) : returnDate ? (
+            <>
+              <View style={[styles.flightDivider, { borderColor: colors.border }]} />
+              <Text style={[styles.flightLabel, { color: colors.primary }]}>
+                {t("dealTrip.return", { defaultValue: "Return" })}
+              </Text>
+              <View style={styles.flightDetails}>
+                <View style={[styles.flightDetailItem, { backgroundColor: colors.background }]}>
+                  <Ionicons name="calendar-outline" size={13} color={colors.textMuted} />
+                  <Text style={[styles.flightDetailText, { color: colors.text }]} numberOfLines={1}>
+                    {formatDate(returnDate)}
+                  </Text>
+                </View>
+              </View>
             </>
           ) : null}
 

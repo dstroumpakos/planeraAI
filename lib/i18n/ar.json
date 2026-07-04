@@ -191,6 +191,7 @@
     "multiCityRoute": "مسار متعدد المدن",
     "comingSoon": "قريباً",
     "surpriseMe": "فاجئني!",
+    "flightSearch": "البحث عن رحلات",
     "trendingNow": "الرائج الآن",
     "myTrips": "رحلاتي",
     "popularDestination": "وجهة شائعة",
@@ -218,6 +219,7 @@
   "dealTrip": {
     "title": "خطط لرحلتك",
     "fromRadar": "رادار الأسعار المنخفضة",
+    "fromFlightSearch": "البحث عن رحلات",
     "days": "أيام",
     "generate": "إنشاء خطة الرحلة",
     "selectInterests": "يرجى اختيار اهتمام واحد على الأقل",
@@ -468,6 +470,7 @@
     "maxWatchedReached": "تم الوصول إلى الحد الأقصى 20 وجهة متابَعة"
   },
   "flights": {
+    "createTripWithFlight": "إنشاء رحلة بهذه الرحلة الجوية",
     "noOwnAirport": "{{city}} ليس لديها مطار خاص بها. عرض الرحلات إلى {{nearestCity}} ({{iata}}).",
     "noOwnAirportWithDistance": "{{city}} ليس لديها مطار خاص بها. عرض الرحلات إلى {{nearestCity}} ({{iata}})، على بُعد ~{{distance}} كم.",
     "bookFlight": "حجز رحلة طيران",
@@ -923,7 +926,7 @@
     "dailyCost": "المصاريف اليومية",
     "experiencesCost": "التجارب",
     "baggageCost": "الأمتعة",
-    "perPerson": "لكل شخص",
+    "perPerson": "/شخص",
     "perDay": "لكل يوم",
     "perPersonPerDay": "لكل شخص/يوم",
     "budgetVsTarget": "ميزانيتك",
@@ -961,7 +964,6 @@
     "aiGeneratingSightsDesc": "الذكاء الاصطناعي يبحث عن أفضل المعالم في {{destination}}. قد يستغرق هذا لحظة.",
     "accommodations": "أماكن الإقامة",
     "gettingAround": "التنقل",
-    "bookNow": "احجز الآن",
     "openInGoogleMaps": "فتح في خرائط Google",
     "travelerInsights": "تجارب المسافرين",
     "verified": "موثق",
@@ -1009,7 +1011,6 @@
     "flightsFrom": "رحلات من",
     "optionsAvailable": "خيارات",
     "swipeToCompare": "اسحب للمقارنة",
-    "cheapest": "الأرخص",
     "fastest": "الأسرع",
     "from": "من",
     "directFlight": "مباشر",
@@ -1068,7 +1069,6 @@
     "guestCount_plural": "{{count}} ضيوف",
     "nightCount": "{{count}} ليلة",
     "nightCount_plural": "{{count}} ليالٍ",
-    "from": "من",
     "to": "إلى",
     "accommodationComingSoon": "حجز الفنادق وأماكن الإقامة سيتوفر قريباً. نحن نعمل بجد لنقدم لك أفضل الخيارات!",
     "gettingAroundDest": "التنقل في {{destination}}",
@@ -1089,7 +1089,6 @@
     "budgetEur": "الميزانية (€)",
     "localExperiencesOptional": "تجارب محلية (اختياري)",
     "exploreDest": "استكشف {{destination}}",
-    "perPerson": "/شخص",
     "calendarStartDate": "تاريخ البداية",
     "calendarEndDate": "تاريخ النهاية",
     "arrivalTime": "وقت الوصول",
@@ -1653,5 +1652,10 @@
     "includesActivities": "الأنشطة",
     "includesInsurance": "التأمين",
     "includesGuide": "مرشد"
+  },
+  "offline": {
+    "showingSaved": "غير متصل — عرض الرحلات المحفوظة",
+    "tripBanner": "غير متصل — رحلة محفوظة",
+    "tripUnavailable": "هذه الرحلة غير متاحة دون اتصال بعد. افتحها مرة واحدة أثناء الاتصال لحفظها."
   }
 }

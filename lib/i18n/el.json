@@ -191,6 +191,7 @@
     "multiCityRoute": "Δρομολόγιο Πολλαπλών Πόλεων",
     "comingSoon": "Σύντομα",
     "surpriseMe": "Εκπλήξτε Με!",
+    "flightSearch": "Αναζήτηση Πτήσεων",
     "trendingNow": "Δημοφιλή Τώρα",
     "myTrips": "Τα Ταξίδια μου",
     "popularDestination": "Δημοφιλής Προορισμός",
@@ -218,6 +219,7 @@
   "dealTrip": {
     "title": "Σχεδιάστε το Ταξίδι σας",
     "fromRadar": "Ραντάρ Χαμηλών Ναύλων",
+    "fromFlightSearch": "Αναζήτηση Πτήσεων",
     "days": "ημέρες",
     "generate": "Δημιουργία Προγράμματος",
     "selectInterests": "Παρακαλώ επιλέξτε τουλάχιστον ένα ενδιαφέρον",
@@ -468,6 +470,7 @@
     "maxWatchedReached": "Μέγιστο 20 προορισμοί παρακολούθησης"
   },
   "flights": {
+    "createTripWithFlight": "Δημιουργία ταξιδιού με αυτή την πτήση",
     "noOwnAirport": "Το {{city}} δεν έχει δικό του αεροδρόμιο. Εμφάνιση πτήσεων προς {{nearestCity}} ({{iata}}).",
     "noOwnAirportWithDistance": "Το {{city}} δεν έχει δικό του αεροδρόμιο. Εμφάνιση πτήσεων προς {{nearestCity}} ({{iata}}), ~{{distance}} χλμ μακριά.",
     "bookFlight": "Κράτηση Πτήσης",
@@ -901,7 +904,7 @@
     "gygReserveSpot": "Κλείστε τη θέση σας",
     "gygTrust": "Δωρεάν ακύρωση · Με την υποστήριξη της GetYourGuide",
     "priceFrom": "από",
-    "bookNow": "Κράτηση Τώρα",
+    "bookNow": "Κρατήστε Τώρα",
     "flightDetailsUnavailable": "Μη διαθέσιμες λεπτομέρειες πτήσης",
     "checkFlightAvailability": "Ελέγξτε Διαθεσιμότητα Πτήσεων",
     "aiGenerated": "Δημιουργημένο από AI",
@@ -923,7 +926,7 @@
     "dailyCost": "Καθημερινά έξοδα",
     "experiencesCost": "Εμπειρίες",
     "baggageCost": "Αποσκευές",
-    "perPerson": "Ανά άτομο",
+    "perPerson": "/άτομο",
     "perDay": "Ανά ημέρα",
     "perPersonPerDay": "Ανά άτομο/ημέρα",
     "budgetVsTarget": "Ο προϋπολογισμός σας",
@@ -932,7 +935,7 @@
     "ofBudget": "{{used}} από {{total}}",
     "selectFlight": "Επιλέξτε πτήση",
     "selectStay": "Επιλέξτε διαμονή",
-    "cheapest": "Φθηνότερο",
+    "cheapest": "Φθηνότερη",
     "flightOption": "Επιλογή πτήσης {{number}}",
     "bagIncluded": "Αποσκευή περιλαμβάνεται",
     "bagExtra": "Αποσκευή επιπλέον",
@@ -961,7 +964,6 @@
     "aiGeneratingSightsDesc": "Η AI μας βρίσκει τα καλύτερα αξιοθέατα στο {{destination}}. Μπορεί να πάρει λίγο χρόνο.",
     "accommodations": "Καταλύματα",
     "gettingAround": "Μετακινήσεις",
-    "bookNow": "Κρατήστε Τώρα",
     "openInGoogleMaps": "Άνοιγμα στο Google Maps",
     "travelerInsights": "Πληροφορίες Ταξιδιωτών",
     "verified": "Επαληθευμένο",
@@ -1009,9 +1011,8 @@
     "flightsFrom": "Πτήσεις από",
     "optionsAvailable": "επιλογές",
     "swipeToCompare": "Σύρετε για σύγκριση",
-    "cheapest": "Φθηνότερη",
     "fastest": "Ταχύτερη",
-    "from": "από",
+    "from": "Από",
     "directFlight": "Απευθείας",
     "stops": "{{count}} στάση",
     "aiGeneratedFlightData": "Δεδομένα Πτήσης από AI",
@@ -1068,7 +1069,6 @@
     "guestCount_plural": "{{count}} επισκέπτες",
     "nightCount": "{{count}} βράδυ",
     "nightCount_plural": "{{count}} βράδια",
-    "from": "Από",
     "to": "Προς",
     "accommodationComingSoon": "Η κράτηση ξενοδοχείων και καταλυμάτων θα είναι σύντομα διαθέσιμη. Εργαζόμαστε σκληρά για να σας φέρουμε τις καλύτερες επιλογές!",
     "gettingAroundDest": "Μετακινήσεις στο {{destination}}",
@@ -1089,7 +1089,6 @@
     "budgetEur": "Προϋπολογισμός (€)",
     "localExperiencesOptional": "Τοπικές Εμπειρίες (Προαιρετικό)",
     "exploreDest": "Εξερευνήστε {{destination}}",
-    "perPerson": "/άτομο",
     "calendarStartDate": "Ημερομηνία Έναρξης",
     "calendarEndDate": "Ημερομηνία Λήξης",
     "arrivalTime": "Ώρα Άφιξης",
@@ -1653,5 +1652,10 @@
     "includesActivities": "Δραστηριότητες",
     "includesInsurance": "Ασφάλεια",
     "includesGuide": "Ξεναγός"
+  },
+  "offline": {
+    "showingSaved": "Εκτός σύνδεσης — εμφανίζονται αποθηκευμένα ταξίδια",
+    "tripBanner": "Εκτός σύνδεσης — αποθηκευμένο ταξίδι",
+    "tripUnavailable": "Αυτό το ταξίδι δεν είναι ακόμη διαθέσιμο εκτός σύνδεσης. Άνοιξέ το μία φορά με σύνδεση για να αποθηκευτεί."
   }
 }

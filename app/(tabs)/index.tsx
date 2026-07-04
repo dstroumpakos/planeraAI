@@ -404,6 +404,31 @@ export default function HomeScreen() {
 
           <TouchableOpacity
             style={styles.storyButton}
+            onPress={() => router.push("/flights/search" as any)}
+            activeOpacity={0.8}
+          >
+            <LinearGradient
+              colors={["#FEDA77", "#F58529", "#DD2A7B", "#8134AF", "#515BD4"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.storyRing}
+            >
+              <View style={[styles.storyAvatar, { backgroundColor: "#1E7BD4" }]}>
+                <Ionicons name="airplane-outline" size={26} color="#FFFFFF" />
+              </View>
+            </LinearGradient>
+            <Text
+              style={[styles.storyLabel, { color: colors.text }]}
+              numberOfLines={3}
+              adjustsFontSizeToFit
+              minimumFontScale={0.85}
+            >
+              {t("home.flightSearch", { defaultValue: "Flight Search" })}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.storyButton}
             onPress={() => router.push("/worldprint" as any)}
             activeOpacity={0.8}
           >

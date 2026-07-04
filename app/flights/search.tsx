@@ -14,6 +14,7 @@ import { useTranslation } from "react-i18next";
 import { useTheme } from "@/lib/ThemeContext";
 import { useFlightSearch } from "@/hooks/useFlightSearch";
 import { resolveAirport } from "@/lib/destinationAirports";
+import { AIRPORTS } from "@/lib/airports";
 import { FlightSearchForm } from "@/components/flights/FlightSearchForm";
 import { AirportsSummaryCard } from "@/components/flights/AirportsSummaryCard";
 import { PriceInsightsCard } from "@/components/flights/PriceInsightsCard";
@@ -68,14 +69,72 @@ export default function FlightsSearchScreen() {
   const [currentCurrency, setCurrentCurrency] = useState(
     initial.currency ?? "EUR"
   );
+  // Last submitted search input — needed to prefill the trip-creation flow
+  // (dates, route, traveler count) when the user picks a flight.
+  const [lastInput, setLastInput] = useState<FlightSearchInput | null>(null);
 
   const onSubmit = async (input: FlightSearchInput) => {
     setCurrentCurrency(input.currency ?? "EUR");
+    setLastInput(input);
     try {
       await searchFlights(input);
     } catch {
       // error is surfaced via `error` state
     }
+  };
+
+  // Navigate to the deal-trip screen (flight-search mode) with the selected
+  // flight locked in and dates/destination/travelers prefilled.
+  const onCreateTrip = (option: NormalizedFlightOption) => {
+    if (!lastInput) return;
+    const segments = option.flights;
+    const first = segments[0];
+    const lastSeg = segments[segments.length - 1] ?? first;
+    const stops = Math.max(0, segments.length - 1);
+    const timeOf = (iso?: string | null) => iso?.split(" ")[1] ?? "";
+    const minsToLabel = (mins?: number | null) =>
+      mins != null ? `${Math.floor(mins / 60)}h ${mins % 60}m` : "";
+
+    const originAirport = AIRPORTS.find((a) => a.code === lastInput.departureId);
+    const destAirport = AIRPORTS.find((a) => a.code === lastInput.arrivalId);
+
+    const mappedSegments =
+      stops > 0
+        ? segments.map((s) => ({
+            airline: s.airline ?? "",
+            flightNumber: s.flightNumber ?? undefined,
+            departureAirport: s.departureAirport.id ?? "",
+            departureTime: timeOf(s.departureAirport.time),
+            arrivalAirport: s.arrivalAirport.id ?? "",
+            arrivalTime: timeOf(s.arrivalAirport.time),
+            duration: minsToLabel(s.durationMinutes),
+          }))
+        : null;
+
+    const adults = lastInput.adults || 1;
+    router.push({
+      pathname: "/deal-trip",
+      params: {
+        origin: lastInput.departureId,
+        originCity: originAirport?.city || first?.departureAirport.name || lastInput.departureId,
+        destination: lastInput.arrivalId,
+        destinationCity:
+          params.arrivalCityName || destAirport?.city || lastSeg?.arrivalAirport.name || lastInput.arrivalId,
+        airline: first?.airline ?? "",
+        flightNumber: segments.map((s) => s.flightNumber).filter(Boolean).join(" • "),
+        outboundDate: lastInput.outboundDate,
+        outboundDeparture: timeOf(first?.departureAirport.time),
+        outboundArrival: timeOf(lastSeg?.arrivalAirport.time),
+        outboundDuration: minsToLabel(option.totalDurationMinutes),
+        outboundStops: String(stops),
+        outboundSegments: mappedSegments ? JSON.stringify(mappedSegments) : "",
+        returnDate: lastInput.returnDate || "",
+        price: option.price != null ? String(option.price) : "0",
+        totalPrice: option.price != null && adults > 1 ? String(option.price * adults) : "",
+        currency: lastInput.currency || currentCurrency,
+        travelers: String(adults),
+      },
+    } as any);
   };
 
   const styles = StyleSheet.create({
@@ -171,6 +230,7 @@ export default function FlightsSearchScreen() {
                 setSelected(o);
                 setSheetOpen(true);
               }}
+              onCreateTrip={onCreateTrip}
             />
           </>
         )}

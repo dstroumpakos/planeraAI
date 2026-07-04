@@ -1,4 +1,5 @@
-import { useMutation, useQuery, useAction, FunctionReference } from "convex/react";
+import { useMutation, useQuery, useAction } from "convex/react";
+import type { FunctionReference } from "convex/server";
 import { authClient } from "./auth-client.native";
 import { useCallback, useEffect, useState } from "react";
 

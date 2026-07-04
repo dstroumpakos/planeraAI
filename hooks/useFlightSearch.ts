@@ -24,7 +24,7 @@ export function useFlightSearch() {
       setLoading(true);
       setError(null);
       try {
-        const result = await search({ input });
+        const result = (await search({ input })) as NormalizedFlightSearchResponse;
         setData(result);
         return result;
       } catch (err: any) {

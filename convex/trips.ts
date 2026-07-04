@@ -388,6 +388,203 @@ export const createFromDeal = authMutation({
     },
 });
 
+// Create a trip from a flight selected in the SerpApi flight search screen.
+// Same flow as createFromDeal, but the flight data comes straight from the
+// client (normalized SerpApi option) instead of a stored lowFareRadar deal.
+export const createFromFlight = authMutation({
+    args: {
+        token: v.string(),
+        // Route (IATA codes + resolved city/country names from the client)
+        origin: v.string(),
+        destination: v.string(),
+        originCity: v.optional(v.string()),
+        destinationCity: v.optional(v.string()),
+        originCountry: v.optional(v.string()),
+        destinationCountry: v.optional(v.string()),
+        // Outbound flight details
+        airline: v.string(),
+        flightNumber: v.optional(v.string()),
+        outboundDate: v.string(),               // "2026-06-10"
+        outboundDeparture: v.optional(v.string()), // "08:00"
+        outboundArrival: v.optional(v.string()),   // "10:30"
+        outboundDuration: v.optional(v.string()),
+        outboundStops: v.optional(v.float64()),
+        outboundSegments: v.optional(v.array(v.object({
+            airline: v.string(),
+            flightNumber: v.optional(v.string()),
+            departureAirport: v.string(),
+            departureTime: v.string(),
+            arrivalAirport: v.string(),
+            arrivalTime: v.string(),
+            duration: v.optional(v.string()),
+        }))),
+        // Return leg: SerpApi round-trip results only carry the outbound leg
+        // details up front, so we only get the date here.
+        returnDate: v.optional(v.string()),
+        // Pricing
+        pricePerPerson: v.float64(),
+        totalPrice: v.optional(v.float64()),
+        currency: v.string(),
+        // Trip preferences filled in by the user
+        budgetTotal: v.float64(),
+        travelerCount: v.float64(),
+        interests: v.array(v.string()),
+        localExperiences: v.optional(v.array(v.string())),
+        skipHotel: v.optional(v.boolean()),
+        language: v.optional(v.string()),
+        platform: v.optional(v.string()),
+    },
+    returns: v.id("trips"),
+    handler: async (ctx: any, args: any) => {
+        // Validate
+        if (args.travelerCount < 1 || args.travelerCount > 12) {
+            throw new Error("Traveler count must be between 1 and 12");
+        }
+        if (args.budgetTotal <= 0) {
+            throw new Error("Budget must be greater than 0");
+        }
+
+        const perPersonBudget = Math.round(args.budgetTotal / args.travelerCount);
+
+        const startDate = new Date(args.outboundDate).getTime();
+        if (isNaN(startDate)) throw new Error("Invalid outbound date");
+        const endDate = args.returnDate
+            ? new Date(args.returnDate).getTime()
+            : startDate + 3 * 24 * 60 * 60 * 1000; // Default 3 days for one-way
+
+        // Check credits (same logic as create)
+        const userPlan = await ctx.db
+            .query("userPlans")
+            .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))
+            .unique();
+
+        const subscriptionStatus = isSubscriptionActiveWithGrace(
+            userPlan?.plan,
+            userPlan?.subscriptionExpiresAt,
+        );
+        const isSubActive = subscriptionStatus.active;
+        const tripCredits = userPlan?.tripCredits ?? 0;
+        const tripsGenerated = userPlan?.tripsGenerated ?? 0;
+        const hasFreeTrial = tripsGenerated < 1;
+
+        if (!isSubActive && tripCredits <= 0 && !hasFreeTrial) {
+            throw new Error("No trip credits available. Please purchase a trip pack or subscribe to Premium.");
+        }
+
+        // Deduct credit
+        if (userPlan) {
+            if (isSubActive) {
+                await ctx.db.patch(userPlan._id, { tripsGenerated: tripsGenerated + 1 });
+            } else if (tripCredits > 0) {
+                await ctx.db.patch(userPlan._id, { tripCredits: tripCredits - 1, tripsGenerated: tripsGenerated + 1 });
+            } else {
+                await ctx.db.patch(userPlan._id, { tripsGenerated: 1 });
+            }
+        } else {
+            await ctx.db.insert("userPlans", {
+                userId: ctx.user.userId,
+                plan: "free",
+                tripsGenerated: 1,
+                tripCredits: 0,
+            });
+        }
+
+        // Build flight data matching the itinerary.flights.options format
+        const dealFlightData = {
+            options: [{
+                id: `flight-search-${Date.now()}`,
+                outbound: {
+                    airline: args.airline,
+                    flightNumber: args.flightNumber || "",
+                    departure: args.outboundDeparture || "",
+                    arrival: args.outboundArrival || "",
+                    duration: args.outboundDuration || "",
+                    stops: args.outboundStops ?? 0,
+                    segments: args.outboundSegments || undefined,
+                },
+                return: undefined,
+                pricePerPerson: args.pricePerPerson,
+                totalPrice: args.totalPrice || args.pricePerPerson * args.travelerCount,
+                currency: args.currency,
+                isBestPrice: true,
+                checkedBaggageIncluded: false,
+                checkedBaggagePrice: 0,
+                luggage: "Check airline",
+                bookingUrl: "",
+            }],
+            bestPrice: args.pricePerPerson,
+            dataSource: "flight-search",
+        };
+
+        const effectiveOriginCity = args.originCity || args.origin;
+        const effectiveDestCity = args.destinationCity || args.destination;
+
+        const origin = args.originCountry
+            ? `${effectiveOriginCity}, ${args.originCountry}`
+            : effectiveOriginCity;
+        const destination = args.destinationCountry
+            ? `${effectiveDestCity}, ${args.destinationCountry}`
+            : effectiveDestCity;
+
+        const arrivalTime = args.outboundDate && args.outboundArrival
+            ? `${args.outboundDate}T${args.outboundArrival}:00`
+            : undefined;
+
+        const tripId = await ctx.db.insert("trips", {
+            userId: ctx.user.userId,
+            destination,
+            origin,
+            startDate,
+            endDate,
+            budgetTotal: args.budgetTotal,
+            travelerCount: args.travelerCount,
+            perPersonBudget,
+            budget: args.budgetTotal,
+            travelers: args.travelerCount,
+            interests: args.interests,
+            localExperiences: args.localExperiences ?? [],
+            status: "generating",
+            skipFlights: true, // Flight comes from the search selection
+            skipHotel: args.skipHotel ?? false,
+            preferredFlightTime: "any",
+            arrivalTime,
+            language: args.language || "en",
+            platform: args.platform,
+            // Reuse the deal trip type so the locked-flight rendering applies;
+            // dataSource "flight-search" in dealFlightData tells them apart.
+            tripType: "deal",
+            dealFlightData,
+        });
+
+        const flightInfo = `Flying from: ${origin} to ${destination}. Flight already selected via flight search (${args.airline}${args.outboundDeparture ? `, ${args.outboundDeparture}-${args.outboundArrival}` : ""}). Do NOT include flight recommendations — focus on activities, hotels, and restaurants.`;
+
+        const hotelInfo = args.skipHotel
+            ? "Note: User already has accommodation booked, so DO NOT include hotel recommendations."
+            : "";
+
+        const prompt = `Plan a trip to ${destination} for ${args.travelerCount} people.
+        ${flightInfo}
+        ${hotelInfo}
+        Budget: €${args.budgetTotal} total (€${perPersonBudget} per person).
+        Dates: ${new Date(startDate).toDateString()} to ${new Date(endDate).toDateString()}.
+        Interests: ${args.interests.join(", ")}.`;
+
+        await ctx.scheduler.runAfter(0, internal.tripsActions.generate, {
+            tripId,
+            prompt,
+            skipFlights: true,
+            skipHotel: args.skipHotel ?? false,
+            preferredFlightTime: "any",
+            arrivalTime,
+            language: args.language || "en",
+        });
+
+        await ctx.scheduler.runAfter(0, internal.achievements.checkAndUnlock, { userId: ctx.user.userId });
+
+        return tripId;
+    },
+});
+
 // Internal query to get trip details
 export const getTripDetails = internalQuery({
     args: { tripId: v.id("trips") },
@@ -436,6 +633,36 @@ export const getTripDetails = internalQuery({
                 ),
                 daysReady: v.number(),
                 totalDays: v.number(),
+            })),
+            // Image fields
+            destinationImage: v.optional(v.object({
+                url: v.string(),
+                photographer: v.string(),
+                attribution: v.string(),
+            })),
+            // Structured itinerary items (future use)
+            itineraryItems: v.optional(v.any()),
+            // Multi-city fields
+            isMultiCity: v.optional(v.boolean()),
+            destinations: v.optional(v.array(v.object({
+                city: v.string(),
+                country: v.string(),
+                days: v.number(),
+                order: v.number(),
+            }))),
+            optimizedRoute: v.optional(v.any()),
+            errorMessage: v.optional(v.string()),
+            // Location-based fields
+            userAtDestination: v.optional(v.boolean()),
+            lastLocationCheckAt: v.optional(v.number()),
+            locationVerified: v.optional(v.boolean()),
+            locationVerifiedAt: v.optional(v.number()),
+            // Share Card fields
+            tripCardId: v.optional(v.string()),
+            shareCardPhoto: v.optional(v.object({
+                url: v.string(),
+                photographer: v.string(),
+                photographerUsername: v.optional(v.string()),
             })),
         })
     ),
@@ -906,15 +1133,45 @@ export const list = authQuery({
             budget: v.optional(v.union(v.float64(), v.string())),
             travelers: v.optional(v.float64()),
             interests: v.array(v.string()),
+            localExperiences: v.optional(v.array(v.string())),
             skipFlights: v.optional(v.boolean()),
             skipHotel: v.optional(v.boolean()),
             preferredFlightTime: v.optional(v.string()),
+            arrivalTime: v.optional(v.string()),
+            departureTime: v.optional(v.string()),
             selectedTravelerIds: v.optional(v.array(v.id("travelers"))),
             status: v.string(),
             itinerary: v.optional(v.any()),
+            itineraryItems: v.optional(v.any()),
+            generationProgress: v.optional(v.object({
+                phase: v.union(v.literal("planning"), v.literal("building"), v.literal("enriching"), v.literal("done")),
+                daysReady: v.float64(),
+                totalDays: v.float64(),
+            })),
             isMultiCity: v.optional(v.boolean()),
             optimizedRoute: v.optional(v.any()),
             destinations: v.optional(v.any()),
+            errorMessage: v.optional(v.string()),
+            language: v.optional(v.string()),
+            platform: v.optional(v.string()),
+            destinationImage: v.optional(v.object({
+                url: v.string(),
+                photographer: v.string(),
+                attribution: v.string(),
+            })),
+            userAtDestination: v.optional(v.boolean()),
+            lastLocationCheckAt: v.optional(v.float64()),
+            locationVerified: v.optional(v.boolean()),
+            locationVerifiedAt: v.optional(v.float64()),
+            tripType: v.optional(v.string()),
+            dealId: v.optional(v.id("lowFareRadar")),
+            dealFlightData: v.optional(v.any()),
+            tripCardId: v.optional(v.string()),
+            shareCardPhoto: v.optional(v.object({
+                url: v.string(),
+                photographer: v.string(),
+                photographerUsername: v.optional(v.string()),
+            })),
         })
     ),
     handler: async (ctx: any) => {
@@ -985,6 +1242,24 @@ export const get = authQuery({
                 url: v.string(),
                 photographer: v.string(),
                 attribution: v.string(),
+            })),
+            localExperiences: v.optional(v.array(v.string())),
+            arrivalTime: v.optional(v.string()),
+            departureTime: v.optional(v.string()),
+            language: v.optional(v.string()),
+            platform: v.optional(v.string()),
+            userAtDestination: v.optional(v.boolean()),
+            lastLocationCheckAt: v.optional(v.number()),
+            locationVerified: v.optional(v.boolean()),
+            locationVerifiedAt: v.optional(v.number()),
+            tripType: v.optional(v.string()),
+            dealId: v.optional(v.id("lowFareRadar")),
+            dealFlightData: v.optional(v.any()),
+            tripCardId: v.optional(v.string()),
+            shareCardPhoto: v.optional(v.object({
+                url: v.string(),
+                photographer: v.string(),
+                photographerUsername: v.optional(v.string()),
             })),
             // User plan info
             userPlan: v.optional(v.string()),

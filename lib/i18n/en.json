@@ -191,6 +191,7 @@
     "multiCityRoute": "Multi-City Route",
     "comingSoon": "Coming soon",
     "surpriseMe": "Surprise Me!",
+    "flightSearch": "Flight Search",
     "trendingNow": "Trending Now",
     "myTrips": "My Trips",
     "popularDestination": "Popular Destination",
@@ -218,6 +219,7 @@
   "dealTrip": {
     "title": "Plan Your Trip",
     "fromRadar": "Low Fare Radar",
+    "fromFlightSearch": "Flight Search",
     "days": "days",
     "generate": "Generate Itinerary",
     "selectInterests": "Please select at least one interest",
@@ -468,6 +470,7 @@
     "maxWatchedReached": "Maximum of 20 watched destinations reached"
   },
   "flights": {
+    "createTripWithFlight": "Create trip with this flight",
     "noOwnAirport": "{{city}} doesn't have its own airport. Showing flights to {{nearestCity}} ({{iata}}).",
     "noOwnAirportWithDistance": "{{city}} doesn't have its own airport. Showing flights to {{nearestCity}} ({{iata}}), ~{{distance}} km away.",
     "bookFlight": "Book Flight",
@@ -918,7 +921,7 @@
     "dailyCost": "Daily spending",
     "experiencesCost": "Experiences",
     "baggageCost": "Baggage",
-    "perPerson": "Per person",
+    "perPerson": "/person",
     "perDay": "Per day",
     "perPersonPerDay": "Per person/day",
     "budgetVsTarget": "Your budget",
@@ -956,7 +959,6 @@
     "aiGeneratingSightsDesc": "Our AI is finding the best sights in {{destination}}. This may take a moment.",
     "accommodations": "Accommodations",
     "gettingAround": "Getting Around",
-    "bookNow": "Book Now",
     "openInGoogleMaps": "Open in Google Maps",
     "travelerInsights": "Traveler Insights",
     "verified": "Verified",
@@ -1004,9 +1006,8 @@
     "flightsFrom": "Flights from",
     "optionsAvailable": "options",
     "swipeToCompare": "Swipe to compare",
-    "cheapest": "Cheapest",
     "fastest": "Fastest",
-    "from": "from",
+    "from": "From",
     "directFlight": "Direct",
     "stops": "{{count}} stop",
     "aiGeneratedFlightData": "AI-Generated Flight Data",
@@ -1063,7 +1064,6 @@
     "guestCount_plural": "{{count}} guests",
     "nightCount": "{{count}} night",
     "nightCount_plural": "{{count}} nights",
-    "from": "From",
     "to": "To",
     "accommodationComingSoon": "Hotel and accommodation booking will be available soon. We're working hard to bring you the best options!",
     "gettingAroundDest": "Getting Around {{destination}}",
@@ -1084,7 +1084,6 @@
     "budgetEur": "Budget (€)",
     "localExperiencesOptional": "Local Experiences (Optional)",
     "exploreDest": "Explore {{destination}}",
-    "perPerson": "/person",
     "calendarStartDate": "Start Date",
     "calendarEndDate": "End Date",
     "arrivalTime": "Arrival Time",
@@ -1653,5 +1652,10 @@
     "includesActivities": "Activities",
     "includesInsurance": "Insurance",
     "includesGuide": "Guide"
+  },
+  "offline": {
+    "showingSaved": "Offline — showing saved trips",
+    "tripBanner": "Offline — showing saved trip",
+    "tripUnavailable": "This trip isn't available offline yet. Open it once while connected to save it."
   }
 }

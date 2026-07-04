@@ -12,5 +12,5 @@ export {
   Authenticated,
   Unauthenticated,
   AuthLoading,
-  useConvexAuth,
+  useNativeConvexAuth as useConvexAuth,
 } from "./ConvexAuthProvider.native";

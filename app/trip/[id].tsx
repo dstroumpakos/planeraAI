@@ -18,6 +18,8 @@ import { ImageWithAttribution } from "@/components/ImageWithAttribution";
 import { useTheme } from "@/lib/ThemeContext";
 import { LinearGradient } from "expo-linear-gradient";
 import { useAuthenticatedMutation, useToken } from "@/lib/useAuthenticatedMutation";
+import { useCachedQuery, useIsOffline } from "@/lib/useCachedQuery";
+import { tripCacheKey, sightsCacheKey } from "@/lib/offlineTripCache";
 import { optimizeUnsplashUrl, IMAGE_SIZES } from "@/lib/imageUtils";
 import * as Haptics from "expo-haptics";
 import * as WebBrowser from "expo-web-browser";
@@ -785,8 +787,18 @@ export default function TripDetails() {
     const { t, i18n } = useTranslation();
     const { colors, isDarkMode } = useTheme();
     const { token } = useToken();
-    // @ts-ignore
-    const trip = useQuery(token ? (api.trips.get as any) : "skip", token ? { token, tripId: id as Id<"trips"> } : "skip");
+    // Offline-first: falls back to the disk snapshot when the live query
+    // can't resolve (no connection), so active trips stay readable abroad.
+    const {
+        data: trip,
+        isFromCache: tripFromCache,
+        cacheChecked: tripCacheChecked,
+    } = useCachedQuery<any>(
+        api.trips.get as any,
+        token ? { token, tripId: id as Id<"trips"> } : "skip",
+        id ? tripCacheKey(String(id)) : null
+    );
+    const isOffline = useIsOffline();
     // @ts-ignore
     const updateTrip = useAuthenticatedMutation(api.trips.update as any);
     // @ts-ignore
@@ -872,7 +884,11 @@ export default function TripDetails() {
     }, [trip?._id]);
      
     // V1: AI-generated Top 5 Sights (replaces Viator activities)
-    const topSights = useQuery(api.sights.getTopSights, trip ? { tripId: id as Id<"trips"> } : "skip");
+    const { data: topSights } = useCachedQuery<any>(
+        api.sights.getTopSights as any,
+        trip ? { tripId: id as Id<"trips"> } : "skip",
+        id ? sightsCacheKey(String(id)) : null
+    );
     const generateTopSights = useMutation(api.sights.generateTopSights);
     const [generatingSights, setGeneratingSights] = useState(false);
 
@@ -1439,6 +1455,23 @@ export default function TripDetails() {
     }, [trip?.status]);
 
     if (trip === undefined) {
+        // Offline with no saved snapshot — a spinner would hang forever
+        if (isOffline && tripCacheChecked) {
+            return (
+                <View style={[styles.center, { backgroundColor: colors.background }]}>
+                    <Ionicons name="cloud-offline-outline" size={48} color={colors.textMuted} />
+                    <Text style={{ color: colors.text, marginTop: 16, fontSize: 16, fontWeight: "600", textAlign: "center", paddingHorizontal: 32 }}>
+                        {t('offline.tripUnavailable')}
+                    </Text>
+                    <TouchableOpacity
+                        style={{ marginTop: 24, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12, backgroundColor: colors.primary }}
+                        onPress={() => router.back()}
+                    >
+                        <Text style={{ color: colors.text, fontWeight: "700" }}>{t('tripDetail.goBack')}</Text>
+                    </TouchableOpacity>
+                </View>
+            );
+        }
         return (
             <View style={[styles.center, { backgroundColor: colors.background }]}>
                 <ActivityIndicator size="large" color={colors.primary} />
@@ -2535,6 +2568,12 @@ export default function TripDetails() {
         <View style={[styles.container, { backgroundColor: colors.background }]}>
             <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor="transparent" translucent={true} />
             <EnrichingToast phase={trip.generationProgress?.phase} destination={trip.destination} />
+            {tripFromCache && isOffline && (
+                <View style={{ position: "absolute", top: insets.top + 56, alignSelf: "center", zIndex: 20, flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(0,0,0,0.75)", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 }}>
+                    <Ionicons name="cloud-offline-outline" size={14} color="#FFFFFF" />
+                    <Text style={{ color: "#FFFFFF", fontSize: 12, fontWeight: "600" }}>{t('offline.tripBanner')}</Text>
+                </View>
+            )}
             {/* Header - Minimal with just back button */}
             <SafeAreaView style={[styles.header, { backgroundColor: 'transparent', position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10, borderBottomWidth: 0 }]}>
                 <View style={styles.headerContent}>

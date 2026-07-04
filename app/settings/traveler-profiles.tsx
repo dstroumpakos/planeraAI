@@ -272,7 +272,7 @@ export default function TravelerProfiles() {
           </View>
         ) : (
           <>
-            {travelers.map((traveler) => {
+            {travelers.map((traveler: any) => {
               const complete = isProfileComplete(traveler);
               const age = calculateAge(traveler.dateOfBirth);
               

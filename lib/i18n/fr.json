@@ -191,6 +191,7 @@
     "multiCityRoute": "Itinéraire Multi-Villes",
     "comingSoon": "Bientôt disponible",
     "surpriseMe": "Surprenez-moi !",
+    "flightSearch": "Recherche de Vols",
     "trendingNow": "Tendances Actuelles",
     "myTrips": "Mes Voyages",
     "popularDestination": "Destination Populaire",
@@ -218,6 +219,7 @@
   "dealTrip": {
     "title": "Planifiez votre Voyage",
     "fromRadar": "Radar Bas Prix",
+    "fromFlightSearch": "Recherche de Vols",
     "days": "jours",
     "generate": "Générer l'Itinéraire",
     "selectInterests": "Veuillez sélectionner au moins un intérêt",
@@ -468,6 +470,7 @@
     "maxWatchedReached": "Maximum de 20 destinations suivies atteint"
   },
   "flights": {
+    "createTripWithFlight": "Créer un voyage avec ce vol",
     "noOwnAirport": "{{city}} n'a pas son propre aéroport. Affichage des vols vers {{nearestCity}} ({{iata}}).",
     "noOwnAirportWithDistance": "{{city}} n'a pas son propre aéroport. Affichage des vols vers {{nearestCity}} ({{iata}}), à ~{{distance}} km.",
     "bookFlight": "Réserver un Vol",
@@ -923,7 +926,7 @@
     "dailyCost": "Dépenses quotidiennes",
     "experiencesCost": "Expériences",
     "baggageCost": "Bagages",
-    "perPerson": "Par personne",
+    "perPerson": "/personne",
     "perDay": "Par jour",
     "perPersonPerDay": "Par personne/jour",
     "budgetVsTarget": "Votre budget",
@@ -961,7 +964,6 @@
     "aiGeneratingSightsDesc": "Notre IA recherche les meilleurs sites à {{destination}}. Cela peut prendre un moment.",
     "accommodations": "Hébergements",
     "gettingAround": "Se Déplacer",
-    "bookNow": "Réserver Maintenant",
     "openInGoogleMaps": "Ouvrir dans Google Maps",
     "travelerInsights": "Expériences de Voyageurs",
     "verified": "Vérifié",
@@ -1009,9 +1011,8 @@
     "flightsFrom": "Vols à partir de",
     "optionsAvailable": "options",
     "swipeToCompare": "Glissez pour comparer",
-    "cheapest": "Le moins cher",
     "fastest": "Le plus rapide",
-    "from": "à partir de",
+    "from": "De",
     "directFlight": "Direct",
     "stops": "{{count}} escale",
     "aiGeneratedFlightData": "Données de Vol Générées par IA",
@@ -1068,7 +1069,6 @@
     "guestCount_plural": "{{count}} voyageurs",
     "nightCount": "{{count}} nuit",
     "nightCount_plural": "{{count}} nuits",
-    "from": "De",
     "to": "Vers",
     "accommodationComingSoon": "La réservation d'hôtels et d'hébergements sera bientôt disponible. Nous travaillons dur pour vous proposer les meilleures options !",
     "gettingAroundDest": "Se Déplacer à {{destination}}",
@@ -1089,7 +1089,6 @@
     "budgetEur": "Budget (€)",
     "localExperiencesOptional": "Expériences Locales (Optionnel)",
     "exploreDest": "Explorer {{destination}}",
-    "perPerson": "/personne",
     "calendarStartDate": "Date de Début",
     "calendarEndDate": "Date de Fin",
     "arrivalTime": "Heure d'Arrivée",
@@ -1653,5 +1652,10 @@
     "includesActivities": "Activités",
     "includesInsurance": "Assurance",
     "includesGuide": "Guide"
+  },
+  "offline": {
+    "showingSaved": "Hors ligne — affichage des voyages enregistrés",
+    "tripBanner": "Hors ligne — voyage enregistré",
+    "tripUnavailable": "Ce voyage n'est pas encore disponible hors ligne. Ouvrez-le une fois en étant connecté pour l'enregistrer."
   }
 }

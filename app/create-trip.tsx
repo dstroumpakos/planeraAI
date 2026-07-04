@@ -497,7 +497,7 @@ export default function CreateTripScreen() {
         const ref = sectionRefs.current[key];
         if (ref && scrollRef.current) {
             ref.measureLayout(
-                scrollRef.current.getInnerViewRef() as any,
+                (scrollRef.current as any).getInnerViewRef() as any,
                 (_x: number, y: number) => {
                     scrollRef.current?.scrollTo({ y: Math.max(0, y - 20), animated: true });
                 },
@@ -1418,7 +1418,7 @@ export default function CreateTripScreen() {
                 )}
                 <TouchableOpacity 
                     style={[styles.generateButton, { backgroundColor: colors.text }, loading && styles.disabledButton, currentGuideKey === "generate" ? { borderWidth: 2, borderColor: colors.primary } : {}]}
-                    onPress={handleSubmit}
+                    onPress={() => handleSubmit()}
                     disabled={loading}
                 >
                     {loading ? (

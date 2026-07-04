@@ -24,7 +24,7 @@ export function useFlightBookingOptions() {
       setLoading(true);
       setError(null);
       try {
-        const result = await fetchOptions({ input });
+        const result = (await fetchOptions({ input })) as NormalizedBookingOptionsResponse;
         setBookingOptions(result);
         return result;
       } catch (err: any) {

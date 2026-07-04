@@ -114,13 +114,13 @@ export default function FlightBookingScreen() {
     
     // Find matching travelers by ID or use default travelers
     const travelersToUse = travelerIds.length > 0
-      ? travelerIds.map(id => savedTravelers.find(t => t._id === id)).filter(Boolean)
-      : savedTravelers.filter(t => t.isDefault).slice(0, numPassengers);
+      ? travelerIds.map(id => savedTravelers.find((t: any) => t._id === id)).filter(Boolean)
+      : savedTravelers.filter((t: any) => t.isDefault).slice(0, numPassengers);
     
     if (travelersToUse.length > 0) {
       setPassengers(prev => {
         const updated = [...prev];
-        travelersToUse.forEach((traveler, index) => {
+        travelersToUse.forEach((traveler: any, index: number) => {
           if (traveler && index < updated.length) {
             // Use phoneCountryCode and phoneNumber directly from traveler profile
             const countryCode = traveler.phoneCountryCode || "+1";

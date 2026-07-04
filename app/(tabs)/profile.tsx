@@ -9,6 +9,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useQuery, useConvex } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useToken, useAuthenticatedMutation } from "@/lib/useAuthenticatedMutation";
+import { clearOfflineCache } from "@/lib/offlineTripCache";
 import { useState } from "react";
 import * as ImagePicker from "expo-image-picker";
 import { useTheme } from "@/lib/ThemeContext";
@@ -35,6 +36,7 @@ export default function Profile() {
     const router = useRouter();
     const navigation = useNavigation();
     const { data: session } = authClient.useSession();
+    const user = session?.user;
     const { token } = useToken();
     const trips = useQuery(api.trips.list as any, { token: token || "skip" });
     const userPlan = useQuery(api.users.getPlan as any, { token: token || "skip" });
@@ -133,6 +135,7 @@ export default function Profile() {
                 }
             }
             await authClient.signOut();
+            await clearOfflineCache();
         } catch (error) {
             console.error("Logout failed:", error);
         }
@@ -162,6 +165,7 @@ export default function Profile() {
                                         try {
                                             await deleteAccount({});
                                             await authClient.signOut();
+                                            await clearOfflineCache();
                                         } catch (error) {
                                             console.error("Account deletion failed:", error);
                                             Alert.alert(t('common.error'), t('profile.failedDeleteAccount'));
@@ -257,7 +261,6 @@ export default function Profile() {
         }
     };
 
-    const user = session?.user;
     const tripCount = trips?.length || 0;
     const completedTripsCount = trips?.filter((t: any) => t.status === "completed").length || 0;
     const now = Date.now();
