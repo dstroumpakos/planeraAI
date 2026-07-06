@@ -20,6 +20,7 @@ import type * as bookingLinks from "../bookingLinks.js";
 import type * as bookings from "../bookings.js";
 import type * as crons from "../crons.js";
 import type * as dealExtractor from "../dealExtractor.js";
+import type * as destinationSpend from "../destinationSpend.js";
 import type * as emailHelpers from "../emailHelpers.js";
 import type * as emails from "../emails.js";
 import type * as errorReporter from "../errorReporter.js";
@@ -107,6 +108,7 @@ declare const fullApi: ApiFromModules<{
   bookings: typeof bookings;
   crons: typeof crons;
   dealExtractor: typeof dealExtractor;
+  destinationSpend: typeof destinationSpend;
   emailHelpers: typeof emailHelpers;
   emails: typeof emails;
   errorReporter: typeof errorReporter;

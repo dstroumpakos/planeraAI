@@ -154,10 +154,78 @@ export const saveSights = internalMutation({
     },
 });
 
+// ---- Destination-level sights (no trip needed; used by the preview screen) ----
+
+const sightValidator = v.object({
+    name: v.string(),
+    shortDescription: v.string(),
+    neighborhoodOrArea: v.optional(v.string()),
+    bestTimeToVisit: v.optional(v.string()),
+    estDurationHours: v.optional(v.string()),
+    latitude: v.optional(v.float64()),
+    longitude: v.optional(v.float64()),
+});
+
+/**
+ * Public query: cached AI-generated sights for a destination string, no trip
+ * required. Returns null when nothing recent is cached (the client then asks
+ * the action to generate them). Mirrors the language-suffixed cache key used by
+ * the generation action so each language reads its own set.
+ */
+export const getDestinationSights = query({
+    args: { destination: v.string(), language: v.optional(v.string()) },
+    returns: v.union(v.null(), v.object({ sights: v.array(sightValidator) })),
+    handler: async (ctx, args) => {
+        const destinationKey = destinationKeyWithLang(args.destination, args.language);
+        const cached = await ctx.db
+            .query("destinationSights")
+            .withIndex("by_destination_key", (q) => q.eq("destinationKey", destinationKey))
+            .first();
+        if (!cached) return null;
+
+        // Only serve recent, non-empty caches.
+        const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
+        if (cached.createdAt < thirtyDaysAgo || cached.sights.length < 1) return null;
+        return { sights: cached.sights };
+    },
+});
+
+/** Save destination-level sights (no trip link), replacing any stale entry. */
+export const saveDestinationSights = internalMutation({
+    args: { destinationKey: v.string(), sights: v.array(sightValidator) },
+    returns: v.null(),
+    handler: async (ctx, args) => {
+        // Drop any prior destination-level entry for this key so we don't pile up.
+        const existing = await ctx.db
+            .query("destinationSights")
+            .withIndex("by_destination_key", (q) => q.eq("destinationKey", args.destinationKey))
+            .collect();
+        for (const row of existing) {
+            if (row.tripId === undefined) await ctx.db.delete(row._id);
+        }
+        await ctx.db.insert("destinationSights", {
+            destinationKey: args.destinationKey,
+            sights: args.sights,
+            createdAt: Date.now(),
+        });
+        return null;
+    },
+});
+
 // Helper to normalize destination to a cache key
 function normalizeDestinationKey(destination: string): string {
     return destination
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-|-$/g, '');
+}
+
+/**
+ * Language-suffixed cache key, matching sightsAction.generateSightsAction:
+ * English uses the bare key, other languages append "-<lang>".
+ */
+export function destinationKeyWithLang(destination: string, language?: string): string {
+    const lang = language || "en";
+    const base = normalizeDestinationKey(destination);
+    return lang === "en" ? base : `${base}-${lang}`;
 }

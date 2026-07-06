@@ -359,6 +359,67 @@ Format:
 
 Keep responses concise and helpful. Use bullet points for lists. Be warm but professional.`;
 
+/**
+ * Public, unauthenticated action returning the *current* weather for a
+ * destination (used by the destination preview screen). Reuses the same
+ * Open-Meteo geocoding + forecast endpoints as the Atlas chat, but returns a
+ * compact shape with the raw weather code so the client can pick an icon.
+ * Returns null when the city can't be geocoded or the API call fails.
+ */
+export const getCurrentWeather = action({
+    args: {
+        destination: v.string(),
+    },
+    returns: v.union(
+        v.null(),
+        v.object({
+            location: v.string(),
+            temperature: v.number(),
+            feelsLike: v.number(),
+            humidity: v.number(),
+            windSpeed: v.number(),
+            description: v.string(),
+            weatherCode: v.number(),
+            isDay: v.boolean(),
+            todayMax: v.number(),
+            todayMin: v.number(),
+        }),
+    ),
+    handler: async (_ctx, args) => {
+        // Use only the city portion (before any comma) for geocoding accuracy.
+        const cityName = args.destination.split(",")[0].trim();
+        if (!cityName) return null;
+
+        const location = await geocodeCity(cityName);
+        if (!location) return null;
+
+        try {
+            const response = await fetch(
+                `https://api.open-meteo.com/v1/forecast?latitude=${location.lat}&longitude=${location.lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=1`,
+            );
+            const data = await response.json();
+            if (!data?.current) return null;
+
+            const code = data.current.weather_code;
+            return {
+                location: `${location.name}${location.country ? ", " + location.country : ""}`,
+                temperature: Math.round(data.current.temperature_2m),
+                feelsLike: Math.round(data.current.apparent_temperature),
+                humidity: Math.round(data.current.relative_humidity_2m),
+                windSpeed: Math.round(data.current.wind_speed_10m),
+                description: weatherCodeToDescription[code] || "Unknown",
+                weatherCode: typeof code === "number" ? code : -1,
+                isDay: data.current.is_day === 1,
+                todayMax: Math.round(data.daily?.temperature_2m_max?.[0] ?? data.current.temperature_2m),
+                todayMin: Math.round(data.daily?.temperature_2m_min?.[0] ?? data.current.temperature_2m),
+            };
+        } catch (error) {
+            console.error("getCurrentWeather error:", error);
+            return null;
+        }
+    },
+});
+
 export const chat = action({
     args: {
         token: v.string(),

@@ -1,4 +1,5 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useState, useEffect, useRef } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, StatusBar } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -10,6 +11,7 @@ import { api } from "@/convex/_generated/api";
 import { useTheme } from "@/lib/ThemeContext";
 import { useTranslation } from "react-i18next";
 import { useToken, useAuthenticatedMutation } from "@/lib/useAuthenticatedMutation";
+import { resolveIATA } from "@/lib/destinationAirports";
 
 // Destination highlights data
 const DESTINATION_HIGHLIGHTS: Record<string, { emoji: string; highlights: string[]; bestFor: string[]; bestTime: string }> = {
@@ -454,17 +456,120 @@ const DEFAULT_HIGHLIGHTS = {
     bestTime: "Check local weather"
 };
 
+type CurrentWeather = {
+    location: string;
+    temperature: number;
+    feelsLike: number;
+    humidity: number;
+    windSpeed: number;
+    description: string;
+    weatherCode: number;
+    isDay: boolean;
+    todayMax: number;
+    todayMin: number;
+};
+
+// Map a WMO weather code to an Ionicons glyph (see open-meteo.com/en/docs).
+function weatherIconFor(code: number, isDay: boolean): keyof typeof Ionicons.glyphMap {
+    if (code === 0) return isDay ? "sunny" : "moon";
+    if (code === 1 || code === 2) return isDay ? "partly-sunny" : "cloudy-night";
+    if (code === 3 || code === 45 || code === 48) return "cloud";
+    if (code >= 51 && code <= 67) return "rainy";
+    if (code >= 71 && code <= 77) return "snow";
+    if (code >= 80 && code <= 82) return "rainy";
+    if (code === 85 || code === 86) return "snow";
+    if (code >= 95) return "thunderstorm";
+    return "partly-sunny";
+}
+
+// Map a WMO weather code to an i18n condition key (localized on the client so
+// the label matches the app language instead of the API's English string).
+function weatherConditionKey(code: number): string {
+    if (code === 0) return "weatherClear";
+    if (code === 1) return "weatherMainlyClear";
+    if (code === 2) return "weatherPartlyCloudy";
+    if (code === 3) return "weatherOvercast";
+    if (code === 45 || code === 48) return "weatherFog";
+    if (code >= 51 && code <= 57) return "weatherDrizzle";
+    if (code >= 61 && code <= 67) return "weatherRain";
+    if (code >= 71 && code <= 77) return "weatherSnow";
+    if (code >= 80 && code <= 82) return "weatherRainShowers";
+    if (code === 85 || code === 86) return "weatherSnow";
+    if (code >= 95) return "weatherThunderstorm";
+    return "";
+}
+
+// Sky-gradient palette for the weather card — warmer/brighter by day, deep
+// indigo at night. Purely cosmetic, gives the card a premium "weather app" feel.
+function weatherGradient(isDay: boolean): [string, string] {
+    return isDay ? ["#3B82F6", "#6366F1"] : ["#1E293B", "#4338CA"];
+}
+
 export default function DestinationPreviewScreen() {
     const router = useRouter();
     const { colors, isDarkMode } = useTheme();
-    const { t } = useTranslation();
+    const { t, i18n } = useTranslation();
     const { token } = useToken();
     const { destination } = useLocalSearchParams<{ destination: string }>();
     const { image, loading } = useDestinationImage(destination);
     const trackDownload = useAction(api.images.trackUnsplashDownload);
 
+    // Current weather for the destination (Open-Meteo via Convex action).
+    const getCurrentWeather = useAction(api.atlas.getCurrentWeather);
+    const [weather, setWeather] = useState<CurrentWeather | null>(null);
+    const [weatherLoading, setWeatherLoading] = useState(true);
+
+    useEffect(() => {
+        let cancelled = false;
+        if (!destination) {
+            setWeatherLoading(false);
+            return;
+        }
+        setWeatherLoading(true);
+        getCurrentWeather({ destination })
+            .then((result) => {
+                if (!cancelled) setWeather(result);
+            })
+            .catch((error) => {
+                console.error("Failed to load weather:", error);
+                if (!cancelled) setWeather(null);
+            })
+            .finally(() => {
+                if (!cancelled) setWeatherLoading(false);
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [destination]);
+
+    // Curated destination facts (avg daily spend + typical stay length).
+    const facts = useQuery(
+        api.trips.getDestinationFacts as any,
+        destination ? { destination } : "skip",
+    );
+
+    // Real, AI-generated top sights for this destination (cached backend-side).
+    const sightsData = useQuery(
+        api.sights.getDestinationSights as any,
+        destination ? { destination, language: i18n.language } : "skip",
+    );
+    const generateDestinationSights = useAction(api.sightsAction.generateDestinationSights);
+    const sightsRequestedRef = useRef<Set<string>>(new Set());
+
+    // When nothing is cached yet, kick off generation once per destination.
+    useEffect(() => {
+        if (!destination || !token) return;
+        if (sightsData === null && !sightsRequestedRef.current.has(destination)) {
+            sightsRequestedRef.current.add(destination);
+            generateDestinationSights({ token, destination, language: i18n.language }).catch((error) => {
+                console.error("Failed to generate sights:", error);
+                sightsRequestedRef.current.delete(destination); // allow a retry later
+            });
+        }
+    }, [destination, sightsData, token, i18n.language]);
+
     // Watch destination state
-    const isWatching = useQuery(api.watchedDestinations.isWatching as any, 
+    const isWatching = useQuery(api.watchedDestinations.isWatching as any,
         token ? { token, destination: destination || "" } : "skip"
     );
     const watchMutation = useAuthenticatedMutation(api.watchedDestinations.watch as any);
@@ -480,7 +585,6 @@ export default function DestinationPreviewScreen() {
     };
     
     const avgBudget = parseFloat((useLocalSearchParams() as any).avgBudget) || 0;
-    const avgRating = parseFloat((useLocalSearchParams() as any).avgRating) || 0;
     const tripCount = parseInt((useLocalSearchParams() as any).count) || 0;
 
     const destinationKey = Object.keys(DESTINATION_HIGHLIGHTS).find(
@@ -489,6 +593,19 @@ export default function DestinationPreviewScreen() {
     const destinationData = destinationKey 
         ? DESTINATION_HIGHLIGHTS[destinationKey] 
         : DEFAULT_HIGHLIGHTS;
+
+    // City portion of the destination (e.g. "Paris, France" -> "Paris").
+    const destinationCity = (destination || "").split(",")[0].trim();
+
+    // Highlights: prefer real AI-generated sight names; for curated cities fall
+    // back to the built-in list; otherwise show a loading state — never the
+    // generic "Local attractions" placeholders.
+    const realHighlights: string[] | null = sightsData?.sights?.length
+        ? sightsData.sights.slice(0, 6).map((s: any) => s.name)
+        : null;
+    const isCuratedDestination = destinationKey != null;
+    const highlightsToShow: string[] | null =
+        realHighlights ?? (isCuratedDestination ? destinationData.highlights : null);
 
     const handleCreateTrip = async () => {
         if (image?.downloadLocation) {
@@ -501,6 +618,19 @@ export default function DestinationPreviewScreen() {
         router.push({
             pathname: "/create-trip",
             params: { prefilledDestination: destination }
+        });
+    };
+
+    // Open the flight search prefilled with this destination as the arrival.
+    const handleSearchFlights = () => {
+        if (!destination) return;
+        const arrivalId = resolveIATA(destination); // "" when no airport resolves
+        router.push({
+            pathname: "/flights/search",
+            params: {
+                arrivalCityName: destinationCity || destination,
+                ...(arrivalId ? { arrivalId } : {}),
+            },
         });
     };
 
@@ -548,86 +678,228 @@ export default function DestinationPreviewScreen() {
                 </SafeAreaView>
 
                 <View style={styles.heroContent}>
+                    <View style={[styles.heroBadge, { backgroundColor: colors.primary }]}>
+                        <Ionicons name="trending-up" size={13} color="#000000" />
+                        <Text style={styles.heroBadgeText}>{t('home.popularDestination')}</Text>
+                    </View>
                     <Text style={styles.heroTitle}>{destination}</Text>
                     <View style={styles.heroStats}>
-                        <View style={styles.statItem}>
-                            <Ionicons name="star" size={16} color={colors.primary} />
-                            <Text style={styles.statValue}>{avgRating.toFixed(1)}</Text>
-                            <Text style={styles.statLabel}>{t('destinationPreview.rating')}</Text>
-                        </View>
-                        <View style={styles.statDivider} />
                         <View style={styles.statItem}>
                             <Ionicons name="people" size={16} color={colors.primary} />
                             <Text style={styles.statValue}>{tripCount}</Text>
                             <Text style={styles.statLabel}>{t('destinationPreview.tripsLabel')}</Text>
                         </View>
                         <View style={styles.statDivider} />
-                        <View style={styles.statItem}>
-                            <Ionicons name="wallet" size={16} color={colors.primary} />
-                            <Text style={styles.statValue}>€{Math.round(avgBudget)}</Text>
-                            <Text style={styles.statLabel}>{t('destinationPreview.avgBudget')}</Text>
-                        </View>
+                        {facts?.avgDailySpend != null ? (
+                            <View style={styles.statItem}>
+                                <Ionicons name="wallet" size={16} color={colors.primary} />
+                                <Text style={styles.statValue}>€{Math.round(facts.avgDailySpend)}</Text>
+                                <Text style={styles.statLabel}>{t('home.perDayShort')}</Text>
+                            </View>
+                        ) : (
+                            <View style={styles.statItem}>
+                                <Ionicons name="wallet" size={16} color={colors.primary} />
+                                <Text style={styles.statValue}>€{Math.round(avgBudget)}</Text>
+                                <Text style={styles.statLabel}>{t('destinationPreview.avgBudget')}</Text>
+                            </View>
+                        )}
                     </View>
                 </View>
             </View>
             </SafeAreaView>
 
             <ScrollView style={styles.contentSection} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
-                <View style={[styles.infoCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                    <View style={styles.infoCardHeader}>
-                        <Ionicons name="calendar" size={20} color={colors.primary} />
-                        <Text style={[styles.infoCardTitle, { color: colors.text }]}>{t('destinationPreview.bestTimeToVisit')}</Text>
+                {weatherLoading && (
+                    <View style={[styles.weatherLoadingCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                        <ActivityIndicator size="small" color={colors.primary} />
+                        <Text style={[styles.infoCardText, { color: colors.textSecondary, marginLeft: 10 }]}>
+                            {t('destinationPreview.loadingWeather')}
+                        </Text>
                     </View>
-                    <Text style={[styles.infoCardText, { color: colors.textSecondary }]}>{destinationData.bestTime}</Text>
-                </View>
-
-                <View style={styles.section}>
-                    <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('destinationPreview.topHighlights')}</Text>
-                    <View style={styles.highlightsGrid}>
-                        {destinationData.highlights.map((highlight, index) => (
-                            <View key={index} style={[styles.highlightChip, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                                <Ionicons name="location" size={14} color={colors.primary} />
-                                <Text style={[styles.highlightText, { color: colors.text }]}>{highlight}</Text>
+                )}
+                {!weatherLoading && weather && (
+                    <LinearGradient
+                        colors={weatherGradient(weather.isDay)}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.weatherCard}
+                    >
+                        <View style={styles.weatherHeaderRow}>
+                            <Ionicons name="partly-sunny" size={15} color="rgba(255,255,255,0.9)" />
+                            <Text style={styles.weatherHeaderText}>{t('destinationPreview.currentWeather')}</Text>
+                        </View>
+                        <View style={styles.weatherMainRow}>
+                            <View style={styles.weatherTempBlock}>
+                                <Text style={styles.weatherTemp}>{weather.temperature}°</Text>
+                                <Text style={styles.weatherDescription}>
+                                    {weatherConditionKey(weather.weatherCode)
+                                        ? t(`destinationPreview.${weatherConditionKey(weather.weatherCode)}`)
+                                        : weather.description}
+                                </Text>
                             </View>
-                        ))}
+                            <Ionicons
+                                name={weatherIconFor(weather.weatherCode, weather.isDay)}
+                                size={68}
+                                color="#FFFFFF"
+                            />
+                        </View>
+                        <View style={styles.weatherPillRow}>
+                            <View style={styles.weatherPill}>
+                                <Ionicons name="thermometer-outline" size={14} color="#FFFFFF" />
+                                <Text style={styles.weatherPillText}>{t('destinationPreview.feelsLike')} {weather.feelsLike}°</Text>
+                            </View>
+                            <View style={styles.weatherPill}>
+                                <Ionicons name="swap-vertical-outline" size={14} color="#FFFFFF" />
+                                <Text style={styles.weatherPillText}>{weather.todayMax}° / {weather.todayMin}°</Text>
+                            </View>
+                            <View style={styles.weatherPill}>
+                                <Ionicons name="water-outline" size={14} color="#FFFFFF" />
+                                <Text style={styles.weatherPillText}>{weather.humidity}%</Text>
+                            </View>
+                            <View style={styles.weatherPill}>
+                                <Ionicons name="speedometer-outline" size={14} color="#FFFFFF" />
+                                <Text style={styles.weatherPillText}>{weather.windSpeed} km/h</Text>
+                            </View>
+                        </View>
+                    </LinearGradient>
+                )}
+
+                <View style={styles.snapshotRow}>
+                    <View style={[styles.snapshotCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                        <View style={[styles.snapshotIcon, { backgroundColor: isDarkMode ? colors.secondary : "#FFF9E6" }]}>
+                            <Ionicons name="calendar" size={18} color={colors.primary} />
+                        </View>
+                        <Text style={[styles.snapshotLabel, { color: colors.textMuted }]}>{t('destinationPreview.bestTimeToVisit')}</Text>
+                        <Text style={[styles.snapshotValue, { color: colors.text }]}>{destinationData.bestTime}</Text>
                     </View>
+                    {facts?.avgStayDays != null && (
+                        <View style={[styles.snapshotCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                            <View style={[styles.snapshotIcon, { backgroundColor: isDarkMode ? colors.secondary : "#FFF9E6" }]}>
+                                <Ionicons name="time" size={18} color={colors.primary} />
+                            </View>
+                            <Text style={[styles.snapshotLabel, { color: colors.textMuted }]}>{t('destinationPreview.averageStay')}</Text>
+                            <Text style={[styles.snapshotValue, { color: colors.text }]}>
+                                ~{facts.avgStayDays} {t('destinationPreview.daysUnit')}
+                            </Text>
+                        </View>
+                    )}
+                </View>
+
+                <TouchableOpacity
+                    style={[styles.flightSearchButton, { backgroundColor: colors.card, borderColor: colors.border }]}
+                    onPress={handleSearchFlights}
+                    activeOpacity={0.85}
+                >
+                    <View style={[styles.flightSearchIcon, { backgroundColor: colors.primary }]}>
+                        <Ionicons name="airplane" size={20} color={colors.text} />
+                    </View>
+                    <View style={styles.flightSearchTextBlock}>
+                        <Text style={[styles.flightSearchTitle, { color: colors.text }]}>{t('destinationPreview.searchFlights')}</Text>
+                        <Text style={[styles.flightSearchSubtitle, { color: colors.textMuted }]} numberOfLines={1}>
+                            {t('destinationPreview.flightsSubtitle', { destination: destinationCity || destination })}
+                        </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+                </TouchableOpacity>
+
+                <View style={styles.section}>
+                    <View style={styles.sectionHeaderRow}>
+                        <View style={[styles.sectionIconTile, { backgroundColor: isDarkMode ? colors.secondary : "#FFF9E6" }]}>
+                            <Ionicons name="star" size={16} color={colors.primary} />
+                        </View>
+                        <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('destinationPreview.topHighlights')}</Text>
+                    </View>
+                    {highlightsToShow ? (
+                        <View style={styles.highlightsGrid}>
+                            {highlightsToShow.map((highlight, index) => (
+                                <View key={index} style={[styles.highlightCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                                    <View style={[styles.highlightNum, { backgroundColor: colors.primary }]}>
+                                        <Text style={styles.highlightNumText}>{index + 1}</Text>
+                                    </View>
+                                    <Text style={[styles.highlightCardText, { color: colors.text }]} numberOfLines={2}>{highlight}</Text>
+                                </View>
+                            ))}
+                        </View>
+                    ) : (
+                        <View style={[styles.highlightsLoading, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                            <ActivityIndicator size="small" color={colors.primary} />
+                            <Text style={[styles.infoCardText, { color: colors.textSecondary, marginLeft: 10 }]}>
+                                {t('destinationPreview.loadingHighlights')}
+                            </Text>
+                        </View>
+                    )}
                 </View>
 
                 <View style={styles.section}>
-                    <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('destinationPreview.perfectFor')}</Text>
+                    <View style={styles.sectionHeaderRow}>
+                        <View style={[styles.sectionIconTile, { backgroundColor: isDarkMode ? colors.secondary : "#FFF9E6" }]}>
+                            <Ionicons name="heart" size={16} color={colors.primary} />
+                        </View>
+                        <Text style={[styles.sectionTitle, { color: colors.text }]}>{t('destinationPreview.perfectFor')}</Text>
+                    </View>
                     <View style={styles.tagsContainer}>
                         {destinationData.bestFor.map((tag, index) => (
-                            <View key={index} style={[styles.tag, { backgroundColor: colors.primary }]}>
-                                <Text style={[styles.tagText, { color: colors.text }]}>{tag}</Text>
+                            <View key={index} style={[styles.tagPill, { backgroundColor: isDarkMode ? colors.secondary : "#FFF9E6", borderColor: colors.primary }]}>
+                                <Ionicons name="checkmark-circle" size={14} color={colors.primary} />
+                                <Text style={[styles.tagPillText, { color: colors.text }]}>{tag}</Text>
                             </View>
                         ))}
                     </View>
                 </View>
 
-                <View style={[styles.insightCard, { backgroundColor: isDarkMode ? colors.secondary : "#FFF9E6", borderColor: colors.primary }]}>
-                    <View style={styles.insightHeader}>
-                        <Ionicons name="bulb" size={24} color={colors.primary} />
-                        <Text style={[styles.insightTitle, { color: colors.text }]}>{t('destinationPreview.fromOurTravelers')}</Text>
+                <View style={[styles.socialCard, { backgroundColor: isDarkMode ? colors.secondary : "#FFF9E6", borderColor: colors.primary }]}>
+                    <View style={styles.socialHeader}>
+                        <View style={styles.avatarCluster}>
+                            {[0, 1, 2].map((i) => (
+                                <View
+                                    key={i}
+                                    style={[
+                                        styles.avatar,
+                                        {
+                                            backgroundColor: colors.primary,
+                                            borderColor: isDarkMode ? colors.secondary : "#FFF9E6",
+                                            marginLeft: i === 0 ? 0 : -10,
+                                        },
+                                    ]}
+                                >
+                                    <Ionicons name="person" size={13} color="#000000" />
+                                </View>
+                            ))}
+                        </View>
+                        <Text style={[styles.socialTitle, { color: colors.text }]}>{t('destinationPreview.fromOurTravelers')}</Text>
                     </View>
                     <Text style={[styles.insightText, { color: colors.textSecondary }]}>
-                        {tripCount > 0 
-                            ? t('destinationPreview.travelersExplored', { count: tripCount, destination, budget: Math.round(avgBudget), rating: avgRating.toFixed(1) })
+                        {tripCount > 0
+                            ? t('destinationPreview.travelersExplored', { count: tripCount, destination, budget: Math.round(avgBudget) })
                             : t('destinationPreview.beFirstToExplore', { destination })
                         }
                     </Text>
                 </View>
 
-                <View style={{ height: 120 }} />
+                <View style={{ height: 170 }} />
             </ScrollView>
 
             <SafeAreaView edges={["bottom"]} style={[styles.ctaContainer, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
-                <View style={styles.ctaContent}>
-                    <View style={styles.ctaPricing}>
-                        <Text style={[styles.ctaLabel, { color: colors.textMuted }]}>{t('destinationPreview.from')}</Text>
-                        <Text style={[styles.ctaPrice, { color: colors.text }]}>€{Math.round(avgBudget * 0.7)}</Text>
-                        <Text style={[styles.ctaPerPerson, { color: colors.textMuted }]}>{t('destinationPreview.perPerson')}</Text>
+                <View style={styles.ctaInner}>
+                    <View style={styles.ctaTopRow}>
+                        <View style={styles.ctaPricing}>
+                            <View style={styles.ctaPriceRow}>
+                                <Text style={[styles.ctaLabel, { color: colors.textMuted }]}>{t('destinationPreview.from')}</Text>
+                                <Text style={[styles.ctaPrice, { color: colors.text }]}>
+                                    €{facts?.avgDailySpend != null && facts?.avgStayDays != null
+                                        ? Math.round(facts.avgDailySpend * facts.avgStayDays)
+                                        : Math.round(avgBudget * 0.7)}
+                                </Text>
+                                <Text style={[styles.ctaPerPerson, { color: colors.textMuted }]}>{t('destinationPreview.perPerson')}</Text>
+                            </View>
+                            <Text style={[styles.ctaSubNote, { color: colors.textMuted }]}>{t('destinationPreview.estimatedCost')}</Text>
+                        </View>
+                        <View style={styles.ctaNoteRow}>
+                            <Ionicons name="sparkles" size={12} color={colors.primary} />
+                            <Text style={[styles.ctaNote, { color: colors.textMuted }]} numberOfLines={2}>{t('destinationPreview.planNote')}</Text>
+                        </View>
                     </View>
-                    <TouchableOpacity style={[styles.ctaButton, { backgroundColor: colors.primary }]} onPress={handleCreateTrip}>
+                    <TouchableOpacity style={[styles.ctaButtonFull, { backgroundColor: colors.primary }]} onPress={handleCreateTrip} activeOpacity={0.9}>
                         <Text style={[styles.ctaButtonText, { color: colors.text }]}>{t('destinationPreview.planMyTrip')}</Text>
                         <Ionicons name="arrow-forward" size={20} color={colors.text} />
                     </TouchableOpacity>
@@ -652,6 +924,8 @@ const styles = StyleSheet.create({
     backButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(0,0,0,0.3)", justifyContent: "center", alignItems: "center" },
     watchButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(0,0,0,0.3)", justifyContent: "center", alignItems: "center" },
     heroContent: { position: "absolute", bottom: 24, left: 20, right: 20 },
+    heroBadge: { flexDirection: "row", alignItems: "center", alignSelf: "flex-start", gap: 5, paddingHorizontal: 11, paddingVertical: 5, borderRadius: 20, marginBottom: 12 },
+    heroBadgeText: { color: "#000000", fontSize: 12, fontWeight: "700" },
     heroTitle: { fontSize: 36, fontWeight: "800", color: "#FFFFFF", marginBottom: 16 },
     heroStats: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,0.15)", borderRadius: 16, padding: 16 },
     statItem: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 },
@@ -661,27 +935,79 @@ const styles = StyleSheet.create({
     contentSection: { flex: 1 },
     contentContainer: { padding: 20 },
     infoCard: { borderRadius: 16, padding: 16, marginBottom: 20, borderWidth: 1 },
+    // Weather card (premium gradient)
+    weatherCard: { borderRadius: 20, padding: 18, marginBottom: 16, overflow: "hidden" },
+    weatherLoadingCard: { flexDirection: "row", alignItems: "center", borderRadius: 20, padding: 20, marginBottom: 16, borderWidth: 1 },
+    weatherHeaderRow: { flexDirection: "row", alignItems: "center", gap: 7, marginBottom: 4 },
+    weatherHeaderText: { fontSize: 13, fontWeight: "600", color: "rgba(255,255,255,0.9)", letterSpacing: 0.3, textTransform: "uppercase" },
+    weatherMainRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16 },
+    weatherTempBlock: { flex: 1 },
+    weatherTemp: { fontSize: 52, fontWeight: "800", color: "#FFFFFF", lineHeight: 58 },
+    weatherDescription: { fontSize: 15, fontWeight: "500", color: "rgba(255,255,255,0.9)", marginTop: 2 },
+    weatherPillRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+    weatherPill: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(255,255,255,0.18)", paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10 },
+    weatherPillText: { fontSize: 12.5, fontWeight: "600", color: "#FFFFFF" },
+    // Trip snapshot (2-column)
+    snapshotRow: { flexDirection: "row", gap: 12, marginBottom: 24 },
+    snapshotCard: { flex: 1, borderRadius: 16, padding: 14, borderWidth: 1 },
+    snapshotIcon: { width: 36, height: 36, borderRadius: 10, justifyContent: "center", alignItems: "center", marginBottom: 10 },
+    snapshotLabel: { fontSize: 12, fontWeight: "500", marginBottom: 4 },
+    snapshotValue: { fontSize: 15, fontWeight: "700" },
+    // Flight search button
+    flightSearchButton: { flexDirection: "row", alignItems: "center", gap: 14, borderRadius: 16, padding: 14, marginBottom: 24, borderWidth: 1 },
+    flightSearchIcon: { width: 44, height: 44, borderRadius: 12, justifyContent: "center", alignItems: "center" },
+    flightSearchTextBlock: { flex: 1 },
+    flightSearchTitle: { fontSize: 16, fontWeight: "700" },
+    flightSearchSubtitle: { fontSize: 13, marginTop: 2 },
     infoCardHeader: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 },
     infoCardTitle: { fontSize: 16, fontWeight: "700" },
     infoCardText: { fontSize: 15, marginLeft: 30 },
     section: { marginBottom: 24 },
-    sectionTitle: { fontSize: 18, fontWeight: "700", marginBottom: 12 },
-    highlightsGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-    highlightChip: { flexDirection: "row", alignItems: "center", paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, gap: 8, borderWidth: 1 },
-    highlightText: { fontSize: 14, fontWeight: "500" },
+    sectionHeaderRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 14 },
+    sectionIconTile: { width: 30, height: 30, borderRadius: 9, justifyContent: "center", alignItems: "center" },
+    sectionTitle: { fontSize: 18, fontWeight: "700" },
+    // Highlights — numbered 2-column cards
+    highlightsGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+    highlightsLoading: { flexDirection: "row", alignItems: "center", padding: 16, borderRadius: 14, borderWidth: 1 },
+    highlightCard: { flexDirection: "row", alignItems: "center", gap: 10, flexBasis: "47%", flexGrow: 1, paddingHorizontal: 12, paddingVertical: 12, borderRadius: 14, borderWidth: 1 },
+    highlightNum: { width: 26, height: 26, borderRadius: 13, justifyContent: "center", alignItems: "center" },
+    highlightNumText: { fontSize: 13, fontWeight: "800", color: "#000000" },
+    highlightCardText: { flex: 1, fontSize: 14, fontWeight: "600" },
+    // Perfect for — soft tinted pills
     tagsContainer: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-    tag: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20 },
-    tagText: { fontSize: 14, fontWeight: "600" },
-    insightCard: { borderRadius: 16, padding: 20, borderWidth: 1 },
-    insightHeader: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 12 },
-    insightTitle: { fontSize: 16, fontWeight: "700" },
+    tagPill: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 20, borderWidth: 1 },
+    tagPillText: { fontSize: 14, fontWeight: "600" },
+    // Social proof card
+    socialCard: { borderRadius: 16, padding: 20, borderWidth: 1 },
+    socialHeader: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 12 },
+    avatarCluster: { flexDirection: "row", alignItems: "center" },
+    avatar: { width: 30, height: 30, borderRadius: 15, justifyContent: "center", alignItems: "center", borderWidth: 2 },
+    socialTitle: { fontSize: 16, fontWeight: "700" },
     insightText: { fontSize: 14, lineHeight: 22 },
-    ctaContainer: { position: "absolute", bottom: 0, left: 0, right: 0, borderTopWidth: 1 },
-    ctaContent: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 20, paddingVertical: 16 },
-    ctaPricing: { flexDirection: "row", alignItems: "baseline", gap: 4 },
+    ctaContainer: {
+        position: "absolute",
+        bottom: 0,
+        left: 0,
+        right: 0,
+        borderTopWidth: 1,
+        // Lift the bar above scrolling content so it reads as a floating footer
+        // instead of text bleeding into the cards behind it.
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: -4 },
+        shadowOpacity: 0.12,
+        shadowRadius: 12,
+        elevation: 16,
+    },
+    ctaInner: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 12 },
+    ctaTopRow: { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", gap: 12, marginBottom: 12 },
+    ctaPricing: { flexShrink: 0 },
+    ctaPriceRow: { flexDirection: "row", alignItems: "baseline", gap: 4 },
     ctaLabel: { fontSize: 14 },
     ctaPrice: { fontSize: 24, fontWeight: "800" },
     ctaPerPerson: { fontSize: 14 },
-    ctaButton: { flexDirection: "row", alignItems: "center", paddingHorizontal: 24, paddingVertical: 14, borderRadius: 14, gap: 8 },
-    ctaButtonText: { fontSize: 16, fontWeight: "700" },
+    ctaSubNote: { fontSize: 11, marginTop: 2 },
+    ctaNoteRow: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 5, flexShrink: 1, paddingBottom: 3 },
+    ctaNote: { fontSize: 12, fontWeight: "500", flexShrink: 1, textAlign: "right" },
+    ctaButtonFull: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 16, borderRadius: 16, gap: 8 },
+    ctaButtonText: { fontSize: 17, fontWeight: "700" },
 });

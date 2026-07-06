@@ -550,7 +550,6 @@ export default function HomeScreen() {
                     params: {
                       destination: destination.destination,
                       avgBudget: destination.avgBudget.toString(),
-                      avgRating: destination.avgRating.toString(),
                       count: destination.count.toString(),
                     }
                   })}
@@ -570,11 +569,6 @@ export default function HomeScreen() {
                   )}
                   
                   <View style={styles.trendingOverlay}>
-                    <View style={styles.ratingBadge}>
-                      <Ionicons name="star" size={12} color={colors.primary} />
-                      <Text style={[styles.ratingText, { color: "#000000" }]}>{destination.avgRating.toFixed(1)}</Text>
-                    </View>
-                    
                     <View style={styles.trendingCardContent}>
                       <Text style={styles.trendingName}>{destination.destination}</Text>
                       <View style={styles.trendingLocationRow}>
@@ -582,11 +576,15 @@ export default function HomeScreen() {
                         <Text style={styles.trendingCountry}>{t("home.popularDestination")}</Text>
                       </View>
                       <View style={styles.trendingFooter}>
-                        <View>
-                          <Text style={[styles.trendingPriceLabel, { color: "#000000" }]}>{t("home.estTotal")}</Text>
-                          <Text style={[styles.trendingPrice, { color: colors.primary }]}>€{Math.round(destination.avgBudget)}</Text>
-                          <Text style={[styles.trendingPriceSubtitle, { color: "#000000" }]}>{t("home.basedOnBudget")}</Text>
-                        </View>
+                        {destination.avgDailySpend != null ? (
+                          <View>
+                            <Text style={[styles.trendingPriceLabel, { color: "#FFFFFF" }]}>{t("home.avgDailySpend")}</Text>
+                            <Text style={[styles.trendingPrice, { color: colors.primary }]}>€{Math.round(destination.avgDailySpend)}</Text>
+                            <Text style={[styles.trendingPriceSubtitle, { color: "#FFFFFF" }]}>{t("home.perDayPerPerson")}</Text>
+                          </View>
+                        ) : (
+                          <View />
+                        )}
                         <View style={styles.trendingArrow}>
                           <Ionicons name="arrow-forward" size={16} color="#000000" />
                         </View>
@@ -596,6 +594,11 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               ))}
             </ScrollView>
+            {trendingDestinations.some((d: any) => d.avgDailySpend != null) && (
+              <Text style={[styles.trendingSource, { color: colors.textMuted }]}>
+                {t("home.spendSource")}
+              </Text>
+            )}
           </View>
         )}
 
@@ -886,6 +889,11 @@ const styles = StyleSheet.create({
   trendingScroll: {
     paddingLeft: 20,
   },
+  trendingSource: {
+    fontSize: 11,
+    paddingHorizontal: 20,
+    marginTop: 10,
+  },
   trendingContent: {
     paddingRight: 20,
     gap: 16,
@@ -920,23 +928,9 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    justifyContent: "space-between",
+    justifyContent: "flex-end",
     padding: 16,
     backgroundColor: "rgba(0,0,0,0.1)",
-  },
-  ratingBadge: {
-    alignSelf: "flex-end",
-    backgroundColor: "rgba(255,255,255,0.9)",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-  ratingText: {
-    fontSize: 12,
-    fontWeight: "700",
   },
   trendingCardContent: {
     width: "100%",
@@ -974,13 +968,19 @@ const styles = StyleSheet.create({
   },
   trendingPriceLabel: {
     fontSize: 12,
-    fontWeight: "500",
+    fontWeight: "700",
     marginBottom: 4,
+    textShadowColor: "rgba(0,0,0,0.5)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
   trendingPriceSubtitle: {
     fontSize: 12,
-    fontWeight: "500",
+    fontWeight: "700",
     marginTop: 2,
+    textShadowColor: "rgba(0,0,0,0.5)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
   trendingArrow: {
     width: 40,

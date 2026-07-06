@@ -1,76 +1,51 @@
 "use node";
 
 import { v } from "convex/values";
-import { internalAction } from "./_generated/server";
-import { internal } from "./_generated/api";
+import { action, internalAction } from "./_generated/server";
+import { api, internal } from "./_generated/api";
 import OpenAI from "openai";
 
-// Internal action to generate sights with AI
-export const generateSightsAction = internalAction({
-    args: {
-        tripId: v.id("trips"),
-        destination: v.string(),
-        language: v.optional(v.string()),
-    },
-    returns: v.null(),
-    handler: async (ctx, args) => {
-        const { tripId, destination, language } = args;
-        
-        // Language mapping for the AI prompt
-        const LANGUAGE_NAMES: Record<string, string> = {
-            en: "English",
-            el: "Greek",
-            es: "Spanish",
-            fr: "French",
-            de: "German",
-            ar: "Arabic",
-        };
-        const contentLanguage = language || "en";
-        const languageName = LANGUAGE_NAMES[contentLanguage] || "English";
-        const isNonEnglish = contentLanguage !== "en";
-        
-        // Include language in cache key so each language gets its own cached sights
-        const destinationKey = isNonEnglish 
-            ? normalizeDestinationKey(destination) + `-${contentLanguage}`
-            : normalizeDestinationKey(destination);
-        
-        console.log(`🏛️ Generating sights for: ${destination}`);
-        
-        // Check if we have a recent cached full set for this destination
-        const existingSights = await ctx.runMutation(internal.sights.getCachedSights, { destinationKey });
-        if (existingSights && existingSights.sights.length >= 15) {
-            console.log(`Using cached sights for destination (${existingSights.sights.length} sights)`);
-            // Link to this trip
-            await ctx.runMutation(internal.sights.saveSights, {
-                tripId,
-                destinationKey,
-                sights: existingSights.sights,
-            });
-            return null;
-        }
-        
-        // Generate with OpenAI
-        const openaiKey = process.env.OPENAI_API_KEY;
-        if (!openaiKey) {
-            console.warn("OpenAI API key not configured, using fallback sights");
-            const fallbackSights = getFallbackSights(destination);
-            await ctx.runMutation(internal.sights.saveSights, {
-                tripId,
-                destinationKey,
-                sights: fallbackSights,
-            });
-            return null;
-        }
-        
-        try {
-            const openai = new OpenAI({ apiKey: openaiKey });
-            
-            const languageInstruction = isNonEnglish 
-                ? `\n\n**LANGUAGE REQUIREMENT:** ALL text content (name, shortDescription, neighborhoodOrArea, bestTimeToVisit) MUST be written in ${languageName}. JSON keys/field names stay in English. Only the string VALUES should be in ${languageName}.`
-                : '';
-            
-            const prompt = `Generate a comprehensive list of ALL the must-see sights, attractions, and noteworthy places for ${destination}. Include as many as you can — aim for 20 to 30 sights.${languageInstruction}
-            
+// Language mapping for the AI prompt (shared by both generation actions).
+const LANGUAGE_NAMES: Record<string, string> = {
+    en: "English",
+    el: "Greek",
+    es: "Spanish",
+    fr: "French",
+    de: "German",
+    ar: "Arabic",
+};
+
+type Sight = {
+    name: string;
+    shortDescription: string;
+    neighborhoodOrArea?: string;
+    bestTimeToVisit?: string;
+    estDurationHours?: string;
+    latitude?: number;
+    longitude?: number;
+};
+
+/**
+ * Call OpenAI to generate a full sights list for a destination. Returns null on
+ * any failure (missing key, API error, empty result) so callers can fall back.
+ */
+async function generateSightsWithAI(destination: string, language?: string): Promise<Sight[] | null> {
+    const openaiKey = process.env.OPENAI_API_KEY;
+    if (!openaiKey) return null;
+
+    const contentLanguage = language || "en";
+    const languageName = LANGUAGE_NAMES[contentLanguage] || "English";
+    const isNonEnglish = contentLanguage !== "en";
+
+    try {
+        const openai = new OpenAI({ apiKey: openaiKey });
+
+        const languageInstruction = isNonEnglish
+            ? `\n\n**LANGUAGE REQUIREMENT:** ALL text content (name, shortDescription, neighborhoodOrArea, bestTimeToVisit) MUST be written in ${languageName}. JSON keys/field names stay in English. Only the string VALUES should be in ${languageName}.`
+            : '';
+
+        const prompt = `Generate a comprehensive list of ALL the must-see sights, attractions, and noteworthy places for ${destination}. Include as many as you can — aim for 20 to 30 sights.${languageInstruction}
+
 For each sight, provide:
 1. name: The official name of the sight${isNonEnglish ? ` (in ${languageName})` : ''}
 2. shortDescription: 1-2 sentences describing what makes it special${isNonEnglish ? ` (in ${languageName})` : ''}
@@ -105,36 +80,71 @@ Return ONLY valid JSON in this exact format:
 
 IMPORTANT: The latitude and longitude MUST be the exact coordinates of each sight's real-world location. Do NOT approximate or use neighborhood centers — use the precise coordinates of the actual building, monument, or entrance.`;
 
-            const completion = await openai.chat.completions.create({
-                messages: [
-                    { role: "system", content: `You are a travel expert providing informational recommendations. Return only valid JSON.${isNonEnglish ? ` All text content in the response must be written in ${languageName}. Keep JSON field names in English.` : ''}` },
-                    { role: "user", content: prompt },
-                ],
-                model: "gpt-5.4-2026-03-05",
-                response_format: { type: "json_object" },
+        const completion = await openai.chat.completions.create({
+            messages: [
+                { role: "system", content: `You are a travel expert providing informational recommendations. Return only valid JSON.${isNonEnglish ? ` All text content in the response must be written in ${languageName}. Keep JSON field names in English.` : ''}` },
+                { role: "user", content: prompt },
+            ],
+            model: "gpt-5.4-2026-03-05",
+            response_format: { type: "json_object" },
+        });
+
+        const content = completion.choices[0].message.content;
+        if (!content) return null;
+
+        const data = JSON.parse(content);
+        const sights: Sight[] = data.sights || [];
+        return sights.length > 0 ? sights : null;
+    } catch (error) {
+        console.error("Error generating sights:", error);
+        return null;
+    }
+}
+
+// Internal action to generate sights with AI
+export const generateSightsAction = internalAction({
+    args: {
+        tripId: v.id("trips"),
+        destination: v.string(),
+        language: v.optional(v.string()),
+    },
+    returns: v.null(),
+    handler: async (ctx, args) => {
+        const { tripId, destination, language } = args;
+        const contentLanguage = language || "en";
+        const isNonEnglish = contentLanguage !== "en";
+
+        // Include language in cache key so each language gets its own cached sights
+        const destinationKey = isNonEnglish
+            ? normalizeDestinationKey(destination) + `-${contentLanguage}`
+            : normalizeDestinationKey(destination);
+
+        console.log(`🏛️ Generating sights for: ${destination}`);
+
+        // Check if we have a recent cached full set for this destination
+        const existingSights = await ctx.runMutation(internal.sights.getCachedSights, { destinationKey });
+        if (existingSights && existingSights.sights.length >= 15) {
+            console.log(`Using cached sights for destination (${existingSights.sights.length} sights)`);
+            // Link to this trip
+            await ctx.runMutation(internal.sights.saveSights, {
+                tripId,
+                destinationKey,
+                sights: existingSights.sights,
             });
-            
-            const content = completion.choices[0].message.content;
-            if (!content) {
-                throw new Error("OpenAI returned empty response");
+            return null;
+        }
+
+        try {
+            const sights = await generateSightsWithAI(destination, contentLanguage);
+            if (!sights) {
+                throw new Error("Sight generation returned no results");
             }
-            
-            const data = JSON.parse(content);
-            const sights = data.sights || [];
-            
-            if (sights.length === 0) {
-                throw new Error("OpenAI returned no sights");
-            }
-            
             console.log(`✅ Generated ${sights.length} sights for ${destination}`);
-            
-            // Save all the sights (no limit)
             await ctx.runMutation(internal.sights.saveSights, {
                 tripId,
                 destinationKey,
                 sights,
             });
-            
         } catch (error) {
             console.error("Error generating sights:", error);
             // Use fallback
@@ -146,6 +156,42 @@ IMPORTANT: The latitude and longitude MUST be the exact coordinates of each sigh
             });
         }
         
+        return null;
+    },
+});
+
+/**
+ * Public action: ensure destination-level sights exist for a destination string
+ * (no trip needed). Used by the destination preview screen. Requires a valid
+ * auth token because it can incur OpenAI cost; results are cached 30 days by
+ * destination + language, so repeat opens are free. No-ops if already cached.
+ */
+export const generateDestinationSights = action({
+    args: { token: v.string(), destination: v.string(), language: v.optional(v.string()) },
+    returns: v.null(),
+    handler: async (ctx, args) => {
+        const user = await ctx.runQuery(api.users.validateToken, { token: args.token });
+        if (!user) throw new Error("Authentication required");
+
+        const contentLanguage = args.language || "en";
+        const isNonEnglish = contentLanguage !== "en";
+        const destinationKey = isNonEnglish
+            ? normalizeDestinationKey(args.destination) + `-${contentLanguage}`
+            : normalizeDestinationKey(args.destination);
+
+        // Already cached (from a trip or a previous preview open)? Nothing to do.
+        // Use the same read the client sees (recent + non-empty) so we don't
+        // regenerate over an existing fallback set.
+        const existing = await ctx.runQuery(api.sights.getDestinationSights, {
+            destination: args.destination,
+            language: contentLanguage,
+        });
+        if (existing && existing.sights.length >= 1) return null;
+
+        const sights = (await generateSightsWithAI(args.destination, contentLanguage))
+            ?? getFallbackSights(args.destination);
+
+        await ctx.runMutation(internal.sights.saveDestinationSights, { destinationKey, sights });
         return null;
     },
 });

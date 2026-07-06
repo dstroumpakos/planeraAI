@@ -215,7 +215,6 @@ export default function DestinationsScreen() {
                 params: {
                   destination: destination.destination,
                   avgBudget: destination.avgBudget.toString(),
-                  avgRating: destination.avgRating.toString(),
                   count: destination.count.toString(),
                 }
               })}
@@ -262,17 +261,11 @@ export default function DestinationsScreen() {
                 
                 {/* Content Overlay */}
                 <View style={styles.cardOverlay}>
-                  {/* Header: Title and Rating */}
+                  {/* Header: Title */}
                   <View style={styles.cardHeader}>
                     <Text style={styles.destinationName} numberOfLines={1}>
                       {destination.destination}
                     </Text>
-                    <View style={styles.ratingBadge}>
-                      <Ionicons name="star" size={14} color="#FFD700" />
-                      <Text style={styles.ratingText}>
-                        {destination.avgRating.toFixed(1)}
-                      </Text>
-                    </View>
                   </View>
 
                   {/* Stats Row */}
@@ -283,13 +276,17 @@ export default function DestinationsScreen() {
                         {destination.count} {destination.count === 1 ? t('destinations.trip') : t('destinations.trips')}
                       </Text>
                     </View>
-                    <View style={styles.statDivider} />
-                    <View style={styles.statItem}>
-                      <Ionicons name="wallet-outline" size={14} color="rgba(255,255,255,0.8)" />
-                      <Text style={styles.statText}>
-                        ~${Math.round(destination.avgBudget).toLocaleString()}
-                      </Text>
-                    </View>
+                    {destination.avgDailySpend != null && (
+                      <>
+                        <View style={styles.statDivider} />
+                        <View style={styles.statItem}>
+                          <Ionicons name="wallet-outline" size={14} color="rgba(255,255,255,0.8)" />
+                          <Text style={styles.statText}>
+                            €{Math.round(destination.avgDailySpend).toLocaleString()}{t('home.perDayShort')}
+                          </Text>
+                        </View>
+                      </>
+                    )}
                   </View>
 
                   {/* Interests */}
@@ -312,6 +309,11 @@ export default function DestinationsScreen() {
             </TouchableOpacity>
           ))
         )}
+        {filteredDestinations.some((d) => d.avgDailySpend != null) && (
+          <Text style={[styles.sourceNote, { color: colors.textMuted }]}>
+            {t('home.spendSource')}
+          </Text>
+        )}
       </ScrollView>
     </SafeAreaView>
     </>
@@ -321,6 +323,13 @@ export default function DestinationsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  sourceNote: {
+    fontSize: 11,
+    textAlign: "center",
+    marginTop: 8,
+    marginBottom: 24,
+    paddingHorizontal: 20,
   },
   loadingContainer: {
     flex: 1,
@@ -445,20 +454,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     flex: 1,
     marginRight: 12,
-    color: "#FFFFFF",
-  },
-  ratingBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    backgroundColor: "rgba(255,255,255,0.2)",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  ratingText: {
-    fontSize: 14,
-    fontWeight: "600",
     color: "#FFFFFF",
   },
   cardStats: {

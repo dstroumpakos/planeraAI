@@ -333,6 +333,66 @@ function generateTimeAwareGuidance(
     return { guidance, skipLastDay, firstDayStartTime, lastDayEndTime };
 }
 
+// Parse a clock string ("09:00", "9:00", "1:00 PM", "9h30") into minutes since
+// midnight. Returns null if unparseable — string comparison is unsafe because
+// "9:00" sorts after "13:00".
+function parseClockToMinutes(raw: any): number | null {
+    if (typeof raw !== "string") return null;
+    const m = raw.trim().match(/^(\d{1,2})[:h.](\d{2})\s*(am|pm)?/i);
+    if (!m) return null;
+    let h = parseInt(m[1], 10);
+    const min = parseInt(m[2], 10);
+    const ap = m[3]?.toLowerCase();
+    if (ap === "pm" && h < 12) h += 12;
+    if (ap === "am" && h === 12) h = 0;
+    if (isNaN(h) || isNaN(min) || h > 23 || min > 59) return null;
+    return h * 60 + min;
+}
+
+/**
+ * Hard-enforce flight timing on a single itinerary day so activities never fall
+ * outside the flight window: removes arrival-day (day 0) activities that start
+ * before the buffered landing time, and departure-day (final day) activities
+ * that start after the airport-transfer cutoff. Idempotent — safe to re-run.
+ */
+function enforceFlightBuffersOnDay(
+    day: any,
+    index: number,
+    firstDayStartTime: string | null,
+    lastDayEndTime: string | null,
+    effectiveTripDays: number,
+): void {
+    if (!day || !Array.isArray(day.activities)) return;
+
+    // Arrival day: drop anything before the buffered landing time.
+    if (index === 0 && firstDayStartTime) {
+        const bufferMin = parseClockToMinutes(firstDayStartTime);
+        if (bufferMin != null) {
+            const before = day.activities.length;
+            day.activities = day.activities.filter((a: any) => {
+                const mins = parseClockToMinutes(a.startTime || a.time);
+                return mins == null || mins >= bufferMin;
+            });
+            const removed = before - day.activities.length;
+            if (removed > 0) console.log(`Arrival buffer: removed ${removed} Day 1 activities before ${firstDayStartTime}`);
+        }
+    }
+
+    // Departure day: drop anything after the airport-transfer cutoff.
+    if (index === effectiveTripDays - 1 && lastDayEndTime) {
+        const cutoffMin = parseClockToMinutes(lastDayEndTime);
+        if (cutoffMin != null) {
+            const before = day.activities.length;
+            day.activities = day.activities.filter((a: any) => {
+                const mins = parseClockToMinutes(a.startTime || a.time);
+                return mins == null || mins <= cutoffMin;
+            });
+            const removed = before - day.activities.length;
+            if (removed > 0) console.log(`Departure buffer: removed ${removed} last-day activities after ${lastDayEndTime}`);
+        }
+    }
+}
+
 export const generate = internalAction({
     args: { 
         tripId: v.id("trips"), 
@@ -1077,6 +1137,16 @@ export const generate = internalAction({
             }
 
             let dayByDayItinerary: any[] = [];
+
+            // Flight-time buffers computed once at this scope so EVERY generation
+            // path (streaming, OpenAI fallbacks, and the no-OpenAI basic itinerary)
+            // can enforce them — activities must never fall outside the flight
+            // window. generateTimeAwareGuidance is pure, so this mirrors the inner
+            // computation used for the prompt.
+            const flightBufferGuidance = generateTimeAwareGuidance(arrivalTime, departureTime, trip.startDate, trip.endDate);
+            const bufferTripDays = Math.max(1, Math.ceil((trip.endDate - trip.startDate) / (24 * 60 * 60 * 1000)));
+            const bufferEffectiveTripDays = flightBufferGuidance.skipLastDay ? bufferTripDays - 1 : bufferTripDays;
+
             if (hasOpenAIKey) {
                 try {
                     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
@@ -1386,19 +1456,17 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
 
                     dayByDayItinerary = [];
 
-                    // Remove Day 1 activities scheduled before the buffered arrival time.
-                    const applyArrivalBuffer = (day: any, index: number) => {
-                        if (index !== 0) return;
-                        if (!timeAwareGuidance.firstDayStartTime || !day || !Array.isArray(day.activities)) return;
-                        const bufferTime = timeAwareGuidance.firstDayStartTime;
-                        const before = day.activities.length;
-                        day.activities = day.activities.filter((a: any) => {
-                            const t = a.startTime || a.time;
-                            if (!t) return true;
-                            return t >= bufferTime;
-                        });
-                        const removed = before - day.activities.length;
-                        if (removed > 0) console.log(`Arrival buffer enforced: removed ${removed} Day 1 activities before ${bufferTime}`);
+                    // Enforce flight timing on a day as it streams in (arrival day
+                    // must start after landing; departure day must end before the
+                    // airport-transfer cutoff). See enforceFlightBuffersOnDay.
+                    const applyFlightBuffers = (day: any, index: number) => {
+                        enforceFlightBuffersOnDay(
+                            day,
+                            index,
+                            timeAwareGuidance.firstDayStartTime,
+                            timeAwareGuidance.lastDayEndTime,
+                            effectiveTripDays,
+                        );
                     };
 
                     // Tolerant single-line parser: ignores fences, wrappers and partial
@@ -1418,7 +1486,7 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                     // Append one parsed day to memory + DB so it appears on screen live.
                     const appendDay = async (day: any) => {
                         day.day = dayByDayItinerary.length + 1;
-                        applyArrivalBuffer(day, dayByDayItinerary.length);
+                        applyFlightBuffers(day, dayByDayItinerary.length);
                         dayByDayItinerary.push(day);
                         try {
                             await ctx.runMutation(internal.trips.appendItineraryDay, {
@@ -1518,6 +1586,22 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
             } else {
                 console.warn("⚠️ OpenAI not configured, using basic itinerary");
                 dayByDayItinerary = generateBasicItinerary(trip, activities, restaurants);
+            }
+
+            // Final safety net: enforce flight-time buffers on every day regardless
+            // of how the itinerary was produced (streaming applies this per-day, but
+            // the basic-itinerary fallbacks bypass appendDay). Idempotent — safe to
+            // re-run over already-buffered streamed days.
+            if (flightBufferGuidance.firstDayStartTime || flightBufferGuidance.lastDayEndTime) {
+                dayByDayItinerary.forEach((day: any, index: number) =>
+                    enforceFlightBuffersOnDay(
+                        day,
+                        index,
+                        flightBufferGuidance.firstDayStartTime,
+                        flightBufferGuidance.lastDayEndTime,
+                        bufferEffectiveTripDays,
+                    ),
+                );
             }
 
             // Assemble the non-day parts of the itinerary and finalize the base

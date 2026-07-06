@@ -5,6 +5,7 @@ import { internal } from "./_generated/api";
 import { isSubscriptionActiveWithGrace } from "./helpers/subscription";
 import { getDistanceMeters } from "./helpers/geo";
 import { assignActivityIds, dedupeVenues, resequenceDayTimes, reassignTimeSlots } from "./helpers/itinerary";
+import { getAvgDailySpend, getAvgStay, SPEND_CURRENCY } from "./destinationSpend";
 
 export const create = authMutation({
     args: {
@@ -1922,7 +1923,11 @@ export const getTrendingDestinations = query({
         destination: v.string(),
         count: v.float64(),
         avgBudget: v.float64(),
-        avgRating: v.float64(),
+        // Curated average daily spend per person for the destination (see
+        // destinationSpend.ts). Null when we have no figure for it.
+        avgDailySpend: v.union(v.number(), v.null()),
+        spendCurrency: v.string(),
+        spendLevel: v.union(v.literal("city"), v.literal("country"), v.null()),
         interests: v.array(v.string()),
     })),
     handler: async (ctx: any) => {
@@ -1947,7 +1952,6 @@ export const getTrendingDestinations = query({
             count: number;
             budgets: number[];
             allInterests: string[];
-            ratings: number[];
         }> = {};
 
         recentTrips.forEach((trip: any) => {
@@ -1956,16 +1960,15 @@ export const getTrendingDestinations = query({
                     count: 0,
                     budgets: [],
                     allInterests: [],
-                    ratings: [],
                 };
             }
 
             destinationMap[trip.destination].count += 1;
-            
+
              // Get budget value - prefer budgetTotal, then budget
             const budgetValue = trip.budgetTotal ?? trip.budget;
-            const budgetNum = typeof budgetValue === "string" 
-                ? parseFloat(budgetValue) 
+            const budgetNum = typeof budgetValue === "string"
+                ? parseFloat(budgetValue)
                 : budgetValue;
             if (budgetNum !== undefined && !isNaN(budgetNum)) {
                 destinationMap[trip.destination].budgets.push(budgetNum);
@@ -1973,28 +1976,55 @@ export const getTrendingDestinations = query({
 
             // Collect interests
             destinationMap[trip.destination].allInterests.push(...trip.interests);
-            
-            // Add a default rating (you can enhance this later with actual ratings)
-            destinationMap[trip.destination].ratings.push(4.5 + Math.random() * 0.5);
         });
 
         // Convert to array and sort by count
         const trending = Object.entries(destinationMap)
-            .map(([destination, data]) => ({
-                destination,
-                count: data.count,
-                avgBudget: data.budgets.length > 0 
-                    ? data.budgets.reduce((a, b) => a + b, 0) / data.budgets.length 
-                    : 0,
-                avgRating: data.ratings.length > 0
-                    ? data.ratings.reduce((a, b) => a + b, 0) / data.ratings.length
-                    : 4.5,
-                interests: [...new Set(data.allInterests)].slice(0, 3), // Top 3 unique interests
-            }))
+            .map(([destination, data]) => {
+                const spend = getAvgDailySpend(destination);
+                return {
+                    destination,
+                    count: data.count,
+                    avgBudget: data.budgets.length > 0
+                        ? data.budgets.reduce((a, b) => a + b, 0) / data.budgets.length
+                        : 0,
+                    avgDailySpend: spend ? spend.amount : null,
+                    spendCurrency: SPEND_CURRENCY,
+                    spendLevel: spend ? spend.level : null,
+                    interests: [...new Set(data.allInterests)].slice(0, 3), // Top 3 unique interests
+                };
+            })
             .sort((a, b) => b.count - a.count)
             .slice(0, 5); // Return top 5
 
         return trending;
+    },
+});
+
+/**
+ * Curated facts for a single destination (avg daily spend + typical stay
+ * length), resolved from the static datasets in destinationSpend.ts. Used by
+ * the destination preview screen. Fields are null when we have no figure.
+ */
+export const getDestinationFacts = query({
+    args: { destination: v.string() },
+    returns: v.object({
+        avgDailySpend: v.union(v.number(), v.null()),
+        spendCurrency: v.string(),
+        spendLevel: v.union(v.literal("city"), v.literal("country"), v.null()),
+        avgStayDays: v.union(v.number(), v.null()),
+        stayLevel: v.union(v.literal("city"), v.literal("country"), v.null()),
+    }),
+    handler: async (_ctx: any, args: any) => {
+        const spend = getAvgDailySpend(args.destination);
+        const stay = getAvgStay(args.destination);
+        return {
+            avgDailySpend: spend ? spend.amount : null,
+            spendCurrency: SPEND_CURRENCY,
+            spendLevel: spend ? spend.level : null,
+            avgStayDays: stay ? stay.days : null,
+            stayLevel: stay ? stay.level : null,
+        };
     },
 });
 
@@ -2004,7 +2034,9 @@ export const getAllDestinations = query({
         destination: v.string(),
         count: v.float64(),
         avgBudget: v.float64(),
-        avgRating: v.float64(),
+        avgDailySpend: v.union(v.number(), v.null()),
+        spendCurrency: v.string(),
+        spendLevel: v.union(v.literal("city"), v.literal("country"), v.null()),
         interests: v.array(v.string()),
     })),
     handler: async (ctx: any) => {
@@ -2046,28 +2078,26 @@ export const getAllDestinations = query({
             count: number;
             budgets: number[];
             allInterests: string[];
-            ratings: number[];
         }> = {};
 
         completedTrips.forEach((trip: any) => {
             const normalizedDest = normalizeDestination(trip.destination);
-            
+
             if (!destinationMap[normalizedDest]) {
                 destinationMap[normalizedDest] = {
                     displayName: normalizedDest,
                     count: 0,
                     budgets: [],
                     allInterests: [],
-                    ratings: [],
                 };
             }
 
             destinationMap[normalizedDest].count += 1;
-            
+
         // Get budget value - prefer budgetTotal, then budget
             const budgetValue = trip.budgetTotal ?? trip.budget;
-            const budgetNum = typeof budgetValue === "string" 
-                ? parseFloat(budgetValue) 
+            const budgetNum = typeof budgetValue === "string"
+                ? parseFloat(budgetValue)
                 : budgetValue;
             if (budgetNum !== undefined && !isNaN(budgetNum)) {
                 destinationMap[normalizedDest].budgets.push(budgetNum);
@@ -2075,24 +2105,24 @@ export const getAllDestinations = query({
 
             // Collect interests
             destinationMap[normalizedDest].allInterests.push(...trip.interests);
-            
-            // Add a default rating
-            destinationMap[normalizedDest].ratings.push(4.5 + Math.random() * 0.5);
         });
 
         // Convert to array and sort by count (most popular first)
         const allDestinations = Object.values(destinationMap)
-            .map((data) => ({
-                destination: data.displayName,
-                count: data.count,
-                avgBudget: data.budgets.length > 0 
-                    ? data.budgets.reduce((a, b) => a + b, 0) / data.budgets.length 
-                    : 0,
-                avgRating: data.ratings.length > 0
-                    ? data.ratings.reduce((a, b) => a + b, 0) / data.ratings.length
-                    : 4.5,
-                interests: [...new Set(data.allInterests)].slice(0, 3),
-            }))
+            .map((data) => {
+                const spend = getAvgDailySpend(data.displayName);
+                return {
+                    destination: data.displayName,
+                    count: data.count,
+                    avgBudget: data.budgets.length > 0
+                        ? data.budgets.reduce((a, b) => a + b, 0) / data.budgets.length
+                        : 0,
+                    avgDailySpend: spend ? spend.amount : null,
+                    spendCurrency: SPEND_CURRENCY,
+                    spendLevel: spend ? spend.level : null,
+                    interests: [...new Set(data.allInterests)].slice(0, 3),
+                };
+            })
             .sort((a, b) => b.count - a.count);
 
         return allDestinations;
