@@ -38,11 +38,14 @@ export const getTopSights = query({
         if (!trip) return null;
         
         const destinationKey = normalizeDestinationKey(trip.destination);
+        // Newest matching row wins — see getDestinationSights for why .first()
+        // (oldest) can be shadowed by a stale row sharing this key.
         const cachedSights = await ctx.db
             .query("destinationSights")
             .withIndex("by_destination_key", (q) => q.eq("destinationKey", destinationKey))
+            .order("desc")
             .first();
-        
+
         // Return cached sights if they exist, are recent (30 days), and have a full set (15+)
         if (cachedSights) {
             const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
@@ -112,11 +115,14 @@ export const getCachedSights = internalMutation({
         })
     ),
     handler: async (ctx, args) => {
+        // Newest matching row wins — see getDestinationSights for why .first()
+        // (oldest) can be shadowed by a stale row sharing this key.
         const cached = await ctx.db
             .query("destinationSights")
             .withIndex("by_destination_key", (q) => q.eq("destinationKey", args.destinationKey))
+            .order("desc")
             .first();
-        
+
         if (!cached) return null;
         
         // Only use cache if recent (30 days) AND has a full set of sights (15+)
@@ -177,9 +183,17 @@ export const getDestinationSights = query({
     returns: v.union(v.null(), v.object({ sights: v.array(sightValidator) })),
     handler: async (ctx, args) => {
         const destinationKey = destinationKeyWithLang(args.destination, args.language);
+        // Read the NEWEST row for this key, not the oldest. Trip-level rows
+        // (saveSights) and destination-level rows (saveDestinationSights) share
+        // the same key space, and saveDestinationSights only prunes its own
+        // (tripId-less) rows. A plain .first() returns the oldest match, so a
+        // stale trip-linked row would shadow every freshly generated set and
+        // this query would return null forever. .order("desc") picks the fresh
+        // insert instead.
         const cached = await ctx.db
             .query("destinationSights")
             .withIndex("by_destination_key", (q) => q.eq("destinationKey", destinationKey))
+            .order("desc")
             .first();
         if (!cached) return null;
 

@@ -197,10 +197,11 @@
     "popularDestination": "Δημοφιλής Προορισμός",
     "estTotal": "Εκτ. σύνολο",
     "basedOnBudget": "Βάσει του προϋπολογισμού σας",
-    "avgDailySpend": "Μέσο ημερ. κόστος",
-    "perDayPerPerson": "ανά άτομο / ημέρα",
-    "perDayShort": "/ημέρα",
-    "spendSource": "Πηγή: Eurostat, Numbeo & Budget Your Trip",
+    "avgTripSpend": "Μέση δαπάνη / ταξίδι",
+    "perPersonTrip": "ανά άτομο / ταξίδι",
+    "perTripShort": "/ταξίδι",
+    "spendSource": "Πηγή: UN Tourism (UNWTO) & εσωτερικές εκτιμήσεις",
+    "spendSourceEstimate": "Κατά προσέγγιση εκτιμήσεις",
     "pleaseLogIn": "Παρακαλώ συνδεθείτε για να δείτε τα ταξίδια σας"
   },
   "lowFare": {

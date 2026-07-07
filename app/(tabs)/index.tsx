@@ -576,11 +576,11 @@ export default function HomeScreen() {
                         <Text style={styles.trendingCountry}>{t("home.popularDestination")}</Text>
                       </View>
                       <View style={styles.trendingFooter}>
-                        {destination.avgDailySpend != null ? (
+                        {destination.avgTripSpend != null ? (
                           <View>
-                            <Text style={[styles.trendingPriceLabel, { color: "#FFFFFF" }]}>{t("home.avgDailySpend")}</Text>
-                            <Text style={[styles.trendingPrice, { color: colors.primary }]}>€{Math.round(destination.avgDailySpend)}</Text>
-                            <Text style={[styles.trendingPriceSubtitle, { color: "#FFFFFF" }]}>{t("home.perDayPerPerson")}</Text>
+                            <Text style={[styles.trendingPriceLabel, { color: "#FFFFFF" }]}>{t("home.avgTripSpend")}</Text>
+                            <Text style={[styles.trendingPrice, { color: colors.primary }]}>€{Math.round(destination.avgTripSpend)}</Text>
+                            <Text style={[styles.trendingPriceSubtitle, { color: "#FFFFFF" }]}>{t("home.perPersonTrip")}</Text>
                           </View>
                         ) : (
                           <View />
@@ -594,9 +594,11 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               ))}
             </ScrollView>
-            {trendingDestinations.some((d: any) => d.avgDailySpend != null) && (
+            {trendingDestinations.some((d: any) => d.avgTripSpend != null) && (
               <Text style={[styles.trendingSource, { color: colors.textMuted }]}>
-                {t("home.spendSource")}
+                {trendingDestinations.some((d: any) => d.spendSource === "unwto")
+                  ? t("home.spendSource")
+                  : t("home.spendSourceEstimate")}
               </Text>
             )}
           </View>

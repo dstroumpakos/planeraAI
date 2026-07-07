@@ -1,17 +1,21 @@
 /**
- * Curated average daily tourist spend per destination.
+ * FALLBACK estimates of average daily tourist spend per destination.
  *
- * These figures approximate what a mid-range traveler spends *on the ground*
- * per person per day — lodging + food + local transport + activities — and
- * EXCLUDE international airfare. They are a curated, static snapshot compiled
- * from public sources (Eurostat tourism-expenditure statistics, `tour_dem_*`,
- * for country-level figures, plus per-city cost indices such as Numbeo and
- * Budget Your Trip). All values are in EUR.
+ * IMPORTANT — provenance: these numbers were authored internally as informed
+ * approximations. They are NOT copied from, or verified against, any specific
+ * third-party dataset. Do not label them as Eurostat/Numbeo/etc. data.
  *
- * Why static: this module is imported by a Convex *query* (`getTrendingDestinations`),
- * and queries cannot make network calls. Refresh these numbers periodically
- * (roughly once a year, when Eurostat publishes new expenditure data) rather
- * than fetching live.
+ * Real per-country figures now come from UN Tourism (UNWTO) — see
+ * convex/unwtoCountryStats.ts (bundled from the UNWTO bulk dataset), and the
+ * trip queries prefer that real data (spendSource: "unwto"). This module is only
+ * the FALLBACK for destinations UNWTO doesn't cover (or city-only strings with
+ * no country), surfaced with spendSource: "estimate". Note: resolveSpendStay in
+ * trips.ts now reports spend PER TRIP; the per-day values here are multiplied by
+ * a typical stay to derive an estimated per-trip figure.
+ *
+ * Figures approximate what a mid-range traveler spends on the ground per person
+ * per day (lodging + food + local transport + activities), excluding
+ * international airfare. All values are in EUR.
  */
 
 import { normalizeDestinationKey } from "./partnerApiAuth";

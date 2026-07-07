@@ -6,6 +6,54 @@ import { isSubscriptionActiveWithGrace } from "./helpers/subscription";
 import { getDistanceMeters } from "./helpers/geo";
 import { assignActivityIds, dedupeVenues, resequenceDayTimes, reassignTimeSlots } from "./helpers/itinerary";
 import { getAvgDailySpend, getAvgStay, SPEND_CURRENCY } from "./destinationSpend";
+import { normalizeDestinationKey } from "./partnerApiAuth";
+import { UNWTO_COUNTRY_STATS } from "./unwtoCountryStats";
+
+/**
+ * Resolve a destination's average spend PER TRIP (per person) + typical stay,
+ * preferring REAL UN Tourism (UNWTO) country figures. UNWTO covers ~180
+ * countries worldwide; for anything it doesn't have (and city-only strings with
+ * no country) we fall back to the curated estimates in destinationSpend.ts,
+ * deriving a per-trip figure from the per-day estimate × typical stay.
+ * `spendSource` records which was used ("unwto" | "estimate").
+ */
+function resolveSpendStay(destination: string): {
+    avgTripSpend: number | null;
+    spendCurrency: string;
+    spendLevel: "city" | "country" | null;
+    avgStayDays: number | null;
+    stayLevel: "city" | "country" | null;
+    spendSource: "unwto" | "estimate" | null;
+} {
+    const segments = destination.split(",").map((s) => s.trim()).filter(Boolean);
+    const countryToken = segments.length > 1 ? normalizeDestinationKey(segments[segments.length - 1]) : "";
+    const unwto = countryToken ? UNWTO_COUNTRY_STATS[countryToken] : undefined;
+
+    if (unwto) {
+        const stay = unwto.stayDays ?? getAvgStay(destination)?.days ?? null;
+        return {
+            avgTripSpend: unwto.spendPerTripEUR,
+            spendCurrency: SPEND_CURRENCY,
+            spendLevel: "country",
+            avgStayDays: stay,
+            stayLevel: stay != null ? "country" : null,
+            spendSource: "unwto",
+        };
+    }
+
+    // Fallback: curated per-day estimate × typical stay → an estimated per-trip.
+    const spend = getAvgDailySpend(destination);
+    const stay = getAvgStay(destination);
+    const stayDays = stay ? stay.days : null;
+    return {
+        avgTripSpend: spend ? Math.round(spend.amount * (stayDays ?? 4)) : null,
+        spendCurrency: SPEND_CURRENCY,
+        spendLevel: spend ? spend.level : null,
+        avgStayDays: stayDays,
+        stayLevel: stay ? stay.level : null,
+        spendSource: spend ? "estimate" : null,
+    };
+}
 
 export const create = authMutation({
     args: {
@@ -1925,9 +1973,10 @@ export const getTrendingDestinations = query({
         avgBudget: v.float64(),
         // Curated average daily spend per person for the destination (see
         // destinationSpend.ts). Null when we have no figure for it.
-        avgDailySpend: v.union(v.number(), v.null()),
+        avgTripSpend: v.union(v.number(), v.null()),
         spendCurrency: v.string(),
         spendLevel: v.union(v.literal("city"), v.literal("country"), v.null()),
+        spendSource: v.union(v.literal("unwto"), v.literal("estimate"), v.null()),
         interests: v.array(v.string()),
     })),
     handler: async (ctx: any) => {
@@ -1981,16 +2030,17 @@ export const getTrendingDestinations = query({
         // Convert to array and sort by count
         const trending = Object.entries(destinationMap)
             .map(([destination, data]) => {
-                const spend = getAvgDailySpend(destination);
+                const s = resolveSpendStay(destination);
                 return {
                     destination,
                     count: data.count,
                     avgBudget: data.budgets.length > 0
                         ? data.budgets.reduce((a, b) => a + b, 0) / data.budgets.length
                         : 0,
-                    avgDailySpend: spend ? spend.amount : null,
-                    spendCurrency: SPEND_CURRENCY,
-                    spendLevel: spend ? spend.level : null,
+                    avgTripSpend: s.avgTripSpend,
+                    spendCurrency: s.spendCurrency,
+                    spendLevel: s.spendLevel,
+                    spendSource: s.spendSource,
                     interests: [...new Set(data.allInterests)].slice(0, 3), // Top 3 unique interests
                 };
             })
@@ -2009,21 +2059,22 @@ export const getTrendingDestinations = query({
 export const getDestinationFacts = query({
     args: { destination: v.string() },
     returns: v.object({
-        avgDailySpend: v.union(v.number(), v.null()),
+        avgTripSpend: v.union(v.number(), v.null()),
         spendCurrency: v.string(),
         spendLevel: v.union(v.literal("city"), v.literal("country"), v.null()),
+        spendSource: v.union(v.literal("unwto"), v.literal("estimate"), v.null()),
         avgStayDays: v.union(v.number(), v.null()),
         stayLevel: v.union(v.literal("city"), v.literal("country"), v.null()),
     }),
-    handler: async (_ctx: any, args: any) => {
-        const spend = getAvgDailySpend(args.destination);
-        const stay = getAvgStay(args.destination);
+    handler: async (ctx: any, args: any) => {
+        const s = resolveSpendStay(args.destination);
         return {
-            avgDailySpend: spend ? spend.amount : null,
-            spendCurrency: SPEND_CURRENCY,
-            spendLevel: spend ? spend.level : null,
-            avgStayDays: stay ? stay.days : null,
-            stayLevel: stay ? stay.level : null,
+            avgTripSpend: s.avgTripSpend,
+            spendCurrency: s.spendCurrency,
+            spendLevel: s.spendLevel,
+            spendSource: s.spendSource,
+            avgStayDays: s.avgStayDays,
+            stayLevel: s.stayLevel,
         };
     },
 });
@@ -2034,9 +2085,10 @@ export const getAllDestinations = query({
         destination: v.string(),
         count: v.float64(),
         avgBudget: v.float64(),
-        avgDailySpend: v.union(v.number(), v.null()),
+        avgTripSpend: v.union(v.number(), v.null()),
         spendCurrency: v.string(),
         spendLevel: v.union(v.literal("city"), v.literal("country"), v.null()),
+        spendSource: v.union(v.literal("unwto"), v.literal("estimate"), v.null()),
         interests: v.array(v.string()),
     })),
     handler: async (ctx: any) => {
@@ -2108,18 +2160,21 @@ export const getAllDestinations = query({
         });
 
         // Convert to array and sort by count (most popular first)
+        // Note: display names here are city-only (country stripped), so UNWTO
+        // (country-keyed) rarely matches — most resolve to curated estimates.
         const allDestinations = Object.values(destinationMap)
             .map((data) => {
-                const spend = getAvgDailySpend(data.displayName);
+                const s = resolveSpendStay(data.displayName);
                 return {
                     destination: data.displayName,
                     count: data.count,
                     avgBudget: data.budgets.length > 0
                         ? data.budgets.reduce((a, b) => a + b, 0) / data.budgets.length
                         : 0,
-                    avgDailySpend: spend ? spend.amount : null,
-                    spendCurrency: SPEND_CURRENCY,
-                    spendLevel: spend ? spend.level : null,
+                    avgTripSpend: s.avgTripSpend,
+                    spendCurrency: s.spendCurrency,
+                    spendLevel: s.spendLevel,
+                    spendSource: s.spendSource,
                     interests: [...new Set(data.allInterests)].slice(0, 3),
                 };
             })

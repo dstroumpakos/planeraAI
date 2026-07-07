@@ -84,6 +84,7 @@ import type * as tripCollaborators from "../tripCollaborators.js";
 import type * as tripShareLinks from "../tripShareLinks.js";
 import type * as trips from "../trips.js";
 import type * as tripsActions from "../tripsActions.js";
+import type * as unwtoCountryStats from "../unwtoCountryStats.js";
 import type * as users from "../users.js";
 import type * as watchedDestinations from "../watchedDestinations.js";
 import type * as wishlist from "../wishlist.js";
@@ -172,6 +173,7 @@ declare const fullApi: ApiFromModules<{
   tripShareLinks: typeof tripShareLinks;
   trips: typeof trips;
   tripsActions: typeof tripsActions;
+  unwtoCountryStats: typeof unwtoCountryStats;
   users: typeof users;
   watchedDestinations: typeof watchedDestinations;
   wishlist: typeof wishlist;

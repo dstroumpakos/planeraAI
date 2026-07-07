@@ -276,13 +276,13 @@ export default function DestinationsScreen() {
                         {destination.count} {destination.count === 1 ? t('destinations.trip') : t('destinations.trips')}
                       </Text>
                     </View>
-                    {destination.avgDailySpend != null && (
+                    {destination.avgTripSpend != null && (
                       <>
                         <View style={styles.statDivider} />
                         <View style={styles.statItem}>
                           <Ionicons name="wallet-outline" size={14} color="rgba(255,255,255,0.8)" />
                           <Text style={styles.statText}>
-                            €{Math.round(destination.avgDailySpend).toLocaleString()}{t('home.perDayShort')}
+                            €{Math.round(destination.avgTripSpend).toLocaleString()}{t('home.perTripShort')}
                           </Text>
                         </View>
                       </>
@@ -309,9 +309,11 @@ export default function DestinationsScreen() {
             </TouchableOpacity>
           ))
         )}
-        {filteredDestinations.some((d) => d.avgDailySpend != null) && (
+        {filteredDestinations.some((d) => d.avgTripSpend != null) && (
           <Text style={[styles.sourceNote, { color: colors.textMuted }]}>
-            {t('home.spendSource')}
+            {filteredDestinations.some((d) => d.spendSource === "unwto")
+              ? t('home.spendSource')
+              : t('home.spendSourceEstimate')}
           </Text>
         )}
       </ScrollView>

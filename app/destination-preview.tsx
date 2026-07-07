@@ -690,11 +690,11 @@ export default function DestinationPreviewScreen() {
                             <Text style={styles.statLabel}>{t('destinationPreview.tripsLabel')}</Text>
                         </View>
                         <View style={styles.statDivider} />
-                        {facts?.avgDailySpend != null ? (
+                        {facts?.avgTripSpend != null ? (
                             <View style={styles.statItem}>
                                 <Ionicons name="wallet" size={16} color={colors.primary} />
-                                <Text style={styles.statValue}>€{Math.round(facts.avgDailySpend)}</Text>
-                                <Text style={styles.statLabel}>{t('home.perDayShort')}</Text>
+                                <Text style={styles.statValue}>€{Math.round(facts.avgTripSpend)}</Text>
+                                <Text style={styles.statLabel}>{t('home.perTripShort')}</Text>
                             </View>
                         ) : (
                             <View style={styles.statItem}>
@@ -886,8 +886,8 @@ export default function DestinationPreviewScreen() {
                             <View style={styles.ctaPriceRow}>
                                 <Text style={[styles.ctaLabel, { color: colors.textMuted }]}>{t('destinationPreview.from')}</Text>
                                 <Text style={[styles.ctaPrice, { color: colors.text }]}>
-                                    €{facts?.avgDailySpend != null && facts?.avgStayDays != null
-                                        ? Math.round(facts.avgDailySpend * facts.avgStayDays)
+                                    €{facts?.avgTripSpend != null
+                                        ? Math.round(facts.avgTripSpend)
                                         : Math.round(avgBudget * 0.7)}
                                 </Text>
                                 <Text style={[styles.ctaPerPerson, { color: colors.textMuted }]}>{t('destinationPreview.perPerson')}</Text>

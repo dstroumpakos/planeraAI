@@ -197,10 +197,11 @@
     "popularDestination": "Destino Popular",
     "estTotal": "Total est.",
     "basedOnBudget": "Basado en tu presupuesto",
-    "avgDailySpend": "Gasto diario medio",
-    "perDayPerPerson": "por persona / día",
-    "perDayShort": "/día",
-    "spendSource": "Fuente: Eurostat, Numbeo y Budget Your Trip",
+    "avgTripSpend": "Gasto medio / viaje",
+    "perPersonTrip": "por persona / viaje",
+    "perTripShort": "/viaje",
+    "spendSource": "Fuente: UN Tourism (UNWTO) y estimaciones internas",
+    "spendSourceEstimate": "Estimaciones aproximadas",
     "pleaseLogIn": "Por favor inicia sesión para ver tus viajes"
   },
   "lowFare": {

@@ -197,10 +197,11 @@
     "popularDestination": "وجهة شائعة",
     "estTotal": "الإجمالي التقديري",
     "basedOnBudget": "بناءً على ميزانيتك",
-    "avgDailySpend": "متوسط الإنفاق اليومي",
-    "perDayPerPerson": "للشخص / يوميًا",
-    "perDayShort": "/يوم",
-    "spendSource": "المصدر: Eurostat وNumbeo وBudget Your Trip",
+    "avgTripSpend": "متوسط الإنفاق / رحلة",
+    "perPersonTrip": "للشخص / رحلة",
+    "perTripShort": "/رحلة",
+    "spendSource": "المصدر: UN Tourism (UNWTO) وتقديرات داخلية",
+    "spendSourceEstimate": "تقديرات تقريبية",
     "pleaseLogIn": "يرجى تسجيل الدخول لمشاهدة رحلاتك"
   },
   "lowFare": {
