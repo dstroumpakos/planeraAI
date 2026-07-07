@@ -232,3 +232,32 @@ export const AIRPORTS = [
     { code: "NAN", name: "Nadi International Airport", city: "Nadi", country: "Fiji" },
     { code: "PPT", name: "Faa'a International Airport", city: "Papeete", country: "French Polynesia" },
 ];
+
+// Country name (as stored above) → ISO 3166-1 alpha-2 code, used as SerpApi's
+// `gl` param so booking providers localize to the departure market (e.g.
+// European departures land on EUR provider pages).
+const COUNTRY_ISO: Record<string, string> = {
+  USA: "us", "United States": "us", UK: "gb", "United Kingdom": "gb",
+  Ireland: "ie", France: "fr", Spain: "es", Portugal: "pt", Italy: "it",
+  Germany: "de", Netherlands: "nl", Belgium: "be", Luxembourg: "lu",
+  Switzerland: "ch", Austria: "at", Denmark: "dk", Norway: "no", Sweden: "se",
+  Finland: "fi", Iceland: "is", Greece: "gr", Poland: "pl", "Czech Republic": "cz",
+  Czechia: "cz", Hungary: "hu", Romania: "ro", Bulgaria: "bg", Croatia: "hr",
+  Slovenia: "si", Slovakia: "sk", Estonia: "ee", Latvia: "lv", Lithuania: "lt",
+  Malta: "mt", Cyprus: "cy", Turkey: "tr", Russia: "ru", Ukraine: "ua",
+  Canada: "ca", Mexico: "mx", Brazil: "br", Argentina: "ar", Chile: "cl",
+  Colombia: "co", Peru: "pe", Panama: "pa", UAE: "ae", Qatar: "qa",
+  "Saudi Arabia": "sa", Israel: "il", Egypt: "eg", Morocco: "ma",
+  "South Africa": "za", Nigeria: "ng", Kenya: "ke", India: "in", China: "cn",
+  "Hong Kong": "hk", Japan: "jp", "South Korea": "kr", Taiwan: "tw",
+  Singapore: "sg", Malaysia: "my", Indonesia: "id", Thailand: "th",
+  Vietnam: "vn", Philippines: "ph", Australia: "au", "New Zealand": "nz",
+  Fiji: "fj", "French Polynesia": "pf",
+};
+
+/** SerpApi `gl` for an IATA code, via its airport's country. */
+export function glForIata(iata?: string): string | undefined {
+  if (!iata) return undefined;
+  const airport = AIRPORTS.find((a) => a.code === iata.toUpperCase());
+  return airport ? COUNTRY_ISO[airport.country] : undefined;
+}

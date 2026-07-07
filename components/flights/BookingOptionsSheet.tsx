@@ -13,6 +13,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "@/lib/ThemeContext";
+import { glForIata } from "@/lib/airports";
 import { useFlightBookingOptions } from "@/hooks/useFlightBookingOptions";
 import type { NormalizedFlightOption } from "@/types/flights";
 import { FlightResultCard } from "./FlightResultCard";
@@ -64,6 +65,7 @@ export const BookingOptionsSheet: React.FC<Props> = ({
       getBookingOptions({
         bookingToken: flightOption.bookingToken,
         currency,
+        gl: glForIata(searchContext?.departureId),
         departureId: searchContext?.departureId,
         arrivalId: searchContext?.arrivalId,
         outboundDate: searchContext?.outboundDate,
