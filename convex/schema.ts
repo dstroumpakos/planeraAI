@@ -1169,6 +1169,16 @@ export default defineSchema({
         .index("by_cacheKey", ["cacheKey"])
         .index("by_expires", ["expiresAt"]),
 
+    // Fixed-window rate limit for user-facing flight searches. Guards the
+    // (paid) SerpApi quota against abuse — especially anonymous public searches
+    // from the marketing widget. One row per user; the window resets lazily.
+    flightSearchRateLimits: defineTable({
+        userId: v.string(),
+        windowStart: v.float64(),
+        count: v.float64(),
+    })
+        .index("by_user", ["userId"]),
+
     // Cache for AI-resolved IATA codes. When the static destination→airport
     // map can't resolve a city, we ask OpenAI for the nearest airport's IATA
     // code and persist it here so the same place never re-hits OpenAI.

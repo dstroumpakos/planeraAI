@@ -78,6 +78,46 @@ export const purgeExpired = internalMutation({
   },
 });
 
+/**
+ * Fixed-window per-user rate limit for user-facing flight searches. Protects
+ * the paid SerpApi quota from abuse (notably anonymous public searches). One
+ * row per user; the window resets lazily on the first call after it lapses.
+ */
+export const checkRateLimit = internalMutation({
+  args: {
+    userId: v.string(),
+    limit: v.float64(),
+    windowMs: v.float64(),
+  },
+  handler: async (ctx, { userId, limit, windowMs }) => {
+    const now = Date.now();
+    const row = await ctx.db
+      .query("flightSearchRateLimits")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .first();
+
+    if (!row || now - row.windowStart >= windowMs) {
+      if (row) {
+        await ctx.db.patch(row._id, { windowStart: now, count: 1 });
+      } else {
+        await ctx.db.insert("flightSearchRateLimits", {
+          userId,
+          windowStart: now,
+          count: 1,
+        });
+      }
+      return { allowed: true as const };
+    }
+
+    if (row.count >= limit) {
+      return { allowed: false as const };
+    }
+
+    await ctx.db.patch(row._id, { count: row.count + 1 });
+    return { allowed: true as const };
+  },
+});
+
 // ============================ IATA resolution cache ==========================
 // Persists AI-resolved IATA codes keyed by normalized city name so the same
 // destination never re-hits OpenAI. Invoked from the Node action in

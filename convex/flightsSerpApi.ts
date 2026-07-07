@@ -343,6 +343,18 @@ export const searchFlights = action({
     if (!session || (session.expiresAt && session.expiresAt < Date.now())) {
       throw new Error("Authentication required");
     }
+    // Per-user rate limit: guards the paid SerpApi quota from abuse (notably
+    // anonymous public searches from the marketing widget). Generous enough
+    // for genuine browsing; strict enough to cap a single session's cost.
+    const rl: { allowed: boolean } = await ctx.runMutation(
+      internal.flightSearchCache.checkRateLimit,
+      { userId: String(session.userId), limit: 60, windowMs: 15 * 60 * 1000 }
+    );
+    if (!rl.allowed) {
+      throw new Error(
+        "You've searched a lot in a short time. Please wait a few minutes and try again."
+      );
+    }
     try {
       return await _runSearch(ctx, args.input as FlightSearchInput, args.cacheTtlMs);
     } catch (err) {
