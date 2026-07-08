@@ -842,6 +842,24 @@ export default defineSchema({
         .index("by_active", ["active"])
         .index("by_origin_destination", ["origin", "destination"]),
 
+    // Low-Fare Radar refresh state — singleton row tracking the periodic
+    // searchapi.io price-refresh cron. Powers the admin widget countdown and
+    // the "refresh now" button. Read/written via first() (never more than one row).
+    radarRefreshState: defineTable({
+        lastRefreshAt: v.optional(v.float64()),  // when the last refresh completed
+        nextRefreshAt: v.float64(),              // when the next refresh is due
+        running: v.optional(v.boolean()),        // guard against overlapping runs
+        lastResult: v.optional(v.object({
+            checked: v.float64(),
+            updated: v.float64(),
+            unchanged: v.float64(),
+            notFound: v.float64(),
+            failed: v.float64(),
+            at: v.float64(),
+        })),
+        updatedAt: v.float64(),
+    }),
+
     // Watched Destinations — users watching destinations for deal alerts
     watchedDestinations: defineTable({
         userId: v.string(),

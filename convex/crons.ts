@@ -21,6 +21,19 @@ crons.interval(
     internal.lowFareRadar.softDeleteExpiredDeals,
 );
 
+// Low-Fare Radar price refresh. Tick hourly; the tick re-prices manually-added
+// (curated) deals via the searchapi.io Google Flights API only when the
+// DB-tracked countdown (`nextRefreshAt`, every 4 days) is due. Tracking the due
+// time in the DB — rather than relying on the fixed cron cadence — lets the
+// admin widget show an accurate countdown and reset it with "refresh now".
+// AUTO-seeded deals are excluded (they refresh via search seeding and age out).
+crons.interval(
+    "refresh-low-fare-radar-prices",
+    { hours: 1 },
+    internal.lowFareRadarRefresh.radarRefreshTick,
+    {},
+);
+
 // Watchdog: mark trips stuck in "generating" (>10 min) as failed.
 // Catches Convex platform-level transient errors that prevent the
 // generate action from ever running.

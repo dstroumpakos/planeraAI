@@ -505,6 +505,7 @@
     .toast.show { transform: translateY(0); opacity: 1; pointer-events: auto; }
     .toast.success { background: var(--success); }
     .toast.error { background: var(--danger); }
+    .toast.info { background: var(--text); }
 
     /* Notification Preview Modal */
     .notif-modal-backdrop {
@@ -1432,6 +1433,16 @@
   <div class="content" id="content-list" style="display:none">
     <div class="stats-row" id="statsRow"></div>
 
+    <!-- Auto price-refresh countdown + manual trigger -->
+    <div id="refreshPanel" style="display:none;align-items:center;justify-content:space-between;gap:16px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px 20px;margin-bottom:16px;flex-wrap:wrap">
+      <div style="min-width:220px">
+        <div style="font-size:13px;color:var(--muted);font-weight:600;margin-bottom:4px">&#9201;&#65039; Next automatic price refresh</div>
+        <div id="rpCountdown" style="font-size:26px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:0.5px">&mdash;</div>
+        <div id="rpSub" style="font-size:12px;color:var(--muted);margin-top:4px"></div>
+      </div>
+      <button id="rpBtn" onclick="triggerRefreshNow()" style="background:var(--text);color:#fff;border:none;border-radius:12px;padding:12px 20px;font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap">&#9889; Refresh now</button>
+    </div>
+
     <!-- Filter Bar -->
     <div class="filter-bar" id="filterBar">
       <!-- Status pills -->
@@ -2099,12 +2110,114 @@
   }
 
   // LOAD DEALS
+  // \u2500\u2500\u2500 AUTO PRICE-REFRESH COUNTDOWN \u2500\u2500\u2500
+  var refreshStatus = null;      // last-fetched status payload
+  var refreshClockOffset = 0;    // serverNow - clientNow, to avoid clock drift
+  var refreshCountdownTimer = null;
+  var refreshInProgress = false; // true while a manual "refresh now" is running
+
+  function fmtDuration(ms) {
+    if (ms < 0) ms = 0;
+    var s = Math.floor(ms / 1000);
+    var d = Math.floor(s / 86400); s -= d * 86400;
+    var h = Math.floor(s / 3600); s -= h * 3600;
+    var m = Math.floor(s / 60); s -= m * 60;
+    var pad = function(n) { return (n < 10 ? '0' : '') + n; };
+    if (d > 0) return d + 'd ' + pad(h) + 'h ' + pad(m) + 'm ' + pad(s) + 's';
+    return pad(h) + 'h ' + pad(m) + 'm ' + pad(s) + 's';
+  }
+
+  function renderRefreshCountdown() {
+    var panel = document.getElementById('refreshPanel');
+    var cd = document.getElementById('rpCountdown');
+    var sub = document.getElementById('rpSub');
+    var btn = document.getElementById('rpBtn');
+    if (!panel || !refreshStatus) return;
+    panel.style.display = 'flex';
+
+    // The big countdown always reflects nextRefreshAt, so pressing "Refresh
+    // now" (which resets nextRefreshAt) visibly restarts the timer at once.
+    if (refreshStatus.nextRefreshAt) {
+      var remaining = refreshStatus.nextRefreshAt - (Date.now() + refreshClockOffset);
+      cd.textContent = remaining > 0 ? fmtDuration(remaining) : 'Due \u2014 running within the hour';
+    } else {
+      cd.textContent = 'Not scheduled yet';
+    }
+
+    // The button shows progress while a refresh is running (locally or via cron).
+    var busy = refreshInProgress || refreshStatus.running;
+    btn.disabled = busy;
+    btn.style.opacity = busy ? '0.5' : '1';
+    btn.style.cursor = busy ? 'default' : 'pointer';
+    btn.innerHTML = busy ? '&#8987; Refreshing\u2026' : '&#9889; Refresh now';
+
+    // Sub-line: last run summary.
+    if (refreshStatus.lastRefreshAt) {
+      var r = refreshStatus.lastResult;
+      var when = new Date(refreshStatus.lastRefreshAt).toLocaleString();
+      var summary = r
+        ? ' \u00B7 updated ' + r.updated + ', unchanged ' + r.unchanged + ', not found ' + r.notFound + ', failed ' + r.failed + ' (of ' + r.checked + ')'
+        : '';
+      sub.textContent = 'Last refresh: ' + when + summary;
+    } else {
+      sub.textContent = 'No refresh has run yet.';
+    }
+  }
+
+  function startRefreshCountdown() {
+    if (refreshCountdownTimer) clearInterval(refreshCountdownTimer);
+    refreshCountdownTimer = setInterval(renderRefreshCountdown, 1000);
+  }
+
+  function loadRefreshStatus() {
+    if (!adminKey) return;
+    convexQuery('lowFareRadar:getRefreshStatus', { adminKey: adminKey }).then(function(status) {
+      refreshStatus = status;
+      refreshClockOffset = (status.serverNow || Date.now()) - Date.now();
+      renderRefreshCountdown();
+      startRefreshCountdown();
+    }).catch(function(err) {
+      console.warn('[Refresh] status error:', err.message || err);
+    });
+  }
+
+  function triggerRefreshNow() {
+    if (!adminKey) return toast(t('msg_connect_first'), 'error');
+    if (refreshInProgress) return;
+    refreshInProgress = true;
+    // Optimistically reset the countdown immediately so the timer visibly
+    // restarts the moment the button is pressed; loadRefreshStatus() below
+    // reconciles it with the authoritative server value once the run finishes.
+    if (refreshStatus) {
+      var interval = refreshStatus.intervalMs || (4 * 24 * 60 * 60 * 1000);
+      refreshStatus.nextRefreshAt = (Date.now() + refreshClockOffset) + interval;
+    }
+    renderRefreshCountdown();
+    startRefreshCountdown();
+    toast('Refreshing prices\u2026', 'info');
+    convexAction('lowFareRadarRefresh:triggerRefreshNow', { adminKey: adminKey }).then(function(res) {
+      refreshInProgress = false;
+      if (res && res.alreadyRunning) {
+        toast('A refresh is already running.', 'info');
+      } else if (res) {
+        toast('Refreshed ' + res.checked + ' deal(s): ' + res.updated + ' price change(s), ' + res.notFound + ' flight(s) not found.', 'success');
+      }
+      loadRefreshStatus();
+      loadDeals();
+    }).catch(function(err) {
+      refreshInProgress = false;
+      toast('Refresh failed: ' + (err.message || err), 'error');
+      loadRefreshStatus();
+    });
+  }
+
   function loadDeals() {
     if (!adminKey) {
       document.getElementById('dealsList').innerHTML =
         '<div class="empty-state"><div class="icon">\uD83D\uDD0C</div><p>' + escapeHtml(t('empty_connect')) + '</p></div>';
       return;
     }
+    loadRefreshStatus();
     var dealsPromise = convexQuery('lowFareRadar:listAll', { adminKey: adminKey });
     var wishlistPromise = convexQuery('lowFareRadar:getWishlistStats', { adminKey: adminKey }).catch(function(err) { console.warn('[Wishlist] loadDeals error:', err.message || err); return []; });
     Promise.all([dealsPromise, wishlistPromise]).then(function(results) {

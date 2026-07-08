@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useMemo } from "react";
 import {
   View,
   Text,
@@ -9,6 +9,8 @@ import {
   Linking,
   Dimensions,
   Platform,
+  Modal,
+  TextInput,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -95,10 +97,27 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
   const [resolvingDealId, setResolvingDealId] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>("all");
   const [wishlistFilter, setWishlistFilter] = useState<string | null>(null);
+  const [destFilter, setDestFilter] = useState<string | null>(null);
+  const [destModalOpen, setDestModalOpen] = useState(false);
+  const [destSearch, setDestSearch] = useState("");
   const [allExpanded, setAllExpanded] = useState(false);
   const animValues = useRef<Record<string, Animated.Value>>({});
   const flightAnimValues = useRef<Record<string, Animated.Value>>({});
   const lastActiveIndexRef = useRef<number>(-1);
+  const scrollRef = useRef<ScrollView>(null);
+
+  // Unique destinations across all deals, for the destination dropdown.
+  const destinationOptions = useMemo(() => {
+    const map = new Map<string, { code: string; city: string; count: number }>();
+    for (const d of deals || []) {
+      const code = d.destination;
+      if (!code) continue;
+      const existing = map.get(code);
+      if (existing) existing.count++;
+      else map.set(code, { code, city: d.destinationCity || code, count: 1 });
+    }
+    return Array.from(map.values()).sort((a, b) => a.city.localeCompare(b.city));
+  }, [deals]);
 
   const playFlightAnim = (id: string) => {
     const v = getFlightAnim(id);
@@ -130,12 +149,27 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
 
   if (!deals || deals.length === 0) return null;
 
-  const filteredDeals =
+  const tabFilteredDeals =
     filter === "recommended"
       ? deals.filter((d) => d.isRecommended || d.matchesPreference)
       : filter === "wishlist"
         ? deals.filter((d) => d.matchesWishlist && (!wishlistFilter || d.destinationCity.toLowerCase() === wishlistFilter.toLowerCase()))
         : deals;
+
+  // Apply the destination dropdown filter on top of the active tab.
+  const filteredDeals = destFilter
+    ? tabFilteredDeals.filter((d) => d.destination === destFilter)
+    : tabFilteredDeals;
+
+  const selectedDest = destFilter
+    ? destinationOptions.find((o) => o.code === destFilter) || null
+    : null;
+
+  const matchesDestSearch = (o: { code: string; city: string }) => {
+    const q = destSearch.trim().toLowerCase();
+    if (!q) return true;
+    return o.city.toLowerCase().includes(q) || o.code.toLowerCase().includes(q);
+  };
 
   const getAnimValue = (id: string) => {
     if (!animValues.current[id]) {
@@ -154,6 +188,23 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
         useNativeDriver: false,
       }).start();
     });
+  };
+
+  const selectDestination = (code: string | null) => {
+    setDestFilter(code);
+    // Picking a specific destination clears the tab filter so the chosen route
+    // always shows, regardless of which tab was active.
+    if (code) {
+      setFilter("all");
+      setWishlistFilter(null);
+    }
+    setDestModalOpen(false);
+    setDestSearch("");
+    // Snap the carousel back to the first matching card.
+    lastActiveIndexRef.current = -1;
+    requestAnimationFrame(() =>
+      scrollRef.current?.scrollTo({ x: 0, animated: false })
+    );
   };
 
   const formatDate = (dateStr: string) => {
@@ -378,8 +429,140 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
         )}
       </ScrollView>
 
+      {/* Destination Dropdown */}
+      {destinationOptions.length > 1 && (
+        <View style={styles.destSelectorWrap}>
+          <TouchableOpacity
+            style={[
+              styles.destSelector,
+              {
+                backgroundColor: colors.card,
+                borderColor: selectedDest ? colors.primary : colors.border,
+              },
+            ]}
+            onPress={() => setDestModalOpen(true)}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="location" size={16} color={colors.primary} />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.destSelectorLabel, { color: colors.textMuted }]}>
+                {t("lowFare.destination", { defaultValue: "Destination" })}
+              </Text>
+              <Text
+                style={[styles.destSelectorValue, { color: colors.text }]}
+                numberOfLines={1}
+              >
+                {selectedDest
+                  ? `${selectedDest.city} (${selectedDest.code})`
+                  : t("lowFare.allDestinations", { defaultValue: "All destinations" })}
+              </Text>
+            </View>
+            {selectedDest ? (
+              <TouchableOpacity
+                onPress={() => selectDestination(null)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons name="close-circle" size={20} color={colors.textMuted} />
+              </TouchableOpacity>
+            ) : (
+              <Ionicons name="chevron-down" size={18} color={colors.textMuted} />
+            )}
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Destination Picker Modal */}
+      <Modal
+        visible={destModalOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setDestModalOpen(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setDestModalOpen(false)}
+        >
+          <TouchableOpacity
+            activeOpacity={1}
+            style={[styles.modalSheet, { backgroundColor: colors.background }]}
+          >
+            <View style={styles.modalHandle} />
+            <Text style={[styles.modalTitle, { color: colors.text }]}>
+              {t("lowFare.selectDestination", { defaultValue: "Select destination" })}
+            </Text>
+            <View
+              style={[
+                styles.searchBox,
+                { backgroundColor: colors.card, borderColor: colors.border },
+              ]}
+            >
+              <Ionicons name="search" size={16} color={colors.textMuted} />
+              <TextInput
+                style={[styles.searchInput, { color: colors.text }]}
+                placeholder={t("lowFare.searchDestinations", {
+                  defaultValue: "Search destinations…",
+                })}
+                placeholderTextColor={colors.textMuted}
+                value={destSearch}
+                onChangeText={setDestSearch}
+                autoCorrect={false}
+                autoCapitalize="none"
+              />
+            </View>
+            <ScrollView style={styles.modalList} keyboardShouldPersistTaps="handled">
+              <TouchableOpacity
+                style={[styles.destRow, { borderBottomColor: colors.border }]}
+                onPress={() => selectDestination(null)}
+              >
+                <Text style={[styles.destRowCity, { color: !destFilter ? colors.primary : colors.text }]}>
+                  {t("lowFare.allDestinations", { defaultValue: "All destinations" })}
+                </Text>
+                <Text style={[styles.destRowCount, { color: colors.textMuted }]}>
+                  {deals.length}
+                </Text>
+              </TouchableOpacity>
+              {destinationOptions.filter(matchesDestSearch).map((o) => {
+                const active = destFilter === o.code;
+                return (
+                  <TouchableOpacity
+                    key={o.code}
+                    style={[styles.destRow, { borderBottomColor: colors.border }]}
+                    onPress={() => selectDestination(o.code)}
+                  >
+                    <View style={styles.destRowLeft}>
+                      {active && (
+                        <Ionicons name="checkmark-circle" size={18} color={colors.primary} />
+                      )}
+                      <Text
+                        style={[styles.destRowCity, { color: active ? colors.primary : colors.text }]}
+                        numberOfLines={1}
+                      >
+                        {o.city}{" "}
+                        <Text style={{ color: colors.textMuted }}>({o.code})</Text>
+                      </Text>
+                    </View>
+                    <Text style={[styles.destRowCount, { color: colors.textMuted }]}>
+                      {o.count}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+              {destinationOptions.filter(matchesDestSearch).length === 0 && (
+                <Text style={[styles.destEmpty, { color: colors.textMuted }]}>
+                  {t("lowFare.noMatches", {
+                    defaultValue: "No destinations match your search",
+                  })}
+                </Text>
+              )}
+            </ScrollView>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
       {/* Deal Cards */}
       <ScrollView
+        ref={scrollRef}
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.cardsContainer}
@@ -1472,5 +1655,102 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#FF3B30",
     flex: 1,
+  },
+  destSelectorWrap: {
+    paddingHorizontal: 20,
+    marginBottom: 14,
+  },
+  destSelector: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  destSelectorLabel: {
+    fontSize: 10,
+    fontWeight: "700",
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+  },
+  destSelectorValue: {
+    fontSize: 15,
+    fontWeight: "700",
+    marginTop: 1,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.5)",
+    justifyContent: "flex-end",
+  },
+  modalSheet: {
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 30,
+    maxHeight: "75%",
+  },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "rgba(127,127,127,0.35)",
+    alignSelf: "center",
+    marginBottom: 14,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "800",
+    marginBottom: 14,
+  },
+  searchBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: Platform.OS === "ios" ? 10 : 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 12,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: "600",
+    padding: 0,
+  },
+  modalList: {
+    flexGrow: 0,
+  },
+  destRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    gap: 12,
+  },
+  destRowLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flex: 1,
+  },
+  destRowCity: {
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  destRowCount: {
+    fontSize: 13,
+    fontWeight: "700",
+  },
+  destEmpty: {
+    fontSize: 14,
+    fontWeight: "600",
+    textAlign: "center",
+    paddingVertical: 24,
   },
 });

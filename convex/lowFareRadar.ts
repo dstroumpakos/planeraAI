@@ -785,6 +785,217 @@ export const softDeleteExpiredDeals = internalMutation({
   },
 });
 
+// ─── Internal: Low-Fare Radar price refresh (searchapi.io, every 4 days) ───
+
+/**
+ * List deals eligible for the periodic price refresh:
+ *   - active + not soft-deleted
+ *   - manually-added / curated only (dealTag !== "AUTO"). AUTO deals already
+ *     self-refresh through the search-seeding path and age out in 7 days.
+ *   - outbound (and return, if round-trip) date still in the future — searchapi
+ *     returns nothing for past dates, so re-pricing them is wasted quota.
+ */
+export const listRefreshableDeals = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    // YYYY-MM-DD (UTC). Date strings compare correctly lexicographically.
+    const today = new Date().toISOString().slice(0, 10);
+    const deals = await ctx.db
+      .query("lowFareRadar")
+      .withIndex("by_active", (q) => q.eq("active", true))
+      .collect();
+
+    return deals.filter(
+      (d) =>
+        d.active &&
+        !d.deletedAt &&
+        d.dealTag !== "AUTO" &&
+        !!d.outboundDate &&
+        d.outboundDate >= today &&
+        (!d.returnDate || d.returnDate >= today)
+    );
+  },
+});
+
+/**
+ * Apply a refreshed fare to a single deal. Only `price`/`totalPrice` are
+ * touched — flight times, airline, and any admin-set `originalPrice` are left
+ * as curated. Mirrors the admin `update` flow: logs the change and notifies
+ * watchers on a price drop.
+ */
+export const applyPriceRefresh = internalMutation({
+  args: {
+    id: v.id("lowFareRadar"),
+    newPrice: v.float64(),
+    // How the fresh fare was matched to this deal's specific flight, for the
+    // change log ("flight_number" or "airline_time").
+    matchType: v.optional(v.string()),
+    // The matched flight number(s), e.g. "A3601" or "A3601+A3602".
+    matchedFlight: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db.get(args.id);
+    if (!existing) return { changed: false as const };
+
+    const oldPrice = existing.price;
+    const newPrice = Math.round(args.newPrice);
+
+    // Sanity guard: ignore junk values so a bad API response can't corrupt a
+    // curated deal.
+    if (!(newPrice > 0) || newPrice > 100000) return { changed: false as const };
+
+    if (newPrice === oldPrice) {
+      // No change — record that we checked so admins can see it's fresh.
+      await ctx.db.patch(args.id, { updatedAt: Date.now() });
+      return { changed: false as const };
+    }
+
+    // Preserve a multi-passenger total by scaling it proportionally with the
+    // per-person price (deals store `price` as per-person, `totalPrice` as the
+    // group total when it differs).
+    const ratio =
+      existing.totalPrice && existing.price
+        ? existing.totalPrice / existing.price
+        : 1;
+    const newTotal = Math.round(newPrice * ratio);
+
+    const timestamp = new Date().toISOString().slice(0, 16).replace("T", " ");
+    const prevLog: string[] = (existing as any).changeLog || [];
+    const matchNote = args.matchedFlight
+      ? `, matched ${args.matchedFlight}`
+      : args.matchType
+      ? `, matched by ${args.matchType}`
+      : "";
+    const entry = `[${timestamp}] price: ${oldPrice} -> ${newPrice} (auto-refresh${matchNote})`;
+
+    await ctx.db.patch(args.id, {
+      price: newPrice,
+      totalPrice: newTotal,
+      updatedAt: Date.now(),
+      changeCount: ((existing as any).changeCount || 0) + 1,
+      changeLog: [...prevLog, entry],
+    });
+
+    // Notify watchers on a genuine drop (same behavior as the admin update).
+    if (newPrice < oldPrice && existing.active) {
+      await ctx.scheduler.runAfter(0, internal.watchedDestinations.notifyPriceDrop, {
+        dealId: args.id,
+        oldPrice,
+        newPrice,
+      });
+    }
+
+    return { changed: true as const, oldPrice, newPrice };
+  },
+});
+
+// ─── Low-Fare Radar refresh state (countdown + manual trigger support) ───
+
+// Keep in sync with the interval in lowFareRadarRefresh.ts / crons.ts.
+const RADAR_REFRESH_INTERVAL_MS = 4 * 24 * 60 * 60 * 1000;
+
+/** Admin: current refresh state for the widget countdown + "refresh now" UI. */
+export const getRefreshStatus = query({
+  args: { adminKey: v.string() },
+  handler: async (ctx, args) => {
+    validateAdminKey(args.adminKey);
+    const state = await ctx.db.query("radarRefreshState").first();
+    return {
+      lastRefreshAt: state?.lastRefreshAt ?? null,
+      nextRefreshAt: state?.nextRefreshAt ?? null,
+      running: !!state?.running,
+      lastResult: state?.lastResult ?? null,
+      intervalMs: RADAR_REFRESH_INTERVAL_MS,
+      // Server clock so the widget can render a drift-free countdown.
+      serverNow: Date.now(),
+    };
+  },
+});
+
+/** Internal: read refresh state (used by the cron tick + manual trigger). */
+export const getRadarRefreshStateInternal = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const state = await ctx.db.query("radarRefreshState").first();
+    if (!state) return null;
+    return {
+      nextRefreshAt: state.nextRefreshAt,
+      running: !!state.running,
+    };
+  },
+});
+
+/** Internal: ensure the singleton exists; returns the (possibly new) due time. */
+export const ensureRadarRefreshState = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const state = await ctx.db.query("radarRefreshState").first();
+    if (state) return state.nextRefreshAt;
+    const now = Date.now();
+    const nextRefreshAt = now + RADAR_REFRESH_INTERVAL_MS;
+    await ctx.db.insert("radarRefreshState", {
+      nextRefreshAt,
+      running: false,
+      updatedAt: now,
+    });
+    return nextRefreshAt;
+  },
+});
+
+/** Internal: mark a refresh run as started (overlap guard). */
+export const markRadarRefreshStarted = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const now = Date.now();
+    const state = await ctx.db.query("radarRefreshState").first();
+    if (state) {
+      await ctx.db.patch(state._id, { running: true, updatedAt: now });
+    } else {
+      await ctx.db.insert("radarRefreshState", {
+        nextRefreshAt: now + RADAR_REFRESH_INTERVAL_MS,
+        running: true,
+        updatedAt: now,
+      });
+    }
+  },
+});
+
+/** Internal: mark a refresh run complete and reset the countdown. */
+export const markRadarRefreshCompleted = internalMutation({
+  args: {
+    result: v.object({
+      checked: v.float64(),
+      updated: v.float64(),
+      unchanged: v.float64(),
+      notFound: v.float64(),
+      failed: v.float64(),
+    }),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const nextRefreshAt = now + RADAR_REFRESH_INTERVAL_MS;
+    const lastResult = { ...args.result, at: now };
+    const state = await ctx.db.query("radarRefreshState").first();
+    if (state) {
+      await ctx.db.patch(state._id, {
+        lastRefreshAt: now,
+        nextRefreshAt,
+        running: false,
+        lastResult,
+        updatedAt: now,
+      });
+    } else {
+      await ctx.db.insert("radarRefreshState", {
+        lastRefreshAt: now,
+        nextRefreshAt,
+        running: false,
+        lastResult,
+        updatedAt: now,
+      });
+    }
+  },
+});
+
 // ─── Admin: Broadcast a deal to users by home airport ───
 
 /** Internal: find all users whose home airport matches one of the given IATA codes */
