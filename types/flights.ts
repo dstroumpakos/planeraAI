@@ -211,3 +211,51 @@ export interface LowFareRadarDeal {
   typicalPriceRange?: number[];
   dealQuality: DealScore;
 }
+
+// ----------------------------- Travel Explore -------------------------------
+// "Where can I go?" destination discovery via searchapi.io
+// `google_travel_explore`. Prices are indicative discovery signals, NOT
+// bookable fares.
+
+export type ExploreTravelMode = "all" | "flights_only";
+
+export type ExploreInterest =
+  | "popular"
+  | "outdoors"
+  | "beaches"
+  | "museums"
+  | "history"
+  | "skiing";
+
+export interface ExploreQuery {
+  departureId: string; // IATA, e.g. "ATH"
+  currency?: string; // ISO 4217, defaults to EUR
+  hl?: string; // UI language, defaults to "en"
+  gl?: string; // country code for localization
+  travelMode?: ExploreTravelMode;
+  interests?: ExploreInterest;
+  stops?: StopsFilter;
+  maxPrice?: number;
+  adults?: number;
+  // searchapi.io `time_period` (e.g. "one_week_trip_in_the_next_six_months"
+  // or a "YYYY-MM-DD..YYYY-MM-DD" custom range). Defaults to the engine default.
+  timePeriod?: string;
+}
+
+export interface ExploreDestination {
+  name: string;
+  country?: string;
+  kgmid?: string;
+  iata?: string;
+  coordinates?: { lat: number; lng: number };
+  /** Indicative round-trip flight price (discovery signal, not bookable). */
+  price?: number;
+  stops?: number;
+  airline?: string;
+  flightDuration?: string;
+  avgHotelPerNight?: number;
+  outboundDate?: string; // YYYY-MM-DD
+  returnDate?: string; // YYYY-MM-DD
+  /** Engine-provided image, used only as a fallback for the Unsplash lookup. */
+  thumbnail?: string;
+}

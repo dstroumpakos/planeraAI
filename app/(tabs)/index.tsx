@@ -526,6 +526,33 @@ export default function HomeScreen() {
           />
         )}
 
+        {/* Explore destinations ("Where can I go?") */}
+        <TouchableOpacity
+          activeOpacity={0.9}
+          onPress={() => router.push({ pathname: "/flights/explore", params: homeIata ? { homeIata } : {} } as any)}
+          style={{ marginHorizontal: 20, marginBottom: 24 }}
+        >
+          <LinearGradient
+            colors={[colors.primary, "#34C759"]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={{ flexDirection: "row", alignItems: "center", gap: 14, padding: 18, borderRadius: 20 }}
+          >
+            <View style={{ width: 46, height: 46, borderRadius: 14, backgroundColor: "rgba(0,0,0,0.15)", justifyContent: "center", alignItems: "center" }}>
+              <Ionicons name="compass" size={24} color="#000" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 17, fontWeight: "800", color: "#000", letterSpacing: -0.3 }}>
+                {t("explore.homeCardTitle", { defaultValue: "Where can I go?" })}
+              </Text>
+              <Text style={{ fontSize: 13, fontWeight: "600", color: "rgba(0,0,0,0.7)", marginTop: 2 }}>
+                {t("explore.homeCardSubtitle", { defaultValue: "Find destinations you can afford" })}
+              </Text>
+            </View>
+            <Ionicons name="arrow-forward" size={20} color="#000" />
+          </LinearGradient>
+        </TouchableOpacity>
+
         {/* Trending Destinations Section */}
         {trendingDestinations && trendingDestinations.length > 0 && (
           <View style={styles.sectionContainer}>

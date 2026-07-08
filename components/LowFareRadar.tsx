@@ -735,7 +735,7 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
                 <View style={styles.stopsRow}>
                   <Ionicons name="git-branch-outline" size={11} color={colors.primary} />
                   <Text style={[styles.stopsRowText, { color: colors.primary }]}>
-                    {deal.outboundStops} stop{(deal.outboundStops ?? 0) > 1 ? "s" : ""}
+                    {deal.outboundStops} {(deal.outboundStops ?? 0) > 1 ? t("lowFare.stops", { defaultValue: "stops" }) : t("lowFare.stop", { defaultValue: "stop" })}
                   </Text>
                 </View>
               )}
@@ -847,7 +847,7 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
                     <View style={styles.stopsRow}>
                       <Ionicons name="git-branch-outline" size={11} color={colors.primary} />
                       <Text style={[styles.stopsRowText, { color: colors.primary }]}>
-                        {deal.returnStops} stop{(deal.returnStops ?? 0) > 1 ? "s" : ""}
+                        {deal.returnStops} {(deal.returnStops ?? 0) > 1 ? t("lowFare.stops", { defaultValue: "stops" }) : t("lowFare.stop", { defaultValue: "stop" })}
                       </Text>
                     </View>
                   )}

@@ -1173,7 +1173,11 @@ export default defineSchema({
     // types/flights.ts and may evolve faster than the schema.
     flightSearchCache: defineTable({
         cacheKey: v.string(),
-        kind: v.union(v.literal("search"), v.literal("booking_options")),
+        kind: v.union(
+            v.literal("search"),
+            v.literal("booking_options"),
+            v.literal("explore")
+        ),
         departureId: v.optional(v.string()),
         arrivalId: v.optional(v.string()),
         outboundDate: v.optional(v.string()),

@@ -25,7 +25,11 @@ export const readCache = internalQuery({
 export const writeCache = internalMutation({
   args: {
     cacheKey: v.string(),
-    kind: v.union(v.literal("search"), v.literal("booking_options")),
+    kind: v.union(
+      v.literal("search"),
+      v.literal("booking_options"),
+      v.literal("explore")
+    ),
     ttlMs: v.float64(),
     normalizedResults: v.any(),
     departureId: v.optional(v.string()),
