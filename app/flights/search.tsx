@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   ScrollView,
@@ -48,6 +48,7 @@ export default function FlightsSearchScreen() {
     adults?: string;
     currency?: string;
     arrivalCityName?: string;
+    autoSearch?: string;
   }>();
 
   const arrivalInfo = useMemo(
@@ -104,6 +105,38 @@ export default function FlightsSearchScreen() {
       // error is surfaced via `error` state
     }
   };
+
+  // Auto-run a live fare search when opened from "Where can I go?" (explore).
+  // Gated on `autoSearch=1` so the home-screen / destination-preview entry
+  // points keep their manual-submit behavior. Waits for the auth token and a
+  // fully resolved route, and fires only once.
+  const autoSearchedRef = useRef(false);
+  useEffect(() => {
+    if (autoSearchedRef.current) return;
+    if (params.autoSearch !== "1") return;
+    if (!token) return;
+    if (!initial.departureId || !initial.arrivalId) return;
+    autoSearchedRef.current = true;
+
+    const outboundDate =
+      initial.outboundDate ||
+      new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+    const rd = new Date(outboundDate);
+    rd.setDate(rd.getDate() + 7);
+    const returnDate = initial.returnDate || rd.toISOString().split("T")[0];
+
+    onSubmit({
+      departureId: initial.departureId,
+      arrivalId: initial.arrivalId,
+      outboundDate,
+      returnDate,
+      adults: initial.adults ?? 1,
+      currency: initial.currency ?? "EUR",
+      type: "round_trip",
+      stops: "any",
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, initial.departureId, initial.arrivalId, params.autoSearch]);
 
   const selectOutbound = async (option: NormalizedFlightOption) => {
     if (!lastInput) return;

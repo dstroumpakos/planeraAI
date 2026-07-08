@@ -10,8 +10,8 @@ import type { ExploreDestination, ExploreQuery } from "@/types/flights";
  * Stateful wrapper (mirrors `useFlightSearch`) so screens don't manage their
  * own loading/error flags. Auth + rate limit + cache live in the action.
  */
-export function useExploreDestinations() {
-  const explore = useAuthenticatedAction(api.explore.exploreDestinations);
+export function useExploreDestinations(token?: string | null) {
+  const explore = useAuthenticatedAction(api.explore.exploreDestinations, token);
 
   const [data, setData] = useState<ExploreDestination[] | null>(null);
   const [loading, setLoading] = useState(false);

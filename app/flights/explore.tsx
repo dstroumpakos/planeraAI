@@ -23,6 +23,7 @@ import { useTheme } from "@/lib/ThemeContext";
 import { useDestinationImage } from "@/lib/useImages";
 import { useExploreDestinations } from "@/hooks/useExploreDestinations";
 import { AIRPORTS, glForIata } from "@/lib/airports";
+import { resolveIATA } from "@/lib/destinationAirports";
 import type {
   ExploreDestination,
   ExploreInterest,
@@ -53,6 +54,49 @@ const BUDGET_OPTIONS: { key: string; max?: number }[] = [
   { key: "u300", max: 300 },
   { key: "u600", max: 600 },
 ];
+
+// Trip-length quick-filters → searchapi.io `time_period`. Each maps to two
+// round-trip variants: the rolling "next six months" window (default), and a
+// specific-month variant when the user pins a month below.
+const DURATION_OPTIONS: {
+  key: string;
+  labelKey: string;
+  anyMonth: string;
+  monthPeriod: (month: string) => string;
+}[] = [
+  {
+    key: "weekend",
+    labelKey: "explore.durationWeekend",
+    anyMonth: "weekend_trip_in_the_next_six_months",
+    monthPeriod: (m) => `weekend_in_${m}`,
+  },
+  {
+    key: "one_week",
+    labelKey: "explore.durationOneWeek",
+    anyMonth: "one_week_trip_in_the_next_six_months",
+    monthPeriod: (m) => `one_week_trip_in_${m}`,
+  },
+  {
+    key: "two_weeks",
+    labelKey: "explore.durationTwoWeeks",
+    anyMonth: "two_week_trip_in_the_next_six_months",
+    monthPeriod: (m) => `two_week_trip_in_${m}`,
+  },
+];
+
+// English lowercase month names — the `{month}` token the Explore engine wants
+// (independent of the UI language, which only affects the chip label).
+const MONTHS_EN = [
+  "january", "february", "march", "april", "may", "june",
+  "july", "august", "september", "october", "november", "december",
+];
+
+/** Resolve the `time_period` value from the chosen duration + optional month. */
+function buildTimePeriod(durationKey: string, month: string | null): string | undefined {
+  const opt = DURATION_OPTIONS.find((d) => d.key === durationKey);
+  if (!opt) return undefined;
+  return month ? opt.monthPeriod(month) : opt.anyMonth;
+}
 
 const INTEREST_OPTIONS: { key: ExploreInterest; icon: keyof typeof Ionicons.glyphMap }[] = [
   { key: "popular", icon: "flame" },
@@ -144,12 +188,15 @@ function ExploreCard({
 
 export default function ExploreScreen() {
   const { colors, isDarkMode } = useTheme();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const router = useRouter();
   const { token } = useToken();
   const params = useLocalSearchParams<{ homeIata?: string; currency?: string }>();
 
-  const userSettings = useQuery(api.users.getSettings as any, { token: token || "skip" });
+  const userSettings = useQuery(
+    api.users.getSettings as any,
+    token ? { token } : "skip"
+  );
   const settingsHomeIata = useMemo(() => {
     const raw = (userSettings as any)?.homeAirport as string | undefined;
     if (!raw) return undefined;
@@ -165,11 +212,15 @@ export default function ExploreScreen() {
   const [interest, setInterest] = useState<ExploreInterest | null>(null);
   const [budgetKey, setBudgetKey] = useState<string>("any");
   const [directOnly, setDirectOnly] = useState(false);
+  // Default to the engine's own default trip length (one week).
+  const [durationKey, setDurationKey] = useState<string>("one_week");
+  // `null` = rolling "next six months"; otherwise a lowercase English month.
+  const [month, setMonth] = useState<string | null>(null);
 
   const [originModalOpen, setOriginModalOpen] = useState(false);
   const [originSearch, setOriginSearch] = useState("");
 
-  const { data, loading, error, exploreDestinations } = useExploreDestinations();
+  const { data, loading, error, exploreDestinations } = useExploreDestinations(token);
 
   // Default the origin to the user's saved home airport once settings load.
   useEffect(() => {
@@ -177,30 +228,50 @@ export default function ExploreScreen() {
   }, [origin, settingsHomeIata]);
 
   const runExplore = useCallback(() => {
-    if (!origin) return;
+    if (!origin || !token) return;
     const maxPrice = BUDGET_OPTIONS.find((b) => b.key === budgetKey)?.max;
+    const timePeriod = buildTimePeriod(durationKey, month);
     const input: ExploreQuery = {
       departureId: origin,
       currency,
+      hl: i18n.language,
       gl: glForIata(origin),
       interests: interest ?? undefined,
       stops: directOnly ? "nonstop" : undefined,
       maxPrice,
+      timePeriod,
     };
     exploreDestinations(input).catch(() => {
       // error is surfaced via `error` state
     });
-  }, [origin, currency, interest, budgetKey, directOnly, exploreDestinations]);
+  }, [origin, token, currency, interest, budgetKey, directOnly, durationKey, month, exploreDestinations]);
 
-  // Re-run whenever the origin or any filter changes.
+  // Re-run whenever the origin, token, or any filter changes. Waiting for the
+  // token avoids firing before auth is ready (which would surface a spurious
+  // "Authentication required" error that never recovers on its own).
   useEffect(() => {
-    if (origin) runExplore();
-  }, [origin, interest, budgetKey, directOnly]);
+    if (origin && token) runExplore();
+  }, [origin, token, interest, budgetKey, directOnly, durationKey, month]);
 
   const originAirport = useMemo(
     () => AIRPORTS.find((a) => a.code === origin),
     [origin]
   );
+
+  // Current month + the next six — the only window the Explore engine's
+  // `{month}` token accepts. Labels are localized; the API value stays English.
+  const monthOptions = useMemo(() => {
+    const now = new Date();
+    const out: { value: string; label: string }[] = [];
+    for (let i = 0; i <= 6; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+      out.push({
+        value: MONTHS_EN[d.getMonth()],
+        label: d.toLocaleDateString(i18n.language, { month: "short" }),
+      });
+    }
+    return out;
+  }, [i18n.language]);
 
   const filteredAirports = useMemo(() => {
     const q = originSearch.trim().toLowerCase();
@@ -216,9 +287,27 @@ export default function ExploreScreen() {
   }, [originSearch]);
 
   const openDestination = (dest: ExploreDestination) => {
+    const arrivalId = dest.iata || resolveIATA(dest.name);
+    // Without a resolvable origin/arrival airport we can't run a live fare
+    // search — fall back to the informational destination preview.
+    if (!origin || !arrivalId) {
+      router.push({
+        pathname: "/destination-preview",
+        params: { destination: dest.name },
+      });
+      return;
+    }
     router.push({
-      pathname: "/destination-preview",
-      params: { destination: dest.name },
+      pathname: "/flights/search",
+      params: {
+        autoSearch: "1",
+        departureId: origin,
+        arrivalId,
+        arrivalCityName: dest.name.split(",")[0].trim(),
+        currency,
+        ...(dest.outboundDate ? { outboundDate: dest.outboundDate } : {}),
+        ...(dest.returnDate ? { returnDate: dest.returnDate } : {}),
+      },
     });
   };
 
@@ -361,6 +450,81 @@ export default function ExploreScreen() {
                 {t("explore.directOnly", { defaultValue: "Direct" })}
               </Text>
             </TouchableOpacity>
+          </ScrollView>
+
+          {/* Trip-length chips → time_period */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.chipRow}
+          >
+            {DURATION_OPTIONS.map((d) => {
+              const active = durationKey === d.key;
+              return (
+                <TouchableOpacity
+                  key={d.key}
+                  style={[
+                    styles.chip,
+                    {
+                      backgroundColor: active ? colors.primary : colors.card,
+                      borderColor: active ? colors.primary : colors.border,
+                    },
+                  ]}
+                  onPress={() => setDurationKey(d.key)}
+                >
+                  <Ionicons
+                    name="calendar-outline"
+                    size={13}
+                    color={active ? "#000" : colors.primary}
+                  />
+                  <Text style={[styles.chipText, { color: active ? "#000" : colors.text }]}>
+                    {t(d.labelKey, { defaultValue: d.key })}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
+          {/* Month chips → time_period `{month}` variant */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.chipRow}
+          >
+            <TouchableOpacity
+              style={[
+                styles.chip,
+                {
+                  backgroundColor: month === null ? colors.primary : colors.card,
+                  borderColor: month === null ? colors.primary : colors.border,
+                },
+              ]}
+              onPress={() => setMonth(null)}
+            >
+              <Text style={[styles.chipText, { color: month === null ? "#000" : colors.text }]}>
+                {t("explore.monthAny", { defaultValue: "Any month" })}
+              </Text>
+            </TouchableOpacity>
+            {monthOptions.map((m) => {
+              const active = month === m.value;
+              return (
+                <TouchableOpacity
+                  key={m.value}
+                  style={[
+                    styles.chip,
+                    {
+                      backgroundColor: active ? colors.primary : colors.card,
+                      borderColor: active ? colors.primary : colors.border,
+                    },
+                  ]}
+                  onPress={() => setMonth(active ? null : m.value)}
+                >
+                  <Text style={[styles.chipText, { color: active ? "#000" : colors.text }]}>
+                    {m.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </ScrollView>
 
           {/* Results */}

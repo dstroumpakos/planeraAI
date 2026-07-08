@@ -29,7 +29,11 @@ const EXPLORE_CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12h
 
 function buildCacheKey(q: ExploreQuery): string {
   return [
-    "explore",
+    // Version tag — bump to invalidate stale entries (e.g. the empty results
+    // an earlier bug cached for 12h). Only successful, non-empty responses are
+    // cached now, so a poisoned key should never recur, but the tag is cheap
+    // insurance and lets us evolve the request shape without stale hits.
+    "explore:v2",
     q.departureId.trim().toUpperCase(),
     (q.currency || "EUR").toUpperCase(),
     q.travelMode || "all",
@@ -119,17 +123,23 @@ export const exploreDestinations = action({
         `[explore] ${input.departureId} -> ${result.length} destinations`
       );
 
-      try {
-        await ctx.runMutation(internal.flightSearchCache.writeCache, {
-          cacheKey,
-          kind: "explore",
-          ttlMs: EXPLORE_CACHE_TTL_MS,
-          normalizedResults: result,
-          departureId: input.departureId.trim().toUpperCase(),
-          currency: (input.currency ?? "EUR").toUpperCase(),
-        });
-      } catch {
-        console.error("[explore] cache write failed");
+      // Only cache a genuine, non-empty result. `fetchExploreDestinations`
+      // returns null on both API failure AND empty results, so caching an
+      // empty array would pin a failed lookup for the full TTL (the exact bug
+      // that served stale "0 destinations" after a transient HTTP 400).
+      if (result.length > 0) {
+        try {
+          await ctx.runMutation(internal.flightSearchCache.writeCache, {
+            cacheKey,
+            kind: "explore",
+            ttlMs: EXPLORE_CACHE_TTL_MS,
+            normalizedResults: result,
+            departureId: input.departureId.trim().toUpperCase(),
+            currency: (input.currency ?? "EUR").toUpperCase(),
+          });
+        } catch {
+          console.error("[explore] cache write failed");
+        }
       }
 
       return result;

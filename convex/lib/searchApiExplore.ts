@@ -48,6 +48,42 @@ const STOPS = new Set([
   "two_stops_or_fewer",
 ]);
 
+// The Google Travel `hl` param does NOT accept bare "en" — it wants
+// region-qualified codes. Full supported set per searchapi.io docs
+// (https://www.searchapi.io/docs/parameters/google-travel/hl). We normalize
+// the app's language onto this set so a "en" (or any unsupported code) can't
+// 400 the whole request.
+const SUPPORTED_HL = new Set([
+  "af", "bs", "ca", "cs", "da", "de", "et", "en-GB", "en-US", "es", "es-419",
+  "eu", "fil", "fr", "gl", "hr", "id", "is", "it", "sw", "lv", "lt", "hu", "ms",
+  "nl", "no", "pl", "pt-BR", "pt-PT", "ro", "sq", "sk", "sl", "sr-Latn", "fi",
+  "sv", "vi", "tr", "el", "bg", "mk", "mn", "ru", "sr", "uk", "ka", "iw", "ur",
+  "ar", "fa", "am", "ne", "mr", "hi", "bn", "pa", "gu", "ta", "te", "kn", "ml",
+  "si", "th", "lo", "km", "ko", "ja", "zh-CN", "zh-TW",
+]);
+
+// Bare base codes that have no exact entry but a well-known regional default.
+const HL_ALIAS: Record<string, string> = {
+  en: "en-US",
+  pt: "pt-PT",
+  zh: "zh-CN",
+  he: "iw", // Google uses the legacy "iw" for Hebrew
+  nb: "no",
+  nn: "no",
+};
+
+/** Map any incoming UI language onto a `hl` value the engine accepts. */
+function normalizeHl(raw?: string): string {
+  const fallback = "en-US";
+  if (!raw) return fallback;
+  const v = raw.trim().replace("_", "-");
+  if (SUPPORTED_HL.has(v)) return v; // exact (e.g. "en-GB", "pt-BR", "el")
+  const base = v.split("-")[0].toLowerCase();
+  if (SUPPORTED_HL.has(base)) return base; // "es-ES" -> "es", "de-DE" -> "de"
+  if (HL_ALIAS[base]) return HL_ALIAS[base];
+  return fallback;
+}
+
 function getSearchApiKey(): string | null {
   const key = process.env.SEARCHAPI_API_KEY;
   if (!key || typeof key !== "string" || key.trim().length === 0) {
@@ -139,8 +175,12 @@ export async function fetchExploreDestinations(
   params.append("engine", "google_travel_explore");
   params.append("departure_id", q.departureId.trim().toUpperCase());
   params.append("currency", (q.currency || "EUR").toUpperCase());
-  params.append("hl", q.hl?.trim() || "en");
-  if (q.gl?.trim()) params.append("gl", q.gl.trim().toLowerCase());
+  params.append("hl", normalizeHl(q.hl));
+  // NOTE: `gl` is intentionally NOT sent. It's the one param our proven
+  // google_flights integration (searchApiFlights.ts) doesn't use, and it's
+  // non-essential for a discovery grid (hl + currency already localize). It
+  // was the prime suspect for the observed HTTP 400 on this engine. If the
+  // body log below shows a different offending param, revisit.
 
   // `interests` is documented as incompatible with `travel_mode=flights_only`,
   // so never send both. travel_mode wins only when explicitly flights_only.
