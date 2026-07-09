@@ -52,3 +52,10 @@ pm2_jlist.json
 scripts/partner-api-e2e.ps1
 scripts/partner-api-idem.ps1
 scripts/ota-prod.mjs
+scripts/newsletter-preview/2-welcome.html
+scripts/newsletter-preview/1-confirmation.html
+scripts/newsletter-preview/3-drip1-plan.html
+scripts/newsletter-preview/4-drip2-lowfare.html
+scripts/newsletter-preview/5-drip3-community.html
+scripts/newsletter-preview/generate.js
+scripts/newsletter-preview/index.html

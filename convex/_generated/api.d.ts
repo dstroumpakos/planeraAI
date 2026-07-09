@@ -57,6 +57,7 @@ import type * as lowFareRadarAuto from "../lowFareRadarAuto.js";
 import type * as lowFareRadarAutoAction from "../lowFareRadarAutoAction.js";
 import type * as lowFareRadarRefresh from "../lowFareRadarRefresh.js";
 import type * as lowFareRadarSearch from "../lowFareRadarSearch.js";
+import type * as newsletter from "../newsletter.js";
 import type * as notifications from "../notifications.js";
 import type * as otaAdmin from "../otaAdmin.js";
 import type * as otaPackages from "../otaPackages.js";
@@ -151,6 +152,7 @@ declare const fullApi: ApiFromModules<{
   lowFareRadarAutoAction: typeof lowFareRadarAutoAction;
   lowFareRadarRefresh: typeof lowFareRadarRefresh;
   lowFareRadarSearch: typeof lowFareRadarSearch;
+  newsletter: typeof newsletter;
   notifications: typeof notifications;
   otaAdmin: typeof otaAdmin;
   otaPackages: typeof otaPackages;
