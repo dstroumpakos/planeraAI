@@ -1797,5 +1797,23 @@
     "showingSaved": "Offline — showing saved trips",
     "tripBanner": "Offline — showing saved trip",
     "tripUnavailable": "This trip isn't available offline yet. Open it once while connected to save it."
+  },
+  "newsletter": {
+    "title": "Travel tips & deals",
+    "subtitle": "Get AI trip ideas and flight deals in your inbox.",
+    "emailPlaceholder": "Enter your email",
+    "subscribeButton": "Subscribe",
+    "invalidEmail": "Please enter a valid email address.",
+    "errorGeneric": "Something went wrong. Please try again.",
+    "successTitle": "Almost there!",
+    "successBody": "Check your inbox to confirm your subscription.",
+    "confirmedTitle": "You're subscribed!",
+    "confirmedBody": "Thanks for confirming. Watch your inbox for travel tips and deals.",
+    "getTheApp": "Get the app",
+    "linkInvalidTitle": "Link expired",
+    "linkInvalidBody": "This confirmation link is invalid or has already been used.",
+    "backHome": "Back to home",
+    "unsubscribedTitle": "You're unsubscribed",
+    "unsubscribedBody": "You won't receive any more newsletter emails. You can resubscribe anytime."
   }
 }

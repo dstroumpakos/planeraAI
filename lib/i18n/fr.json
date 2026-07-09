@@ -1797,5 +1797,23 @@
     "showingSaved": "Hors ligne — affichage des voyages enregistrés",
     "tripBanner": "Hors ligne — voyage enregistré",
     "tripUnavailable": "Ce voyage n'est pas encore disponible hors ligne. Ouvrez-le une fois en étant connecté pour l'enregistrer."
+  },
+  "newsletter": {
+    "title": "Astuces et offres de voyage",
+    "subtitle": "Recevez des idées de voyage IA et des offres de vols par e-mail.",
+    "emailPlaceholder": "Saisissez votre e-mail",
+    "subscribeButton": "S'abonner",
+    "invalidEmail": "Veuillez saisir une adresse e-mail valide.",
+    "errorGeneric": "Une erreur s'est produite. Veuillez réessayer.",
+    "successTitle": "Presque terminé !",
+    "successBody": "Vérifiez votre boîte de réception pour confirmer votre abonnement.",
+    "confirmedTitle": "Inscription confirmée !",
+    "confirmedBody": "Merci d'avoir confirmé. Surveillez votre boîte de réception pour des astuces et des offres de voyage.",
+    "getTheApp": "Obtenir l'application",
+    "linkInvalidTitle": "Lien expiré",
+    "linkInvalidBody": "Ce lien de confirmation est invalide ou a déjà été utilisé.",
+    "backHome": "Retour à l'accueil",
+    "unsubscribedTitle": "Désinscription effectuée",
+    "unsubscribedBody": "Vous ne recevrez plus d'e-mails de la newsletter. Vous pouvez vous réinscrire à tout moment."
   }
 }

@@ -1797,5 +1797,23 @@
     "showingSaved": "Offline — gespeicherte Reisen werden angezeigt",
     "tripBanner": "Offline — gespeicherte Reise",
     "tripUnavailable": "Diese Reise ist offline noch nicht verfügbar. Öffne sie einmal mit Internetverbindung, um sie zu speichern."
+  },
+  "newsletter": {
+    "title": "Reisetipps & Angebote",
+    "subtitle": "Erhalte KI-Reiseideen und Flugangebote per E-Mail.",
+    "emailPlaceholder": "E-Mail-Adresse eingeben",
+    "subscribeButton": "Abonnieren",
+    "invalidEmail": "Bitte gib eine gültige E-Mail-Adresse ein.",
+    "errorGeneric": "Etwas ist schiefgelaufen. Bitte versuche es erneut.",
+    "successTitle": "Fast geschafft!",
+    "successBody": "Überprüfe dein Postfach, um dein Abonnement zu bestätigen.",
+    "confirmedTitle": "Anmeldung bestätigt!",
+    "confirmedBody": "Danke für die Bestätigung. Freu dich auf Reisetipps und Angebote in deinem Postfach.",
+    "getTheApp": "App holen",
+    "linkInvalidTitle": "Link abgelaufen",
+    "linkInvalidBody": "Dieser Bestätigungslink ist ungültig oder wurde bereits verwendet.",
+    "backHome": "Zurück zur Startseite",
+    "unsubscribedTitle": "Abmeldung erfolgreich",
+    "unsubscribedBody": "Du erhältst keine Newsletter-E-Mails mehr. Du kannst dich jederzeit wieder anmelden."
   }
 }

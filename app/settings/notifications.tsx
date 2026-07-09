@@ -10,6 +10,7 @@ import * as Notifications from "expo-notifications";
 import { registerForPushNotificationsAsync } from "@/lib/useNotifications";
 import { useTheme } from "@/lib/ThemeContext";
 import { useTranslation } from "react-i18next";
+import NewsletterSignup from "@/components/NewsletterSignup";
 
 export default function NotificationsScreen() {
     const router = useRouter();
@@ -187,6 +188,8 @@ export default function NotificationsScreen() {
                         </View>
                     ))}
                 </View>
+
+                <NewsletterSignup />
 
                 <View style={[styles.infoBox, { backgroundColor: isDarkMode ? colors.secondary : colors.secondary }]}>
                     <Ionicons name="information-circle-outline" size={20} color={colors.primary} />

@@ -1797,5 +1797,23 @@
     "showingSaved": "Sin conexión — mostrando viajes guardados",
     "tripBanner": "Sin conexión — viaje guardado",
     "tripUnavailable": "Este viaje aún no está disponible sin conexión. Ábrelo una vez con conexión para guardarlo."
+  },
+  "newsletter": {
+    "title": "Consejos y ofertas de viaje",
+    "subtitle": "Recibe ideas de viajes con IA y ofertas de vuelos en tu correo.",
+    "emailPlaceholder": "Introduce tu correo electrónico",
+    "subscribeButton": "Suscribirse",
+    "invalidEmail": "Introduce una dirección de correo válida.",
+    "errorGeneric": "Algo salió mal. Inténtalo de nuevo.",
+    "successTitle": "¡Ya casi!",
+    "successBody": "Revisa tu bandeja de entrada para confirmar tu suscripción.",
+    "confirmedTitle": "¡Suscripción confirmada!",
+    "confirmedBody": "Gracias por confirmar. Atento a tu bandeja de entrada para recibir consejos y ofertas de viaje.",
+    "getTheApp": "Descargar la app",
+    "linkInvalidTitle": "Enlace caducado",
+    "linkInvalidBody": "Este enlace de confirmación no es válido o ya se ha utilizado.",
+    "backHome": "Volver al inicio",
+    "unsubscribedTitle": "Cancelaste la suscripción",
+    "unsubscribedBody": "No recibirás más correos del boletín. Puedes volver a suscribirte cuando quieras."
   }
 }

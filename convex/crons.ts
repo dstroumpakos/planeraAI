@@ -91,4 +91,14 @@ crons.interval(
     {},
 );
 
+// Newsletter funnel: walk active subscribers through the drip sequence, one
+// email every few days. The per-subscriber cadence is tracked in the DB
+// (`lastEmailSentAt`), so ticking every 12h just picks up whoever is due.
+crons.interval(
+    "process-newsletter-drip",
+    { hours: 12 },
+    internal.newsletter.processNewsletterDrip,
+    {},
+);
+
 export default crons;

@@ -1618,5 +1618,32 @@ export default defineSchema({
             completedTrips: v.float64(),
         }))),
     }),
+
+    // Newsletter funnel subscribers (double opt-in + drip sequence).
+    // Captured from the marketing site and in-app opt-in card.
+    newsletterSubscribers: defineTable({
+        email: v.string(),
+        status: v.union(
+            v.literal("pending"),      // awaiting double opt-in confirmation
+            v.literal("active"),       // confirmed, receiving emails
+            v.literal("unsubscribed")  // opted out
+        ),
+        source: v.optional(v.string()),   // "web" | "app" | etc.
+        language: v.optional(v.string()),
+        userId: v.optional(v.string()),   // set if a logged-in app user subscribed
+        // Double opt-in / unsubscribe tokens (unguessable)
+        confirmToken: v.string(),
+        unsubscribeToken: v.string(),
+        // Drip sequence progress (0 = welcome sent, then 1..N)
+        dripStage: v.float64(),
+        lastEmailSentAt: v.optional(v.float64()),
+        confirmedAt: v.optional(v.float64()),
+        unsubscribedAt: v.optional(v.float64()),
+        createdAt: v.float64(),
+    })
+        .index("by_email", ["email"])
+        .index("by_confirm_token", ["confirmToken"])
+        .index("by_unsubscribe_token", ["unsubscribeToken"])
+        .index("by_status", ["status"]),
 });
 
