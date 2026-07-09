@@ -329,32 +329,190 @@ const EMAIL_COPY: Record<EmailKey, Record<Lang, EmailCopy>> = {
   },
 };
 
-const FOOTER_COPY: Record<Lang, { note: string; unsubscribe: string }> = {
+const FOOTER_COPY: Record<Lang, { note: string; unsubscribe: string; disclosure: string }> = {
   en: {
     note: "You're receiving this because you signed up for travel tips and deals from Planera.",
     unsubscribe: "Unsubscribe",
+    disclosure: "Some links are partner links — Planera may earn a commission at no extra cost to you.",
   },
   el: {
     note: "Λαμβάνετε αυτό το email επειδή εγγραφήκατε για ταξιδιωτικές συμβουλές και προσφορές από την Planera.",
     unsubscribe: "Διαγραφή",
+    disclosure: "Ορισμένοι σύνδεσμοι είναι συνεργατικοί — η Planera μπορεί να λάβει προμήθεια χωρίς επιπλέον κόστος για εσάς.",
   },
   es: {
     note: "Recibes este correo porque te suscribiste para recibir consejos y ofertas de viaje de Planera.",
     unsubscribe: "Cancelar suscripción",
+    disclosure: "Algunos enlaces son de socios — Planera puede ganar una comisión sin coste adicional para ti.",
   },
   fr: {
     note: "Vous recevez cet e-mail car vous vous êtes inscrit pour recevoir des conseils et des offres de voyage de Planera.",
     unsubscribe: "Se désabonner",
+    disclosure: "Certains liens sont des liens partenaires — Planera peut percevoir une commission sans frais supplémentaires pour vous.",
   },
   de: {
     note: "Du erhältst diese E-Mail, weil du dich für Reisetipps und Angebote von Planera angemeldet hast.",
     unsubscribe: "Abmelden",
+    disclosure: "Einige Links sind Partnerlinks — Planera kann eine Provision erhalten, ohne dass dir zusätzliche Kosten entstehen.",
   },
   ar: {
     note: "تتلقى هذه الرسالة لأنك اشتركت للحصول على نصائح وعروض السفر من Planera.",
     unsubscribe: "إلغاء الاشتراك",
+    disclosure: "بعض الروابط هي روابط شركاء — قد تحصل Planera على عمولة دون أي تكلفة إضافية عليك.",
   },
 };
+
+// ---- Marketing visuals -----------------------------------------------------
+
+// Full-width hero images (hosted on planeraai.app) used at the top of the
+// marketing (drip) emails — one bright travel photo per stage.
+const STAGE_HERO_IMG: Record<EmailKey, string | null> = {
+  confirm: null,
+  welcome: `${BASE_URL}/nl-hero-welcome.jpg`,
+  drip1: `${BASE_URL}/nl-hero-plan.jpg`,
+  drip2: `${BASE_URL}/nl-hero-flights.jpg`,
+  drip3: `${BASE_URL}/nl-hero-explore.jpg`,
+};
+
+// CJ (Commission Junction, publisher 101641262) banner creatives. `img` is the
+// hosted creative; `click` is the commission-tracked redirect. Mirrors the
+// DEALS_BANNERS in the website's affiliates.ts.
+interface CjBanner {
+  img: string;
+  click: string;
+  alt: string;
+}
+const CJ_BANNERS: Record<"tripcom" | "kiwi" | "welcome", CjBanner> = {
+  tripcom: {
+    img: "https://www.ftjcfx.com/image-101641262-15425634",
+    click: "https://www.anrdoezrs.net/click-101641262-15425634",
+    alt: "Trip.com — save on flights and hotels",
+  },
+  kiwi: {
+    img: "https://www.ftjcfx.com/image-101641262-13236165",
+    click: "https://www.kqzyfj.com/click-101641262-13236165",
+    alt: "Kiwi.com — find cheap flights",
+  },
+  welcome: {
+    img: "https://www.lduhtrp.net/image-101641262-17270340",
+    click: "https://www.dpbolvw.net/click-101641262-17270340",
+    alt: "Welcome Pickups — fixed-price airport transfers",
+  },
+};
+
+// Which CJ banner (if any) each email stage shows. Drip emails are the
+// marketing surface; confirm/welcome stay clean.
+const STAGE_BANNER: Record<EmailKey, CjBanner | null> = {
+  confirm: null,
+  welcome: null,
+  drip1: CJ_BANNERS.tripcom, // "plan a trip" → flights + hotels + packages
+  drip2: CJ_BANNERS.kiwi, // "never overpay" → cheap flights
+  drip3: CJ_BANNERS.welcome, // "explore / arrive" → airport transfers
+};
+
+// ---- Low-Fare Radar deal cards (shown inside the drip2 email) --------------
+
+interface DealForEmail {
+  originCity: string;
+  destinationCity: string;
+  price: number;
+  originalPrice?: number;
+  currency: string;
+  outboundDate: string;
+  returnDate?: string;
+  dealTag?: string;
+  isRecommended?: boolean;
+}
+
+const DEALS_LABELS: Record<
+  Lang,
+  { heading: string; viewAll: string; perPerson: string; roundTrip: string; oneWay: string }
+> = {
+  en: { heading: "Live fares right now", viewAll: "See all deals", perPerson: "per person", roundTrip: "Round trip", oneWay: "One way" },
+  el: { heading: "Ζωντανές τιμές τώρα", viewAll: "Δείτε όλες τις προσφορές", perPerson: "ανά άτομο", roundTrip: "Μετ' επιστροφής", oneWay: "Απλή μετάβαση" },
+  es: { heading: "Tarifas en directo", viewAll: "Ver todas las ofertas", perPerson: "por persona", roundTrip: "Ida y vuelta", oneWay: "Solo ida" },
+  fr: { heading: "Tarifs en direct", viewAll: "Voir toutes les offres", perPerson: "par personne", roundTrip: "Aller-retour", oneWay: "Aller simple" },
+  de: { heading: "Aktuelle Preise", viewAll: "Alle Angebote ansehen", perPerson: "pro Person", roundTrip: "Hin & zurück", oneWay: "Nur Hinflug" },
+  ar: { heading: "أسعار مباشرة الآن", viewAll: "عرض كل العروض", perPerson: "للشخص", roundTrip: "ذهاب وعودة", oneWay: "ذهاب فقط" },
+};
+
+function formatDealPrice(amount: number, currency: string, lang: Lang): string {
+  try {
+    return new Intl.NumberFormat(lang, {
+      style: "currency",
+      currency,
+      maximumFractionDigits: 0,
+    }).format(amount);
+  } catch {
+    return `${Math.round(amount)} ${currency}`;
+  }
+}
+
+function formatDealDate(dateStr: string, lang: Lang): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  if (!y || !m || !d) return dateStr;
+  try {
+    return new Intl.DateTimeFormat(lang, {
+      day: "numeric",
+      month: "short",
+      timeZone: "UTC",
+    }).format(new Date(Date.UTC(y, m - 1, d)));
+  } catch {
+    return dateStr;
+  }
+}
+
+/** Builds a full email row (<tr>) showcasing live Low-Fare Radar deals. */
+function renderDealsBlock(deals: DealForEmail[], lang: Lang): string {
+  if (!deals.length) return "";
+  const rtl = lang === "ar";
+  const dir = rtl ? "rtl" : "ltr";
+  const align = rtl ? "right" : "left";
+  const priceAlign = rtl ? "left" : "right";
+  const L = DEALS_LABELS[lang];
+  const dealsUrl = `${BASE_URL}/deals`;
+
+  const cards = deals
+    .map((d) => {
+      const route = `${d.originCity} → ${d.destinationCity}`;
+      const price = formatDealPrice(d.price, d.currency, lang);
+      const orig =
+        d.originalPrice && d.originalPrice > d.price
+          ? formatDealPrice(d.originalPrice, d.currency, lang)
+          : "";
+      const dates = d.returnDate
+        ? `${formatDealDate(d.outboundDate, lang)} – ${formatDealDate(d.returnDate, lang)}`
+        : formatDealDate(d.outboundDate, lang);
+      const tag = d.dealTag
+        ? `<span style="display:inline-block;background:#FFF6C2;color:#7A6A00;font-size:10px;font-weight:700;letter-spacing:0.4px;text-transform:uppercase;padding:3px 8px;border-radius:6px;">${d.dealTag}</span>`
+        : "";
+      return `
+        <a href="${dealsUrl}" target="_blank" style="text-decoration:none;display:block;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FAF9F6;border-radius:12px;margin-bottom:10px;">
+            <tr>
+              <td style="padding:14px 16px;vertical-align:middle;direction:${dir};text-align:${align};">
+                ${tag}
+                <p style="margin:${tag ? "6px" : "0"} 0 2px;font-size:16px;font-weight:700;color:#1A1A1A;">${route}</p>
+                <p style="margin:0;font-size:12px;color:#8A8A8A;">${dates} · ${d.returnDate ? L.roundTrip : L.oneWay}</p>
+              </td>
+              <td width="96" style="padding:14px 16px;vertical-align:middle;text-align:${priceAlign};white-space:nowrap;">
+                ${orig ? `<p style="margin:0;font-size:12px;color:#B0B0B0;text-decoration:line-through;">${orig}</p>` : ""}
+                <p style="margin:0;font-size:20px;font-weight:800;color:#1A1A1A;">${price}</p>
+                <p style="margin:0;font-size:10px;color:#8A8A8A;">${L.perPerson}</p>
+              </td>
+            </tr>
+          </table>
+        </a>`;
+    })
+    .join("");
+
+  return `
+      <tr><td style="padding:4px 40px 20px;direction:${dir};text-align:${align};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <p style="margin:0 0 12px;font-size:12px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;color:#8A8A8A;">${L.heading}</p>
+        ${cards}
+        <a href="${dealsUrl}" target="_blank" style="display:inline-block;margin-top:2px;font-size:14px;font-weight:700;color:#1A1A1A;text-decoration:underline;">${L.viewAll}</a>
+      </td></tr>`;
+}
 
 /**
  * Shared branded email shell. Returns a full HTML document, localized and
@@ -369,12 +527,33 @@ function renderEmail(opts: {
   ctaText: string;
   ctaUrl: string;
   unsubscribeUrl: string;
+  heroImg?: string;
+  banner?: CjBanner | null;
+  dealsBlock?: string;
 }): string {
   const year = new Date().getFullYear();
   const rtl = opts.lang === "ar";
   const dir = rtl ? "rtl" : "ltr";
   const align = rtl ? "right" : "left";
   const footer = FOOTER_COPY[opts.lang];
+
+  const heroRow = opts.heroImg
+    ? `
+      <tr><td style="padding:20px 40px 0;">
+        <img src="${opts.heroImg}" alt="" width="520" style="display:block;width:100%;max-width:520px;height:auto;border:0;border-radius:14px;outline:none;text-decoration:none;" />
+      </td></tr>`
+    : "";
+
+  const bannerRow = opts.banner
+    ? `
+      <tr><td align="center" style="padding:8px 40px 28px;">
+        <a href="${opts.banner.click}" target="_blank" style="text-decoration:none;display:inline-block;">
+          <img src="${opts.banner.img}" alt="${opts.banner.alt}" width="520" style="display:block;width:100%;max-width:520px;height:auto;border:0;border-radius:10px;outline:none;text-decoration:none;" />
+        </a>
+        <p style="margin:10px 0 0;font-size:11px;line-height:1.5;color:#B0B0B0;direction:${dir};text-align:${align};">${footer.disclosure}</p>
+      </td></tr>`
+    : "";
+
   return `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html xmlns="http://www.w3.org/1999/xhtml" dir="${dir}" lang="${opts.lang}">
 <head>
@@ -395,7 +574,7 @@ ${opts.preheader}
     <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background:#FFFFFF;border-radius:20px;box-shadow:0 4px 24px rgba(26,26,26,0.06);overflow:hidden;">
       <tr><td align="${align}" style="padding:32px 40px 0;">
         <a href="${BASE_URL}" style="text-decoration:none;display:inline-block;"><img src="${BASE_URL}/logo.png" alt="Planera" width="140" style="display:block;width:140px;max-width:140px;height:auto;border:0;outline:none;text-decoration:none;" /></a>
-      </td></tr>
+      </td></tr>${heroRow}
       <tr><td style="padding:24px 40px 8px;direction:${dir};text-align:${align};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
         <h1 style="margin:0 0 12px;font-size:28px;line-height:1.2;font-weight:800;color:#1A1A1A;letter-spacing:-0.6px;">${opts.heading}</h1>
         <div style="margin:0 0 24px;font-size:16px;line-height:1.65;color:#4A4A4A;">
@@ -403,11 +582,11 @@ ${opts.preheader}
           <p style="margin:0;">${opts.para2}</p>
         </div>
       </td></tr>
-      <tr><td align="${align}" style="padding:0 40px 32px;direction:${dir};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+      <tr><td align="${align}" style="padding:0 40px 28px;direction:${dir};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
         <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td style="border-radius:12px;background:#FFE500;">
           <a href="${opts.ctaUrl}" style="display:inline-block;padding:14px 28px;font-size:16px;font-weight:700;color:#1A1A1A;text-decoration:none;border-radius:12px;">${opts.ctaText}</a>
         </td></tr></table>
-      </td></tr>
+      </td></tr>${opts.dealsBlock ?? ""}${bannerRow}
       <tr><td style="padding:24px 40px 32px;border-top:1px solid #F0EEE9;direction:${dir};text-align:${align};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
         <p style="margin:0 0 6px;font-size:12px;line-height:1.6;color:#9A9A9A;">${footer.note}</p>
         <p style="margin:0;font-size:12px;line-height:1.6;color:#9A9A9A;">© ${year} Planera · <a href="${opts.unsubscribeUrl}" style="color:#9A9A9A;text-decoration:underline;">${footer.unsubscribe}</a></p>
@@ -468,12 +647,30 @@ function dripEmail(
   stage: number,
   language: string | undefined,
   unsubscribeToken: string,
+  deals?: DealForEmail[],
 ): { subject: string; html: string; text: string } {
   const lang = normalizeLang(language);
   const key = STAGE_KEYS[stage] ?? "welcome";
   const c = EMAIL_COPY[key][lang];
   const ctaUrl = STAGE_CTA_URL[key];
   const unsubscribeUrl = `${BASE_URL}/newsletter/unsubscribe?token=${unsubscribeToken}`;
+
+  // The Low-Fare Radar deal cards only appear in the drip2 ("Low-Fare Radar") email.
+  const dealsBlock =
+    key === "drip2" && deals && deals.length
+      ? renderDealsBlock(deals, lang)
+      : undefined;
+
+  const dealsText =
+    key === "drip2" && deals && deals.length
+      ? "\n\n" +
+        deals
+          .map(
+            (d) =>
+              `${d.originCity} → ${d.destinationCity}: ${formatDealPrice(d.price, d.currency, lang)}`,
+          )
+          .join("\n")
+      : "";
 
   return {
     subject: c.subject,
@@ -486,9 +683,12 @@ function dripEmail(
       ctaText: c.cta,
       ctaUrl,
       unsubscribeUrl,
+      heroImg: STAGE_HERO_IMG[key] ?? undefined,
+      banner: STAGE_BANNER[key],
+      dealsBlock,
     }),
     text:
-      `${c.heading}\n\n${c.para1}\n\n${c.para2}\n\n` +
+      `${c.heading}\n\n${c.para1}\n\n${c.para2}${dealsText}\n\n` +
       `${c.cta}: ${ctaUrl}\n\n` +
       `${FOOTER_COPY[lang].unsubscribe}: ${unsubscribeUrl}`,
   };
@@ -707,6 +907,43 @@ export const advanceDripStage = internalMutation({
 });
 
 /**
+ * Top live Low-Fare Radar deals to feature in the drip2 email.
+ * Recommended deals first, then cheapest. Max 3.
+ */
+export const getFeaturedDeals = internalQuery({
+  args: {},
+  handler: async (ctx): Promise<DealForEmail[]> => {
+    const now = Date.now();
+    const deals = await ctx.db
+      .query("lowFareRadar")
+      .withIndex("by_active", (q) => q.eq("active", true))
+      .collect();
+
+    const activeDeals = deals.filter(
+      (d: any) =>
+        d.active && !d.deletedAt && (!d.expiresAt || d.expiresAt > now),
+    );
+
+    activeDeals.sort((a: any, b: any) => {
+      if (!!a.isRecommended !== !!b.isRecommended) return a.isRecommended ? -1 : 1;
+      return a.price - b.price;
+    });
+
+    return activeDeals.slice(0, 3).map((d: any) => ({
+      originCity: d.originCity,
+      destinationCity: d.destinationCity,
+      price: d.price,
+      originalPrice: d.originalPrice,
+      currency: d.currency,
+      outboundDate: d.outboundDate,
+      returnDate: d.returnDate,
+      dealTag: d.dealTag,
+      isRecommended: d.isRecommended,
+    }));
+  },
+});
+
+/**
  * Cron entry point: send the next drip email to every due subscriber.
  */
 export const processNewsletterDrip = internalAction({
@@ -714,13 +951,23 @@ export const processNewsletterDrip = internalAction({
   returns: v.object({ processed: v.float64() }),
   handler: async (ctx): Promise<{ processed: number }> => {
     const due = await ctx.runQuery(internal.newsletter.getDueDripSubscribers, {});
+    // Fetch live deals once per tick; only the drip2 email renders them.
+    const featuredDeals: DealForEmail[] = await ctx.runQuery(
+      internal.newsletter.getFeaturedDeals,
+      {},
+    );
     let processed = 0;
 
     for (const sub of due) {
       const nextStage = sub.dripStage + 1;
       if (nextStage > MAX_DRIP_STAGE) continue;
 
-      const mail = dripEmail(nextStage, sub.language, sub.unsubscribeToken);
+      const mail = dripEmail(
+        nextStage,
+        sub.language,
+        sub.unsubscribeToken,
+        featuredDeals,
+      );
       const result = await ctx.runAction(internal.postmark.sendRawEmail, {
         to: sub.email,
         subject: mail.subject,
