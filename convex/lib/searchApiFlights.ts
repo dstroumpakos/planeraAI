@@ -117,6 +117,12 @@ export interface RadarFlightOption {
 export interface RadarFlightOptionsResult {
   options: RadarFlightOption[];
   priceLevel: string | null; // "low" | "typical" | "high"
+  /**
+   * Google's historical typical price range for this route+dates, [low, high],
+   * from `price_insights.typical_price_range`. Null when Google doesn't provide
+   * it. Same basis as an option's `price` (round-trip total for round trips).
+   */
+  typicalPriceRange: [number, number] | null;
 }
 
 /**
@@ -182,7 +188,19 @@ export async function fetchRadarFlightOptions(
       ? json.price_insights.price_level
       : null;
 
-  return { options, priceLevel };
+  // Google's historical typical price range, e.g. [180, 320]. Guard against
+  // malformed shapes so a bad response can't produce a nonsense benchmark.
+  let typicalPriceRange: [number, number] | null = null;
+  const rawRange = json?.price_insights?.typical_price_range;
+  if (Array.isArray(rawRange) && rawRange.length === 2) {
+    const lo = toNumber(rawRange[0]);
+    const hi = toNumber(rawRange[1]);
+    if (lo !== undefined && hi !== undefined && lo > 0 && hi >= lo) {
+      typicalPriceRange = [lo, hi];
+    }
+  }
+
+  return { options, priceLevel, typicalPriceRange };
 }
 
 /** What we know about the deal's specific flight, used to match a fresh option. */

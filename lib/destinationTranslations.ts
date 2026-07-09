@@ -407,6 +407,51 @@ export const CITY_TRANSLATIONS: Translations = {
   "Ulaanbaatar": { el: "Ουλάν Μπατόρ", es: "Ulán Bator", fr: "Oulan-Bator", de: "Ulaanbaatar", ar: "أولان باتور" },
 };
 
+// Reverse lookup: any localized (or English) city/country name, lowercased,
+// mapped back to its canonical English name. Built once at module load.
+// Used to normalize destination strings — which may be in the user's language,
+// e.g. "Ρίο ντε Τζανέιρο" — before sending them to image / search APIs (Unsplash,
+// OpenAI) that only understand English.
+let LOCALIZED_TO_ENGLISH: Record<string, string> | null = null;
+
+function buildReverseLookup(): Record<string, string> {
+  const map: Record<string, string> = {};
+  for (const table of [CITY_TRANSLATIONS, COUNTRY_TRANSLATIONS]) {
+    for (const [english, langs] of Object.entries(table)) {
+      map[english.toLowerCase()] = english;
+      for (const localized of Object.values(langs)) {
+        const key = localized.toLowerCase();
+        // Don't let a later collision overwrite an already-mapped name.
+        if (!(key in map)) map[key] = english;
+      }
+    }
+  }
+  return map;
+}
+
+/**
+ * Translate a single city or country token to its canonical English name.
+ * Returns the original (trimmed) token if no translation is known.
+ */
+export function toEnglishName(name: string): string {
+  if (!LOCALIZED_TO_ENGLISH) LOCALIZED_TO_ENGLISH = buildReverseLookup();
+  const trimmed = name.trim();
+  return LOCALIZED_TO_ENGLISH[trimmed.toLowerCase()] || trimmed;
+}
+
+/**
+ * Normalize a possibly-localized destination string (e.g. "Ρίο ντε Τζανέιρο, Brazil")
+ * into English ("Rio de Janeiro, Brazil") so it can be used as a query for image /
+ * search APIs that only understand English. Handles comma-separated "City, Country"
+ * strings by translating each part independently; untranslatable parts (e.g. IATA
+ * codes) are passed through unchanged.
+ */
+export function normalizeDestinationToEnglish(destination: string): string {
+  const parts = destination.split(",").map((p) => p.trim()).filter(Boolean);
+  if (parts.length === 0) return destination.trim();
+  return parts.map(toEnglishName).join(", ");
+}
+
 export const COUNTRY_TRANSLATIONS: Translations = {
   "France": { el: "Γαλλία", es: "Francia", fr: "France", de: "Frankreich", ar: "فرنسا" },
   "UK": { el: "Ηνωμένο Βασίλειο", es: "Reino Unido", fr: "Royaume-Uni", de: "Vereinigtes Königreich", ar: "المملكة المتحدة" },

@@ -15,6 +15,7 @@
  */
 
 import { AIRPORTS } from "./airports";
+import { normalizeDestinationToEnglish } from "./destinationTranslations";
 
 export type AirportInfo = {
   /** IATA code to actually search flights with. */
@@ -798,8 +799,12 @@ export function resolveAirport(name: string | undefined | null): AirportInfo | n
     return { iata: parenMatch[1], hasOwnAirport: true };
   }
 
-  const lower = raw.toLowerCase().trim();
-  const cleaned = normalize(raw);
+  // Localized names (e.g. Greek "Ρώμη", German "Mailand") won't match the
+  // English-keyed maps below, so normalize to canonical English first. Falls
+  // back to the original string when no translation is known.
+  const english = normalizeDestinationToEnglish(raw);
+  const lower = english.toLowerCase().trim();
+  const cleaned = normalize(english);
 
   // 2) Exact match (cleaned or raw lowercased)
   if (DESTINATION_AIRPORTS[cleaned]) return DESTINATION_AIRPORTS[cleaned];

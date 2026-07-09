@@ -29,11 +29,45 @@ import {
   normalizeFlightNumber,
   extractHm,
   type RadarDealCriteria,
+  type RadarFlightOptionsResult,
 } from "./lib/searchApiFlights";
 
 // Upper bound on searchapi.io calls per run. Curated deal count is small in
 // practice; this is a backstop against runaway quota use.
 const MAX_DEALS_PER_RUN = 100;
+
+// Low-fare ceiling: a deal stays on the radar only while its fare is at or
+// below the route's typical price times this ratio. Above it, the deal is no
+// longer a "low fare" and gets expired on refresh. 1.0 = expire once the fare
+// rises above the typical/average price; lower it (e.g. 0.9) to require deals
+// to stay a further margin under the typical price.
+const LOW_FARE_CEILING_RATIO = 1.0;
+
+// Median needs a few live options to be a trustworthy benchmark; below this we
+// skip the ceiling check (rather than risk expiring a deal on thin data).
+const MIN_OPTIONS_FOR_MEDIAN = 4;
+
+/**
+ * The "typical price" for a route on given dates, used as the low-fare ceiling
+ * reference. Prefers Google's historical typical range (midpoint), falling back
+ * to the median of the live options. Returns null when we don't have enough
+ * signal to judge — the caller then skips the ceiling check for that deal.
+ */
+function routeTypicalPrice(result: RadarFlightOptionsResult): number | null {
+  const range = result.typicalPriceRange;
+  if (range) {
+    return (range[0] + range[1]) / 2;
+  }
+  const prices = result.options
+    .map((o) => o.price)
+    .filter((p) => p > 0)
+    .sort((a, b) => a - b);
+  if (prices.length < MIN_OPTIONS_FOR_MEDIAN) return null;
+  const mid = Math.floor(prices.length / 2);
+  return prices.length % 2
+    ? prices[mid]
+    : (prices[mid - 1] + prices[mid]) / 2;
+}
 
 // Where the post-refresh price-change report is emailed. Override via env if
 // needed; defaults to the admin address.
@@ -48,6 +82,10 @@ type PriceChange = {
   oldPrice: number;
   newPrice: number;
   currency: string;
+  // Set when the deal was retired because its fare rose above the route's
+  // low-fare ceiling; carries the typical price it was measured against.
+  expired?: boolean;
+  ceiling?: number;
 };
 
 const esc = (s: string) =>
@@ -66,11 +104,14 @@ function buildReportEmail(
           const delta = c.newPrice - c.oldPrice;
           const pct = c.oldPrice ? Math.round((delta / c.oldPrice) * 100) : 0;
           const color = delta < 0 ? "#34C759" : delta > 0 ? "#EF4444" : "#8A8A8A";
+          const changeCell = c.expired
+            ? `<span style="display:inline-block;padding:2px 8px;border-radius:6px;background:#FDECEC;color:#EF4444;font-weight:800;font-size:12px;">EXPIRED</span><br/><span style="color:#8A8A8A;font-size:11px;">&gt; ceiling ${esc(c.currency)} ${c.ceiling ?? "—"}</span>`
+            : `<span style="color:${color};">${arrow(c.oldPrice, c.newPrice)} ${delta > 0 ? "+" : ""}${delta} (${pct > 0 ? "+" : ""}${pct}%)</span>`;
           return `<tr>
             <td style="padding:8px 12px;border-bottom:1px solid #EFEDE7;font-size:13px;color:#1A1A1A;"><strong>${esc(c.route)}</strong><br/><span style="color:#8A8A8A;font-size:12px;">${esc(c.cities)}</span></td>
             <td style="padding:8px 12px;border-bottom:1px solid #EFEDE7;font-size:12px;color:#4A4A4A;">${esc(c.flight || "—")}<br/><span style="color:#8A8A8A;">${esc(c.dates)}</span></td>
             <td style="padding:8px 12px;border-bottom:1px solid #EFEDE7;font-size:13px;color:#1A1A1A;white-space:nowrap;">${esc(c.currency)} ${c.oldPrice} → <strong>${esc(c.currency)} ${c.newPrice}</strong></td>
-            <td style="padding:8px 12px;border-bottom:1px solid #EFEDE7;font-size:13px;font-weight:700;color:${color};white-space:nowrap;">${arrow(c.oldPrice, c.newPrice)} ${delta > 0 ? "+" : ""}${delta} (${pct > 0 ? "+" : ""}${pct}%)</td>
+            <td style="padding:8px 12px;border-bottom:1px solid #EFEDE7;font-size:13px;font-weight:700;white-space:nowrap;">${changeCell}</td>
           </tr>`;
         })
         .join("")
@@ -86,6 +127,7 @@ function buildReportEmail(
       <tr><td style="padding:16px 32px 0;">
         <p style="margin:0;font-size:14px;color:#4A4A4A;">
           Checked <strong>${summary.checked}</strong> deal(s) · <strong style="color:#34C759;">${summary.updated}</strong> price change(s) ·
+          <strong style="color:#EF4444;">${summary.expired}</strong> expired (above ceiling) ·
           ${summary.unchanged} unchanged · ${summary.notFound} flight(s) not found · ${summary.failed} failed.
         </p>
       </td></tr>
@@ -108,18 +150,22 @@ function buildReportEmail(
 
   const textLines = [
     `Low-Fare Radar — price refresh (${when})`,
-    `Checked ${summary.checked} · updated ${summary.updated} · unchanged ${summary.unchanged} · not found ${summary.notFound} · failed ${summary.failed}`,
+    `Checked ${summary.checked} · updated ${summary.updated} · expired ${summary.expired} · unchanged ${summary.unchanged} · not found ${summary.notFound} · failed ${summary.failed}`,
     "",
     ...(changes.length
-      ? changes.map(
-          (c) =>
-            `${c.route} (${c.cities}) ${c.flight} ${c.dates}: ${c.currency} ${c.oldPrice} -> ${c.newPrice} (${c.newPrice - c.oldPrice >= 0 ? "+" : ""}${c.newPrice - c.oldPrice})`
+      ? changes.map((c) =>
+          c.expired
+            ? `${c.route} (${c.cities}) ${c.flight} ${c.dates}: EXPIRED — ${c.currency} ${c.oldPrice} -> ${c.newPrice}, above ceiling ${c.currency} ${c.ceiling ?? "—"}`
+            : `${c.route} (${c.cities}) ${c.flight} ${c.dates}: ${c.currency} ${c.oldPrice} -> ${c.newPrice} (${c.newPrice - c.oldPrice >= 0 ? "+" : ""}${c.newPrice - c.oldPrice})`
         )
       : ["No prices changed in this run."]),
   ];
 
-  const subject = changes.length
-    ? `✈️ Low-Fare Radar: ${changes.length} price change(s)`
+  const parts: string[] = [];
+  if (summary.expired) parts.push(`${summary.expired} expired`);
+  if (summary.updated) parts.push(`${summary.updated} price change(s)`);
+  const subject = parts.length
+    ? `✈️ Low-Fare Radar: ${parts.join(", ")}`
     : `✈️ Low-Fare Radar: refresh complete (no changes)`;
 
   return { subject, html, text: textLines.join("\n") };
@@ -148,6 +194,7 @@ type RefreshResult = {
   unchanged: number;
   notFound: number;
   failed: number;
+  expired: number;
 };
 
 /**
@@ -165,6 +212,7 @@ export const refreshManualDealPrices = internalAction({
     let unchanged = 0;
     let notFound = 0; // API returned options, but not the deal's specific flight
     let failed = 0;
+    let expired = 0;  // deals retired for exceeding the low-fare ceiling
     const changes: PriceChange[] = [];
 
     try {
@@ -205,30 +253,47 @@ export const refreshManualDealPrices = internalAction({
 
           const matchedFlight =
             match.option.outboundFlightNumbers.join("+") || undefined;
+
+          // Low-fare ceiling for this route (typical price × ratio). When the
+          // route's typical price is unknown we pass no ceiling, so the deal is
+          // only re-priced, never expired on thin data.
+          const typical = routeTypicalPrice(result);
+          const ceiling =
+            typical != null ? typical * LOW_FARE_CEILING_RATIO : undefined;
+
           const res: {
             changed: boolean;
+            expired?: boolean;
             oldPrice?: number;
             newPrice?: number;
+            ceiling?: number;
           } = await ctx.runMutation(internal.lowFareRadar.applyPriceRefresh, {
             id: deal._id,
             newPrice: Math.round(match.option.price),
             matchType: match.matchType,
             matchedFlight,
+            ...(ceiling != null ? { ceiling } : {}),
           });
 
-          if (res?.changed) {
+          const changeRow = (): PriceChange => ({
+            route: `${deal.origin} → ${deal.destination}`,
+            cities: `${deal.originCity || deal.origin} → ${deal.destinationCity || deal.destination}`,
+            flight: matchedFlight || deal.flightNumber || "",
+            dates: deal.returnDate
+              ? `${deal.outboundDate} → ${deal.returnDate}`
+              : deal.outboundDate,
+            oldPrice: res.oldPrice ?? deal.price,
+            newPrice: res.newPrice ?? Math.round(match.option.price),
+            currency: deal.currency,
+          });
+
+          if (res?.expired) {
+            expired++;
+            changes.push({ ...changeRow(), expired: true, ceiling: res.ceiling });
+            if (res.changed) updated++;
+          } else if (res?.changed) {
             updated++;
-            changes.push({
-              route: `${deal.origin} → ${deal.destination}`,
-              cities: `${deal.originCity || deal.origin} → ${deal.destinationCity || deal.destination}`,
-              flight: matchedFlight || deal.flightNumber || "",
-              dates: deal.returnDate
-                ? `${deal.outboundDate} → ${deal.returnDate}`
-                : deal.outboundDate,
-              oldPrice: res.oldPrice ?? deal.price,
-              newPrice: res.newPrice ?? Math.round(match.option.price),
-              currency: deal.currency,
-            });
+            changes.push(changeRow());
           } else {
             unchanged++;
           }
@@ -241,13 +306,13 @@ export const refreshManualDealPrices = internalAction({
       }
 
       console.log(
-        `[radar-refresh] checked=${checked} updated=${updated} unchanged=${unchanged} notFound=${notFound} failed=${failed} (of ${deals.length} eligible)`
+        `[radar-refresh] checked=${checked} updated=${updated} expired=${expired} unchanged=${unchanged} notFound=${notFound} failed=${failed} (of ${deals.length} eligible)`
       );
 
       // Email a price-change report so the run is observable end-to-end.
       // Best-effort: a mail failure must not fail the refresh.
       try {
-        const summary: RefreshResult = { checked, updated, unchanged, notFound, failed };
+        const summary: RefreshResult = { checked, updated, unchanged, notFound, failed, expired };
         const { subject, html, text } = buildReportEmail(summary, changes);
         const mail: { success: boolean; error?: string } = await ctx.runAction(
           internal.postmark.sendRawEmail,
@@ -264,11 +329,11 @@ export const refreshManualDealPrices = internalAction({
     } finally {
       // Always reset the countdown, even if the run threw partway through.
       await ctx.runMutation(internal.lowFareRadar.markRadarRefreshCompleted, {
-        result: { checked, updated, unchanged, notFound, failed },
+        result: { checked, updated, unchanged, notFound, failed, expired },
       });
     }
 
-    return { checked, updated, unchanged, notFound, failed };
+    return { checked, updated, unchanged, notFound, failed, expired };
   },
 });
 
@@ -327,6 +392,7 @@ export const triggerRefreshNow = action({
         unchanged: 0,
         notFound: 0,
         failed: 0,
+        expired: 0,
         alreadyRunning: true,
       };
     }

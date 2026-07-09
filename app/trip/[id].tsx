@@ -43,6 +43,7 @@ import {
     FlightPartnerKey,
     HotelPartnerKey,
 } from "@/lib/affiliateLinks";
+import { normalizeDestinationToEnglish } from "@/lib/destinationTranslations";
 
 // Sanitize location titles for maps deep links by stripping descriptions, ratings, etc.
 const cleanLocationTitle = (title: string): string => {
@@ -720,7 +721,9 @@ const CITY_TO_SKYSCANNER_ENTITY: Record<string, string> = {
 // Helper to get Skyscanner entity_id for a city
 const getSkyscannerEntityId = (cityName: string | undefined): string | null => {
     if (!cityName) return null;
-    const lower = cityName.toLowerCase().trim();
+    // Destination may be localized (e.g. Greek "Ρώμη"); the entity map is
+    // keyed by English names, so normalize before looking up.
+    const lower = normalizeDestinationToEnglish(cityName).toLowerCase().trim();
     if (CITY_TO_SKYSCANNER_ENTITY[lower]) return CITY_TO_SKYSCANNER_ENTITY[lower];
     for (const [city, id] of Object.entries(CITY_TO_SKYSCANNER_ENTITY)) {
         if (lower.includes(city) || city.includes(lower)) return id;
@@ -744,9 +747,10 @@ const getAirportName = (codeOrCity: string | undefined): string => {
         return AIRPORT_NAMES[codeMatch[1]];
     }
     
-    // Try to find a city name match
-    const lowerInput = codeOrCity.toLowerCase().trim();
-    
+    // Try to find a city name match. Normalize localized names
+    // (e.g. Greek "Ρώμη") to English first — the map is English-keyed.
+    const lowerInput = normalizeDestinationToEnglish(codeOrCity).toLowerCase().trim();
+
     // Direct city match
     if (CITY_TO_AIRPORT[lowerInput]) {
         return AIRPORT_NAMES[CITY_TO_AIRPORT[lowerInput]];
@@ -772,8 +776,10 @@ const getAirportCode = (codeOrCity: string | undefined): string => {
     // Check parentheses like "Athens (ATH)"
     const codeMatch = codeOrCity.match(/\(([A-Z]{3})\)/);
     if (codeMatch) return codeMatch[1];
-    // City name lookup
-    const lower = codeOrCity.toLowerCase().trim();
+    // City name lookup. Normalize localized names (e.g. Greek "Ρώμη") to
+    // English first — the map is English-keyed — so provider deep links
+    // always receive a valid IATA code, never a raw localized string.
+    const lower = normalizeDestinationToEnglish(codeOrCity).toLowerCase().trim();
     if (CITY_TO_AIRPORT[lower]) return CITY_TO_AIRPORT[lower];
     for (const [city, code] of Object.entries(CITY_TO_AIRPORT)) {
         if (lower.includes(city)) return code;
@@ -1740,7 +1746,9 @@ export default function TripDetails() {
     });
 
     const hotelLinkParams = (): HotelLinkParams => ({
-        destination: trip.destination || '',
+        // English label so provider hotel search (Airbnb / Trip.com searchWord)
+        // resolves reliably even when trip.destination is localized.
+        destination: normalizeDestinationToEnglish(trip.destination || ''),
         destEntityId: getSkyscannerEntityId(trip.destination),
         checkIn: new Date(trip.startDate).toISOString().split('T')[0],
         checkOut: new Date(trip.endDate).toISOString().split('T')[0],

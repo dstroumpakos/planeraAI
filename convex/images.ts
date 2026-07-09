@@ -2,6 +2,7 @@
 
 import { action } from "./_generated/server";
 import { v } from "convex/values";
+import { normalizeDestinationToEnglish } from "../lib/destinationTranslations";
 
 interface UnsplashPhoto {
   urls: { regular: string };
@@ -283,7 +284,9 @@ export const getDestinationImage = action({
     v.null()
   ),
   handler: async (ctx, args) => {
-    return await fetchUnsplashImage(args.destination);
+    // Destination may arrive in the user's language (e.g. "Ρίο ντε Τζανέιρο");
+    // Unsplash only understands English, so normalize before searching.
+    return await fetchUnsplashImage(normalizeDestinationToEnglish(args.destination));
   },
 });
 
@@ -353,7 +356,7 @@ export const getActivityImage = action({
     v.null()
   ),
   handler: async (ctx, args) => {
-    const query = `${args.activity} ${args.destination}`;
+    const query = `${args.activity} ${normalizeDestinationToEnglish(args.destination)}`;
     return await fetchUnsplashImage(query);
   },
 });
@@ -371,7 +374,7 @@ export const getRestaurantImage = action({
     v.null()
   ),
   handler: async (ctx, args) => {
-    const query = `${args.cuisine} restaurant ${args.destination}`;
+    const query = `${args.cuisine} restaurant ${normalizeDestinationToEnglish(args.destination)}`;
     return await fetchUnsplashImage(query);
   },
 });

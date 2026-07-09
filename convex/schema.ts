@@ -855,6 +855,7 @@ export default defineSchema({
             unchanged: v.float64(),
             notFound: v.float64(),
             failed: v.float64(),
+            expired: v.optional(v.float64()),  // deals retired for exceeding the low-fare ceiling
             at: v.float64(),
         })),
         updatedAt: v.float64(),

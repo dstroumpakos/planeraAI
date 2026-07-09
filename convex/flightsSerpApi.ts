@@ -277,57 +277,59 @@ async function _runSearch(
   return normalized;
 }
 
+// Shared validator for the flight-search input, reused by the authenticated
+// `searchFlights` and the account-free public `searchFlightsPublic`.
+const FLIGHT_SEARCH_INPUT = v.object({
+  departureId: v.string(),
+  arrivalId: v.string(),
+  outboundDate: v.string(),
+  returnDate: v.optional(v.string()),
+  type: v.optional(v.union(v.literal("one_way"), v.literal("round_trip"))),
+  currency: v.optional(v.string()),
+  adults: v.optional(v.float64()),
+  children: v.optional(v.float64()),
+  infantsInSeat: v.optional(v.float64()),
+  infantsOnLap: v.optional(v.float64()),
+  travelClass: v.optional(
+    v.union(
+      v.literal("economy"),
+      v.literal("premium_economy"),
+      v.literal("business"),
+      v.literal("first")
+    )
+  ),
+  stops: v.optional(
+    v.union(
+      v.literal("any"),
+      v.literal("nonstop"),
+      v.literal("one_stop_or_fewer"),
+      v.literal("two_stops_or_fewer")
+    )
+  ),
+  sortBy: v.optional(
+    v.union(
+      v.literal("top"),
+      v.literal("price"),
+      v.literal("departure_time"),
+      v.literal("arrival_time"),
+      v.literal("duration"),
+      v.literal("emissions")
+    )
+  ),
+  bags: v.optional(v.float64()),
+  maxPrice: v.optional(v.float64()),
+  maxDuration: v.optional(v.float64()),
+  outboundTimes: v.optional(v.string()),
+  returnTimes: v.optional(v.string()),
+  deepSearch: v.optional(v.boolean()),
+  noCache: v.optional(v.boolean()),
+  departureToken: v.optional(v.string()),
+});
+
 export const searchFlights = action({
   args: {
     token: v.string(),
-    input: v.object({
-      departureId: v.string(),
-      arrivalId: v.string(),
-      outboundDate: v.string(),
-      returnDate: v.optional(v.string()),
-      type: v.optional(
-        v.union(v.literal("one_way"), v.literal("round_trip"))
-      ),
-      currency: v.optional(v.string()),
-      adults: v.optional(v.float64()),
-      children: v.optional(v.float64()),
-      infantsInSeat: v.optional(v.float64()),
-      infantsOnLap: v.optional(v.float64()),
-      travelClass: v.optional(
-        v.union(
-          v.literal("economy"),
-          v.literal("premium_economy"),
-          v.literal("business"),
-          v.literal("first")
-        )
-      ),
-      stops: v.optional(
-        v.union(
-          v.literal("any"),
-          v.literal("nonstop"),
-          v.literal("one_stop_or_fewer"),
-          v.literal("two_stops_or_fewer")
-        )
-      ),
-      sortBy: v.optional(
-        v.union(
-          v.literal("top"),
-          v.literal("price"),
-          v.literal("departure_time"),
-          v.literal("arrival_time"),
-          v.literal("duration"),
-          v.literal("emissions")
-        )
-      ),
-      bags: v.optional(v.float64()),
-      maxPrice: v.optional(v.float64()),
-      maxDuration: v.optional(v.float64()),
-      outboundTimes: v.optional(v.string()),
-      returnTimes: v.optional(v.string()),
-      deepSearch: v.optional(v.boolean()),
-      noCache: v.optional(v.boolean()),
-      departureToken: v.optional(v.string()),
-    }),
+    input: FLIGHT_SEARCH_INPUT,
     // Optional cache TTL override (ms). Capped at 7 days. Used by
     // background workers like the Low-Fare Radar to keep SerpApi quota
     // bounded; user-facing searches should omit this and get the 30-min
@@ -359,6 +361,52 @@ export const searchFlights = action({
       return await _runSearch(ctx, args.input as FlightSearchInput, args.cacheTtlMs);
     } catch (err) {
       await reportError(ctx, "flightsSerpApi:searchFlights", err, {
+        departureId: args.input?.departureId,
+        arrivalId: args.input?.arrivalId,
+      });
+      throw err;
+    }
+  },
+});
+
+/**
+ * Public, account-free flight search for the marketing / SEO widget.
+ *
+ * The widget used to mint an anonymous account (`signInAnonymous`) per visitor
+ * just to obtain a session token — polluting the users table with a "Guest
+ * User" row for every browser that ran a search. This variant takes an opaque
+ * per-browser `deviceId` used ONLY for rate limiting (a string key in the
+ * `flightSearchRateLimits` table, NOT a user record), so public searches never
+ * create users. The SerpApi key stays server-side exactly as before.
+ *
+ * Rate limit is tighter than the authenticated per-user one since it's fully
+ * public. A spoofed/rotated deviceId is no easier to abuse than minting fresh
+ * anonymous accounts was, so this is strictly better than the old flow.
+ */
+export const searchFlightsPublic = action({
+  args: {
+    deviceId: v.string(),
+    input: FLIGHT_SEARCH_INPUT,
+  },
+  handler: async (ctx, args): Promise<NormalizedFlightSearchResponse> => {
+    const device = (args.deviceId || "").trim();
+    if (!device) throw new Error("Missing device id");
+
+    const rl: { allowed: boolean } = await ctx.runMutation(
+      internal.flightSearchCache.checkRateLimit,
+      { userId: `pub:${device}`, limit: 30, windowMs: 15 * 60 * 1000 }
+    );
+    if (!rl.allowed) {
+      throw new Error(
+        "You've searched a lot in a short time. Please wait a few minutes and try again."
+      );
+    }
+
+    try {
+      // Public searches always use the default cache TTL (no override).
+      return await _runSearch(ctx, args.input as FlightSearchInput, undefined);
+    } catch (err) {
+      await reportError(ctx, "flightsSerpApi:searchFlightsPublic", err, {
         departureId: args.input?.departureId,
         arrivalId: args.input?.arrivalId,
       });

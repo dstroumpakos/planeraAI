@@ -8,6 +8,7 @@ import { assignActivityIds, dedupeVenues, resequenceDayTimes, reassignTimeSlots 
 import { getAvgDailySpend, getAvgStay, SPEND_CURRENCY } from "./destinationSpend";
 import { normalizeDestinationKey } from "./partnerApiAuth";
 import { UNWTO_COUNTRY_STATS } from "./unwtoCountryStats";
+import { toEnglishName } from "../lib/destinationTranslations";
 
 /**
  * Resolve a destination's average spend PER TRIP (per person) + typical stay,
@@ -359,15 +360,20 @@ export const createFromDeal = authMutation({
             dealId: deal._id,
         };
 
-        // Use city names; fall back to frontend-passed names if AI extraction left them empty
-        const effectiveOriginCity = deal.originCity || args.originCityFallback || deal.origin;
-        const effectiveDestCity = deal.destinationCity || args.destinationCityFallback || deal.destination;
+        // Use city names; fall back to frontend-passed names if AI extraction left them empty.
+        // Normalize to canonical English (names may be localized, e.g. Greek "Ρώμη")
+        // so the stored destination stays consistent, matches the AI prompt, and
+        // yields correct Unsplash imagery.
+        const effectiveOriginCity = toEnglishName(deal.originCity || args.originCityFallback || deal.origin);
+        const effectiveDestCity = toEnglishName(deal.destinationCity || args.destinationCityFallback || deal.destination);
+        const effectiveOriginCountry = args.originCountry ? toEnglishName(args.originCountry) : undefined;
+        const effectiveDestCountry = args.destinationCountry ? toEnglishName(args.destinationCountry) : undefined;
 
-        const origin = args.originCountry
-            ? `${effectiveOriginCity}, ${args.originCountry}`
+        const origin = effectiveOriginCountry
+            ? `${effectiveOriginCity}, ${effectiveOriginCountry}`
             : effectiveOriginCity;
-        const destination = args.destinationCountry
-            ? `${effectiveDestCity}, ${args.destinationCountry}`
+        const destination = effectiveDestCountry
+            ? `${effectiveDestCity}, ${effectiveDestCountry}`
             : effectiveDestCity;
 
         const tripId = await ctx.db.insert("trips", {
@@ -594,14 +600,20 @@ export const createFromFlight = authMutation({
             dataSource: "flight-search",
         };
 
-        const effectiveOriginCity = args.originCity || args.origin;
-        const effectiveDestCity = args.destinationCity || args.destination;
+        // City/country names may arrive in the user's language (e.g. Greek
+        // "Ρώμη") from the explore/flight-search flow. Store the destination in
+        // canonical English so it stays consistent with the English origin,
+        // matches the AI prompt, and yields correct Unsplash imagery.
+        const effectiveOriginCity = toEnglishName(args.originCity || args.origin);
+        const effectiveDestCity = toEnglishName(args.destinationCity || args.destination);
+        const effectiveOriginCountry = args.originCountry ? toEnglishName(args.originCountry) : undefined;
+        const effectiveDestCountry = args.destinationCountry ? toEnglishName(args.destinationCountry) : undefined;
 
-        const origin = args.originCountry
-            ? `${effectiveOriginCity}, ${args.originCountry}`
+        const origin = effectiveOriginCountry
+            ? `${effectiveOriginCity}, ${effectiveOriginCountry}`
             : effectiveOriginCity;
-        const destination = args.destinationCountry
-            ? `${effectiveDestCity}, ${args.destinationCountry}`
+        const destination = effectiveDestCountry
+            ? `${effectiveDestCity}, ${effectiveDestCountry}`
             : effectiveDestCity;
 
         const arrivalTime = args.outboundDate && args.outboundArrival

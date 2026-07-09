@@ -3,6 +3,7 @@
 import { action } from "./_generated/server";
 import { v } from "convex/values";
 import { api } from "./_generated/api";
+import { normalizeDestinationToEnglish } from "../lib/destinationTranslations";
 
 /**
  * Fetch a portrait-oriented Unsplash photo for the share card.
@@ -30,7 +31,7 @@ export const fetchShareCardPhoto = action({
     }
 
     try {
-      const searchQuery = `${trip.destination} travel`;
+      const searchQuery = `${normalizeDestinationToEnglish(trip.destination)} travel`;
       const response = await fetch(
         `https://api.unsplash.com/search/photos?query=${encodeURIComponent(searchQuery)}&per_page=1&orientation=portrait`,
         {
@@ -49,7 +50,7 @@ export const fetchShareCardPhoto = action({
       if (!data.results || data.results.length === 0) {
         // Fallback: try just the destination name
         const fallbackResponse = await fetch(
-          `https://api.unsplash.com/search/photos?query=${encodeURIComponent(trip.destination)}&per_page=1&orientation=portrait`,
+          `https://api.unsplash.com/search/photos?query=${encodeURIComponent(normalizeDestinationToEnglish(trip.destination))}&per_page=1&orientation=portrait`,
           {
             headers: {
               Authorization: `Client-ID ${accessKey}`,
@@ -131,7 +132,7 @@ export const fetchShareCardPhotos = action({
     }
 
     try {
-      const searchQuery = `${trip.destination} travel`;
+      const searchQuery = `${normalizeDestinationToEnglish(trip.destination)} travel`;
       const response = await fetch(
         `https://api.unsplash.com/search/photos?query=${encodeURIComponent(searchQuery)}&per_page=10&orientation=portrait`,
         {
@@ -152,7 +153,7 @@ export const fetchShareCardPhotos = action({
       // If few results, try fallback query
       if (results.length < 3) {
         const fallbackResponse = await fetch(
-          `https://api.unsplash.com/search/photos?query=${encodeURIComponent(trip.destination)}&per_page=10&orientation=portrait`,
+          `https://api.unsplash.com/search/photos?query=${encodeURIComponent(normalizeDestinationToEnglish(trip.destination))}&per_page=10&orientation=portrait`,
           {
             headers: {
               Authorization: `Client-ID ${accessKey}`,

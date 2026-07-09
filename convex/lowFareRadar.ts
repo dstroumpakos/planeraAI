@@ -832,23 +832,25 @@ export const applyPriceRefresh = internalMutation({
     matchType: v.optional(v.string()),
     // The matched flight number(s), e.g. "A3601" or "A3601+A3602".
     matchedFlight: v.optional(v.string()),
+    // "Low fare" ceiling for this route (the typical/average fare, derived from
+    // Google's price insights during the refresh). When the refreshed price is
+    // above this, the deal is no longer a low fare and gets expired so the
+    // radar only ever surfaces genuine deals. Omitted → no ceiling check.
+    ceiling: v.optional(v.float64()),
   },
   handler: async (ctx, args) => {
     const existing = await ctx.db.get(args.id);
-    if (!existing) return { changed: false as const };
+    if (!existing) return { changed: false as const, expired: false as const };
 
     const oldPrice = existing.price;
     const newPrice = Math.round(args.newPrice);
 
     // Sanity guard: ignore junk values so a bad API response can't corrupt a
     // curated deal.
-    if (!(newPrice > 0) || newPrice > 100000) return { changed: false as const };
+    if (!(newPrice > 0) || newPrice > 100000)
+      return { changed: false as const, expired: false as const };
 
-    if (newPrice === oldPrice) {
-      // No change — record that we checked so admins can see it's fresh.
-      await ctx.db.patch(args.id, { updatedAt: Date.now() });
-      return { changed: false as const };
-    }
+    const priceChanged = newPrice !== oldPrice;
 
     // Preserve a multi-passenger total by scaling it proportionally with the
     // per-person price (deals store `price` as per-person, `totalPrice` as the
@@ -866,6 +868,42 @@ export const applyPriceRefresh = internalMutation({
       : args.matchType
       ? `, matched by ${args.matchType}`
       : "";
+
+    // Ceiling rule: the fare has risen above the route's typical price, so this
+    // is no longer a low fare — expire it (deactivate so it drops off the radar
+    // for users). Runs even when the price itself is unchanged, so a deal that
+    // has crept above the ceiling is still retired. Only expire currently-active
+    // deals; a bad/zero ceiling never triggers it.
+    const overCeiling =
+      args.ceiling != null && args.ceiling > 0 && newPrice > args.ceiling;
+
+    if (overCeiling && existing.active) {
+      const now = Date.now();
+      const entry = `[${timestamp}] EXPIRED: price ${oldPrice} -> ${newPrice} above low-fare ceiling ${Math.round(args.ceiling!)} (auto-refresh${matchNote})`;
+      await ctx.db.patch(args.id, {
+        price: newPrice,
+        totalPrice: newTotal,
+        active: false,
+        expiresAt: now,
+        updatedAt: now,
+        changeCount: ((existing as any).changeCount || 0) + 1,
+        changeLog: [...prevLog, entry],
+      });
+      return {
+        changed: priceChanged,
+        expired: true as const,
+        oldPrice,
+        newPrice,
+        ceiling: Math.round(args.ceiling!),
+      };
+    }
+
+    if (!priceChanged) {
+      // No change — record that we checked so admins can see it's fresh.
+      await ctx.db.patch(args.id, { updatedAt: Date.now() });
+      return { changed: false as const, expired: false as const };
+    }
+
     const entry = `[${timestamp}] price: ${oldPrice} -> ${newPrice} (auto-refresh${matchNote})`;
 
     await ctx.db.patch(args.id, {
@@ -885,7 +923,7 @@ export const applyPriceRefresh = internalMutation({
       });
     }
 
-    return { changed: true as const, oldPrice, newPrice };
+    return { changed: true as const, expired: false as const, oldPrice, newPrice };
   },
 });
 
@@ -969,6 +1007,7 @@ export const markRadarRefreshCompleted = internalMutation({
       unchanged: v.float64(),
       notFound: v.float64(),
       failed: v.float64(),
+      expired: v.optional(v.float64()),
     }),
   },
   handler: async (ctx, args) => {
