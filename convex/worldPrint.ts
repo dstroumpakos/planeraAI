@@ -291,6 +291,10 @@ export const addVisit = authMutation({
       v.literal("planned"),
       v.literal("verified")
     ),
+    // How the visit was recorded. Manual self-adds (the user marking a city
+    // they've already been to) pass "manual" so they can later be removed —
+    // trip/gps-verified visits are protected from removal.
+    verifiedSource: v.optional(v.string()),
   },
   handler: async (ctx: any, args: any) => {
     const userId: string = ctx.user.userId;
@@ -319,6 +323,9 @@ export const addVisit = authMutation({
         await ctx.db.patch(existing._id, {
           status: args.status,
           verifiedAt: Date.now(),
+          ...(args.verifiedSource
+            ? { verifiedSource: args.verifiedSource }
+            : {}),
         });
       }
       return { visitId: existing._id, wasNew: false };
@@ -330,6 +337,7 @@ export const addVisit = authMutation({
       countryCode: city.countryCode,
       status: args.status,
       verifiedAt: Date.now(),
+      ...(args.verifiedSource ? { verifiedSource: args.verifiedSource } : {}),
     });
 
     // Touch lastActivityAt
@@ -352,10 +360,13 @@ export const removeVisit = authMutation({
     const visit = await ctx.db.get(args.visitId);
     if (!visit) throw new ConvexError("Visit not found");
     if (visit.userId !== userId) throw new ConvexError("Not authorized");
-    // Only allow removal of claimed (self-added, unverified) visits — verified
-    // ones are anchored to real trips and should not be silently removed.
-    if (visit.status !== "claimed") {
-      throw new ConvexError("Only self-claimed cities can be removed");
+    // Allow removal only of user-originated entries: self-"claimed" cities and
+    // manual self-adds. Visits anchored to a real trip or a GPS check-in are
+    // protected so they can't be silently removed.
+    const isRemovable =
+      visit.status === "claimed" || visit.verifiedSource === "manual";
+    if (!isRemovable) {
+      throw new ConvexError("Only manually-added cities can be removed");
     }
     await ctx.db.delete(args.visitId);
     return { success: true };

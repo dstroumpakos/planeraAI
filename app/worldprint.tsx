@@ -19,6 +19,9 @@ import {
   StatusBar,
   Share,
   Alert,
+  Modal,
+  TextInput,
+  FlatList,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, Stack } from "expo-router";
@@ -34,6 +37,7 @@ import { useTheme } from "@/lib/ThemeContext";
 import WorldGlobe, { GlobeVisit, WorldGlobeHandle } from "@/components/WorldGlobe";
 import ShareWorldPrintCard, { ShareWorldPrintCardHandle } from "@/components/ShareWorldPrintCard";
 import { SIGNATURE_COLORS } from "@/lib/worldPrintQuests";
+import { WORLD_CITIES, WorldCity } from "@/lib/worldCities";
 
 export default function WorldPrintScreen() {
   const router = useRouter();
@@ -61,10 +65,15 @@ export default function WorldPrintScreen() {
   const clearVisits = useAuthenticatedMutation(
     api.worldPrint.clearMyVisits as any
   );
+  const addVisit = useAuthenticatedMutation(api.worldPrint.addVisit as any);
+  const removeVisit = useAuthenticatedMutation(api.worldPrint.removeVisit as any);
 
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [selectedCity, setSelectedCity] = useState<string | null>(null);
   const [claiming, setClaiming] = useState<string | null>(null);
+  const [showAddCity, setShowAddCity] = useState(false);
+  const [citySearch, setCitySearch] = useState("");
+  const [pendingCityId, setPendingCityId] = useState<string | null>(null);
   const [globeSnapshot, setGlobeSnapshot] = useState<string | null>(null);
   const shareCardRef = React.useRef<ShareWorldPrintCardHandle>(null);
   const globeRef = React.useRef<WorldGlobeHandle>(null);
@@ -168,6 +177,69 @@ export default function WorldPrintScreen() {
     [setSigColor]
   );
 
+  // Map cityId -> the user's visit for it (for the add-city sheet toggle state).
+  const visitByCityId = useMemo(() => {
+    const m = new Map<string, any>();
+    for (const v of (data?.visits ?? []) as any[]) m.set(v.cityId, v);
+    return m;
+  }, [data?.visits]);
+
+  // Filter the shipped city catalog by the search box (name / country / alias).
+  const filteredCities = useMemo(() => {
+    const q = citySearch.trim().toLowerCase();
+    const list =
+      q.length === 0
+        ? WORLD_CITIES
+        : WORLD_CITIES.filter(
+            (c) =>
+              c.name.toLowerCase().includes(q) ||
+              c.country.toLowerCase().includes(q) ||
+              (c.aliases ?? []).some((a) => a.toLowerCase().includes(q))
+          );
+    return list.slice(0, 80);
+  }, [citySearch]);
+
+  const handleToggleCity = useCallback(
+    async (city: WorldCity) => {
+      if (pendingCityId) return;
+      const existing = visitByCityId.get(city.id);
+      setPendingCityId(city.id);
+      try {
+        if (existing) {
+          const removable =
+            existing.verifiedSource === "manual" || existing.status === "claimed";
+          if (!removable) {
+            Alert.alert(
+              t("worldprint.cantRemoveTitle", { defaultValue: "Can't remove" }),
+              t("worldprint.cantRemoveBody", {
+                defaultValue:
+                  "This city was added from a trip or a check-in, so it can't be removed here.",
+              })
+            );
+            return;
+          }
+          await removeVisit({ visitId: existing._id });
+          await Haptics.selectionAsync();
+        } else {
+          await addVisit({
+            cityId: city.id,
+            status: "verified",
+            verifiedSource: "manual",
+          });
+          await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        }
+      } catch (e: any) {
+        Alert.alert(
+          t("common.error", { defaultValue: "Error" }),
+          e?.message ?? "Could not update city."
+        );
+      } finally {
+        setPendingCityId(null);
+      }
+    },
+    [pendingCityId, visitByCityId, addVisit, removeVisit, t]
+  );
+
   if (!token || !data) {
     return (
       <View style={[styles.loadingContainer, { backgroundColor: "#050A14" }]}>
@@ -227,6 +299,16 @@ export default function WorldPrintScreen() {
           </Text>
         </View>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <TouchableOpacity
+            style={styles.iconButton}
+            hitSlop={10}
+            onPress={() => {
+              setCitySearch("");
+              setShowAddCity(true);
+            }}
+          >
+            <Ionicons name="add" size={24} color="#F8FAFC" />
+          </TouchableOpacity>
           {visits.length === 0 ? (
             <TouchableOpacity
               style={styles.iconButton}
@@ -366,6 +448,105 @@ export default function WorldPrintScreen() {
           ))}
         </ScrollView>
       </SafeAreaView>
+
+      {/* Add-city sheet — manually mark cities you've already visited */}
+      <Modal
+        visible={showAddCity}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShowAddCity(false)}
+      >
+        <View style={styles.addBackdrop}>
+          <View style={styles.addSheet}>
+            <SafeAreaView edges={["bottom"]} style={{ flex: 1 }}>
+              <View style={styles.addHeader}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.addTitle}>
+                    {t("worldprint.addCityTitle", {
+                      defaultValue: "Add a city you've visited",
+                    })}
+                  </Text>
+                  <Text style={styles.addHint}>
+                    {t("worldprint.addCityHint", {
+                      defaultValue: "Tap a city to add it to your globe",
+                    })}
+                  </Text>
+                </View>
+                <TouchableOpacity hitSlop={10} onPress={() => setShowAddCity(false)}>
+                  <Ionicons name="close" size={26} color="#CBD5E1" />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.addSearchBox}>
+                <Ionicons name="search" size={18} color="#64748B" />
+                <TextInput
+                  value={citySearch}
+                  onChangeText={setCitySearch}
+                  placeholder={t("worldprint.addCitySearch", {
+                    defaultValue: "Search a city or country",
+                  })}
+                  placeholderTextColor="#64748B"
+                  style={styles.addSearchInput}
+                  autoCorrect={false}
+                  autoCapitalize="none"
+                />
+                {citySearch.length > 0 && (
+                  <TouchableOpacity hitSlop={8} onPress={() => setCitySearch("")}>
+                    <Ionicons name="close-circle" size={18} color="#475569" />
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              <FlatList
+                data={filteredCities}
+                keyExtractor={(c) => c.id}
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 24 }}
+                ListEmptyComponent={
+                  <Text style={styles.addEmpty}>
+                    {t("worldprint.addCityEmpty", {
+                      defaultValue: "No cities match your search",
+                    })}
+                  </Text>
+                }
+                renderItem={({ item }) => {
+                  const visit = visitByCityId.get(item.id);
+                  const added = !!visit;
+                  const manual =
+                    !!visit &&
+                    (visit.verifiedSource === "manual" ||
+                      visit.status === "claimed");
+                  const pending = pendingCityId === item.id;
+                  return (
+                    <TouchableOpacity
+                      activeOpacity={0.7}
+                      disabled={pending}
+                      onPress={() => handleToggleCity(item)}
+                      style={styles.addRow}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.addRowCity}>{item.name}</Text>
+                        <Text style={styles.addRowCountry}>{item.country}</Text>
+                      </View>
+                      {pending ? (
+                        <ActivityIndicator size="small" color="#F59E0B" />
+                      ) : added ? (
+                        <Ionicons
+                          name={manual ? "checkmark-circle" : "lock-closed"}
+                          size={22}
+                          color={manual ? signatureColor : "#475569"}
+                        />
+                      ) : (
+                        <Ionicons name="add-circle-outline" size={22} color="#64748B" />
+                      )}
+                    </TouchableOpacity>
+                  );
+                }}
+              />
+            </SafeAreaView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -475,6 +656,60 @@ function QuestCard({
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#050A14" },
   loadingContainer: { flex: 1, alignItems: "center", justifyContent: "center" },
+
+  // Add-city sheet
+  addBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(5,10,20,0.6)",
+    justifyContent: "flex-end",
+  },
+  addSheet: {
+    height: "82%",
+    backgroundColor: "#0A1120",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    overflow: "hidden",
+  },
+  addHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 10,
+    gap: 12,
+  },
+  addTitle: { color: "#F8FAFC", fontSize: 18, fontWeight: "800" },
+  addHint: { color: "#94A3B8", fontSize: 12, marginTop: 2 },
+  addSearchBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginHorizontal: 20,
+    marginBottom: 10,
+    paddingHorizontal: 14,
+    height: 46,
+    borderRadius: 14,
+    backgroundColor: "#131C2E",
+    borderWidth: 1,
+    borderColor: "rgba(148,163,184,0.18)",
+  },
+  addSearchInput: { flex: 1, color: "#F8FAFC", fontSize: 15, padding: 0 },
+  addEmpty: {
+    color: "#64748B",
+    textAlign: "center",
+    marginTop: 30,
+    fontSize: 14,
+  },
+  addRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(148,163,184,0.10)",
+    gap: 12,
+  },
+  addRowCity: { color: "#F1F5F9", fontSize: 15, fontWeight: "600" },
+  addRowCountry: { color: "#94A3B8", fontSize: 12, marginTop: 1 },
   topGradient: {
     position: "absolute",
     top: 0,
