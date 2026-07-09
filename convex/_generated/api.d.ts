@@ -11,6 +11,7 @@
 import type * as _features from "../_features.js";
 import type * as achievements from "../achievements.js";
 import type * as admin from "../admin.js";
+import type * as adminKpis from "../adminKpis.js";
 import type * as atlas from "../atlas.js";
 import type * as authNative from "../authNative.js";
 import type * as authNativeDb from "../authNativeDb.js";
@@ -104,6 +105,7 @@ declare const fullApi: ApiFromModules<{
   _features: typeof _features;
   achievements: typeof achievements;
   admin: typeof admin;
+  adminKpis: typeof adminKpis;
   atlas: typeof atlas;
   authNative: typeof authNative;
   authNativeDb: typeof authNativeDb;

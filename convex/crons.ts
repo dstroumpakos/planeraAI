@@ -81,4 +81,14 @@ crons.interval(
     {},
 );
 
+// Recompute the admin-dashboard KPI singleton (trips/users/subs/insights/leads
+// /affiliate/partner aggregates + 30-day time series) so the admin dashboard
+// reads one small doc instead of scanning the large tables on every load.
+crons.interval(
+    "recompute-admin-kpis",
+    { hours: 1 },
+    internal.adminKpis.recomputeAdminKpis,
+    {},
+);
+
 export default crons;

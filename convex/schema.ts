@@ -1465,5 +1465,158 @@ export default defineSchema({
         ),
         updatedAt: v.float64(),
     }),
+
+    // Cron-computed singleton holding the full admin-dashboard KPI set. Like
+    // landingStats, this exists so the admin dashboard reads one small doc
+    // instead of scanning the large trips/users/plans tables on every load.
+    // Recomputed by the `recompute-admin-kpis` cron (see adminKpis.ts).
+    // Every field is optional so the shape can evolve additively without a
+    // migration and so a partial/first-run write never fails validation.
+    adminKpis: defineTable({
+        computedAt: v.optional(v.float64()),
+        durationMs: v.optional(v.float64()),
+
+        // ---- Trips ----
+        trips: v.optional(v.object({
+            total: v.float64(),
+            completed: v.float64(),
+            failed: v.float64(),
+            generating: v.float64(),
+            pending: v.float64(),
+            archived: v.float64(),
+            deal: v.float64(),
+            multiCity: v.float64(),
+            successRatePct: v.float64(),   // completed / (completed + failed)
+            avgDurationDays: v.float64(),
+            avgTravelers: v.float64(),
+            avgBudgetEur: v.float64(),
+        })),
+        tripsByPlatform: v.optional(v.array(v.object({ key: v.string(), count: v.float64() }))),
+        tripsByLanguage: v.optional(v.array(v.object({ key: v.string(), count: v.float64() }))),
+        topTripDestinations: v.optional(v.array(v.object({ destination: v.string(), count: v.float64() }))),
+
+        // ---- Users / activation ----
+        users: v.optional(v.object({
+            total: v.float64(),
+            activated: v.float64(),           // >= 1 trip
+            activatedCompleted: v.float64(),  // >= 1 completed trip
+            onboardingCompleted: v.float64(),
+            aiConsent: v.float64(),
+            activationRatePct: v.float64(),
+        })),
+        usersByPlatform: v.optional(v.array(v.object({ key: v.string(), count: v.float64() }))),
+        usersByAuthProvider: v.optional(v.array(v.object({ key: v.string(), count: v.float64() }))),
+
+        // ---- Subscriptions / monetization ----
+        subs: v.optional(v.object({
+            free: v.float64(),
+            premium: v.float64(),             // any plan==="premium" (incl. admin-comped)
+            premiumMonthly: v.float64(),
+            premiumYearly: v.float64(),
+            expired: v.float64(),             // premium plan whose subscriptionExpiresAt < now
+            // Apple-paywall payers only: premium whose plan carries an Apple
+            // transaction id (lastTransactionId/originalTransactionId), which is
+            // set exclusively by the real IAP grant path — never by an admin grant.
+            // Optional so a pre-existing singleton (written before these were
+            // added) still validates on deploy; recompute always populates them.
+            premiumPaying: v.optional(v.float64()),        // ever purchased via Apple (still premium)
+            premiumPayingActive: v.optional(v.float64()),  // paying AND not expired
+            premiumComped: v.optional(v.float64()),        // premium with no Apple txn (admin-granted)
+            conversionRatePct: v.float64(),       // premium / total users (all premium)
+            payingConversionRatePct: v.optional(v.float64()), // premiumPaying / total users
+            estMrrEur: v.float64(),           // from active paying subs only
+            estArrEur: v.float64(),
+        })),
+        iap: v.optional(v.object({
+            completed: v.float64(),
+            restored: v.float64(),
+            refunded: v.float64(),
+            failed: v.float64(),
+            refundRatePct: v.float64(),
+        })),
+
+        // ---- Insights (UGC moderation) ----
+        insights: v.optional(v.object({
+            total: v.float64(),
+            approved: v.float64(),
+            pending: v.float64(),
+            rejected: v.float64(),
+            flagged: v.float64(),
+            reported: v.float64(),
+            approvalRatePct: v.float64(),
+        })),
+
+        // ---- Engagement ----
+        engagement: v.optional(v.object({
+            activeStreaks: v.float64(),
+            avgCurrentStreak: v.float64(),
+            longestStreak: v.float64(),
+            pushTokens: v.float64(),
+            pushOptInRatePct: v.float64(),
+        })),
+        referrals: v.optional(v.object({
+            total: v.float64(),
+            pending: v.float64(),
+            completed: v.float64(),
+            rewarded: v.float64(),
+        })),
+        notifications: v.optional(v.object({
+            broadcasts: v.float64(),
+            sent: v.float64(),
+            taps: v.float64(),
+            uniqueTaps: v.float64(),
+            tapThroughRatePct: v.float64(),  // uniqueTaps / sent
+        })),
+
+        // ---- Revenue-adjacent (affiliate / leads) ----
+        otaLeads: v.optional(v.object({
+            total: v.float64(),
+            pending: v.float64(),
+            sent: v.float64(),
+            contacted: v.float64(),
+            converted: v.float64(),
+            closed: v.float64(),
+            failed: v.float64(),
+            conversionRatePct: v.float64(),  // converted / total
+        })),
+        otaPackages: v.optional(v.object({
+            active: v.float64(),
+            totalViews: v.float64(),
+            totalLeads: v.float64(),
+        })),
+        affiliate: v.optional(v.object({
+            activeLinks: v.float64(),
+            totalClicks: v.float64(),
+            topLinks: v.array(v.object({ title: v.string(), clicks: v.float64() })),
+        })),
+        radar: v.optional(v.object({
+            activeDeals: v.float64(),
+            planTripClicks: v.float64(),
+            bookingClicks: v.float64(),
+        })),
+
+        // ---- Web / SEO ----
+        itineraries: v.optional(v.object({
+            draft: v.float64(),
+            published: v.float64(),
+            rejected: v.float64(),
+        })),
+
+        // ---- Partner API ----
+        partnerApi: v.optional(v.object({
+            activeKeys: v.float64(),
+            totalKeys: v.float64(),
+            applicationsNew: v.float64(),
+            productsPending: v.float64(),
+        })),
+
+        // ---- Time series: last 30 days ----
+        daily: v.optional(v.array(v.object({
+            date: v.string(),         // "YYYY-MM-DD" (UTC)
+            signups: v.float64(),
+            trips: v.float64(),
+            completedTrips: v.float64(),
+        }))),
+    }),
 });
 
