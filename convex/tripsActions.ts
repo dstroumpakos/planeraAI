@@ -1509,7 +1509,7 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                                     { role: "system", content: systemPrompt },
                                     { role: "user", content: itineraryPrompt },
                                 ],
-                                model: "gpt-5.4-2026-03-05",
+                                model: "gpt-5.6-terra",
                                 max_completion_tokens: maxTokens,
                                 // Itinerary planning is a structured-data task and does not
                                 // need deep reasoning; keep hidden reasoning bounded.
@@ -3589,10 +3589,13 @@ Return a single JSON object (NOT an array) with the replacement activity:
                 { role: "system", content: `You are a travel planner. Return only valid JSON for a single activity.${lang !== "en" ? ` Write all content in ${langName}.` : ""}` },
                 { role: "user", content: prompt },
             ],
-            model: "gpt-5.4-2026-03-05",
+            model: "gpt-5.6-terra",
             response_format: { type: "json_object" },
             max_completion_tokens: 1000,
-        });
+            // All data for this single activity is supplied in the prompt; skip
+            // hidden reasoning for max speed since the user is waiting on the swap.
+            reasoning_effort: "none",
+        } as any);
 
         const content = completion.choices[0]?.message?.content;
         if (!content) throw new Error("No response from AI");
@@ -3708,10 +3711,13 @@ Return a single JSON object (NOT an array):
                 { role: "system", content: `You are a travel planner. Return only valid JSON for a single activity.${lang !== "en" ? ` Write all content in ${langName}.` : ""}` },
                 { role: "user", content: prompt },
             ],
-            model: "gpt-5.4-2026-03-05",
+            model: "gpt-5.6-terra",
             response_format: { type: "json_object" },
             max_completion_tokens: 1000,
-        });
+            // All data for this single activity is supplied in the prompt; skip
+            // hidden reasoning for max speed since the user is waiting on the insert.
+            reasoning_effort: "none",
+        } as any);
 
         const content = completion.choices[0]?.message?.content;
         if (!content) throw new Error("No response from AI");
@@ -3833,10 +3839,13 @@ The first activity's travelFromPrevious MUST be null. Each subsequent activity s
                 { role: "system", content: `You are a travel planner. Return only valid JSON for a single day with an activities array.${lang !== "en" ? ` Write all content in ${langName}.` : ""}` },
                 { role: "user", content: prompt },
             ],
-            model: "gpt-5.4-2026-03-05",
+            model: "gpt-5.6-terra",
             response_format: { type: "json_object" },
             max_completion_tokens: 3000,
-        });
+            // Full day template and context are supplied in the prompt; skip hidden
+            // reasoning for max speed since the user is waiting on the regenerate.
+            reasoning_effort: "none",
+        } as any);
 
         const content = completion.choices[0]?.message?.content;
         if (!content) throw new Error("No response from AI");
