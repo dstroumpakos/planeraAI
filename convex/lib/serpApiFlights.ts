@@ -104,6 +104,11 @@ export function normalizeLayover(raw: any): NormalizedLayover {
 }
 
 export function normalizeFlightSegment(raw: any): NormalizedFlightSegment {
+  // Field-name reconciliation between the two Google-Flights vendors:
+  //   overnight:  SerpApi `overnight`            / searchapi.io `is_overnight`
+  //   delayed:    SerpApi `often_delayed_..`     / searchapi.io `is_often_delayed`
+  //   legroom:    SerpApi top-level `legroom`    / searchapi.io nests it under
+  //               `detected_extensions.legroom_long` (or `_short`)
   return {
     airline: raw?.airline ?? null,
     airlineLogo: raw?.airline_logo ?? null,
@@ -111,9 +116,15 @@ export function normalizeFlightSegment(raw: any): NormalizedFlightSegment {
     airplane: raw?.airplane ?? null,
     travelClass: raw?.travel_class ?? null,
     durationMinutes: toNumberOrNull(raw?.duration),
-    legroom: raw?.legroom ?? null,
-    overnight: Boolean(raw?.overnight),
-    oftenDelayedByOver30Min: Boolean(raw?.often_delayed_by_over_30_min),
+    legroom:
+      raw?.legroom ??
+      raw?.detected_extensions?.legroom_long ??
+      raw?.detected_extensions?.legroom_short ??
+      null,
+    overnight: Boolean(raw?.overnight ?? raw?.is_overnight),
+    oftenDelayedByOver30Min: Boolean(
+      raw?.often_delayed_by_over_30_min ?? raw?.is_often_delayed
+    ),
     planeAndCrewBy: raw?.plane_and_crew_by ?? null,
     ticketAlsoSoldBy: Array.isArray(raw?.ticket_also_sold_by)
       ? raw.ticket_also_sold_by
@@ -217,10 +228,19 @@ export function normalizeBookingOption(
   raw: any,
   index: number
 ): NormalizedBookingOption {
-  const togetherOrSeparate = raw?.together ?? raw?.departing ?? raw?.returning ?? raw;
+  const togetherOrSeparate =
+    raw?.together ??
+    raw?.departing ??
+    raw?.returning ??
+    raw?.departure ??
+    raw?.arrival ??
+    raw;
   // Booking options API nests the actual option under `together` (or
-  // departing/returning for split-itinerary cases). Fall back to the raw
-  // object if SerpApi flattens the shape in the future.
+  // departing/returning for split-itinerary cases). searchapi.io flags split
+  // bookings with `is_split_booking` and nests under `departure`/`arrival`
+  // instead — and puts the fields top-level for the common non-split case,
+  // which the final `?? raw` fallback covers. Falls back to the raw object if
+  // either vendor flattens the shape in the future.
 
   return {
     id: `booking_${index}`,

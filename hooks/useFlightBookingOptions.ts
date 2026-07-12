@@ -7,11 +7,11 @@ import type {
 } from "@/types/flights";
 
 /**
- * Fetches the provider booking options for a SerpApi `booking_token`.
+ * Fetches the provider booking options for a searchapi.io `booking_token`.
  */
 export function useFlightBookingOptions() {
   const fetchOptions = useAuthenticatedAction(
-    api.flightsSerpApi.getBookingOptions
+    api.flightsSearchApi.getBookingOptions
   );
 
   const [bookingOptions, setBookingOptions] =

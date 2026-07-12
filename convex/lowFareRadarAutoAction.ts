@@ -28,6 +28,7 @@ import {
   normalizeFlightOption,
   normalizePriceInsights,
 } from "./lib/serpApiFlights";
+import { SEARCHAPI_FLIGHTS_ENDPOINT } from "./lib/searchApiFlightSearch";
 
 const SERPAPI_ENDPOINT = "https://serpapi.com/search.json";
 
@@ -45,6 +46,23 @@ async function callSerpApi(params: URLSearchParams): Promise<any | null> {
     const res = await fetch(`${SERPAPI_ENDPOINT}?${params.toString()}`, {
       method: "GET",
       headers: { Accept: "application/json" },
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    if (json?.error) return null;
+    return json;
+  } catch {
+    return null;
+  }
+}
+
+async function callSearchApi(params: URLSearchParams): Promise<any | null> {
+  const key = process.env.SEARCHAPI_API_KEY;
+  if (!key || typeof key !== "string" || !key.trim()) return null;
+  try {
+    const res = await fetch(`${SEARCHAPI_FLIGHTS_ENDPOINT}?${params.toString()}`, {
+      method: "GET",
+      headers: { Accept: "application/json", Authorization: `Bearer ${key.trim()}` },
     });
     if (!res.ok) return null;
     const json = await res.json();
@@ -93,10 +111,18 @@ export const enrichAndSeedDeal = internalAction({
     priceLevel: v.optional(v.string()),
     option: v.any(),
     adults: v.optional(v.float64()),
+    // Which vendor minted `option`'s token — the follow-up return-leg and
+    // booking-options calls MUST resolve on the same one (tokens are
+    // provider-locked). Defaults to "serpapi" so existing callers are
+    // unaffected; the searchapi.io user-search path passes "searchapi".
+    provider: v.optional(v.union(v.literal("serpapi"), v.literal("searchapi"))),
   },
   handler: async (ctx, args): Promise<null> => {
     const opt = args.option;
     if (!opt) return null;
+
+    const useSearchApi = args.provider === "searchapi";
+    const call = useSearchApi ? callSearchApi : callSerpApi;
 
     // SerpApi semantics: when `adults=N` is passed, returned `price` is the
     // total for all N passengers, not per-person. We track adults so we
@@ -117,10 +143,12 @@ export const enrichAndSeedDeal = internalAction({
       p.append("return_date", args.returnDate);
       p.append("currency", currency);
       p.append("hl", "en");
-      p.append("type", "1"); // round-trip
+      // round-trip: SerpApi `type=1` vs searchapi.io `flight_type=round_trip`
+      if (useSearchApi) p.append("flight_type", "round_trip");
+      else p.append("type", "1");
       p.append("adults", String(adults));
       p.append("departure_token", opt.departureToken);
-      const raw = await callSerpApi(p);
+      const raw = await call(p);
       if (raw) {
         const priceInsights = normalizePriceInsights(raw?.price_insights);
         const all: any[] = [
@@ -163,15 +191,19 @@ export const enrichAndSeedDeal = internalAction({
       p.append("outbound_date", args.outboundDate);
       if (args.returnDate) {
         p.append("return_date", args.returnDate);
-        p.append("type", "1");
+        if (useSearchApi) p.append("flight_type", "round_trip");
+        else p.append("type", "1");
       } else {
-        p.append("type", "2");
+        if (useSearchApi) p.append("flight_type", "one_way");
+        else p.append("type", "2");
       }
       p.append("booking_token", bookingToken);
       p.append("currency", currency);
       p.append("hl", "en");
-      p.append("adults", String(adults));
-      const raw = await callSerpApi(p);
+      // searchapi.io's booking endpoint rejects `adults` (the token already
+      // encodes passengers); SerpApi's radar path has historically sent it.
+      if (!useSearchApi) p.append("adults", String(adults));
+      const raw = await call(p);
       if (raw) {
         const opts = Array.isArray(raw?.booking_options)
           ? raw.booking_options.map((o: any, i: number) =>

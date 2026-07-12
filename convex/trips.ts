@@ -675,9 +675,11 @@ export const createFromFlight = authMutation({
         });
 
         // Fetch booking link(s) for the locked flight while the token is
-        // still valid. Best-effort — the trip works without them.
+        // still valid. Best-effort — the trip works without them. Uses the
+        // searchapi.io enrichment because this token was minted by the
+        // searchapi.io-backed search screen (tokens are provider-locked).
         if (args.bookingToken) {
-            await ctx.scheduler.runAfter(0, internal.flightsSerpApi.enrichTripBooking, {
+            await ctx.scheduler.runAfter(0, internal.flightsSearchApi.enrichTripBooking, {
                 tripId,
                 bookingToken: args.bookingToken,
                 departureId: args.origin,
