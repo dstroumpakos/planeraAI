@@ -13,7 +13,12 @@ import { Ionicons } from "@expo/vector-icons";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "@/lib/ThemeContext";
 import { AIRPORTS } from "@/lib/airports";
-import type { FlightSearchInput, StopsFilter } from "@/types/flights";
+import type {
+  FlightSearchInput,
+  SortBy,
+  StopsFilter,
+  TravelClass,
+} from "@/types/flights";
 
 interface Props {
   initial?: Partial<FlightSearchInput>;
@@ -26,6 +31,24 @@ const STOPS: { value: StopsFilter; labelKey: string; fallback: string }[] = [
   { value: "nonstop", labelKey: "flights.nonstop", fallback: "Nonstop" },
   { value: "one_stop_or_fewer", labelKey: "flights.oneStopOrFewer", fallback: "≤1 stop" },
 ];
+
+const TRAVEL_CLASSES: { value: TravelClass; labelKey: string; fallback: string }[] = [
+  { value: "economy", labelKey: "flights.classEconomy", fallback: "Economy" },
+  { value: "premium_economy", labelKey: "flights.classPremium", fallback: "Premium" },
+  { value: "business", labelKey: "flights.classBusiness", fallback: "Business" },
+  { value: "first", labelKey: "flights.classFirst", fallback: "First" },
+];
+
+const SORTS: { value: SortBy; labelKey: string; fallback: string }[] = [
+  { value: "top", labelKey: "flights.sortTop", fallback: "Best" },
+  { value: "price", labelKey: "flights.sortPrice", fallback: "Cheapest" },
+  { value: "duration", labelKey: "flights.sortDuration", fallback: "Fastest" },
+  { value: "departure_time", labelKey: "flights.sortDeparture", fallback: "Departure" },
+  { value: "arrival_time", labelKey: "flights.sortArrival", fallback: "Arrival" },
+  { value: "emissions", labelKey: "flights.sortEmissions", fallback: "Emissions" },
+];
+
+const MAX_PASSENGERS = 9;
 
 type Airport = (typeof AIRPORTS)[number];
 
@@ -90,11 +113,39 @@ export const FlightSearchForm: React.FC<Props> = ({ initial, loading, onSubmit }
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [selectingDate, setSelectingDate] = useState<"out" | "ret">("out");
   const [adults, setAdults] = useState(initial?.adults ?? 1);
+  const [children, setChildren] = useState(initial?.children ?? 0);
+  const [infantsInSeat, setInfantsInSeat] = useState(initial?.infantsInSeat ?? 0);
+  const [infantsOnLap, setInfantsOnLap] = useState(initial?.infantsOnLap ?? 0);
   const [stops, setStops] = useState<StopsFilter>(initial?.stops ?? "any");
+  const [travelClass, setTravelClass] = useState<TravelClass>(
+    initial?.travelClass ?? "economy"
+  );
+  const [sortBy, setSortBy] = useState<SortBy>(initial?.sortBy ?? "top");
+  const [carryOnBags, setCarryOnBags] = useState(initial?.carryOnBags ?? 0);
+  const [checkedBags, setCheckedBags] = useState(initial?.checkedBags ?? 0);
+  const [showCheapest, setShowCheapest] = useState(
+    initial?.showCheapestFlights ?? false
+  );
+  const [showHidden, setShowHidden] = useState(initial?.showHiddenFlights ?? false);
+  const [hideSeparate, setHideSeparate] = useState(
+    initial?.hideSeparateTickets ?? false
+  );
+  const [showMore, setShowMore] = useState(false);
   const [maxPrice, setMaxPrice] = useState(
     initial?.maxPrice != null ? String(initial.maxPrice) : ""
   );
   const [currency] = useState(initial?.currency ?? "EUR");
+
+  // Passenger totals: Google caps a search at 9 travelers, and bag counts
+  // cannot exceed the number of seated passengers.
+  const totalPassengers = adults + children + infantsInSeat + infantsOnLap;
+  const seatedPassengers = adults + children + infantsInSeat;
+  const canAddPassenger = totalPassengers < MAX_PASSENGERS;
+  // Keep bag counts valid if the seated-passenger count drops below them.
+  useEffect(() => {
+    if (carryOnBags > seatedPassengers) setCarryOnBags(seatedPassengers);
+    if (checkedBags > seatedPassengers) setCheckedBags(seatedPassengers);
+  }, [seatedPassengers]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The home-airport prefill arrives async (user settings query); apply it as
   // long as the user hasn't typed into the field themselves.
@@ -203,7 +254,17 @@ export const FlightSearchForm: React.FC<Props> = ({ initial, loading, onSubmit }
       type: "round_trip",
       currency,
       adults,
+      children: children || undefined,
+      infantsInSeat: infantsInSeat || undefined,
+      infantsOnLap: infantsOnLap || undefined,
       stops,
+      travelClass,
+      sortBy,
+      carryOnBags: carryOnBags || undefined,
+      checkedBags: checkedBags || undefined,
+      showCheapestFlights: showCheapest || undefined,
+      showHiddenFlights: showHidden || undefined,
+      hideSeparateTickets: hideSeparate || undefined,
       maxPrice: maxPrice ? Number(maxPrice) : undefined,
     });
   };
@@ -336,6 +397,37 @@ export const FlightSearchForm: React.FC<Props> = ({ initial, loading, onSubmit }
       color: colors.text,
       fontSize: 14,
     },
+    moreToggle: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      paddingVertical: 4,
+    },
+    moreToggleText: { color: colors.primary, fontSize: 13, fontWeight: "700" },
+    moreSection: { gap: 12, marginTop: 2 },
+    smallStepperRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      backgroundColor: colors.inputBackground,
+      borderColor: colors.border,
+      borderWidth: 1,
+      borderRadius: 14,
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+    },
+    smallStepperLabel: { color: colors.text, fontSize: 14, fontWeight: "600" },
+    smallStepperSub: { color: colors.textMuted, fontSize: 11, marginTop: 1 },
+    smallStepperControls: { flexDirection: "row", alignItems: "center", gap: 14 },
+    toggleChip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      paddingHorizontal: 12,
+      paddingVertical: 8,
+      borderRadius: 999,
+      backgroundColor: colors.lightGray,
+    },
     submitWrap: { borderRadius: 16, overflow: "hidden", marginTop: 4 },
     submit: {
       flexDirection: "row",
@@ -368,6 +460,39 @@ export const FlightSearchForm: React.FC<Props> = ({ initial, loading, onSubmit }
     modalClose: { color: colors.primary, fontWeight: "700", fontSize: 15 },
     modalHint: { color: colors.textMuted, fontSize: 12 },
   });
+
+  const renderStepper = (
+    label: string,
+    sub: string | null,
+    value: number,
+    onChange: (n: number) => void,
+    min: number,
+    max: number
+  ) => (
+    <View style={styles.smallStepperRow}>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.smallStepperLabel}>{label}</Text>
+        {sub ? <Text style={styles.smallStepperSub}>{sub}</Text> : null}
+      </View>
+      <View style={styles.smallStepperControls}>
+        <TouchableOpacity
+          style={[styles.stepperBtn, value <= min && { opacity: 0.4 }]}
+          onPress={() => onChange(Math.max(min, value - 1))}
+          disabled={value <= min}
+        >
+          <Ionicons name="remove" size={18} color={colors.text} />
+        </TouchableOpacity>
+        <Text style={styles.stepperValue}>{value}</Text>
+        <TouchableOpacity
+          style={[styles.stepperBtn, value >= max && { opacity: 0.4 }]}
+          onPress={() => onChange(Math.min(max, value + 1))}
+          disabled={value >= max}
+        >
+          <Ionicons name="add" size={18} color={colors.text} />
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
 
   const renderSuggestions = () =>
     suggestions.length > 0 && (
@@ -470,9 +595,13 @@ export const FlightSearchForm: React.FC<Props> = ({ initial, loading, onSubmit }
         </View>
       </View>
 
-      {/* Passengers */}
+      {/* Passengers (adults) */}
       <View>
-        <Text style={styles.label}>{t("flights.passengers", { defaultValue: "Passengers" })}</Text>
+        <Text style={styles.label}>
+          {totalPassengers > adults
+            ? t("flights.adults", { defaultValue: "Adults" })
+            : t("flights.passengers", { defaultValue: "Passengers" })}
+        </Text>
         <View style={styles.stepperRow}>
           <TouchableOpacity
             style={[styles.stepperBtn, adults <= 1 && { opacity: 0.4 }]}
@@ -486,9 +615,12 @@ export const FlightSearchForm: React.FC<Props> = ({ initial, loading, onSubmit }
             <Text style={styles.stepperValue}>{adults}</Text>
           </View>
           <TouchableOpacity
-            style={[styles.stepperBtn, adults >= 9 && { opacity: 0.4 }]}
+            style={[
+              styles.stepperBtn,
+              (adults >= 9 || !canAddPassenger) && { opacity: 0.4 },
+            ]}
             onPress={() => setAdults(Math.min(9, adults + 1))}
-            disabled={adults >= 9}
+            disabled={adults >= 9 || !canAddPassenger}
           >
             <Ionicons name="add" size={18} color={colors.text} />
           </TouchableOpacity>
@@ -527,6 +659,182 @@ export const FlightSearchForm: React.FC<Props> = ({ initial, loading, onSubmit }
           />
         </View>
       </View>
+
+      {/* More filters toggle */}
+      <TouchableOpacity
+        style={styles.moreToggle}
+        onPress={() => setShowMore((s) => !s)}
+        activeOpacity={0.7}
+      >
+        <Text style={styles.moreToggleText}>
+          {t("flights.moreFilters", { defaultValue: "More filters" })}
+        </Text>
+        <Ionicons
+          name={showMore ? "chevron-up" : "chevron-down"}
+          size={16}
+          color={colors.primary}
+        />
+      </TouchableOpacity>
+
+      {showMore && (
+        <View style={styles.moreSection}>
+          {/* Cabin class */}
+          <View>
+            <Text style={styles.label}>
+              {t("flights.cabinClass", { defaultValue: "Cabin class" })}
+            </Text>
+            <View style={styles.chipRow}>
+              {TRAVEL_CLASSES.map((c) => (
+                <TouchableOpacity
+                  key={c.value}
+                  style={[styles.chip, travelClass === c.value && styles.chipActive]}
+                  onPress={() => setTravelClass(c.value)}
+                >
+                  <Text
+                    style={[
+                      styles.chipText,
+                      travelClass === c.value && styles.chipTextActive,
+                    ]}
+                  >
+                    {t(c.labelKey, { defaultValue: c.fallback })}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          {/* Sort by */}
+          <View>
+            <Text style={styles.label}>
+              {t("flights.sortBy", { defaultValue: "Sort by" })}
+            </Text>
+            <View style={styles.chipRow}>
+              {SORTS.map((s) => (
+                <TouchableOpacity
+                  key={s.value}
+                  style={[styles.chip, sortBy === s.value && styles.chipActive]}
+                  onPress={() => setSortBy(s.value)}
+                >
+                  <Text
+                    style={[
+                      styles.chipText,
+                      sortBy === s.value && styles.chipTextActive,
+                    ]}
+                  >
+                    {t(s.labelKey, { defaultValue: s.fallback })}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          {/* Extra passenger types */}
+          <View>
+            <Text style={styles.label}>
+              {t("flights.morePassengers", { defaultValue: "More passengers" })}
+            </Text>
+            <View style={{ gap: 8 }}>
+              {renderStepper(
+                t("flights.children", { defaultValue: "Children" }),
+                t("flights.childrenAge", { defaultValue: "Aged 2–11" }),
+                children,
+                setChildren,
+                0,
+                children + (MAX_PASSENGERS - totalPassengers)
+              )}
+              {renderStepper(
+                t("flights.infantsInSeat", { defaultValue: "Infants in seat" }),
+                null,
+                infantsInSeat,
+                setInfantsInSeat,
+                0,
+                infantsInSeat + (MAX_PASSENGERS - totalPassengers)
+              )}
+              {renderStepper(
+                t("flights.infantsOnLap", { defaultValue: "Infants on lap" }),
+                null,
+                infantsOnLap,
+                setInfantsOnLap,
+                0,
+                infantsOnLap + (MAX_PASSENGERS - totalPassengers)
+              )}
+            </View>
+          </View>
+
+          {/* Bags */}
+          <View>
+            <Text style={styles.label}>
+              {t("flights.bags", { defaultValue: "Bags" })}
+            </Text>
+            <View style={{ gap: 8 }}>
+              {renderStepper(
+                t("flights.carryOnBags", { defaultValue: "Carry-on bags" }),
+                null,
+                carryOnBags,
+                setCarryOnBags,
+                0,
+                seatedPassengers
+              )}
+              {renderStepper(
+                t("flights.checkedBags", { defaultValue: "Checked bags" }),
+                null,
+                checkedBags,
+                setCheckedBags,
+                0,
+                seatedPassengers
+              )}
+            </View>
+          </View>
+
+          {/* Boolean flags */}
+          <View>
+            <Text style={styles.label}>
+              {t("flights.options", { defaultValue: "Options" })}
+            </Text>
+            <View style={styles.chipRow}>
+              {(
+                [
+                  {
+                    active: showCheapest,
+                    toggle: () => setShowCheapest((v) => !v),
+                    icon: "pricetag-outline" as const,
+                    label: t("flights.showCheapest", { defaultValue: "Cheapest flights" }),
+                  },
+                  {
+                    active: showHidden,
+                    toggle: () => setShowHidden((v) => !v),
+                    icon: "eye-outline" as const,
+                    label: t("flights.showHidden", { defaultValue: "Show hidden" }),
+                  },
+                  {
+                    active: hideSeparate,
+                    toggle: () => setHideSeparate((v) => !v),
+                    icon: "git-branch-outline" as const,
+                    label: t("flights.hideSelfTransfer", { defaultValue: "Hide self-transfer" }),
+                  },
+                ]
+              ).map((opt) => (
+                <TouchableOpacity
+                  key={opt.label}
+                  style={[styles.toggleChip, opt.active && styles.chipActive]}
+                  onPress={opt.toggle}
+                >
+                  <Ionicons
+                    name={opt.active ? "checkmark-circle" : opt.icon}
+                    size={14}
+                    color={opt.active ? "#000000" : colors.textMuted}
+                  />
+                  <Text
+                    style={[styles.chipText, opt.active && styles.chipTextActive]}
+                  >
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        </View>
+      )}
 
       {/* CTA */}
       <TouchableOpacity

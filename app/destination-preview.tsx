@@ -1,9 +1,20 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useState, useEffect, useRef } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, StatusBar } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import React, { useState, useEffect, useRef } from "react";
+import {
+    View,
+    Text,
+    StyleSheet,
+    TouchableOpacity,
+    ActivityIndicator,
+    StatusBar,
+    Animated,
+    Platform,
+    useWindowDimensions,
+} from "react-native";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { BlurView } from "expo-blur";
 import { useDestinationImage } from "@/lib/useImages";
 import { ImageWithAttribution } from "@/components/ImageWithAttribution";
 import { useAction, useQuery } from "convex/react";
@@ -12,6 +23,12 @@ import { useTheme } from "@/lib/ThemeContext";
 import { useTranslation } from "react-i18next";
 import { useToken, useAuthenticatedMutation } from "@/lib/useAuthenticatedMutation";
 import { resolveIATA } from "@/lib/destinationAirports";
+import {
+    useExploreDestinationFlights,
+    useResolvedHomeIata,
+} from "@/hooks/useExploreDestinationFlights";
+import { useFlightCalendar } from "@/hooks/useFlightCalendar";
+import type { FlightCalendarDate } from "@/types/flights";
 
 // Destination highlights data
 const DESTINATION_HIGHLIGHTS: Record<string, { emoji: string; highlights: string[]; bestFor: string[]; bestTime: string }> = {
@@ -510,6 +527,7 @@ export default function DestinationPreviewScreen() {
     const { colors, isDarkMode } = useTheme();
     const { t, i18n } = useTranslation();
     const { token } = useToken();
+    const insets = useSafeAreaInsets();
     const { destination } = useLocalSearchParams<{ destination: string }>();
     const { image, loading } = useDestinationImage(destination);
     const trackDownload = useAction(api.images.trackUnsplashDownload);
@@ -634,81 +652,203 @@ export default function DestinationPreviewScreen() {
         });
     };
 
+    // "Flights from your city, from €X" teaser. Origin = the logged-in user's
+    // resolved home airport; with no origin the teaser price simply never
+    // appears and the flight button keeps its generic subtitle. The price is an
+    // indicative discovery signal — tapping through runs the real bookable
+    // search via handleSearchFlights.
+    const originIata = useResolvedHomeIata(token);
+    const arrivalIata = resolveIATA(destination); // "" when unresolved
+    const { data: flightTeaser, fetchFlights } = useExploreDestinationFlights(token);
+    useEffect(() => {
+        if (!originIata || !arrivalIata) return;
+        fetchFlights({
+            departureId: originIata,
+            arrivalId: arrivalIata,
+            currency: "EUR",
+        }).catch(() => {
+            // Non-fatal: the teaser just stays hidden, the button still works.
+        });
+    }, [originIata, arrivalIata, fetchFlights]);
+
+    // Format the indicative price for the badge (EUR default; symbol-map the
+    // common currencies, else fall back to the ISO code).
+    const teaserPrice = flightTeaser?.cheapestPrice;
+    const curSymbol = (cur: string) =>
+        cur === "EUR" ? "€" : cur === "USD" ? "$" : cur === "GBP" ? "£" : "";
+    const formatFare = (price: number, cur: string) => {
+        const sym = curSymbol(cur);
+        return sym ? `${sym}${Math.round(price)}` : `${Math.round(price)} ${cur}`;
+    };
+    const teaserPriceLabel =
+        teaserPrice != null ? formatFare(teaserPrice, flightTeaser?.currency || "EUR") : null;
+
+    // "Cheapest days to fly" strip — round-trip price calendar for the same
+    // resolved origin. Same logged-in gate as the teaser; hidden otherwise.
+    const { data: flightCalendar, fetchCalendar } = useFlightCalendar(token);
+    useEffect(() => {
+        if (!originIata || !arrivalIata) return;
+        fetchCalendar({
+            departureId: originIata,
+            arrivalId: arrivalIata,
+            currency: "EUR",
+        }).catch(() => {
+            // Non-fatal: the strip just stays hidden.
+        });
+    }, [originIata, arrivalIata, fetchCalendar]);
+
+    const formatShortDate = (iso: string) =>
+        new Date(iso).toLocaleDateString(i18n.language, { day: "numeric", month: "short" });
+
+    // Open the real flight search prefilled with the chosen cheap dates.
+    const openCalendarDate = (d: FlightCalendarDate) => {
+        router.push({
+            pathname: "/flights/search",
+            params: {
+                departureId: originIata || "",
+                arrivalCityName: destinationCity || destination,
+                outboundDate: d.date,
+                currency: "EUR",
+                autoSearch: "1",
+                ...(arrivalIata ? { arrivalId: arrivalIata } : {}),
+                ...(d.returnDate ? { returnDate: d.returnDate } : {}),
+            },
+        });
+    };
+
+    // ------------------------------ Redesign view-model ---------------------
+    const { height: screenH } = useWindowDimensions();
+    const HERO_H = Math.round(Math.min(Math.max(screenH * 0.54, 400), 560));
+    const blurIntensity = Platform.OS === "android" ? 0 : 40;
+
+    // Parallax: the hero image drifts slower than the scroll and zooms on
+    // pull-down, giving the page a cinematic, premium feel.
+    const scrollY = useRef(new Animated.Value(0)).current;
+    const heroTranslate = scrollY.interpolate({
+        inputRange: [0, HERO_H],
+        outputRange: [0, HERO_H * 0.45],
+        extrapolateLeft: "clamp",
+        extrapolateRight: "extend",
+    });
+    const heroScale = scrollY.interpolate({
+        inputRange: [-HERO_H, 0],
+        outputRange: [2.2, 1],
+        extrapolateLeft: "extend",
+        extrapolateRight: "clamp",
+    });
+
+    // Country = the part after the first comma ("Paris, France" -> "France").
+    const destinationCountry = (destination || "").split(",").slice(1).join(",").trim();
+    // Short season for the compact hero stat ("Apr - Jun, Sep - Nov" -> "Apr - Jun").
+    const seasonShort = (destinationData.bestTime || "").split(",")[0].trim();
+
+    // Frosted "at a glance" stats in the hero. The third tile adapts to
+    // whatever real data exists (avg stay preferred, else est. budget).
+    const heroStats: { value: string; label: string }[] = [
+        { value: String(tripCount || 0), label: t("destinationPreview.tripsLabel", { defaultValue: "trips" }) },
+    ];
+    if (seasonShort) {
+        heroStats.push({ value: seasonShort, label: t("destinationPreview.bestSeason", { defaultValue: "best season" }) });
+    }
+    if (facts?.avgStayDays != null) {
+        heroStats.push({
+            value: `~${facts.avgStayDays}${t("destinationPreview.daysUnitShort", { defaultValue: "d" })}`,
+            label: t("destinationPreview.averageStay", { defaultValue: "avg stay" }),
+        });
+    } else if (avgBudget > 0) {
+        heroStats.push({ value: `€${Math.round(avgBudget)}`, label: t("destinationPreview.avgBudget", { defaultValue: "avg budget" }) });
+    }
+
+    // The sticky-CTA cost is only surfaced when it comes from real UN Tourism
+    // (UNWTO) data — never the curated internal estimates. For estimate-only
+    // destinations the whole price block is hidden (the CTA button stays).
+    const showUnwtoCost = facts?.spendSource === "unwto" && facts?.avgTripSpend != null;
+    const estimatedCost = facts?.avgTripSpend != null ? Math.round(facts.avgTripSpend) : Math.round(avgBudget * 0.7);
+
     return (
         <View style={[styles.container, { backgroundColor: colors.background }]}>
-            <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor="transparent" translucent={true} />
-            <SafeAreaView style={styles.safeContainer} edges={["top"]}>
-                <View style={styles.heroSection}>
-                {loading ? (
-                    <View style={[styles.heroBackground, { backgroundColor: "#1A1A2E" }]}>
-                        <ActivityIndicator size="large" color={colors.primary} />
-                    </View>
-                ) : image ? (
-                    <View style={styles.heroImageWrapper}>
-                        <ImageWithAttribution
-                            imageUrl={image.url}
-                            photographerName={image.photographer}
-                            photographerUrl={image.photographerUrl}
-                            photoUrl={image.attribution}
-                            position="top"
-                        />
-                    </View>
-                ) : (
-                    <View style={[styles.heroBackground, { backgroundColor: "#1A1A2E" }]}>
-                        <Text style={styles.heroEmoji}>{destinationData.emoji}</Text>
-                    </View>
-                )}
-                <LinearGradient colors={["transparent", "rgba(0,0,0,0.7)"]} style={styles.heroGradient} pointerEvents="none" />
-                
-                <SafeAreaView style={styles.headerOverlay} pointerEvents="box-none">
-                    <View style={styles.headerRow}>
-                        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-                            <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
-                        </TouchableOpacity>
-                        {token && (
-                            <TouchableOpacity style={styles.watchButton} onPress={handleToggleWatch}>
-                                <Ionicons 
-                                    name={isWatching ? "notifications" : "notifications-outline"} 
-                                    size={22} 
-                                    color={isWatching ? colors.primary : "#FFFFFF"} 
-                                />
-                            </TouchableOpacity>
-                        )}
-                    </View>
-                </SafeAreaView>
+            <StatusBar barStyle="light-content" backgroundColor="transparent" translucent={true} />
 
-                <View style={styles.heroContent}>
-                    <View style={[styles.heroBadge, { backgroundColor: colors.primary }]}>
-                        <Ionicons name="trending-up" size={13} color="#000000" />
-                        <Text style={styles.heroBadgeText}>{t('home.popularDestination')}</Text>
-                    </View>
-                    <Text style={styles.heroTitle}>{destination}</Text>
-                    <View style={styles.heroStats}>
-                        <View style={styles.statItem}>
-                            <Ionicons name="people" size={16} color={colors.primary} />
-                            <Text style={styles.statValue}>{tripCount}</Text>
-                            <Text style={styles.statLabel}>{t('destinationPreview.tripsLabel')}</Text>
-                        </View>
-                        <View style={styles.statDivider} />
-                        {facts?.avgTripSpend != null ? (
-                            <View style={styles.statItem}>
-                                <Ionicons name="wallet" size={16} color={colors.primary} />
-                                <Text style={styles.statValue}>€{Math.round(facts.avgTripSpend)}</Text>
-                                <Text style={styles.statLabel}>{t('home.perTripShort')}</Text>
+            <Animated.ScrollView
+                style={styles.scroll}
+                showsVerticalScrollIndicator={false}
+                scrollEventThrottle={16}
+                onScroll={Animated.event(
+                    [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+                    { useNativeDriver: true }
+                )}
+            >
+                {/* ---------------------------- Cinematic hero -------------------- */}
+                <View style={[styles.hero, { height: HERO_H }]}>
+                    <Animated.View
+                        style={[
+                            styles.heroImageWrap,
+                            { transform: [{ translateY: heroTranslate }, { scale: heroScale }] },
+                        ]}
+                    >
+                        {loading ? (
+                            <View style={[styles.heroFallback, { backgroundColor: "#12121C" }]}>
+                                <ActivityIndicator size="large" color={colors.primary} />
                             </View>
+                        ) : image ? (
+                            <ImageWithAttribution
+                                imageUrl={image.url}
+                                photographerName={image.photographer}
+                                photographerUrl={image.photographerUrl}
+                                photoUrl={image.attribution}
+                                position="top"
+                                topInset={insets.top + 52}
+                            />
                         ) : (
-                            <View style={styles.statItem}>
-                                <Ionicons name="wallet" size={16} color={colors.primary} />
-                                <Text style={styles.statValue}>€{Math.round(avgBudget)}</Text>
-                                <Text style={styles.statLabel}>{t('destinationPreview.avgBudget')}</Text>
+                            <View style={[styles.heroFallback, { backgroundColor: "#12121C" }]}>
+                                <Text style={styles.heroEmoji}>{destinationData.emoji}</Text>
                             </View>
                         )}
+                    </Animated.View>
+
+                    <LinearGradient
+                        colors={["rgba(0,0,0,0.5)", "rgba(0,0,0,0)"]}
+                        style={styles.heroScrimTop}
+                        pointerEvents="none"
+                    />
+                    <LinearGradient
+                        colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.35)", "rgba(0,0,0,0.92)"]}
+                        locations={[0, 0.55, 1]}
+                        style={styles.heroScrimBottom}
+                        pointerEvents="none"
+                    />
+
+                    <View style={styles.heroContent}>
+                        <View style={styles.heroChipsRow}>
+                            <View style={[styles.popularChip, { backgroundColor: colors.primary }]}>
+                                <Ionicons name="trending-up" size={12} color="#000000" />
+                                <Text style={styles.popularChipText}>{t('home.popularDestination')}</Text>
+                            </View>
+                        </View>
+                        <Text style={styles.heroTitle} numberOfLines={2}>{destinationCity}</Text>
+                        {destinationCountry ? (
+                            <View style={styles.heroCountryRow}>
+                                <Ionicons name="location" size={13} color="rgba(255,255,255,0.9)" />
+                                <Text style={styles.heroCountry}>{destinationCountry}</Text>
+                            </View>
+                        ) : null}
+                        <BlurView intensity={blurIntensity} tint="dark" style={styles.heroGlass}>
+                            {heroStats.map((s, i) => (
+                                <React.Fragment key={i}>
+                                    {i > 0 && <View style={styles.heroGlassDivider} />}
+                                    <View style={styles.heroGlassItem}>
+                                        <Text style={styles.heroGlassValue} numberOfLines={1}>{s.value}</Text>
+                                        <Text style={styles.heroGlassLabel} numberOfLines={1}>{s.label}</Text>
+                                    </View>
+                                </React.Fragment>
+                            ))}
+                        </BlurView>
                     </View>
                 </View>
-            </View>
-            </SafeAreaView>
 
-            <ScrollView style={styles.contentSection} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
+                {/* -------------------- Content sheet, lifted over hero ---------- */}
+                <View style={[styles.sheet, { backgroundColor: colors.background }]}>
+                    <View style={[styles.sheetHandle, { backgroundColor: colors.border }]} />
                 {weatherLoading && (
                     <View style={[styles.weatherLoadingCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
                         <ActivityIndicator size="small" color={colors.primary} />
@@ -764,43 +904,92 @@ export default function DestinationPreviewScreen() {
                     </LinearGradient>
                 )}
 
-                <View style={styles.snapshotRow}>
-                    <View style={[styles.snapshotCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                        <View style={[styles.snapshotIcon, { backgroundColor: isDarkMode ? colors.secondary : "#FFF9E6" }]}>
-                            <Ionicons name="calendar" size={18} color={colors.primary} />
-                        </View>
-                        <Text style={[styles.snapshotLabel, { color: colors.textMuted }]}>{t('destinationPreview.bestTimeToVisit')}</Text>
-                        <Text style={[styles.snapshotValue, { color: colors.text }]}>{destinationData.bestTime}</Text>
-                    </View>
-                    {facts?.avgStayDays != null && (
-                        <View style={[styles.snapshotCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                            <View style={[styles.snapshotIcon, { backgroundColor: isDarkMode ? colors.secondary : "#FFF9E6" }]}>
-                                <Ionicons name="time" size={18} color={colors.primary} />
-                            </View>
-                            <Text style={[styles.snapshotLabel, { color: colors.textMuted }]}>{t('destinationPreview.averageStay')}</Text>
-                            <Text style={[styles.snapshotValue, { color: colors.text }]}>
-                                ~{facts.avgStayDays} {t('destinationPreview.daysUnit')}
-                            </Text>
-                        </View>
-                    )}
-                </View>
-
+                {/* Flights deal card — turns into a live "from €X" teaser when we
+                    can resolve the traveller's home airport. */}
                 <TouchableOpacity
-                    style={[styles.flightSearchButton, { backgroundColor: colors.card, borderColor: colors.border }]}
+                    style={[
+                        styles.flightCard,
+                        { backgroundColor: colors.card, borderColor: teaserPriceLabel ? colors.primary : colors.border },
+                    ]}
                     onPress={handleSearchFlights}
-                    activeOpacity={0.85}
+                    activeOpacity={0.9}
                 >
-                    <View style={[styles.flightSearchIcon, { backgroundColor: colors.primary }]}>
-                        <Ionicons name="airplane" size={20} color={colors.text} />
-                    </View>
-                    <View style={styles.flightSearchTextBlock}>
-                        <Text style={[styles.flightSearchTitle, { color: colors.text }]}>{t('destinationPreview.searchFlights')}</Text>
-                        <Text style={[styles.flightSearchSubtitle, { color: colors.textMuted }]} numberOfLines={1}>
-                            {t('destinationPreview.flightsSubtitle', { destination: destinationCity || destination })}
+                    <LinearGradient
+                        colors={[colors.primary, "#34C759"]}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                        style={styles.flightIcon}
+                    >
+                        <Ionicons name="airplane" size={20} color="#000000" />
+                    </LinearGradient>
+                    <View style={styles.flightTextBlock}>
+                        <Text style={[styles.flightTitle, { color: colors.text }]} numberOfLines={1}>
+                            {originIata && teaserPriceLabel
+                                ? t('destinationPreview.flightsFromCity', { origin: originIata, defaultValue: `Flights from ${originIata}` })
+                                : t('destinationPreview.searchFlights')}
+                        </Text>
+                        <Text style={[styles.flightSubtitle, { color: colors.textMuted }]} numberOfLines={1}>
+                            {originIata && teaserPriceLabel
+                                ? `${originIata} → ${arrivalIata || destinationCity || destination}`
+                                : t('destinationPreview.flightsSubtitle', { destination: destinationCity || destination })}
                         </Text>
                     </View>
-                    <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+                    {teaserPriceLabel ? (
+                        <View style={styles.flightPricePill}>
+                            <Text style={[styles.flightPriceFrom, { color: colors.textMuted }]}>{t('destinationPreview.from')}</Text>
+                            <Text style={[styles.flightPriceValue, { color: colors.primary }]}>{teaserPriceLabel}</Text>
+                        </View>
+                    ) : (
+                        <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+                    )}
                 </TouchableOpacity>
+
+                {/* Cheapest days to fly — round-trip price calendar for the same
+                    resolved origin. Tapping a date opens search prefilled. */}
+                {flightCalendar && flightCalendar.dates.length > 0 && (
+                    <View style={styles.calSection}>
+                        <View style={styles.calHeader}>
+                            <Ionicons name="pricetags-outline" size={14} color={colors.primary} />
+                            <Text style={[styles.calTitle, { color: colors.textSecondary }]}>
+                                {t('destinationPreview.cheapestDays', { defaultValue: 'Cheapest days to fly' })}
+                            </Text>
+                        </View>
+                        <View style={styles.calRow}>
+                            {flightCalendar.dates.map((d) => (
+                                <TouchableOpacity
+                                    key={d.date}
+                                    style={[
+                                        styles.calChip,
+                                        {
+                                            backgroundColor: colors.card,
+                                            borderColor: d.isLowest ? colors.primary : colors.border,
+                                        },
+                                    ]}
+                                    onPress={() => openCalendarDate(d)}
+                                    activeOpacity={0.85}
+                                >
+                                    <Text style={[styles.calDate, { color: colors.text }]} numberOfLines={1}>
+                                        {formatShortDate(d.date)}
+                                    </Text>
+                                    {d.returnDate ? (
+                                        <Text style={[styles.calReturn, { color: colors.textMuted }]} numberOfLines={1}>
+                                            → {formatShortDate(d.returnDate)}
+                                        </Text>
+                                    ) : null}
+                                    <Text
+                                        style={[
+                                            styles.calPrice,
+                                            { color: d.isLowest ? colors.primary : colors.textMuted },
+                                        ]}
+                                        numberOfLines={1}
+                                    >
+                                        {formatFare(d.price, flightCalendar.currency)}
+                                    </Text>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+                    </View>
+                )}
 
                 <View style={styles.section}>
                     <View style={styles.sectionHeaderRow}>
@@ -876,32 +1065,61 @@ export default function DestinationPreviewScreen() {
                     </Text>
                 </View>
 
-                <View style={{ height: 170 }} />
-            </ScrollView>
+                    <View style={{ height: 150 }} />
+                </View>
+            </Animated.ScrollView>
 
-            <SafeAreaView edges={["bottom"]} style={[styles.ctaContainer, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
+            {/* Floating frosted nav — always reachable over the hero. */}
+            <SafeAreaView edges={["top"]} style={styles.floatHeader} pointerEvents="box-none">
+                <View style={styles.floatHeaderRow}>
+                    <TouchableOpacity onPress={() => router.back()} activeOpacity={0.8} style={styles.roundBtnWrap}>
+                        <BlurView intensity={blurIntensity} tint="dark" style={styles.roundBtn}>
+                            <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
+                        </BlurView>
+                    </TouchableOpacity>
+                    {token && (
+                        <TouchableOpacity onPress={handleToggleWatch} activeOpacity={0.8} style={styles.roundBtnWrap}>
+                            <BlurView intensity={blurIntensity} tint="dark" style={styles.roundBtn}>
+                                <Ionicons
+                                    name={isWatching ? "notifications" : "notifications-outline"}
+                                    size={20}
+                                    color={isWatching ? colors.primary : "#FFFFFF"}
+                                />
+                            </BlurView>
+                        </TouchableOpacity>
+                    )}
+                </View>
+            </SafeAreaView>
+
+            {/* Sticky CTA */}
+            <SafeAreaView edges={["bottom"]} style={[styles.ctaBar, { backgroundColor: colors.card, borderTopColor: colors.border }]}>
                 <View style={styles.ctaInner}>
-                    <View style={styles.ctaTopRow}>
-                        <View style={styles.ctaPricing}>
-                            <View style={styles.ctaPriceRow}>
-                                <Text style={[styles.ctaLabel, { color: colors.textMuted }]}>{t('destinationPreview.from')}</Text>
-                                <Text style={[styles.ctaPrice, { color: colors.text }]}>
-                                    €{facts?.avgTripSpend != null
-                                        ? Math.round(facts.avgTripSpend)
-                                        : Math.round(avgBudget * 0.7)}
-                                </Text>
-                                <Text style={[styles.ctaPerPerson, { color: colors.textMuted }]}>{t('destinationPreview.perPerson')}</Text>
+                    {showUnwtoCost && (
+                        <View style={styles.ctaTopRow}>
+                            <View style={styles.ctaPricing}>
+                                <View style={styles.ctaPriceRow}>
+                                    <Text style={[styles.ctaLabel, { color: colors.textMuted }]}>{t('destinationPreview.from')}</Text>
+                                    <Text style={[styles.ctaPrice, { color: colors.text }]}>€{estimatedCost}</Text>
+                                    <Text style={[styles.ctaPerPerson, { color: colors.textMuted }]}>{t('destinationPreview.perPerson')}</Text>
+                                </View>
+                                <Text style={[styles.ctaSubNote, { color: colors.textMuted }]}>{t('destinationPreview.estimatedCost')}</Text>
                             </View>
-                            <Text style={[styles.ctaSubNote, { color: colors.textMuted }]}>{t('destinationPreview.estimatedCost')}</Text>
+                            <View style={styles.ctaNoteRow}>
+                                <Ionicons name="sparkles" size={12} color={colors.primary} />
+                                <Text style={[styles.ctaNote, { color: colors.textMuted }]} numberOfLines={2}>{t('destinationPreview.planNote')}</Text>
+                            </View>
                         </View>
-                        <View style={styles.ctaNoteRow}>
-                            <Ionicons name="sparkles" size={12} color={colors.primary} />
-                            <Text style={[styles.ctaNote, { color: colors.textMuted }]} numberOfLines={2}>{t('destinationPreview.planNote')}</Text>
-                        </View>
-                    </View>
-                    <TouchableOpacity style={[styles.ctaButtonFull, { backgroundColor: colors.primary }]} onPress={handleCreateTrip} activeOpacity={0.9}>
-                        <Text style={[styles.ctaButtonText, { color: colors.text }]}>{t('destinationPreview.planMyTrip')}</Text>
-                        <Ionicons name="arrow-forward" size={20} color={colors.text} />
+                    )}
+                    <TouchableOpacity style={styles.ctaButtonWrap} onPress={handleCreateTrip} activeOpacity={0.9}>
+                        <LinearGradient
+                            colors={[colors.primary, "#34C759"]}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={styles.ctaButton}
+                        >
+                            <Text style={styles.ctaButtonText}>{t('destinationPreview.planMyTrip')}</Text>
+                            <Ionicons name="arrow-forward" size={19} color="#000000" />
+                        </LinearGradient>
                     </TouchableOpacity>
                 </View>
             </SafeAreaView>
@@ -911,33 +1129,67 @@ export default function DestinationPreviewScreen() {
 
 const styles = StyleSheet.create({
     container: { flex: 1 },
-    safeContainer: { flex: 1 },
-    heroSection: { height: 320, position: "relative" },
-    heroImageWrapper: { flex: 1, overflow: "hidden" },
-    heroImageContainer: { flex: 1, width: "100%", height: "100%" },
-    heroBackground: { flex: 1, justifyContent: "center", alignItems: "center" },
-    heroImage: { ...StyleSheet.absoluteFillObject, width: "100%", height: "100%" },
-    heroEmoji: { fontSize: 100, opacity: 0.3 },
-    heroGradient: { position: "absolute", bottom: 0, left: 0, right: 0, height: 200 },
-    headerOverlay: { position: "absolute", top: 0, left: 0, right: 0, zIndex: 10 },
-    headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 16, paddingTop: 8 },
-    backButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(0,0,0,0.3)", justifyContent: "center", alignItems: "center" },
-    watchButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(0,0,0,0.3)", justifyContent: "center", alignItems: "center" },
-    heroContent: { position: "absolute", bottom: 24, left: 20, right: 20 },
-    heroBadge: { flexDirection: "row", alignItems: "center", alignSelf: "flex-start", gap: 5, paddingHorizontal: 11, paddingVertical: 5, borderRadius: 20, marginBottom: 12 },
-    heroBadgeText: { color: "#000000", fontSize: 12, fontWeight: "700" },
-    heroTitle: { fontSize: 36, fontWeight: "800", color: "#FFFFFF", marginBottom: 16 },
-    heroStats: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,0.15)", borderRadius: 16, padding: 16 },
-    statItem: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 },
-    statValue: { fontSize: 16, fontWeight: "700", color: "#FFFFFF" },
-    statLabel: { fontSize: 12, color: "rgba(255,255,255,0.7)" },
-    statDivider: { width: 1, height: 24, backgroundColor: "rgba(255,255,255,0.2)" },
-    contentSection: { flex: 1 },
-    contentContainer: { padding: 20 },
-    infoCard: { borderRadius: 16, padding: 16, marginBottom: 20, borderWidth: 1 },
-    // Weather card (premium gradient)
-    weatherCard: { borderRadius: 20, padding: 18, marginBottom: 16, overflow: "hidden" },
-    weatherLoadingCard: { flexDirection: "row", alignItems: "center", borderRadius: 20, padding: 20, marginBottom: 16, borderWidth: 1 },
+    scroll: { flex: 1 },
+
+    // ------------------------------- Hero -----------------------------------
+    hero: { width: "100%", position: "relative", backgroundColor: "#12121C" },
+    heroImageWrap: { ...StyleSheet.absoluteFillObject },
+    heroFallback: { flex: 1, justifyContent: "center", alignItems: "center" },
+    heroEmoji: { fontSize: 104, opacity: 0.28 },
+    heroScrimTop: { position: "absolute", top: 0, left: 0, right: 0, height: 150 },
+    heroScrimBottom: { position: "absolute", bottom: 0, left: 0, right: 0, height: 280 },
+    heroContent: { position: "absolute", left: 20, right: 20, bottom: 40 },
+    heroChipsRow: { flexDirection: "row", marginBottom: 12 },
+    popularChip: { flexDirection: "row", alignItems: "center", alignSelf: "flex-start", gap: 5, paddingHorizontal: 11, paddingVertical: 6, borderRadius: 20 },
+    popularChipText: { color: "#000000", fontSize: 12, fontWeight: "800", letterSpacing: 0.1 },
+    heroTitle: {
+        fontSize: 38,
+        fontWeight: "800",
+        color: "#FFFFFF",
+        letterSpacing: -0.6,
+        lineHeight: 42,
+        textShadowColor: "rgba(0,0,0,0.4)",
+        textShadowOffset: { width: 0, height: 2 },
+        textShadowRadius: 12,
+    },
+    heroCountryRow: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 6 },
+    heroCountry: { color: "rgba(255,255,255,0.92)", fontSize: 15, fontWeight: "600" },
+    heroGlass: {
+        flexDirection: "row",
+        alignItems: "center",
+        marginTop: 18,
+        borderRadius: 18,
+        overflow: "hidden",
+        paddingVertical: 12,
+        paddingHorizontal: 6,
+        backgroundColor: "rgba(18,18,28,0.34)",
+        borderWidth: 1,
+        borderColor: "rgba(255,255,255,0.14)",
+    },
+    heroGlassItem: { flex: 1, alignItems: "center", paddingHorizontal: 6 },
+    heroGlassValue: { color: "#FFFFFF", fontSize: 15, fontWeight: "800", letterSpacing: -0.2 },
+    heroGlassLabel: { color: "rgba(255,255,255,0.66)", fontSize: 11, fontWeight: "500", marginTop: 3 },
+    heroGlassDivider: { width: StyleSheet.hairlineWidth, height: 30, backgroundColor: "rgba(255,255,255,0.2)" },
+
+    // ------------------------------ Content sheet ---------------------------
+    sheet: {
+        marginTop: -28,
+        borderTopLeftRadius: 30,
+        borderTopRightRadius: 30,
+        paddingHorizontal: 20,
+        paddingTop: 10,
+    },
+    sheetHandle: { width: 40, height: 5, borderRadius: 3, alignSelf: "center", marginTop: 6, marginBottom: 20, opacity: 0.5 },
+
+    // ------------------------------ Floating nav ----------------------------
+    floatHeader: { position: "absolute", top: 0, left: 0, right: 0, zIndex: 20 },
+    floatHeaderRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 16, paddingTop: 6 },
+    roundBtnWrap: { width: 44, height: 44, borderRadius: 22, overflow: "hidden" },
+    roundBtn: { width: 44, height: 44, borderRadius: 22, justifyContent: "center", alignItems: "center", backgroundColor: "rgba(0,0,0,0.3)" },
+
+    // -------------------------- Weather (premium gradient) ------------------
+    weatherCard: { borderRadius: 22, padding: 18, marginBottom: 26, overflow: "hidden" },
+    weatherLoadingCard: { flexDirection: "row", alignItems: "center", borderRadius: 22, padding: 20, marginBottom: 26, borderWidth: 1 },
     weatherHeaderRow: { flexDirection: "row", alignItems: "center", gap: 7, marginBottom: 4 },
     weatherHeaderText: { fontSize: 13, fontWeight: "600", color: "rgba(255,255,255,0.9)", letterSpacing: 0.3, textTransform: "uppercase" },
     weatherMainRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16 },
@@ -947,51 +1199,62 @@ const styles = StyleSheet.create({
     weatherPillRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
     weatherPill: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "rgba(255,255,255,0.18)", paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10 },
     weatherPillText: { fontSize: 12.5, fontWeight: "600", color: "#FFFFFF" },
-    // Trip snapshot (2-column)
-    snapshotRow: { flexDirection: "row", gap: 12, marginBottom: 24 },
-    snapshotCard: { flex: 1, borderRadius: 16, padding: 14, borderWidth: 1 },
-    snapshotIcon: { width: 36, height: 36, borderRadius: 10, justifyContent: "center", alignItems: "center", marginBottom: 10 },
-    snapshotLabel: { fontSize: 12, fontWeight: "500", marginBottom: 4 },
-    snapshotValue: { fontSize: 15, fontWeight: "700" },
-    // Flight search button
-    flightSearchButton: { flexDirection: "row", alignItems: "center", gap: 14, borderRadius: 16, padding: 14, marginBottom: 24, borderWidth: 1 },
-    flightSearchIcon: { width: 44, height: 44, borderRadius: 12, justifyContent: "center", alignItems: "center" },
-    flightSearchTextBlock: { flex: 1 },
-    flightSearchTitle: { fontSize: 16, fontWeight: "700" },
-    flightSearchSubtitle: { fontSize: 13, marginTop: 2 },
-    infoCardHeader: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 },
-    infoCardTitle: { fontSize: 16, fontWeight: "700" },
     infoCardText: { fontSize: 15, marginLeft: 30 },
-    section: { marginBottom: 24 },
+
+    // -------------------------- Flights deal card ---------------------------
+    flightCard: { flexDirection: "row", alignItems: "center", gap: 14, borderRadius: 18, padding: 14, marginBottom: 26, borderWidth: 1.5 },
+    flightIcon: { width: 46, height: 46, borderRadius: 13, justifyContent: "center", alignItems: "center" },
+    flightTextBlock: { flex: 1 },
+    flightTitle: { fontSize: 15.5, fontWeight: "800", letterSpacing: -0.2 },
+    flightSubtitle: { fontSize: 13, fontWeight: "500", marginTop: 2 },
+    flightPricePill: { alignItems: "flex-end", marginRight: 2 },
+    flightPriceFrom: { fontSize: 10.5, fontWeight: "700", textTransform: "lowercase", letterSpacing: 0.3 },
+    flightPriceValue: { fontSize: 18, fontWeight: "800", marginTop: 1, letterSpacing: -0.3 },
+
+    // Cheapest days to fly — price-calendar chips, tucked under the flight card
+    calSection: { marginTop: -14, marginBottom: 26 },
+    calHeader: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 },
+    calTitle: { fontSize: 12.5, fontWeight: "700", letterSpacing: 0.1, textTransform: "uppercase" },
+    calRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+    calChip: { flexBasis: "22%", flexGrow: 1, alignItems: "center", paddingVertical: 10, paddingHorizontal: 4, borderRadius: 14, borderWidth: 1.5 },
+    calDate: { fontSize: 12.5, fontWeight: "700" },
+    calReturn: { fontSize: 10.5, fontWeight: "600", marginTop: 1 },
+    calPrice: { fontSize: 14, fontWeight: "800", marginTop: 3, letterSpacing: -0.2 },
+
+    // ------------------------------- Sections -------------------------------
+    section: { marginBottom: 26 },
     sectionHeaderRow: { flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 14 },
     sectionIconTile: { width: 30, height: 30, borderRadius: 9, justifyContent: "center", alignItems: "center" },
-    sectionTitle: { fontSize: 18, fontWeight: "700" },
+    sectionTitle: { fontSize: 18, fontWeight: "800", letterSpacing: -0.3 },
+
     // Highlights — numbered 2-column cards
     highlightsGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
-    highlightsLoading: { flexDirection: "row", alignItems: "center", padding: 16, borderRadius: 14, borderWidth: 1 },
-    highlightCard: { flexDirection: "row", alignItems: "center", gap: 10, flexBasis: "47%", flexGrow: 1, paddingHorizontal: 12, paddingVertical: 12, borderRadius: 14, borderWidth: 1 },
+    highlightsLoading: { flexDirection: "row", alignItems: "center", padding: 16, borderRadius: 16, borderWidth: 1 },
+    highlightCard: { flexDirection: "row", alignItems: "center", gap: 10, flexBasis: "47%", flexGrow: 1, paddingHorizontal: 12, paddingVertical: 13, borderRadius: 16, borderWidth: 1 },
     highlightNum: { width: 26, height: 26, borderRadius: 13, justifyContent: "center", alignItems: "center" },
     highlightNumText: { fontSize: 13, fontWeight: "800", color: "#000000" },
     highlightCardText: { flex: 1, fontSize: 14, fontWeight: "600" },
+
     // Perfect for — soft tinted pills
     tagsContainer: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
     tagPill: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 20, borderWidth: 1 },
     tagPillText: { fontSize: 14, fontWeight: "600" },
+
     // Social proof card
-    socialCard: { borderRadius: 16, padding: 20, borderWidth: 1 },
+    socialCard: { borderRadius: 20, padding: 20, borderWidth: 1 },
     socialHeader: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 12 },
     avatarCluster: { flexDirection: "row", alignItems: "center" },
     avatar: { width: 30, height: 30, borderRadius: 15, justifyContent: "center", alignItems: "center", borderWidth: 2 },
-    socialTitle: { fontSize: 16, fontWeight: "700" },
+    socialTitle: { fontSize: 16, fontWeight: "800", letterSpacing: -0.2 },
     insightText: { fontSize: 14, lineHeight: 22 },
-    ctaContainer: {
+
+    // -------------------------------- Sticky CTA ----------------------------
+    ctaBar: {
         position: "absolute",
         bottom: 0,
         left: 0,
         right: 0,
         borderTopWidth: 1,
-        // Lift the bar above scrolling content so it reads as a floating footer
-        // instead of text bleeding into the cards behind it.
         shadowColor: "#000",
         shadowOffset: { width: 0, height: -4 },
         shadowOpacity: 0.12,
@@ -1003,11 +1266,12 @@ const styles = StyleSheet.create({
     ctaPricing: { flexShrink: 0 },
     ctaPriceRow: { flexDirection: "row", alignItems: "baseline", gap: 4 },
     ctaLabel: { fontSize: 14 },
-    ctaPrice: { fontSize: 24, fontWeight: "800" },
+    ctaPrice: { fontSize: 26, fontWeight: "800", letterSpacing: -0.5 },
     ctaPerPerson: { fontSize: 14 },
     ctaSubNote: { fontSize: 11, marginTop: 2 },
     ctaNoteRow: { flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 5, flexShrink: 1, paddingBottom: 3 },
     ctaNote: { fontSize: 12, fontWeight: "500", flexShrink: 1, textAlign: "right" },
-    ctaButtonFull: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 16, borderRadius: 16, gap: 8 },
-    ctaButtonText: { fontSize: 17, fontWeight: "700" },
+    ctaButtonWrap: { borderRadius: 16, overflow: "hidden" },
+    ctaButton: { flexDirection: "row", alignItems: "center", justifyContent: "center", paddingVertical: 16, gap: 8 },
+    ctaButtonText: { fontSize: 17, fontWeight: "800", color: "#000000", letterSpacing: -0.2 },
 });

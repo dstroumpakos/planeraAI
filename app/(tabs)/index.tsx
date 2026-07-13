@@ -597,11 +597,18 @@ export default function HomeScreen() {
                   
                   <View style={styles.trendingOverlay}>
                     <View style={styles.trendingCardContent}>
-                      <Text style={styles.trendingName}>{destination.destination}</Text>
-                      <View style={styles.trendingLocationRow}>
-                        <Ionicons name="location-sharp" size={12} color="#FFFFFF" />
-                        <Text style={styles.trendingCountry}>{t("home.popularDestination")}</Text>
-                      </View>
+                      {/* When a UNWTO spend figure exists, the name sits up top and
+                          the price fills the footer. Without it, the name drops into
+                          the footer beside the arrow so it isn't left floating. */}
+                      {destination.avgTripSpend != null && (
+                        <>
+                          <Text style={styles.trendingName}>{destination.destination}</Text>
+                          <View style={styles.trendingLocationRow}>
+                            <Ionicons name="location-sharp" size={12} color="#FFFFFF" />
+                            <Text style={styles.trendingCountry}>{t("home.popularDestination")}</Text>
+                          </View>
+                        </>
+                      )}
                       <View style={styles.trendingFooter}>
                         {destination.avgTripSpend != null ? (
                           <View>
@@ -610,7 +617,13 @@ export default function HomeScreen() {
                             <Text style={[styles.trendingPriceSubtitle, { color: "#FFFFFF" }]}>{t("home.perPersonTrip")}</Text>
                           </View>
                         ) : (
-                          <View />
+                          <View style={styles.trendingFooterInfo}>
+                            <Text style={styles.trendingName} numberOfLines={1}>{destination.destination}</Text>
+                            <View style={[styles.trendingLocationRow, { marginBottom: 0 }]}>
+                              <Ionicons name="location-sharp" size={12} color="#FFFFFF" />
+                              <Text style={styles.trendingCountry}>{t("home.popularDestination")}</Text>
+                            </View>
+                          </View>
                         )}
                         <View style={styles.trendingArrow}>
                           <Ionicons name="arrow-forward" size={16} color="#000000" />
@@ -623,9 +636,7 @@ export default function HomeScreen() {
             </ScrollView>
             {trendingDestinations.some((d: any) => d.avgTripSpend != null) && (
               <Text style={[styles.trendingSource, { color: colors.textMuted }]}>
-                {trendingDestinations.some((d: any) => d.spendSource === "unwto")
-                  ? t("home.spendSource")
-                  : t("home.spendSourceEstimate")}
+                {t("home.spendSourceUnwto")}
               </Text>
             )}
           </View>
@@ -989,6 +1000,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+  },
+  trendingFooterInfo: {
+    flex: 1,
+    marginRight: 12,
   },
   trendingPrice: {
     fontSize: 20,

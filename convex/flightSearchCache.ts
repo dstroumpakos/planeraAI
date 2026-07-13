@@ -28,7 +28,9 @@ export const writeCache = internalMutation({
     kind: v.union(
       v.literal("search"),
       v.literal("booking_options"),
-      v.literal("explore")
+      v.literal("explore"),
+      v.literal("explore_destination"),
+      v.literal("calendar")
     ),
     ttlMs: v.float64(),
     normalizedResults: v.any(),

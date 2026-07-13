@@ -1177,7 +1177,9 @@ export default defineSchema({
         kind: v.union(
             v.literal("search"),
             v.literal("booking_options"),
-            v.literal("explore")
+            v.literal("explore"),
+            v.literal("explore_destination"),
+            v.literal("calendar")
         ),
         departureId: v.optional(v.string()),
         arrivalId: v.optional(v.string()),

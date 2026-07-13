@@ -17,6 +17,12 @@ interface ImageWithAttributionProps {
   blurHash?: string | null;
   /** Image size preset */
   size?: keyof typeof IMAGE_SIZES;
+  /**
+   * Push the (top) attribution line down by this many px. Use on full-bleed
+   * heroes that extend under the status bar / floating nav so the credit
+   * doesn't collide with the status-bar icons. Only applies to position="top".
+   */
+  topInset?: number;
 }
 
 export function ImageWithAttribution({
@@ -29,6 +35,7 @@ export function ImageWithAttribution({
   position = "bottom",
   blurHash,
   size = "HERO",
+  topInset = 0,
 }: ImageWithAttributionProps) {
   const { t } = useTranslation();
   // Optimize the Unsplash URL for faster loading
@@ -79,12 +86,21 @@ export function ImageWithAttribution({
       />
 
       <LinearGradient
-        colors={isTop ? ["rgba(0, 0, 0, 0.6)", "transparent"] : ["transparent", "rgba(0, 0, 0, 0.6)"]}
+        colors={
+          isTop
+            ? // When the top attribution is offset off the screen edge, its dark
+              // scrim would float as a stray band over the image — drop it and
+              // lean on the text shadow instead. At the edge (topInset 0) keep it.
+              topInset > 0
+              ? ["transparent", "transparent"]
+              : ["rgba(0, 0, 0, 0.6)", "transparent"]
+            : ["transparent", "rgba(0, 0, 0, 0.6)"]
+        }
         start={{ x: 0, y: 0 }}
         end={{ x: 0, y: 1 }}
         style={[
           styles.attributionOverlay,
-          isTop ? styles.attributionTop : styles.attributionBottom,
+          isTop ? [styles.attributionTop, { top: topInset }] : styles.attributionBottom,
         ]}
         pointerEvents="box-none"
       >
@@ -181,6 +197,9 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: 11,
     lineHeight: 16,
+    textShadowColor: "rgba(0,0,0,0.6)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
   },
   link: {
     textDecorationLine: "underline",

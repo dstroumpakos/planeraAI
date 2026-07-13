@@ -72,10 +72,18 @@ export function buildSearchApiSearchParams(
 
   saAppend(params, "adults", input.adults);
   saAppend(params, "children", input.children);
-  // The app's single `bags` count historically meant carry-on bags (it mapped
-  // to SerpApi's `bags`), so carry it through as `carry_on_bags`.
-  saAppend(params, "carry_on_bags", input.bags);
+  saAppend(params, "infants_in_seat", input.infantsInSeat);
+  saAppend(params, "infants_on_lap", input.infantsOnLap);
+  // Carry-on: prefer the explicit `carryOnBags`, falling back to the legacy
+  // single `bags` count (which historically meant carry-on).
+  saAppend(params, "carry_on_bags", input.carryOnBags ?? input.bags);
+  saAppend(params, "checked_bags", input.checkedBags);
   saAppend(params, "max_price", input.maxPrice);
+  // Boolean flags — only sent when explicitly enabled so the default request
+  // stays minimal. `separate_tickets=1` HIDES self-transfer tickets.
+  if (input.showCheapestFlights) params.append("show_cheapest_flights", "true");
+  if (input.showHiddenFlights) params.append("show_hidden_flights", "true");
+  if (input.hideSeparateTickets) params.append("separate_tickets", "1");
   saAppend(params, "outbound_times", input.outboundTimes);
   saAppend(params, "return_times", input.returnTimes);
   // Round-trip leg 2: fetch return options for a chosen outbound.

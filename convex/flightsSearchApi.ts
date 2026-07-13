@@ -288,6 +288,11 @@ const FLIGHT_SEARCH_INPUT = v.object({
     )
   ),
   bags: v.optional(v.float64()),
+  carryOnBags: v.optional(v.float64()),
+  checkedBags: v.optional(v.float64()),
+  showCheapestFlights: v.optional(v.boolean()),
+  showHiddenFlights: v.optional(v.boolean()),
+  hideSeparateTickets: v.optional(v.boolean()),
   maxPrice: v.optional(v.float64()),
   maxDuration: v.optional(v.float64()),
   outboundTimes: v.optional(v.string()),

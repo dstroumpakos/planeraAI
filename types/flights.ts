@@ -41,7 +41,22 @@ export interface FlightSearchInput {
   travelClass?: TravelClass;
   stops?: StopsFilter;
   sortBy?: SortBy;
+  /**
+   * Legacy single bag count — historically meant carry-on bags. Kept for
+   * back-compat; `carryOnBags` takes precedence when both are set.
+   */
   bags?: number;
+  carryOnBags?: number;
+  checkedBags?: number;
+  /** Surface the cheapest flights instead of Google's "best" ranking. */
+  showCheapestFlights?: boolean;
+  /** Include flights Google hides by default (e.g. long layovers). */
+  showHiddenFlights?: boolean;
+  /**
+   * Hide separate / self-transfer tickets. searchapi maps this to
+   * `separate_tickets=1` (hide) vs `0` (show, the default).
+   */
+  hideSeparateTickets?: boolean;
   maxPrice?: number;
   maxDuration?: number; // minutes
   outboundTimes?: string; // SerpApi `outbound_times` format (e.g. "4,18")
@@ -258,4 +273,77 @@ export interface ExploreDestination {
   returnDate?: string; // YYYY-MM-DD
   /** Engine-provided image, used only as a fallback for the Unsplash lookup. */
   thumbnail?: string;
+}
+
+// ----------------- Travel Explore — single-destination drill-down -----------
+// searchapi.io `google_travel_explore_destination`: given an origin AND one
+// destination, returns indicative flight options to that destination. Powers
+// the "Flights from your city, from €X" module on a destination preview page.
+// Requires a known origin — only meaningful for a logged-in user whose home
+// airport we can resolve. Prices are indicative teasers, NOT bookable fares:
+// the "See flights" CTA must re-run the real `google_flights` search to obtain
+// a provider-locked, bookable `booking_token`.
+
+export interface ExploreDestinationFlightsQuery {
+  departureId: string; // origin IATA (the viewer's resolved home airport)
+  arrivalId: string; // destination IATA or /m/ location id
+  currency?: string; // ISO 4217, defaults to EUR
+  hl?: string; // UI language, defaults to "en"
+  travelClass?: TravelClass;
+  stops?: StopsFilter;
+  maxPrice?: number;
+  adults?: number;
+  // searchapi.io `time_period` (e.g. "one_week_trip_in_the_next_six_months"
+  // or a "YYYY-MM-DD..YYYY-MM-DD" range). Defaults to the engine default.
+  timePeriod?: string;
+}
+
+export interface ExploreDestinationFlight {
+  /** Indicative price (discovery signal, not bookable). */
+  price?: number;
+  airline?: string;
+  stops?: number;
+  departureAirport?: string; // IATA
+  arrivalAirport?: string; // IATA
+  outboundDate?: string; // YYYY-MM-DD
+  returnDate?: string; // YYYY-MM-DD
+  flightDuration?: string;
+}
+
+export interface ExploreDestinationFlights {
+  arrivalId: string;
+  departureId: string;
+  currency: string;
+  /** Cheapest indicative price across the returned options, if any. */
+  cheapestPrice?: number;
+  flights: ExploreDestinationFlight[];
+}
+
+// ----------------- Flexible-date price calendar ("cheapest days") -----------
+// searchapi.io `google_flights_calendar`: cheapest ROUND-TRIP fare per
+// departure date over a rolling window. Used for the "cheapest days to fly"
+// strip on the destination preview. Round-trip keeps prices consistent with the
+// explore-destination teaser, but the 200-combination cap limits the window to
+// ~2 weeks of departures. Each returned date keeps the return that produced its
+// cheapest fare, so a tap can prefill both legs of the search. Indicative fares.
+
+export interface FlightCalendarQuery {
+  departureId: string; // origin IATA (resolved home airport)
+  arrivalId: string; // destination IATA
+  currency?: string; // ISO 4217, defaults to EUR
+}
+
+export interface FlightCalendarDate {
+  date: string; // YYYY-MM-DD departure date
+  returnDate?: string; // YYYY-MM-DD return that gave this date's cheapest fare
+  price: number; // indicative round-trip fare
+  isLowest?: boolean; // engine flagged this as a lowest-price date
+}
+
+export interface FlightCalendar {
+  departureId: string;
+  arrivalId: string;
+  currency: string;
+  /** Cheapest, date-spread selection (soonest first) for the teaser strip. */
+  dates: FlightCalendarDate[];
 }

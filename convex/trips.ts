@@ -2045,16 +2045,20 @@ export const getTrendingDestinations = query({
         const trending = Object.entries(destinationMap)
             .map(([destination, data]) => {
                 const s = resolveSpendStay(destination);
+                // Trending Now only surfaces REAL UN Tourism (UNWTO) figures — never
+                // the curated internal estimates. Drop the spend for anything that
+                // didn't resolve to UNWTO so the card hides the price entirely.
+                const isUnwto = s.spendSource === "unwto";
                 return {
                     destination,
                     count: data.count,
                     avgBudget: data.budgets.length > 0
                         ? data.budgets.reduce((a, b) => a + b, 0) / data.budgets.length
                         : 0,
-                    avgTripSpend: s.avgTripSpend,
+                    avgTripSpend: isUnwto ? s.avgTripSpend : null,
                     spendCurrency: s.spendCurrency,
-                    spendLevel: s.spendLevel,
-                    spendSource: s.spendSource,
+                    spendLevel: isUnwto ? s.spendLevel : null,
+                    spendSource: isUnwto ? s.spendSource : null,
                     interests: [...new Set(data.allInterests)].slice(0, 3), // Top 3 unique interests
                 };
             })

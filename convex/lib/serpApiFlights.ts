@@ -287,10 +287,19 @@ export function createFlightSearchCacheKey(input: FlightSearchInput): string {
     (input.currency ?? "EUR").toUpperCase(),
     String(input.adults ?? 1),
     String(input.children ?? 0),
+    String(input.infantsInSeat ?? 0),
+    String(input.infantsOnLap ?? 0),
     input.travelClass ?? "economy",
     input.stops ?? "any",
-    String(input.bags ?? 0),
+    input.sortBy ?? "top",
+    // Bags: fold the legacy `bags` into carry-on so old and new keys agree.
+    String(input.carryOnBags ?? input.bags ?? 0),
+    String(input.checkedBags ?? 0),
     input.maxPrice != null ? String(input.maxPrice) : "",
+    // Boolean flags — compact single-char flags keep the key readable.
+    input.showCheapestFlights ? "c" : "",
+    input.showHiddenFlights ? "h" : "",
+    input.hideSeparateTickets ? "s" : "",
     input.departureToken ?? "",
   ];
   return parts.join("|");

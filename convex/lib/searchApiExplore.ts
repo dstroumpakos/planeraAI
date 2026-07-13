@@ -72,8 +72,12 @@ const HL_ALIAS: Record<string, string> = {
   nn: "no",
 };
 
-/** Map any incoming UI language onto a `hl` value the engine accepts. */
-function normalizeHl(raw?: string): string {
+/**
+ * Map any incoming UI language onto a `hl` value the Google Travel engines
+ * accept. Exported for reuse by the sibling `google_travel_explore_destination`
+ * lib — this table is large enough that duplicating it would just invite drift.
+ */
+export function normalizeHl(raw?: string): string {
   const fallback = "en-US";
   if (!raw) return fallback;
   const v = raw.trim().replace("_", "-");
