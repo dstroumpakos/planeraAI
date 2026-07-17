@@ -9,6 +9,7 @@
  */
 
 import type * as _features from "../_features.js";
+import type * as accommodationsPublic from "../accommodationsPublic.js";
 import type * as achievements from "../achievements.js";
 import type * as admin from "../admin.js";
 import type * as adminKpis from "../adminKpis.js";
@@ -110,6 +111,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   _features: typeof _features;
+  accommodationsPublic: typeof accommodationsPublic;
   achievements: typeof achievements;
   admin: typeof admin;
   adminKpis: typeof adminKpis;

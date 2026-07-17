@@ -1179,7 +1179,8 @@ export default defineSchema({
             v.literal("booking_options"),
             v.literal("explore"),
             v.literal("explore_destination"),
-            v.literal("calendar")
+            v.literal("calendar"),
+            v.literal("accommodations")
         ),
         departureId: v.optional(v.string()),
         arrivalId: v.optional(v.string()),

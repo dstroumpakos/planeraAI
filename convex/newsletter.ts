@@ -19,7 +19,7 @@
  * (`internal.postmark.sendRawEmail`).
  */
 
-import { mutation, internalQuery, internalMutation, internalAction } from "./_generated/server";
+import { query, mutation, internalQuery, internalMutation, internalAction } from "./_generated/server";
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 
@@ -30,6 +30,11 @@ import { internal } from "./_generated/api";
 const BASE_URL = "https://planeraai.app";
 const APP_STORE_URL =
   "https://apps.apple.com/us/app/planera-ai-travel-planner/id6758346139";
+
+// All newsletter/marketing emails send from the dedicated marketing address
+// (transactional emails keep support@). Replies land in the same mailbox.
+const MARKETING_EMAIL = "marketing@planeraai.app";
+const MARKETING_FROM = `Planera AI <${MARKETING_EMAIL}>`;
 
 // How long to wait between drip emails.
 const DRIP_INTERVAL_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
@@ -329,36 +334,42 @@ const EMAIL_COPY: Record<EmailKey, Record<Lang, EmailCopy>> = {
   },
 };
 
-const FOOTER_COPY: Record<Lang, { note: string; unsubscribe: string; disclosure: string }> = {
+const FOOTER_COPY: Record<Lang, { note: string; unsubscribe: string; disclosure: string; contact: string }> = {
   en: {
     note: "You're receiving this because you signed up for travel tips and deals from Planera.",
     unsubscribe: "Unsubscribe",
     disclosure: "Some links are partner links — Planera may earn a commission at no extra cost to you.",
+    contact: "Hit reply — a real human reads every email. Or write to us at",
   },
   el: {
     note: "Λαμβάνετε αυτό το email επειδή εγγραφήκατε για ταξιδιωτικές συμβουλές και προσφορές από την Planera.",
     unsubscribe: "Διαγραφή",
     disclosure: "Ορισμένοι σύνδεσμοι είναι συνεργατικοί — η Planera μπορεί να λάβει προμήθεια χωρίς επιπλέον κόστος για εσάς.",
+    contact: "Απαντήστε σε αυτό το email — το διαβάζει πραγματικός άνθρωπος. Ή γράψτε μας στο",
   },
   es: {
     note: "Recibes este correo porque te suscribiste para recibir consejos y ofertas de viaje de Planera.",
     unsubscribe: "Cancelar suscripción",
     disclosure: "Algunos enlaces son de socios — Planera puede ganar una comisión sin coste adicional para ti.",
+    contact: "Responde a este correo — lo lee una persona real. O escríbenos a",
   },
   fr: {
     note: "Vous recevez cet e-mail car vous vous êtes inscrit pour recevoir des conseils et des offres de voyage de Planera.",
     unsubscribe: "Se désabonner",
     disclosure: "Certains liens sont des liens partenaires — Planera peut percevoir une commission sans frais supplémentaires pour vous.",
+    contact: "Répondez à cet e-mail — une vraie personne le lit. Ou écrivez-nous à",
   },
   de: {
     note: "Du erhältst diese E-Mail, weil du dich für Reisetipps und Angebote von Planera angemeldet hast.",
     unsubscribe: "Abmelden",
     disclosure: "Einige Links sind Partnerlinks — Planera kann eine Provision erhalten, ohne dass dir zusätzliche Kosten entstehen.",
+    contact: "Antworte einfach — ein echter Mensch liest jede E-Mail. Oder schreib uns an",
   },
   ar: {
     note: "تتلقى هذه الرسالة لأنك اشتركت للحصول على نصائح وعروض السفر من Planera.",
     unsubscribe: "إلغاء الاشتراك",
     disclosure: "بعض الروابط هي روابط شركاء — قد تحصل Planera على عمولة دون أي تكلفة إضافية عليك.",
+    contact: "رد على هذه الرسالة — يقرأها شخص حقيقي. أو راسلنا على",
   },
 };
 
@@ -588,6 +599,7 @@ ${opts.preheader}
         </td></tr></table>
       </td></tr>${opts.dealsBlock ?? ""}${bannerRow}
       <tr><td style="padding:24px 40px 32px;border-top:1px solid #F0EEE9;direction:${dir};text-align:${align};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <p style="margin:0 0 10px;font-size:13px;line-height:1.6;color:#4A4A4A;">${footer.contact} <a href="mailto:${MARKETING_EMAIL}" style="color:#1A1A1A;font-weight:600;text-decoration:underline;">${MARKETING_EMAIL}</a></p>
         <p style="margin:0 0 6px;font-size:12px;line-height:1.6;color:#9A9A9A;">${footer.note}</p>
         <p style="margin:0;font-size:12px;line-height:1.6;color:#9A9A9A;">© ${year} Planera · <a href="${opts.unsubscribeUrl}" style="color:#9A9A9A;text-decoration:underline;">${footer.unsubscribe}</a></p>
       </td></tr>
@@ -626,6 +638,7 @@ function confirmEmail(
     text:
       `${c.heading}\n\n${c.para1}\n\n${c.para2}\n\n` +
       `${c.cta}: ${confirmUrl}\n\n` +
+      `${FOOTER_COPY[lang].contact} ${MARKETING_EMAIL}\n\n` +
       `${FOOTER_COPY[lang].unsubscribe}: ${unsubscribeUrl}`,
   };
 }
@@ -655,14 +668,17 @@ function dripEmail(
   const ctaUrl = STAGE_CTA_URL[key];
   const unsubscribeUrl = `${BASE_URL}/newsletter/unsubscribe?token=${unsubscribeToken}`;
 
-  // The Low-Fare Radar deal cards only appear in the drip2 ("Low-Fare Radar") email.
+  // Low-Fare Radar deal cards appear in the welcome email (the signup promise:
+  // "this week's top deals in your first email") and the drip2 ("Low-Fare
+  // Radar") email.
+  const showDeals = key === "welcome" || key === "drip2";
   const dealsBlock =
-    key === "drip2" && deals && deals.length
+    showDeals && deals && deals.length
       ? renderDealsBlock(deals, lang)
       : undefined;
 
   const dealsText =
-    key === "drip2" && deals && deals.length
+    showDeals && deals && deals.length
       ? "\n\n" +
         deals
           .map(
@@ -690,6 +706,7 @@ function dripEmail(
     text:
       `${c.heading}\n\n${c.para1}\n\n${c.para2}${dealsText}\n\n` +
       `${c.cta}: ${ctaUrl}\n\n` +
+      `${FOOTER_COPY[lang].contact} ${MARKETING_EMAIL}\n\n` +
       `${FOOTER_COPY[lang].unsubscribe}: ${unsubscribeUrl}`,
   };
 }
@@ -697,6 +714,27 @@ function dripEmail(
 // ---------------------------------------------------------------------------
 // Public mutations
 // ---------------------------------------------------------------------------
+
+/**
+ * Public social-proof counter for the marketing site's signup card.
+ * Returns the confirmed-subscriber count rounded DOWN (nearest 50 under 1000,
+ * nearest 100 above), and 0 while under 100 so the site can hide the line
+ * until the number is worth showing.
+ */
+export const subscriberCount = query({
+  args: {},
+  returns: v.object({ count: v.float64() }),
+  handler: async (ctx) => {
+    const subs = await ctx.db
+      .query("newsletterSubscribers")
+      .withIndex("by_status", (q) => q.eq("status", "active"))
+      .collect();
+    const n = subs.length;
+    if (n < 100) return { count: 0 };
+    const step = n >= 1000 ? 100 : 50;
+    return { count: Math.floor(n / step) * step };
+  },
+});
 
 /**
  * Capture an email into the newsletter funnel (double opt-in).
@@ -774,6 +812,8 @@ export const subscribe = mutation({
       subject: mail.subject,
       html: mail.html,
       text: mail.text,
+      from: MARKETING_FROM,
+      replyTo: MARKETING_EMAIL,
     });
 
     return { success: true, status: "pending" as const };
@@ -812,13 +852,17 @@ export const confirm = mutation({
       lastEmailSentAt: now,
     });
 
-    // Send the welcome email (drip stage 0).
-    const mail = dripEmail(0, sub.language, sub.unsubscribeToken);
+    // Send the welcome email (drip stage 0) with this week's featured deals —
+    // the "lead magnet" promised on the signup form.
+    const featuredDeals = await queryFeaturedDeals(ctx.db);
+    const mail = dripEmail(0, sub.language, sub.unsubscribeToken, featuredDeals);
     await ctx.scheduler.runAfter(0, internal.postmark.sendRawEmail, {
       to: sub.email,
       subject: mail.subject,
       html: mail.html,
       text: mail.text,
+      from: MARKETING_FROM,
+      replyTo: MARKETING_EMAIL,
     });
 
     return { success: true, alreadyConfirmed: false };
@@ -913,35 +957,46 @@ export const advanceDripStage = internalMutation({
 export const getFeaturedDeals = internalQuery({
   args: {},
   handler: async (ctx): Promise<DealForEmail[]> => {
-    const now = Date.now();
-    const deals = await ctx.db
-      .query("lowFareRadar")
-      .withIndex("by_active", (q) => q.eq("active", true))
-      .collect();
-
-    const activeDeals = deals.filter(
-      (d: any) =>
-        d.active && !d.deletedAt && (!d.expiresAt || d.expiresAt > now),
-    );
-
-    activeDeals.sort((a: any, b: any) => {
-      if (!!a.isRecommended !== !!b.isRecommended) return a.isRecommended ? -1 : 1;
-      return a.price - b.price;
-    });
-
-    return activeDeals.slice(0, 3).map((d: any) => ({
-      originCity: d.originCity,
-      destinationCity: d.destinationCity,
-      price: d.price,
-      originalPrice: d.originalPrice,
-      currency: d.currency,
-      outboundDate: d.outboundDate,
-      returnDate: d.returnDate,
-      dealTag: d.dealTag,
-      isRecommended: d.isRecommended,
-    }));
+    return await queryFeaturedDeals(ctx.db);
   },
 });
+
+/**
+ * Shared featured-deals lookup: recommended deals first, then cheapest, max 3.
+ * Callable from both queries and mutations (e.g. `confirm`, which embeds the
+ * deals in the welcome email).
+ */
+async function queryFeaturedDeals(db: {
+  query: (table: "lowFareRadar") => any;
+}): Promise<DealForEmail[]> {
+  const now = Date.now();
+  const deals = await db
+    .query("lowFareRadar")
+    .withIndex("by_active", (q: any) => q.eq("active", true))
+    .collect();
+
+  const activeDeals = deals.filter(
+    (d: any) =>
+      d.active && !d.deletedAt && (!d.expiresAt || d.expiresAt > now),
+  );
+
+  activeDeals.sort((a: any, b: any) => {
+    if (!!a.isRecommended !== !!b.isRecommended) return a.isRecommended ? -1 : 1;
+    return a.price - b.price;
+  });
+
+  return activeDeals.slice(0, 3).map((d: any) => ({
+    originCity: d.originCity,
+    destinationCity: d.destinationCity,
+    price: d.price,
+    originalPrice: d.originalPrice,
+    currency: d.currency,
+    outboundDate: d.outboundDate,
+    returnDate: d.returnDate,
+    dealTag: d.dealTag,
+    isRecommended: d.isRecommended,
+  }));
+}
 
 /**
  * Cron entry point: send the next drip email to every due subscriber.
@@ -973,6 +1028,8 @@ export const processNewsletterDrip = internalAction({
         subject: mail.subject,
         html: mail.html,
         text: mail.text,
+        from: MARKETING_FROM,
+        replyTo: MARKETING_EMAIL,
       });
 
       if (result.success) {

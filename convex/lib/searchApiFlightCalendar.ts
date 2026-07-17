@@ -115,52 +115,61 @@ async function callSearchApi(
   }
 }
 
+export interface CalendarOptions {
+  /** Number of stacked ~14-day outbound windows to scan (default 1). */
+  windows?: number;
+  /** Max departure dates to return (default MAX_DATES). */
+  maxDates?: number;
+  /** Minimum days between returned dates (default MIN_SPACING_DAYS). */
+  spacingDays?: number;
+  /**
+   * Days from today where the first outbound window starts (default OUT_START).
+   * Lets a caller target a specific future month (e.g. October) instead of only
+   * the next few weeks. The return window tracks it by the same base offset.
+   */
+  startOffsetDays?: number;
+}
+
+// Each window spans this many days; derived from the base window so the two
+// constants above stay the single source of truth.
+const WINDOW_LEN_DAYS = OUT_END - OUT_START + 1; // 14
+
+type DepartureInfo = { price: number; returnDate?: string; isLowest: boolean };
+
 /**
- * Query the round-trip price calendar and return the cheapest, date-spread
- * departure dates. Returns `null` when the key is missing, the API fails, or
- * nothing usable comes back.
+ * Fetch ONE ~14-day outbound window (one google_flights_calendar call, ≤200
+ * combos) and merge its cheapest-fare-per-departure-date into `perDeparture`.
+ * N windows = N API calls.
  */
-export async function fetchFlightCalendar(
-  q: FlightCalendarQuery
-): Promise<FlightCalendar | null> {
-  const key = getSearchApiKey();
-  if (!key) return null;
-  if (!q.departureId?.trim() || !q.arrivalId?.trim()) return null;
-
-  const departureId = q.departureId.trim().toUpperCase();
-  const rawArrival = q.arrivalId.trim();
-  const arrivalId = /^[a-z]{3}$/i.test(rawArrival)
-    ? rawArrival.toUpperCase()
-    : rawArrival;
-  const currency = (q.currency || "EUR").toUpperCase();
-
+async function fillWindow(
+  key: string,
+  departureId: string,
+  arrivalId: string,
+  currency: string,
+  outStart: number,
+  retStart: number,
+  perDeparture: Map<string, DepartureInfo>
+): Promise<void> {
   const params = new URLSearchParams();
   params.append("engine", "google_flights_calendar");
   params.append("departure_id", departureId);
   params.append("arrival_id", arrivalId);
   params.append("flight_type", "round_trip");
   // Base dates are required; keep them inside the window.
-  params.append("outbound_date", isoOffset(OUT_START));
-  params.append("return_date", isoOffset(RET_START));
-  params.append("outbound_date_start", isoOffset(OUT_START));
-  params.append("outbound_date_end", isoOffset(OUT_END));
-  params.append("return_date_start", isoOffset(RET_START));
-  params.append("return_date_end", isoOffset(RET_END));
+  params.append("outbound_date", isoOffset(outStart));
+  params.append("return_date", isoOffset(retStart));
+  params.append("outbound_date_start", isoOffset(outStart));
+  params.append("outbound_date_end", isoOffset(outStart + WINDOW_LEN_DAYS - 1));
+  params.append("return_date_start", isoOffset(retStart));
+  params.append("return_date_end", isoOffset(retStart + (RET_END - RET_START)));
   params.append("currency", currency);
   // NOTE: `hl` intentionally omitted — the calendar engine rejects region codes
   // (e.g. "en-GB") and the response carries no localizable text anyway.
 
   const json = await callSearchApi(params, key);
-  if (!json) return null;
+  if (!json) return;
 
   const raw: any[] = Array.isArray(json.calendar) ? json.calendar : [];
-
-  // Reduce the grid to the cheapest fare per departure date, keeping the return
-  // that produced it.
-  const perDeparture = new Map<
-    string,
-    { price: number; returnDate?: string; isLowest: boolean }
-  >();
   for (const c of raw) {
     if (c?.has_no_flights) continue;
     const date = typeof c?.departure === "string" ? c.departure : "";
@@ -173,10 +182,57 @@ export async function fetchFlightCalendar(
       perDeparture.set(date, { price, returnDate, isLowest });
     }
   }
+}
+
+/**
+ * Query the round-trip price calendar and return the cheapest, date-spread
+ * departure dates. Returns `null` when the key is missing, the API fails, or
+ * nothing usable comes back.
+ *
+ * `opts.windows > 1` scans consecutive outbound windows and merges them, so the
+ * public/MCP path can surface many more dates (~14 per window) than the compact
+ * mobile teaser strip. Defaults preserve the original single-window behavior.
+ */
+export async function fetchFlightCalendar(
+  q: FlightCalendarQuery,
+  opts?: CalendarOptions
+): Promise<FlightCalendar | null> {
+  const key = getSearchApiKey();
+  if (!key) return null;
+  if (!q.departureId?.trim() || !q.arrivalId?.trim()) return null;
+
+  const departureId = q.departureId.trim().toUpperCase();
+  const rawArrival = q.arrivalId.trim();
+  const arrivalId = /^[a-z]{3}$/i.test(rawArrival)
+    ? rawArrival.toUpperCase()
+    : rawArrival;
+  const currency = (q.currency || "EUR").toUpperCase();
+
+  const windows = Math.max(1, Math.min(opts?.windows ?? 1, 6));
+  const maxDates = opts?.maxDates ?? MAX_DATES;
+  const spacing = opts?.spacingDays ?? MIN_SPACING_DAYS;
+  // Never look at departures sooner than the base lead time.
+  const baseOut = Math.max(opts?.startOffsetDays ?? OUT_START, OUT_START);
+  // Keep the return window the same distance ahead of the outbound as the base.
+  const baseRet = baseOut + (RET_START - OUT_START);
+
+  const perDeparture = new Map<string, DepartureInfo>();
+  for (let i = 0; i < windows; i++) {
+    const shift = i * WINDOW_LEN_DAYS;
+    await fillWindow(
+      key,
+      departureId,
+      arrivalId,
+      currency,
+      baseOut + shift,
+      baseRet + shift,
+      perDeparture
+    );
+  }
 
   if (perDeparture.size === 0) return null;
 
-  // Cheapest first, then greedily keep dates that are at least MIN_SPACING_DAYS
+  // Cheapest first, then greedily keep dates that are at least `spacing` days
   // apart so the strip shows a spread of options rather than a cluster.
   const byPrice = [...perDeparture.entries()]
     .map(([date, v]) => ({ date, ...v }))
@@ -184,8 +240,8 @@ export async function fetchFlightCalendar(
 
   const picked: typeof byPrice = [];
   for (const cand of byPrice) {
-    if (picked.length >= MAX_DATES) break;
-    if (picked.every((p) => daysBetween(p.date, cand.date) >= MIN_SPACING_DAYS)) {
+    if (picked.length >= maxDates) break;
+    if (picked.every((p) => daysBetween(p.date, cand.date) >= spacing)) {
       picked.push(cand);
     }
   }

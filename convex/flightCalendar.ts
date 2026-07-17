@@ -124,3 +124,104 @@ export const flightCalendar = action({
     }
   },
 });
+
+/**
+ * Public, account-free flight price calendar — "cheapest days to fly" — for the
+ * marketing/SEO widget and the ChatGPT App (Apps SDK / MCP). Mirrors
+ * `flightCalendar` but takes an opaque per-caller `deviceId` used ONLY for rate
+ * limiting (never a user record), so public calendar lookups never create users.
+ *
+ * Same searchapi.io engine, same 12h cache (shared cache key), so public and
+ * authenticated lookups warm the same cache. Prices remain indicative teasers.
+ */
+export const flightCalendarPublic = action({
+  args: {
+    deviceId: v.string(),
+    input: v.object({
+      departureId: v.string(),
+      arrivalId: v.string(),
+      currency: v.optional(v.string()),
+    }),
+    /**
+     * Days from today where the scan starts. Lets the caller target a specific
+     * future month (e.g. "October") instead of only the next few weeks.
+     */
+    startOffsetDays: v.optional(v.float64()),
+  },
+  handler: async (ctx, args): Promise<FlightCalendar | null> => {
+    const device = (args.deviceId || "").trim();
+    if (!device) throw new Error("Missing device id");
+
+    const input = args.input as FlightCalendarQuery;
+    if (!input.departureId?.trim() || !input.arrivalId?.trim()) {
+      return null;
+    }
+
+    const rl: { allowed: boolean } = await ctx.runMutation(
+      internal.flightSearchCache.checkRateLimit,
+      { userId: `pub:${device}`, limit: 30, windowMs: 15 * 60 * 1000 }
+    );
+    if (!rl.allowed) {
+      throw new Error(
+        "You've looked up a lot of flights in a short time. Please wait a few minutes and try again."
+      );
+    }
+
+    try {
+      // Distinct cache key (`|wide`) so the multi-window public result never
+      // collides with the compact single-window teaser under the same route.
+      // The start offset is part of the key: a scan of October must not serve
+      // a cached scan of August.
+      const startOffset = args.startOffsetDays ?? 0;
+      const cacheKey = `${buildCacheKey(input)}|wide|off${Math.round(startOffset)}`;
+      const cached: FlightCalendar | null = await ctx.runQuery(
+        internal.flightSearchCache.readCache,
+        { cacheKey }
+      );
+      if (cached) {
+        console.log(
+          `[calendar] public cache hit ${input.departureId}->${input.arrivalId}`
+        );
+        return cached;
+      }
+
+      // Scan ~6 weeks (3 stacked windows) so ChatGPT can show many more dates
+      // than the mobile strip. 3 windows = 3 searchapi calls on a cache miss.
+      const result = await fetchFlightCalendar(input, {
+        windows: 3,
+        maxDates: 60,
+        startOffsetDays: args.startOffsetDays,
+      });
+
+      console.log(
+        `[calendar] public ${input.departureId}->${input.arrivalId} -> ${
+          result ? result.dates.length : 0
+        } dates`
+      );
+
+      if (result && result.dates.length > 0) {
+        try {
+          await ctx.runMutation(internal.flightSearchCache.writeCache, {
+            cacheKey,
+            kind: "calendar",
+            ttlMs: CALENDAR_CACHE_TTL_MS,
+            normalizedResults: result,
+            departureId: result.departureId,
+            arrivalId: result.arrivalId,
+            currency: result.currency,
+          });
+        } catch {
+          console.error("[calendar] public cache write failed");
+        }
+      }
+
+      return result;
+    } catch (err) {
+      await reportError(ctx, "flightCalendar:flightCalendarPublic", err, {
+        departureId: args.input?.departureId,
+        arrivalId: args.input?.arrivalId,
+      });
+      throw err;
+    }
+  },
+});

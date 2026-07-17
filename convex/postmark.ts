@@ -254,6 +254,11 @@ export const sendRawEmail = internalAction({
     subject: v.string(),
     html: v.string(),
     text: v.optional(v.string()),
+    // Override the default transactional sender (e.g. the newsletter sends
+    // from "Planera AI <marketing@planeraai.app>"). Must be a verified
+    // Postmark sender signature / signed domain.
+    from: v.optional(v.string()),
+    replyTo: v.optional(v.string()),
   },
   returns: v.object({
     success: v.boolean(),
@@ -274,11 +279,12 @@ export const sendRawEmail = internalAction({
           "X-Postmark-Server-Token": apiToken,
         },
         body: JSON.stringify({
-          From: SENDER_EMAIL,
+          From: args.from ?? SENDER_EMAIL,
           To: args.to,
           Subject: args.subject,
           HtmlBody: args.html,
           TextBody: args.text ?? undefined,
+          ReplyTo: args.replyTo ?? undefined,
           MessageStream: MESSAGE_STREAM,
         }),
       });
