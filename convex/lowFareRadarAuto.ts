@@ -63,6 +63,18 @@ export const upsertAutoDealFromSerpApi = internalMutation({
     checkedBaggage: v.optional(v.string()),
     totalPrice: v.optional(v.float64()),
     adults: v.optional(v.float64()),
+    // Admin-seeding overrides. Defaults preserve the opportunistic AUTO
+    // behavior (7-day TTL, "AUTO" tag). The admin batch seeder passes
+    // `dealTag:"SEEDED"` + `persistent:true` so filled-airport deals behave
+    // like curated ones: no auto-expiry, and re-priced by the refresh cron
+    // (which only touches `dealTag !== "AUTO"` rows).
+    dealTag: v.optional(v.string()),
+    persistent: v.optional(v.boolean()),
+    // Extra curated fields the admin seeder derives (typical price → a real
+    // strike-through "was" price, and the travel-month window from the dates).
+    originalPrice: v.optional(v.float64()),
+    travelMonthFrom: v.optional(v.string()),
+    travelMonthTo: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const level = (args.priceLevel || "").toLowerCase();
@@ -186,7 +198,12 @@ export const upsertAutoDealFromSerpApi = internalMutation({
       // `totalPrice`.
       price: Math.round(Number(opt.price) / Math.max(1, args.adults ?? 1)),
       totalPrice: args.totalPrice ?? Number(opt.price),
+      // Route's typical price (per-person) so the card can strike it through and
+      // show a genuine "-X%" saving. Undefined when there's no real gap.
+      originalPrice: args.originalPrice,
       currency: args.currency.toUpperCase(),
+      travelMonthFrom: args.travelMonthFrom,
+      travelMonthTo: args.travelMonthTo,
       cabinBaggage: args.cabinBaggage,
       checkedBaggage: args.checkedBaggage,
       // Always provide a booking link. Fall back to a Google Flights
@@ -200,9 +217,11 @@ export const upsertAutoDealFromSerpApi = internalMutation({
           : `https://www.google.com/travel/flights?hl=en&curr=${args.currency.toUpperCase()}#flt=${origin}.${destination}.${args.outboundDate};c:${args.currency.toUpperCase()};e:1;sd:1;t:o`),
       bookingRequest: args.bookingRequest,
       notes,
-      dealTag: "AUTO" as const,
+      dealTag: args.dealTag ?? ("AUTO" as const),
       active: true,
-      expiresAt: now + AUTO_DEAL_TTL_MS,
+      // Persistent (admin-seeded) deals never auto-expire; opportunistic AUTO
+      // deals age out after the TTL.
+      expiresAt: args.persistent ? undefined : now + AUTO_DEAL_TTL_MS,
       createdAt: now,
     };
 

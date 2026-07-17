@@ -20,7 +20,7 @@
  */
 
 import { internalAction } from "./_generated/server";
-import { internal } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import { v } from "convex/values";
 import { reportError } from "./helpers/reportError";
 import {
@@ -116,8 +116,15 @@ export const enrichAndSeedDeal = internalAction({
     // provider-locked). Defaults to "serpapi" so existing callers are
     // unaffected; the searchapi.io user-search path passes "searchapi".
     provider: v.optional(v.union(v.literal("serpapi"), v.literal("searchapi"))),
+    // Admin-seeding pass-throughs (see upsertAutoDealFromSerpApi). Omitted by
+    // the opportunistic user-search path, which keeps the AUTO defaults.
+    dealTag: v.optional(v.string()),
+    persistent: v.optional(v.boolean()),
+    originalPrice: v.optional(v.float64()),
+    travelMonthFrom: v.optional(v.string()),
+    travelMonthTo: v.optional(v.string()),
   },
-  handler: async (ctx, args): Promise<null> => {
+  handler: async (ctx, args): Promise<string | null> => {
     const opt = args.option;
     if (!opt) return null;
 
@@ -238,8 +245,26 @@ export const enrichAndSeedDeal = internalAction({
       }
     }
 
+    // Seeded (persistent, admin-curated) deals pre-resolve the Google POST
+    // booking_request into the real provider URL — the same link the flight
+    // search shows — and store it as `bookingUrl`. The app still re-resolves
+    // `bookingRequest` fresh at click-time; this just replaces the Google
+    // Flights fallback with a genuine provider link for any consumer (web
+    // widget, exports) that reads `bookingUrl` directly.
+    if (args.persistent && bookingRequest?.url && bookingRequest?.postData) {
+      try {
+        const resolved: any = await ctx.runAction(
+          api.flightsResolve.resolveBookingUrl,
+          { url: bookingRequest.url, postData: bookingRequest.postData }
+        );
+        if (resolved?.ok && resolved.url) bookingUrl = resolved.url;
+      } catch {
+        // Keep the Google Flights fallback if resolution fails.
+      }
+    }
+
     try {
-      await ctx.runMutation(
+      const dealId: string | null = await ctx.runMutation(
         internal.lowFareRadarAuto.upsertAutoDealFromSerpApi,
         {
           origin: args.origin,
@@ -256,8 +281,14 @@ export const enrichAndSeedDeal = internalAction({
           checkedBaggage,
           totalPrice,
           adults,
+          dealTag: args.dealTag,
+          persistent: args.persistent,
+          originalPrice: args.originalPrice,
+          travelMonthFrom: args.travelMonthFrom,
+          travelMonthTo: args.travelMonthTo,
         }
       );
+      return dealId ?? null;
     } catch (err) {
       console.error("[radar-auto] enrich+seed failed");
       await reportError(ctx, "lowFareRadarAutoAction:enrichAndSeedDeal", err, {

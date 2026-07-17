@@ -9,11 +9,18 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useMutation } from "convex/react";
+import * as Localization from "expo-localization";
 import { api } from "@/convex/_generated/api";
 import { useTheme } from "@/lib/ThemeContext";
 import { useTranslation } from "react-i18next";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Device region as ISO-2 lowercase (e.g. "fr"), for geo-relevant newsletter deals. */
+function deviceCountry(): string | undefined {
+  const region = Localization.getLocales()?.[0]?.regionCode;
+  return region && /^[A-Za-z]{2}$/.test(region) ? region.toLowerCase() : undefined;
+}
 
 interface NewsletterSignupProps {
   /** Pre-fill the email input (e.g. the logged-in user's email). */
@@ -52,6 +59,7 @@ export default function NewsletterSignup({
         email: trimmed,
         source,
         language: i18n.language,
+        country: deviceCountry(),
       });
       setStatus("success");
     } catch (e) {

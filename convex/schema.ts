@@ -1633,6 +1633,10 @@ export default defineSchema({
         ),
         source: v.optional(v.string()),   // "web" | "app" | etc.
         language: v.optional(v.string()),
+        // ISO-3166-1 alpha-2, lowercase (e.g. "fr", "gr"). Captured at signup
+        // from IP geolocation so newsletter deals & targeting are geo-relevant
+        // (a French subscriber gets French-origin fares, not Athens ones).
+        country: v.optional(v.string()),
         userId: v.optional(v.string()),   // set if a logged-in app user subscribed
         // Double opt-in / unsubscribe tokens (unguessable)
         confirmToken: v.string(),
@@ -1648,5 +1652,52 @@ export default defineSchema({
         .index("by_confirm_token", ["confirmToken"])
         .index("by_unsubscribe_token", ["unsubscribeToken"])
         .index("by_status", ["status"]),
+
+    // One-off marketing broadcasts composed by the marketing team in the admin
+    // dashboard and sent to opted-in newsletter subscribers. Distinct from the
+    // automated drip (see newsletter.ts): the drip is a fixed sequence, these
+    // are ad-hoc campaigns. Rendered through the same branded email shell.
+    newsletterCampaigns: defineTable({
+        // --- Structured content (fed into renderEmail) ---
+        subject: v.string(),
+        preheader: v.string(),
+        heading: v.string(),
+        para1: v.string(),
+        para2: v.optional(v.string()),
+        ctaText: v.string(),
+        ctaUrl: v.string(),
+        heroImg: v.optional(v.string()),   // hosted image URL shown at the top
+        includeDeals: v.boolean(),         // append live Low-Fare Radar deal cards
+        // --- Targeting (opted-in subscribers only) ---
+        languageFilter: v.optional(v.string()), // undefined = all languages
+        sourceFilter: v.optional(v.string()),   // undefined = all sources ("web"|"app")
+        countryFilter: v.optional(v.string()),  // undefined = all countries (ISO-2, lowercase)
+        // --- Lifecycle ---
+        status: v.union(
+            v.literal("draft"),
+            v.literal("sending"),
+            v.literal("sent"),
+            v.literal("failed"),
+        ),
+        targeted: v.optional(v.float64()), // recipients matched at send time
+        sent: v.optional(v.float64()),
+        failed: v.optional(v.float64()),
+        createdBy: v.string(),             // admin userId who composed it
+        createdAt: v.float64(),
+        sentAt: v.optional(v.float64()),   // when the send completed
+    })
+        .index("by_status", ["status"])
+        .index("by_createdAt", ["createdAt"]),
+
+    // Idempotency ledger: one row per (campaign, subscriber) delivered. A
+    // resumed / retried send batch skips subscribers that already have a row,
+    // so nobody is emailed twice. Mirrors notificationBroadcastTaps.
+    newsletterCampaignSends: defineTable({
+        campaignId: v.id("newsletterCampaigns"),
+        subscriberId: v.id("newsletterSubscribers"),
+        sentAt: v.float64(),
+    })
+        .index("by_campaign", ["campaignId"])
+        .index("by_campaign_subscriber", ["campaignId", "subscriberId"]),
 });
 

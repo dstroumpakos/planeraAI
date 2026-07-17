@@ -22,19 +22,20 @@
 import { query, mutation, internalQuery, internalMutation, internalAction } from "./_generated/server";
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
+import { iataToCountry } from "./lib/airportCountry";
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const BASE_URL = "https://planeraai.app";
+export const BASE_URL = "https://planeraai.app";
 const APP_STORE_URL =
   "https://apps.apple.com/us/app/planera-ai-travel-planner/id6758346139";
 
 // All newsletter/marketing emails send from the dedicated marketing address
 // (transactional emails keep support@). Replies land in the same mailbox.
-const MARKETING_EMAIL = "marketing@planeraai.app";
-const MARKETING_FROM = `Planera AI <${MARKETING_EMAIL}>`;
+export const MARKETING_EMAIL = "marketing@planeraai.app";
+export const MARKETING_FROM = `Planera AI <${MARKETING_EMAIL}>`;
 
 // How long to wait between drip emails.
 const DRIP_INTERVAL_MS = 3 * 24 * 60 * 60 * 1000; // 3 days
@@ -53,6 +54,14 @@ function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
+// ISO-3166-1 alpha-2, lowercase. Rejects anything that isn't a 2-letter code
+// (e.g. Vercel returns "XX" for unknown / local requests).
+function normalizeCountry(input?: string): string | undefined {
+  if (!input) return undefined;
+  const c = input.trim().toLowerCase();
+  return /^[a-z]{2}$/.test(c) && c !== "xx" ? c : undefined;
+}
+
 function randomToken(): string {
   return (
     crypto.randomUUID().replace(/-/g, "") +
@@ -62,10 +71,10 @@ function randomToken(): string {
 
 // ---- Localized copy ------------------------------------------------------
 
-type Lang = "en" | "el" | "es" | "fr" | "de" | "ar";
+export type Lang = "en" | "el" | "es" | "fr" | "de" | "ar";
 const LANGS: Lang[] = ["en", "el", "es", "fr", "de", "ar"];
 
-function normalizeLang(input?: string): Lang {
+export function normalizeLang(input?: string): Lang {
   const base = (input || "en").toLowerCase().split("-")[0];
   return (LANGS as string[]).includes(base) ? (base as Lang) : "en";
 }
@@ -334,7 +343,7 @@ const EMAIL_COPY: Record<EmailKey, Record<Lang, EmailCopy>> = {
   },
 };
 
-const FOOTER_COPY: Record<Lang, { note: string; unsubscribe: string; disclosure: string; contact: string }> = {
+export const FOOTER_COPY: Record<Lang, { note: string; unsubscribe: string; disclosure: string; contact: string }> = {
   en: {
     note: "You're receiving this because you signed up for travel tips and deals from Planera.",
     unsubscribe: "Unsubscribe",
@@ -423,7 +432,8 @@ const STAGE_BANNER: Record<EmailKey, CjBanner | null> = {
 
 // ---- Low-Fare Radar deal cards (shown inside the drip2 email) --------------
 
-interface DealForEmail {
+export interface DealForEmail {
+  origin: string; // IATA departure code, used to derive the deal's country
   originCity: string;
   destinationCity: string;
   price: number;
@@ -474,7 +484,7 @@ function formatDealDate(dateStr: string, lang: Lang): string {
 }
 
 /** Builds a full email row (<tr>) showcasing live Low-Fare Radar deals. */
-function renderDealsBlock(deals: DealForEmail[], lang: Lang): string {
+export function renderDealsBlock(deals: DealForEmail[], lang: Lang): string {
   if (!deals.length) return "";
   const rtl = lang === "ar";
   const dir = rtl ? "rtl" : "ltr";
@@ -529,7 +539,7 @@ function renderDealsBlock(deals: DealForEmail[], lang: Lang): string {
  * Shared branded email shell. Returns a full HTML document, localized and
  * direction-aware (RTL for Arabic).
  */
-function renderEmail(opts: {
+export function renderEmail(opts: {
   lang: Lang;
   preheader: string;
   heading: string;
@@ -745,6 +755,7 @@ export const subscribe = mutation({
     email: v.string(),
     source: v.optional(v.string()),
     language: v.optional(v.string()),
+    country: v.optional(v.string()),
     userId: v.optional(v.string()),
   },
   returns: v.object({
@@ -773,6 +784,7 @@ export const subscribe = mutation({
     const now = Date.now();
     const confirmToken = randomToken();
     const unsubscribeToken = existing?.unsubscribeToken ?? randomToken();
+    const country = normalizeCountry(args.country);
 
     if (existing) {
       // Re-arm a pending / previously-unsubscribed row.
@@ -780,6 +792,7 @@ export const subscribe = mutation({
         status: "pending",
         source: args.source ?? existing.source,
         language: args.language ?? existing.language,
+        country: country ?? existing.country,
         userId: args.userId ?? existing.userId,
         confirmToken,
         unsubscribeToken,
@@ -793,6 +806,7 @@ export const subscribe = mutation({
         status: "pending",
         source: args.source,
         language: args.language,
+        country,
         userId: args.userId,
         confirmToken,
         unsubscribeToken,
@@ -853,8 +867,10 @@ export const confirm = mutation({
     });
 
     // Send the welcome email (drip stage 0) with this week's featured deals —
-    // the "lead magnet" promised on the signup form.
-    const featuredDeals = await queryFeaturedDeals(ctx.db);
+    // the "lead magnet" promised on the signup form. Prefer deals departing
+    // from the subscriber's own country.
+    const allDeals = await queryFeaturedDeals(ctx.db);
+    const featuredDeals = pickTopDeals(allDeals, sub.country);
     const mail = dripEmail(0, sub.language, sub.unsubscribeToken, featuredDeals);
     await ctx.scheduler.runAfter(0, internal.postmark.sendRawEmail, {
       to: sub.email,
@@ -927,6 +943,7 @@ export const getDueDripSubscribers = internalQuery({
         email: s.email,
         dripStage: s.dripStage,
         language: s.language,
+        country: s.country,
         unsubscribeToken: s.unsubscribeToken,
       }));
   },
@@ -962,11 +979,11 @@ export const getFeaturedDeals = internalQuery({
 });
 
 /**
- * Shared featured-deals lookup: recommended deals first, then cheapest, max 3.
- * Callable from both queries and mutations (e.g. `confirm`, which embeds the
- * deals in the welcome email).
+ * All active Low-Fare Radar deals, sorted recommended-first then cheapest,
+ * mapped to the email shape (incl. `origin` so a deal's country can be
+ * derived). Callers slice/geo-filter via `pickTopDeals`.
  */
-async function queryFeaturedDeals(db: {
+export async function queryFeaturedDeals(db: {
   query: (table: "lowFareRadar") => any;
 }): Promise<DealForEmail[]> {
   const now = Date.now();
@@ -985,7 +1002,8 @@ async function queryFeaturedDeals(db: {
     return a.price - b.price;
   });
 
-  return activeDeals.slice(0, 3).map((d: any) => ({
+  return activeDeals.map((d: any) => ({
+    origin: d.origin,
     originCity: d.originCity,
     destinationCity: d.destinationCity,
     price: d.price,
@@ -999,6 +1017,25 @@ async function queryFeaturedDeals(db: {
 }
 
 /**
+ * Pick the top `max` deals for a subscriber's country. Deals departing from
+ * that country (by origin IATA) are preferred; if none exist we fall back to
+ * the global-cheapest list so an email is never left without deals. `deals`
+ * must already be sorted (recommended-first, price asc) — as returned by
+ * `queryFeaturedDeals`.
+ */
+export function pickTopDeals(
+  deals: DealForEmail[],
+  country?: string,
+  max = 3,
+): DealForEmail[] {
+  if (country) {
+    const local = deals.filter((d) => iataToCountry(d.origin) === country);
+    if (local.length) return local.slice(0, max);
+  }
+  return deals.slice(0, max);
+}
+
+/**
  * Cron entry point: send the next drip email to every due subscriber.
  */
 export const processNewsletterDrip = internalAction({
@@ -1006,8 +1043,9 @@ export const processNewsletterDrip = internalAction({
   returns: v.object({ processed: v.float64() }),
   handler: async (ctx): Promise<{ processed: number }> => {
     const due = await ctx.runQuery(internal.newsletter.getDueDripSubscribers, {});
-    // Fetch live deals once per tick; only the drip2 email renders them.
-    const featuredDeals: DealForEmail[] = await ctx.runQuery(
+    // Fetch the full active-deal list once per tick; only the drip2 email
+    // renders deals, and each subscriber gets the top picks for their country.
+    const allDeals: DealForEmail[] = await ctx.runQuery(
       internal.newsletter.getFeaturedDeals,
       {},
     );
@@ -1021,7 +1059,7 @@ export const processNewsletterDrip = internalAction({
         nextStage,
         sub.language,
         sub.unsubscribeToken,
-        featuredDeals,
+        pickTopDeals(allDeals, sub.country),
       );
       const result = await ctx.runAction(internal.postmark.sendRawEmail, {
         to: sub.email,

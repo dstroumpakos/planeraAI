@@ -259,6 +259,11 @@ export const sendRawEmail = internalAction({
     // Postmark sender signature / signed domain.
     from: v.optional(v.string()),
     replyTo: v.optional(v.string()),
+    // Override the Postmark message stream. Defaults to the transactional
+    // "outbound" stream; bulk newsletter broadcasts should pass a dedicated
+    // broadcast stream (e.g. "broadcast") for separate deliverability,
+    // bounce, and complaint handling.
+    messageStream: v.optional(v.string()),
   },
   returns: v.object({
     success: v.boolean(),
@@ -285,7 +290,7 @@ export const sendRawEmail = internalAction({
           HtmlBody: args.html,
           TextBody: args.text ?? undefined,
           ReplyTo: args.replyTo ?? undefined,
-          MessageStream: MESSAGE_STREAM,
+          MessageStream: args.messageStream ?? MESSAGE_STREAM,
         }),
       });
       const result = await response.json();
