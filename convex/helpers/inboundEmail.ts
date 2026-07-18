@@ -95,3 +95,94 @@ export function toTimestamp(iso: string | undefined): number | undefined {
     if (year < 2000 || year > 2100) return undefined;
     return ms;
 }
+
+// ---------------------------------------------------------------------------
+// Trip matching — deciding which trip an inbound reservation attaches to.
+//
+// Kept here (Convex-free) for the same reason as the alias/DKIM logic above:
+// attaching a booking to the WRONG trip, or duplicating one on re-forward, is a
+// correctness/privacy problem, so the decision is exercised directly in
+// scripts/test-inbound-email.ts rather than only through a live deployment.
+// convex/reservations.ts imports these; keep the two in step.
+// ---------------------------------------------------------------------------
+
+/**
+ * A reservation this far outside the trip window still counts as a match
+ * (red-eyes, late check-outs, a train the evening before departure).
+ */
+export const TRIP_MATCH_SLACK_MS = 36 * 60 * 60 * 1000;
+
+/** The trip fields pickMatchingTrip reads. A subset of the Convex `trips` doc. */
+export type TripLike = {
+    _id?: unknown;
+    status?: string;
+    startDate: number;
+    endDate: number;
+    destination?: string;
+};
+
+/**
+ * Stable key so re-forwarding the same confirmation updates the existing row
+ * instead of creating a duplicate. Not a secret, so no hashing needed — a
+ * deterministic string keeps this synchronous in the V8 runtime.
+ */
+export function buildDedupeKey(
+    userId: string,
+    type: string,
+    confirmationCode: string | undefined,
+    title: string,
+    startAt: number | undefined
+): string {
+    const identity = (confirmationCode || title || "").trim().toLowerCase();
+    // Bucket to the day: the same booking re-sent often differs by seconds.
+    const day = startAt ? Math.floor(startAt / 86_400_000) : "";
+    return `${userId}|${type}|${identity}|${day}`;
+}
+
+/**
+ * Normalize a place string for loose comparison ("Barcelona, Spain" → "barcelona spain").
+ */
+export function normalizePlace(value: string | undefined): string {
+    if (!value) return "";
+    return value
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+/**
+ * Pick the best trip for a reservation: the window must overlap, then prefer a
+ * destination that actually appears in the reservation's location/title.
+ * Returns null when nothing overlaps — an unmatched reservation is a valid
+ * (and product-relevant) outcome, not a failure.
+ */
+export function pickMatchingTrip<T extends TripLike>(
+    trips: T[],
+    startAt: number | undefined,
+    haystack: string
+): T | null {
+    if (!startAt) return null;
+
+    const overlapping = trips.filter((trip) => {
+        if (trip.status === "archived") return false;
+        const from = trip.startDate - TRIP_MATCH_SLACK_MS;
+        const to = trip.endDate + TRIP_MATCH_SLACK_MS;
+        return startAt >= from && startAt <= to;
+    });
+
+    if (overlapping.length === 0) return null;
+    if (overlapping.length === 1) return overlapping[0];
+
+    const normalizedHaystack = normalizePlace(haystack);
+    const byDestination = overlapping.filter((trip) => {
+        const tokens = normalizePlace(trip.destination).split(" ").filter((t) => t.length > 3);
+        return tokens.some((token) => normalizedHaystack.includes(token));
+    });
+    if (byDestination.length > 0) return byDestination[0];
+
+    // Ambiguous on dates alone — take the trip whose start is nearest.
+    return overlapping.sort(
+        (a, b) => Math.abs(a.startDate - startAt) - Math.abs(b.startDate - startAt)
+    )[0];
+}

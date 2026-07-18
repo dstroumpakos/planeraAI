@@ -1,7 +1,7 @@
 import { v } from "convex/values";
 import { authQuery, authMutation } from "./functions";
 import { internalMutation, internalQuery } from "./_generated/server";
-import { ALIAS_LENGTH } from "./helpers/inboundEmail";
+import { ALIAS_LENGTH, buildDedupeKey, pickMatchingTrip } from "./helpers/inboundEmail";
 
 /**
  * Reservation Inbox — the DB surface.
@@ -16,10 +16,6 @@ import { ALIAS_LENGTH } from "./helpers/inboundEmail";
  * confirms. DKIM/SPF results are recorded for display and ranking, not for
  * auto-approval.
  */
-
-// A reservation this far outside the trip window still counts as a match
-// (red-eyes, late check-outs, a train the evening before departure).
-const TRIP_MATCH_SLACK_MS = 36 * 60 * 60 * 1000;
 
 // Domain the inbound MX record points at. Kept in one place so the client, the
 // emails and the webhook agree. Override per-deployment with
@@ -36,68 +32,6 @@ const RESERVATION_TYPE = v.union(
     v.literal("restaurant"),
     v.literal("other")
 );
-
-/**
- * Stable key so re-forwarding the same confirmation updates the existing row
- * instead of creating a duplicate. Not a secret, so no hashing needed — a
- * deterministic string keeps this synchronous in the V8 runtime.
- */
-function buildDedupeKey(
-    userId: string,
-    type: string,
-    confirmationCode: string | undefined,
-    title: string,
-    startAt: number | undefined
-): string {
-    const identity = (confirmationCode || title || "").trim().toLowerCase();
-    // Bucket to the day: the same booking re-sent often differs by seconds.
-    const day = startAt ? Math.floor(startAt / 86_400_000) : "";
-    return `${userId}|${type}|${identity}|${day}`;
-}
-
-/**
- * Normalize a place string for loose comparison ("Barcelona, Spain" → "barcelona spain").
- */
-function normalizePlace(value: string | undefined): string {
-    if (!value) return "";
-    return value
-        .toLowerCase()
-        .replace(/[^a-z0-9\s]+/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-}
-
-/**
- * Pick the best trip for a reservation: the window must overlap, then prefer a
- * destination that actually appears in the reservation's location/title.
- * Returns null when nothing overlaps — an unmatched reservation is a valid
- * (and product-relevant) outcome, not a failure.
- */
-function pickMatchingTrip(trips: any[], startAt: number | undefined, haystack: string): any | null {
-    if (!startAt) return null;
-
-    const overlapping = trips.filter((trip) => {
-        if (trip.status === "archived") return false;
-        const from = trip.startDate - TRIP_MATCH_SLACK_MS;
-        const to = trip.endDate + TRIP_MATCH_SLACK_MS;
-        return startAt >= from && startAt <= to;
-    });
-
-    if (overlapping.length === 0) return null;
-    if (overlapping.length === 1) return overlapping[0];
-
-    const normalizedHaystack = normalizePlace(haystack);
-    const byDestination = overlapping.filter((trip) => {
-        const tokens = normalizePlace(trip.destination).split(" ").filter((t: string) => t.length > 3);
-        return tokens.some((token: string) => normalizedHaystack.includes(token));
-    });
-    if (byDestination.length > 0) return byDestination[0];
-
-    // Ambiguous on dates alone — take the trip whose start is nearest.
-    return overlapping.sort(
-        (a, b) => Math.abs(a.startDate - startAt) - Math.abs(b.startDate - startAt)
-    )[0];
-}
 
 // ---------------------------------------------------------------------------
 // Internal — called by the inbound pipeline

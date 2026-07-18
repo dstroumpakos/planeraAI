@@ -9,7 +9,16 @@
  *
  * Exits non-zero on failure, so it drops into CI as-is.
  */
-import { extractAlias, isSenderVerified, htmlToText, toTimestamp } from "../convex/helpers/inboundEmail";
+import {
+    extractAlias,
+    isSenderVerified,
+    htmlToText,
+    toTimestamp,
+    buildDedupeKey,
+    pickMatchingTrip,
+    TRIP_MATCH_SLACK_MS,
+    type TripLike,
+} from "../convex/helpers/inboundEmail";
 
 let pass = 0;
 let fail = 0;
@@ -53,6 +62,59 @@ check("undefined rejected", toTimestamp(undefined), undefined);
 
 console.log("\nhtmlToText");
 check("strips tags + entities", htmlToText("<p>Flight <b>A3&nbsp;700</b></p><script>evil()</script>"), "Flight A3 700");
+
+console.log("\nbuildDedupeKey β€” re-forwarding a confirmation must update, not duplicate");
+const U = "user_1";
+const jun12am = Date.parse("2026-06-12T08:00:00Z");
+const jun12pm = Date.parse("2026-06-12T20:00:00Z");
+const jun13 = Date.parse("2026-06-13T08:00:00Z");
+// Same booking re-sent hours later (code re-cased/padded) collapses to one row.
+check("same code, same day β†’ identical key",
+    buildDedupeKey(U, "flight", "ABC123", "Outbound", jun12am) ===
+    buildDedupeKey(U, "flight", "  abc123 ", "different title", jun12pm), true);
+// A genuinely different day is a different booking, not a re-forward.
+check("same code, next day β†’ different key",
+    buildDedupeKey(U, "flight", "ABC123", "Outbound", jun12am) ===
+    buildDedupeKey(U, "flight", "ABC123", "Outbound", jun13), false);
+// No confirmation code: the title carries identity instead.
+check("no code β†’ falls back to title",
+    buildDedupeKey(U, "hotel", undefined, "Hotel Ritz", jun12am) ===
+    buildDedupeKey(U, "hotel", undefined, "hotel ritz", jun12pm), true);
+// A different user's identical booking never shares a key.
+check("different user β†’ different key",
+    buildDedupeKey(U, "flight", "ABC123", "Outbound", jun12am) ===
+    buildDedupeKey("user_2", "flight", "ABC123", "Outbound", jun12am), false);
+// Missing startAt is still deterministic (empty day bucket), so a dateless
+// re-forward de-dupes rather than piling up.
+check("no startAt β†’ deterministic",
+    buildDedupeKey(U, "other", "X", "t", undefined) ===
+    buildDedupeKey(U, "other", "X", "t", undefined), true);
+
+console.log("\npickMatchingTrip β€” attaching a booking to the WRONG trip is a privacy leak");
+const idOf = (t: TripLike | null) => (t ? (t._id as string) : null);
+const bcn: TripLike = {
+    _id: "trip_bcn", status: "active", destination: "Barcelona, Spain",
+    startDate: Date.parse("2026-06-10T00:00:00Z"), endDate: Date.parse("2026-06-15T00:00:00Z"),
+};
+const paris: TripLike = {
+    _id: "trip_paris", status: "active", destination: "Paris, France",
+    startDate: Date.parse("2026-06-11T00:00:00Z"), endDate: Date.parse("2026-06-14T00:00:00Z"),
+};
+const flightMidday = Date.parse("2026-06-12T08:35:00Z"); // inside both windows
+check("no startAt β†’ unmatched", idOf(pickMatchingTrip([bcn], undefined, "anything")), null);
+check("no trips β†’ unmatched", idOf(pickMatchingTrip([], flightMidday, "Barcelona")), null);
+check("single overlapping trip wins", idOf(pickMatchingTrip([bcn], flightMidday, "any haystack")), "trip_bcn");
+check("within 36h slack before start matches",
+    idOf(pickMatchingTrip([bcn], bcn.startDate - 30 * 60 * 60 * 1000, "")), "trip_bcn");
+check("beyond slack β†’ unmatched",
+    idOf(pickMatchingTrip([bcn], bcn.startDate - 48 * 60 * 60 * 1000, "")), null);
+check("archived trip excluded",
+    idOf(pickMatchingTrip([{ ...bcn, status: "archived" }], flightMidday, "Barcelona")), null);
+check("ambiguous dates β†’ destination in haystack disambiguates",
+    idOf(pickMatchingTrip([bcn, paris], flightMidday, "Athens (ATH) β†’ Barcelona (BCN)")), "trip_bcn");
+check("ambiguous dates, no destination hint β†’ nearest start wins",
+    idOf(pickMatchingTrip([bcn, paris], Date.parse("2026-06-12T00:00:00Z"), "")), "trip_paris");
+check("slack constant is 36h", TRIP_MATCH_SLACK_MS, 36 * 60 * 60 * 1000);
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);
