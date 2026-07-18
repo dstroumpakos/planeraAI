@@ -21,7 +21,13 @@ import { CURATED_CITIES, DEFAULT_DURATIONS } from "./partnerPregenConfig";
  * `pregenerateTopCities` into a cron.
  */
 
-const MODEL = "gpt-5.4-2026-03-05";
+// Must track `partnerItineraryGen`: pre-generation writes into the SAME
+// itinerary cache (`buildCacheKey` from partnerApiAuth), so if these two drift
+// the curated cities — the majority of partner traffic, served from cache —
+// silently keep whatever model this file names, and changing the live
+// generator's model has no visible effect. Shares the same env var so they
+// cannot come apart again.
+const MODEL = process.env.PARTNER_ITINERARY_MODEL || "gpt-5.6-luna";
 
 type Sight = {
   name: string;

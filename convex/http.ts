@@ -62,6 +62,80 @@ http.route({
   }),
 });
 
+/**
+ * Reservation Inbox — Postmark inbound webhook.
+ *
+ * Setup (one-time, outside the code):
+ *   1. Postmark → Servers → Inbound → copy the inbound address.
+ *   2. Point an MX record for `in.planera.app` at Postmark's inbound host.
+ *   3. Set the inbound webhook URL to:
+ *        https://<deployment>.convex.site/inbound/email?key=<RESERVATION_INBOUND_SECRET>
+ *   4. Set RESERVATION_INBOUND_SECRET in the Convex environment.
+ *
+ * The shared secret is the only thing standing between the public internet and
+ * a write path into user accounts, so a missing/incorrect key is a hard 401.
+ * Everything after that is best-effort: content problems return 200 so Postmark
+ * doesn't retry a message that will never parse.
+ */
+http.route({
+  path: "/inbound/email",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const expected = process.env.RESERVATION_INBOUND_SECRET;
+    if (!expected) {
+      console.error("[ReservationInbox] RESERVATION_INBOUND_SECRET not configured");
+      return new Response("Not configured", { status: 503 });
+    }
+
+    const url = new URL(request.url);
+    const provided = url.searchParams.get("key") ?? request.headers.get("X-Inbound-Secret") ?? "";
+    if (!timingSafeEqual(provided, expected)) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+
+    let payload: any;
+    try {
+      payload = await request.json();
+    } catch {
+      return new Response("Bad request", { status: 400 });
+    }
+
+    // Postmark puts the address the message was delivered to in OriginalRecipient;
+    // ToFull[0] is the fallback when a client rewrote the envelope.
+    const recipient =
+      payload?.OriginalRecipient ??
+      payload?.ToFull?.[0]?.Email ??
+      payload?.To ??
+      undefined;
+
+    // Fire and forget: mail servers should not wait on an LLM call. Postmark
+    // treats the 200 as delivery; failures are surfaced through error reports.
+    await ctx.scheduler.runAfter(0, internal.reservationsInbound.parseInboundEmail, {
+      recipient,
+      fromAddress: payload?.FromFull?.Email ?? payload?.From,
+      subject: payload?.Subject,
+      textBody: payload?.TextBody,
+      htmlBody: payload?.HtmlBody,
+      headers: payload?.Headers,
+    });
+
+    return new Response("OK", { status: 200 });
+  }),
+});
+
+/**
+ * Constant-time string compare, so a wrong secret can't be discovered by
+ * timing the 401. Lengths are compared first (they are not secret).
+ */
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
 // ===========================================================================
 // Partner Itinerary API — versioned /v1/ surface (e.g. spytrip.gr).
 //

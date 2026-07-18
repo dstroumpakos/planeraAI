@@ -24,7 +24,18 @@ import { hmacSha256Hex } from "./partnerApiAuth";
  * built from cached sights; only fails if there is nothing to fall back to.
  */
 
-const MODEL = process.env.PARTNER_ITINERARY_MODEL || "gpt-5.4-2026-03-05";
+// gpt-5.6-luna ($1.00 in / $6.00 out per 1M) is ~60% cheaper than the gpt-5.4
+// this replaced ($2.50/$15.00) while being a newer generation, so this is both
+// a cost cut and a quality upgrade. Roughly $0.02 vs $0.05 per cold itinerary.
+//
+// If itinerary quality at luna disappoints, PARTNER_ITINERARY_MODEL=gpt-5.6-terra
+// ($2.50/$15.00) matches the app's own trip generation at the old 5.4 price.
+//
+// NOTE: the model is deliberately NOT part of the itinerary cache key, so
+// switching it does not invalidate existing cached itineraries — they age out
+// naturally instead of triggering a regeneration wave. That also means a
+// quality regression surfaces gradually, only on cache misses.
+const MODEL = process.env.PARTNER_ITINERARY_MODEL || "gpt-5.6-luna";
 
 type Sight = {
   name: string;

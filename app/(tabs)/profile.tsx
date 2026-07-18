@@ -352,6 +352,14 @@ export default function Profile() {
             action: () => router.push("/(tabs)/trips")
         },
         {
+            title: t('reservations.title', { defaultValue: 'Bookings' }),
+            subtitle: t('reservations.menuSubtitle', { defaultValue: 'Forward confirmations to your trips' }),
+            icon: "mail-outline",
+            iconBg: isDarkMode ? "#2C2410" : "#FEF9C3",
+            iconColor: "#CA8A04",
+            action: () => router.push("/settings/reservations" as any)
+        },
+        {
             title: t('stats.travelStats'),
             subtitle: t('stats.viewYourStats'),
             icon: "bar-chart-outline",

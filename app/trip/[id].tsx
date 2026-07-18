@@ -35,6 +35,7 @@ import AddActivityModal, { ManualActivityInput } from "@/components/AddActivityM
 import MoveToDayModal from "@/components/MoveToDayModal";
 import ReorderDayModal from "@/components/ReorderDayModal";
 import { TripFlightProviders } from "@/components/flights/TripFlightProviders";
+import TripReservations from "@/components/TripReservations";
 import {
     buildFlightLink,
     buildHotelLink,
@@ -2760,6 +2761,11 @@ export default function TripDetails() {
 
                 {/* Content based on active filter */}
                 <View style={styles.itineraryContainer}>
+                    {/* Real bookings the user forwarded in. Rendered above the AI
+                        days as a separate layer — these are facts, the days are
+                        suggestions, and regeneration must never touch them. */}
+                    {activeFilter === 'all' && <TripReservations tripId={id as string} />}
+
                     {activeFilter === 'all' && trip.itinerary?.dayByDayItinerary?.map((day: any, index: number) => {
                     // Calculate energy level based on number of activities
                     const activityCount = day.activities?.length || 0;

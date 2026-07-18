@@ -1,18 +1,19 @@
 "use node";
 
 /**
- * Travel Explore — "Where can I go?" destination discovery.
+ * Public, account-free "where can I go?" destination discovery.
  *
- * Wraps searchapi.io's `google_travel_explore` engine
- * (`convex/lib/searchApiExplore.ts`). Given a single departure airport it
- * returns a ranked list of reachable destinations with indicative prices.
+ * Account-free mirror of `explore.exploreDestinations` for the ChatGPT App
+ * (Apps SDK / MCP), where there is no user session — same searchapi.io
+ * `google_travel_explore` engine, same cache key and TTL, so public and
+ * authenticated callers share cache entries and the paid quota stays flat.
  *
- * Mirrors the auth + rate-limit + cache shape of
- * `flightsSerpApi.searchFlights`:
- *   - token auth via `authNativeDb.getSessionByToken`
- *   - per-user rate limit via `flightSearchCache.checkRateLimit`
- *   - response cache via `flightSearchCache` (kind:"explore") with a long TTL,
- *     since Explore data moves slowly and this keeps the paid quota tiny.
+ * Takes an opaque per-caller `deviceId` used ONLY for rate limiting (never a
+ * user record), matching `flightsSearchApi.searchFlightsPublic` and
+ * `accommodationsPublic.accommodationsPublic`.
+ *
+ * IMPORTANT: prices are indicative teasers, NOT bookable. Booking needs a real
+ * `google_flights` search for a provider-locked `booking_token`.
  *
  * The API key never crosses the frontend boundary and is never logged.
  */
@@ -24,22 +25,17 @@ import { reportError } from "./helpers/reportError";
 import { fetchExploreDestinations, normalizeHl } from "./lib/searchApiExplore";
 import type { ExploreDestination, ExploreQuery } from "../types/flights";
 
-// Explore data is stable over hours — a long cache keeps quota tiny.
+// Must stay identical to `explore.ts` so both callers share cache entries.
 const EXPLORE_CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12h
 
+// Keep in lockstep with `explore.ts` — including the version tag. If these
+// diverge the two callers silently stop sharing entries and the paid quota
+// roughly doubles.
 function buildCacheKey(q: ExploreQuery): string {
   return [
-    // Version tag — bump to invalidate stale entries (e.g. the empty results
-    // an earlier bug cached for 12h). Only successful, non-empty responses are
-    // cached now, so a poisoned key should never recur, but the tag is cheap
-    // insurance and lets us evolve the request shape without stale hits.
-    // v3: added `hl`. It was always sent to the API but omitted here, so
-    // whichever language missed the cache first served every other language
-    // its localized destination/country names for the next 12h.
     "explore:v3",
     q.departureId.trim().toUpperCase(),
     (q.currency || "EUR").toUpperCase(),
-    // Normalized so "el-GR" and "el" share one entry rather than two.
     normalizeHl(q.hl),
     q.travelMode || "all",
     q.interests || "any",
@@ -49,9 +45,9 @@ function buildCacheKey(q: ExploreQuery): string {
   ].join("|");
 }
 
-export const exploreDestinations = action({
+export const exploreDestinationsPublic = action({
   args: {
-    token: v.string(),
+    deviceId: v.string(),
     input: v.object({
       departureId: v.string(),
       currency: v.optional(v.string()),
@@ -84,25 +80,17 @@ export const exploreDestinations = action({
     }),
   },
   handler: async (ctx, args): Promise<ExploreDestination[]> => {
-    if (!args.token) throw new Error("Authentication required");
-    const session: any = await ctx.runQuery(
-      internal.authNativeDb.getSessionByToken,
-      { token: args.token }
-    );
-    if (!session || (session.expiresAt && session.expiresAt < Date.now())) {
-      throw new Error("Authentication required");
-    }
+    const device = (args.deviceId || "").trim();
+    if (!device) throw new Error("Missing device id");
 
     const input = args.input as ExploreQuery;
     if (!input.departureId?.trim()) {
       throw new Error("A departure airport is required.");
     }
 
-    // Per-user rate limit — same generous window as flight search, guarding the
-    // shared SearchApi quota from abuse.
     const rl: { allowed: boolean } = await ctx.runMutation(
       internal.flightSearchCache.checkRateLimit,
-      { userId: String(session.userId), limit: 60, windowMs: 15 * 60 * 1000 }
+      { userId: `pub:${device}`, limit: 30, windowMs: 15 * 60 * 1000 }
     );
     if (!rl.allowed) {
       throw new Error(
@@ -117,7 +105,7 @@ export const exploreDestinations = action({
         { cacheKey }
       );
       if (cached) {
-        console.log(`[explore] cache hit ${input.departureId}`);
+        console.log(`[explore] public cache hit ${input.departureId}`);
         return cached;
       }
 
@@ -125,13 +113,12 @@ export const exploreDestinations = action({
       const result = destinations ?? [];
 
       console.log(
-        `[explore] ${input.departureId} -> ${result.length} destinations`
+        `[explore] public ${input.departureId} -> ${result.length} destinations`
       );
 
-      // Only cache a genuine, non-empty result. `fetchExploreDestinations`
-      // returns null on both API failure AND empty results, so caching an
-      // empty array would pin a failed lookup for the full TTL (the exact bug
-      // that served stale "0 destinations" after a transient HTTP 400).
+      // Only cache a genuine, non-empty result — `fetchExploreDestinations`
+      // returns null for both API failure and empty results, so caching an
+      // empty array would pin a failed lookup for the full TTL.
       if (result.length > 0) {
         try {
           await ctx.runMutation(internal.flightSearchCache.writeCache, {
@@ -143,13 +130,13 @@ export const exploreDestinations = action({
             currency: (input.currency ?? "EUR").toUpperCase(),
           });
         } catch {
-          console.error("[explore] cache write failed");
+          console.error("[explore] public cache write failed");
         }
       }
 
       return result;
     } catch (err) {
-      await reportError(ctx, "explore:exploreDestinations", err, {
+      await reportError(ctx, "explorePublic:exploreDestinationsPublic", err, {
         departureId: args.input?.departureId,
       });
       throw err;

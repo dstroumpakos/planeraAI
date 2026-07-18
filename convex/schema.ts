@@ -213,9 +213,16 @@ export default defineSchema({
         aiDataConsentDate: v.optional(v.float64()),
         // Referral code (unique per user)
         referralCode: v.optional(v.string()),
+        // Reservation Inbox: unguessable local-part of this user's personal
+        // forwarding address (e.g. "a8f3k2p9" → a8f3k2p9@in.planera.app).
+        // Treat as a secret: anyone who knows it can post reservations into
+        // this account, which is why inbound parses land in "needs_review"
+        // and unverified senders never auto-attach to a trip.
+        reservationAlias: v.optional(v.string()),
     })
         .index("by_user", ["userId"])
-        .index("by_referralCode", ["referralCode"]),
+        .index("by_referralCode", ["referralCode"])
+        .index("by_reservationAlias", ["reservationAlias"]),
 
     insights: defineTable({
         userId: v.string(),
@@ -1699,5 +1706,107 @@ export default defineSchema({
     })
         .index("by_campaign", ["campaignId"])
         .index("by_campaign_subscriber", ["campaignId", "subscriberId"]),
+
+    // Reservation Inbox — real bookings the user forwarded to their personal
+    // inbound address, parsed into structured rows.
+    //
+    // These are deliberately NOT merged into `trips.itinerary`. That blob is
+    // AI-generated *suggestions*: it gets regenerated, deduped (dedupeVenues)
+    // and resequenced (resequenceDayTimes), any of which would silently destroy
+    // a real €800 booking. Reservations are user-owned *facts* with a different
+    // lifecycle, so they live here and are merged into the day view at render
+    // time — pinned to their real times, with AI activities flowing around them.
+    //
+    // `tripId` is optional: an email can arrive before (or without) a matching
+    // trip. Unmatched rows are not an error state — they are the highest-intent
+    // trip-generation prompt the product has ("you're in Barcelona Mar 12–16,
+    // want a plan around this hotel?").
+    tripReservations: defineTable({
+        userId: v.string(),
+        tripId: v.optional(v.id("trips")),
+        type: v.union(
+            v.literal("flight"),
+            v.literal("hotel"),
+            v.literal("car"),
+            v.literal("rail"),
+            v.literal("ferry"),
+            v.literal("activity"),
+            v.literal("restaurant"),
+            v.literal("other")
+        ),
+        title: v.string(),
+        provider: v.optional(v.string()),          // "Aegean", "Booking.com"
+        confirmationCode: v.optional(v.string()),  // PNR / booking reference
+        // Absolute instants (ms). The parser resolves local times using the
+        // offset in the email when present; when absent we keep the wall-clock
+        // string in `details.rawStart` so the UI can show it un-shifted.
+        startAt: v.optional(v.float64()),
+        endAt: v.optional(v.float64()),
+        location: v.optional(v.string()),          // address / airport pair / city
+        price: v.optional(v.float64()),
+        currency: v.optional(v.string()),
+        // Per-type extras: flight number, cabin, room type, guest count, rawStart…
+        details: v.optional(v.any()),
+
+        // ---- Provenance & trust ----
+        source: v.union(v.literal("email"), v.literal("manual")),
+        // DKIM/SPF passed on the inbound message. The From header is free text
+        // and is never trusted on its own.
+        senderVerified: v.optional(v.boolean()),
+        sourceFrom: v.optional(v.string()),        // sender address (display only)
+        sourceSubject: v.optional(v.string()),     // subject (display only)
+        // Raw email bodies are intentionally NOT stored: confirmations carry
+        // passport numbers, card last-4 and home addresses. We keep only the
+        // extracted fields.
+        parseConfidence: v.optional(v.float64()),  // 0..1 from the extractor
+        parseModel: v.optional(v.string()),
+
+        status: v.union(
+            v.literal("needs_review"),  // parsed, awaiting user confirmation
+            v.literal("confirmed"),     // user accepted; safe to render/monitor
+            v.literal("rejected"),      // user dismissed (kept for dedupe)
+            v.literal("cancelled")      // a later email cancelled this booking
+        ),
+        // Dedupe key so re-forwarding the same confirmation updates instead of
+        // duplicating: hash(userId + type + confirmationCode|title + startAt).
+        dedupeKey: v.optional(v.string()),
+        createdAt: v.float64(),
+        updatedAt: v.optional(v.float64()),
+        reviewedAt: v.optional(v.float64()),
+    })
+        .index("by_user", ["userId"])
+        .index("by_trip", ["tripId"])
+        .index("by_user_status", ["userId", "status"])
+        .index("by_dedupeKey", ["dedupeKey"]),
+
+    // Trips handed off from the ChatGPT App (Apps SDK / MCP) to the web, so a
+    // conversation can end with a real shareable link instead of a dead end.
+    // Account-free by design: there is no user session in ChatGPT, so access is
+    // controlled entirely by the unguessable `slug` (capability URL) rather
+    // than by ownership. Nothing here is private-by-account — treat the slug as
+    // the secret and never enumerate these rows on a public surface.
+    //
+    // `payload` is the already-rendered trip card (flights / hotels /
+    // itinerary / budget) exactly as the MCP server assembled it. It is stored
+    // denormalized on purpose: fares and nightly rates are point-in-time quotes
+    // that must NOT silently re-price when the page is opened later, so the
+    // page renders the snapshot and shows `capturedAt` alongside it.
+    mcpSavedTrips: defineTable({
+        slug: v.string(),                 // unguessable, URL-safe share id
+        destination: v.string(),
+        days: v.float64(),
+        language: v.optional(v.string()), // locale the card was rendered in
+        currency: v.optional(v.string()),
+        payload: v.any(),                 // the structuredContent snapshot
+        // Optional email capture — set only when the user explicitly asked to
+        // be emailed the trip. Subscription itself still goes through the
+        // double opt-in newsletter flow; this is just provenance.
+        email: v.optional(v.string()),
+        views: v.float64(),
+        createdAt: v.float64(),
+        lastViewedAt: v.optional(v.float64()),
+    })
+        .index("by_slug", ["slug"])
+        .index("by_createdAt", ["createdAt"]),
 });
 
