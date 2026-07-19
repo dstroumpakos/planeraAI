@@ -39,6 +39,7 @@ import {
   renderDealsBlock,
   normalizeLang,
   pickTopDeals,
+  CJ_BANNERS,
   FOOTER_COPY,
   MARKETING_FROM,
   MARKETING_EMAIL,
@@ -94,6 +95,8 @@ interface CampaignContent {
   ctaUrl: string;
   heroImg?: string;
   includeDeals: boolean;
+  dealCount?: number;
+  bannerKey?: string;
 }
 
 function renderCampaignEmail(
@@ -117,7 +120,9 @@ function renderCampaignEmail(
     ctaUrl: campaign.ctaUrl,
     unsubscribeUrl,
     heroImg: campaign.heroImg ?? undefined,
-    banner: null,
+    // Affiliate banner is opt-in per campaign; the key is validated against
+    // the CJ creative set so an unknown value just renders nothing.
+    banner: (campaign.bannerKey && CJ_BANNERS[campaign.bannerKey as keyof typeof CJ_BANNERS]) || null,
     dealsBlock,
   });
 
@@ -150,6 +155,8 @@ const campaignContentArgs = {
   ctaUrl: v.string(),
   heroImg: v.optional(v.string()),
   includeDeals: v.boolean(),
+  dealCount: v.optional(v.float64()),
+  bannerKey: v.optional(v.string()),
   languageFilter: v.optional(v.string()),
   sourceFilter: v.optional(v.string()),
   countryFilter: v.optional(v.string()),
@@ -418,7 +425,7 @@ export const sendTestEmail = action({
       campaign,
       undefined,
       "test-preview-token",
-      pickTopDeals(allDeals, campaign.countryFilter),
+      pickTopDeals(allDeals, campaign.countryFilter, campaign.dealCount ?? 3),
     );
     const res: { success: boolean; error?: string } = await ctx.runAction(
       internal.postmark.sendRawEmail,
@@ -733,7 +740,7 @@ export const processCampaignSend = internalAction({
         campaign,
         sub.language,
         sub.unsubscribeToken,
-        pickTopDeals(allDeals, sub.country),
+        pickTopDeals(allDeals, sub.country, campaign.dealCount ?? 3),
       );
       const res: { success: boolean; error?: string } = await ctx.runAction(
         internal.postmark.sendRawEmail,

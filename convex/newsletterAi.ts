@@ -18,7 +18,7 @@
 import { v } from "convex/values";
 import { action, internalQuery, internalMutation, internalAction } from "./_generated/server";
 import { internal as _internal } from "./_generated/api";
-import { normalizeLang, type DealForEmail } from "./newsletter";
+import { normalizeLang, HERO_IMAGES, CJ_BANNERS, type DealForEmail } from "./newsletter";
 
 const internal = _internal as any;
 
@@ -89,7 +89,20 @@ Write ONE short marketing newsletter email. Rules:
 - para1: 1-2 sentences, the hook. para2: 1-2 sentences, the payoff.
 - ctaText: 2-4 words, action-led.
 - ctaUrl: MUST be one of https://planeraai.app , https://planeraai.app/deals , https://planeraai.app/explore
-- includeDeals: true if the email is about flight deals/prices, else false.
+- includeDeals: true if the email should show live flight-deal cards under the copy, else false.
+- dealCount: how many deal cards to show, 1-5. Use 3 unless the copy clearly calls for more or fewer. Ignored when includeDeals is false.
+- heroImage: a big photo at the top. Pick the one that fits the email, or "none":
+    "flights" (planes / airport — fare and booking emails)
+    "plan"    (maps / planning — AI itinerary emails)
+    "explore" (landscapes / discovery — destination and community emails)
+    "welcome" (warm, general-purpose)
+    "none"    (no image — best for short, text-led emails)
+- banner: an optional partner banner under the content, or "none":
+    "tripcom" (flights + hotels + packages — broad travel intent)
+    "kiwi"    (cheap flights — price-led emails)
+    "welcome" (airport transfers — arrival/destination emails)
+    "none"    (no banner — use this when the email is already busy, or purely informational)
+  Choose it only when it genuinely fits the email's subject; a mismatched banner cheapens the email.
 - suggestedSendAt: ISO-8601 UTC timestamp for the best moment to send, between 2 days and 10 days from now. Prefer Tuesday-Thursday, 09:00-11:00 in the audience's local time.
 - sendRationale: one short English sentence (for the admin, not the reader) explaining the timing choice.
 
@@ -99,7 +112,7 @@ VARIETY IS CRITICAL. This audience receives an email every few days, so a repeat
 - Vary the structure too: if a previous email opened with a question, don't open with a question; if it led with a price, lead with a place or an idea instead.
 
 Return ONLY a JSON object with exactly these keys:
-subject, preheader, heading, para1, para2, ctaText, ctaUrl, includeDeals, suggestedSendAt, sendRationale`;
+subject, preheader, heading, para1, para2, ctaText, ctaUrl, includeDeals, dealCount, heroImage, banner, suggestedSendAt, sendRationale`;
 
 // ---------------------------------------------------------------------------
 // Internal data access
@@ -170,6 +183,9 @@ export const insertAiCampaign = internalMutation({
     ctaText: v.string(),
     ctaUrl: v.string(),
     includeDeals: v.boolean(),
+    dealCount: v.optional(v.float64()),
+    heroImg: v.optional(v.string()),
+    bannerKey: v.optional(v.string()),
     languageFilter: v.string(),
     scheduledAt: v.float64(),
     sendRationale: v.optional(v.string()),
@@ -211,6 +227,24 @@ function resolveSendAt(raw: unknown): number {
 function resolveCtaUrl(raw: unknown): string {
   const url = typeof raw === "string" ? raw.trim() : "";
   return url.startsWith(ALLOWED_CTA_PREFIX) ? url : DEFAULT_CTA_URL;
+}
+
+/** Hero image key → hosted URL. Anything unrecognised means "no image". */
+function resolveHeroImg(raw: unknown): string | undefined {
+  const key = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  return HERO_IMAGES[key];
+}
+
+/** Affiliate banner key, validated against the CJ creative set. */
+function resolveBannerKey(raw: unknown): string | undefined {
+  const key = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  return key in CJ_BANNERS ? key : undefined;
+}
+
+/** Deal-card count, clamped to a sane 1-5. */
+function resolveDealCount(raw: unknown): number {
+  const n = typeof raw === "number" ? Math.round(raw) : 3;
+  return Math.min(5, Math.max(1, Number.isFinite(n) ? n : 3));
 }
 
 // ---------------------------------------------------------------------------
@@ -342,6 +376,9 @@ export const generateAiCampaigns = internalAction({
           ctaText,
           ctaUrl: resolveCtaUrl(p.ctaUrl),
           includeDeals: p.includeDeals === true && allDeals.length > 0,
+          dealCount: resolveDealCount(p.dealCount),
+          heroImg: resolveHeroImg(p.heroImage),
+          bannerKey: resolveBannerKey(p.banner),
           languageFilter: lang,
           scheduledAt: resolveSendAt(p.suggestedSendAt),
           sendRationale: cap(p.sendRationale, 300) || undefined,

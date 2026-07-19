@@ -386,6 +386,18 @@ export const FOOTER_COPY: Record<Lang, { note: string; unsubscribe: string; disc
 
 // Full-width hero images (hosted on planeraai.app) used at the top of the
 // marketing (drip) emails — one bright travel photo per stage.
+/**
+ * Hero images available to broadcast campaigns, by key. Campaigns (and the AI
+ * generator) pick a key rather than an arbitrary URL, so a hallucinated or
+ * broken image can never reach a subscriber.
+ */
+export const HERO_IMAGES: Record<string, string> = {
+  welcome: `${BASE_URL}/nl-hero-welcome.jpg`,
+  plan: `${BASE_URL}/nl-hero-plan.jpg`,
+  flights: `${BASE_URL}/nl-hero-flights.jpg`,
+  explore: `${BASE_URL}/nl-hero-explore.jpg`,
+};
+
 const STAGE_HERO_IMG: Record<EmailKey, string | null> = {
   confirm: null,
   welcome: `${BASE_URL}/nl-hero-welcome.jpg`,
@@ -397,12 +409,12 @@ const STAGE_HERO_IMG: Record<EmailKey, string | null> = {
 // CJ (Commission Junction, publisher 101641262) banner creatives. `img` is the
 // hosted creative; `click` is the commission-tracked redirect. Mirrors the
 // DEALS_BANNERS in the website's affiliates.ts.
-interface CjBanner {
+export interface CjBanner {
   img: string;
   click: string;
   alt: string;
 }
-const CJ_BANNERS: Record<"tripcom" | "kiwi" | "welcome", CjBanner> = {
+export const CJ_BANNERS: Record<"tripcom" | "kiwi" | "welcome", CjBanner> = {
   tripcom: {
     img: "https://www.ftjcfx.com/image-101641262-15425634",
     click: "https://www.anrdoezrs.net/click-101641262-15425634",

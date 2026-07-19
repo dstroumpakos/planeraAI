@@ -1675,6 +1675,9 @@ export default defineSchema({
         ctaUrl: v.string(),
         heroImg: v.optional(v.string()),   // hosted image URL shown at the top
         includeDeals: v.boolean(),         // append live Low-Fare Radar deal cards
+        dealCount: v.optional(v.float64()), // how many deal cards (1-5, default 3)
+        // Affiliate banner to append: "tripcom" | "kiwi" | "welcome" (CJ creatives).
+        bannerKey: v.optional(v.string()),
         // --- Targeting (opted-in subscribers only) ---
         languageFilter: v.optional(v.string()), // undefined = all languages
         sourceFilter: v.optional(v.string()),   // undefined = all sources ("web"|"app")
