@@ -1846,5 +1846,27 @@
     "backHome": "Zurück zur Startseite",
     "unsubscribedTitle": "Abmeldung erfolgreich",
     "unsubscribedBody": "Du erhältst keine Newsletter-E-Mails mehr. Du kannst dich jederzeit wieder anmelden."
+  },
+  "reservations": {
+    "title": "Buchungen",
+    "menuSubtitle": "Bestätigungen an deine Reisen weiterleiten",
+    "forwardLabel": "BESTÄTIGUNGEN WEITERLEITEN AN",
+    "forwardHint": "Leite jede Flug-, Hotel- oder Ticketbestätigung weiter. Wir lesen die Details aus und ordnen sie dem richtigen Tag zu.",
+    "emptyTitle": "Noch keine Buchungen",
+    "emptyBody": "Leite deine erste Bestätigung an die Adresse oben weiter – sie erscheint innerhalb einer Minute hier.",
+    "needsReview": "Zu prüfen",
+    "needsReviewHint": "Prüfe, ob wir alles richtig gelesen haben, bevor es in deinen Reiseplan kommt.",
+    "confirmed": "Bestätigt",
+    "cancelled": "Storniert",
+    "unverified": "Absender nicht verifiziert",
+    "noTripYet": "Noch keiner Reise zugeordnet",
+    "dismiss": "Verwerfen",
+    "addToTrip": "Zur Reise hinzufügen",
+    "chooseTrip": "Reise wählen",
+    "whichTrip": "Zu welcher Reise gehört das?",
+    "keepStandalone": "Als eigenständige Buchung behalten",
+    "yourBookings": "Deine Buchungen",
+    "manage": "Verwalten",
+    "confirmedSubtitle": "Bestätigt und fest eingeplant – dein Plan richtet sich danach."
   }
 }

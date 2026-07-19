@@ -1846,5 +1846,27 @@
     "backHome": "Retour à l'accueil",
     "unsubscribedTitle": "Désinscription effectuée",
     "unsubscribedBody": "Vous ne recevrez plus d'e-mails de la newsletter. Vous pouvez vous réinscrire à tout moment."
+  },
+  "reservations": {
+    "title": "Réservations",
+    "menuSubtitle": "Transférez vos confirmations vers vos voyages",
+    "forwardLabel": "TRANSFÉREZ VOS CONFIRMATIONS À",
+    "forwardHint": "Transférez n'importe quelle confirmation de vol, d'hôtel ou de billet. Nous lisons les détails et la plaçons au bon jour.",
+    "emptyTitle": "Aucune réservation",
+    "emptyBody": "Transférez votre première confirmation à l'adresse ci-dessus : elle apparaîtra ici en moins d'une minute.",
+    "needsReview": "À vérifier",
+    "needsReviewHint": "Vérifiez que nous avons bien lu avant de les ajouter à votre itinéraire.",
+    "confirmed": "Confirmées",
+    "cancelled": "Annulées",
+    "unverified": "Expéditeur non vérifié",
+    "noTripYet": "Pas encore liée à un voyage",
+    "dismiss": "Ignorer",
+    "addToTrip": "Ajouter au voyage",
+    "chooseTrip": "Choisir un voyage",
+    "whichTrip": "Pour quel voyage ?",
+    "keepStandalone": "Conserver comme réservation indépendante",
+    "yourBookings": "Vos réservations",
+    "manage": "Gérer",
+    "confirmedSubtitle": "Confirmées et verrouillées — votre programme s'organise autour."
   }
 }

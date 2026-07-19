@@ -1846,5 +1846,27 @@
     "backHome": "Volver al inicio",
     "unsubscribedTitle": "Cancelaste la suscripción",
     "unsubscribedBody": "No recibirás más correos del boletín. Puedes volver a suscribirte cuando quieras."
+  },
+  "reservations": {
+    "title": "Reservas",
+    "menuSubtitle": "Reenvía las confirmaciones a tus viajes",
+    "forwardLabel": "REENVÍA LAS CONFIRMACIONES A",
+    "forwardHint": "Reenvía cualquier confirmación de vuelo, hotel o entrada. Leemos los detalles y la colocamos en el día correcto.",
+    "emptyTitle": "Aún no hay reservas",
+    "emptyBody": "Reenvía tu primera confirmación a la dirección de arriba y aparecerá aquí en menos de un minuto.",
+    "needsReview": "Requiere revisión",
+    "needsReviewHint": "Comprueba que lo hemos leído bien antes de añadirlo a tu itinerario.",
+    "confirmed": "Confirmadas",
+    "cancelled": "Canceladas",
+    "unverified": "Remitente no verificado",
+    "noTripYet": "Sin viaje asociado",
+    "dismiss": "Descartar",
+    "addToTrip": "Añadir al viaje",
+    "chooseTrip": "Elegir viaje",
+    "whichTrip": "¿De qué viaje es?",
+    "keepStandalone": "Mantener como reserva independiente",
+    "yourBookings": "Tus reservas",
+    "manage": "Gestionar",
+    "confirmedSubtitle": "Confirmadas y fijadas: tu plan se adapta a ellas."
   }
 }

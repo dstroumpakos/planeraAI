@@ -214,7 +214,7 @@ export default defineSchema({
         // Referral code (unique per user)
         referralCode: v.optional(v.string()),
         // Reservation Inbox: unguessable local-part of this user's personal
-        // forwarding address (e.g. "a8f3k2p9" → a8f3k2p9@in.planera.app).
+        // forwarding address (e.g. "a8f3c2b9ad4e17f0" → a8f3c2b9ad4e17f0@in.planeraai.app).
         // Treat as a secret: anyone who knows it can post reservations into
         // this account, which is why inbound parses land in "needs_review"
         // and unverified senders never auto-attach to a trip.

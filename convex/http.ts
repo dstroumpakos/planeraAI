@@ -67,7 +67,8 @@ http.route({
  *
  * Setup (one-time, outside the code):
  *   1. Postmark → Servers → Inbound → copy the inbound address.
- *   2. Point an MX record for `in.planera.app` at Postmark's inbound host.
+ *   2. Point an MX record for `in.planeraai.app` at Postmark's inbound host,
+ *      and set the same domain as the Inbound Domain on the Postmark stream.
  *   3. Set the inbound webhook URL to:
  *        https://<deployment>.convex.site/inbound/email?key=<RESERVATION_INBOUND_SECRET>
  *   4. Set RESERVATION_INBOUND_SECRET in the Convex environment.

@@ -1846,5 +1846,27 @@
     "backHome": "Back to home",
     "unsubscribedTitle": "You're unsubscribed",
     "unsubscribedBody": "You won't receive any more newsletter emails. You can resubscribe anytime."
+  },
+  "reservations": {
+    "title": "Bookings",
+    "menuSubtitle": "Forward confirmations to your trips",
+    "forwardLabel": "FORWARD CONFIRMATIONS TO",
+    "forwardHint": "Forward any flight, hotel or ticket confirmation. We read the details and slot it into the right day.",
+    "emptyTitle": "No bookings yet",
+    "emptyBody": "Forward your first confirmation to the address above and it'll show up here within a minute.",
+    "needsReview": "Needs review",
+    "needsReviewHint": "Check we read these correctly before they join your itinerary.",
+    "confirmed": "Confirmed",
+    "cancelled": "Cancelled",
+    "unverified": "Unverified sender",
+    "noTripYet": "Not linked to a trip yet",
+    "dismiss": "Dismiss",
+    "addToTrip": "Add to trip",
+    "chooseTrip": "Choose trip",
+    "whichTrip": "Which trip is this for?",
+    "keepStandalone": "Keep as a standalone booking",
+    "yourBookings": "Your bookings",
+    "manage": "Manage",
+    "confirmedSubtitle": "Confirmed and locked — your plan works around these."
   }
 }

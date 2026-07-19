@@ -24,7 +24,11 @@ const TRIP_MATCH_SLACK_MS = 36 * 60 * 60 * 1000;
 // Domain the inbound MX record points at. Kept in one place so the client, the
 // emails and the webhook agree. Override per-deployment with
 // RESERVATION_INBOUND_DOMAIN (e.g. a staging subdomain).
-export const INBOUND_DOMAIN = process.env.RESERVATION_INBOUND_DOMAIN || "in.planera.app";
+//
+// Must stay a subdomain of the apex used everywhere else (planeraai.app — see
+// emailHelpers BASE_URL). Pointing an MX record at a domain you don't control
+// means every address shown to users silently black-holes.
+export const INBOUND_DOMAIN = process.env.RESERVATION_INBOUND_DOMAIN || "in.planeraai.app";
 
 const RESERVATION_TYPE = v.union(
     v.literal("flight"),

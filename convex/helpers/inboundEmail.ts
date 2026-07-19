@@ -26,9 +26,11 @@ const ALIAS_PATTERN = /^[a-f0-9]{16}$/;
  * guessing, so role addresses (postmaster@, abuse@) and malformed envelopes are
  * dropped instead of being charged to some user.
  *
- * Accepts the bare form (`a8f3k2p9ab@in.planera.app`) and plus-addressing
- * (`trips+a8f3k2p9ab@…`) so the public-facing shape can change later without
- * breaking forwarding rules people already configured.
+ * Accepts the bare form (`a8f3c2b9ad4e17f0@in.planeraai.app`) and plus-addressing
+ * (`trips+a8f3c2b9ad4e17f0@…`) so the public-facing shape can change later
+ * without breaking forwarding rules people already configured. Plus-addressing
+ * is also what makes testing work on Postmark's own inbound address before DNS
+ * is live.
  */
 export function extractAlias(recipient: string | undefined | null): string | null {
     if (!recipient) return null;
