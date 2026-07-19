@@ -120,6 +120,20 @@ export default function Reservations() {
     }, [rejectReservation, t]);
 
     /**
+     * Encode an instant the way create-trip's own time picker does: the local
+     * wall-clock hours the user sees, carried on a UTC instant so the server
+     * reads back the same hours regardless of timezone. Anything else would
+     * shift a 21:10 landing by the device's offset.
+     */
+    const toWallClockIso = useCallback((ms?: number): string | undefined => {
+        if (!ms) return undefined;
+        const d = new Date(ms);
+        return new Date(Date.UTC(
+            d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), 0, 0
+        )).toISOString();
+    }, []);
+
+    /**
      * A booking we could not match is the strongest trip-creation signal in the
      * app: a real reservation, to a real place, on dates the user already
      * committed to. Send them into create-trip with all of it filled in.
@@ -142,9 +156,16 @@ export default function Reservations() {
                     : group.startAt + 7 * 24 * 60 * 60 * 1000
             );
         }
+        // Real flight times beat any default: landing at 22:45 and flying out at
+        // 06:00 changes what the first and last day can hold.
+        const arrival = toWallClockIso(group?.arrivalAt);
+        const departure = toWallClockIso(group?.departureAt);
+        if (arrival) params.prefilledArrivalTime = arrival;
+        if (departure) params.prefilledDepartureTime = departure;
+
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         router.push({ pathname: "/create-trip", params } as any);
-    }, [router]);
+    }, [router, toWallClockIso]);
 
     const handlePickTrip = useCallback(async (tripId: string | null) => {
         const group = pickerFor;

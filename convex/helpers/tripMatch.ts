@@ -326,6 +326,16 @@ export type JourneyGroup<T> = {
     label: string;
     startAt?: number;
     endAt?: number;
+    /**
+     * When you land at the destination, and when you leave it — the outbound
+     * leg's arrival and the return leg's departure. These are the hours a trip
+     * actually starts and stops being usable, which is what create-trip wants:
+     * landing at 22:45 means day one is not a sightseeing day.
+     *
+     * Journey types only; a hotel booking has no such thing.
+     */
+    arrivalAt?: number;
+    departureAt?: number;
     /** The booking total, de-duplicated. See below. */
     price?: number;
     currency?: string;
@@ -383,6 +393,9 @@ export function groupJourneyLegs<T extends GroupableLeg>(rows: T[]): JourneyGrou
                 ? priced[0].price
                 : priced.reduce((sum, l) => sum + (l.price ?? 0), 0);
 
+        // Only a journey lands and takes off again.
+        const isJourney = JOURNEY_TYPES.has(first.type);
+
         return {
             key,
             legs,
@@ -391,6 +404,10 @@ export function groupJourneyLegs<T extends GroupableLeg>(rows: T[]): JourneyGrou
             label,
             startAt: first.startAt,
             endAt: last.endAt ?? last.startAt ?? first.endAt,
+            arrivalAt: isJourney ? first.endAt : undefined,
+            // The last leg departs the destination — only meaningful once there
+            // IS a last leg distinct from the outbound.
+            departureAt: isJourney && legs.length > 1 ? last.startAt : undefined,
             price,
             currency: priced[0]?.currency ?? first.currency,
         };

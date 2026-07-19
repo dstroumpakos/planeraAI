@@ -24,7 +24,6 @@ import { api, internal } from "./_generated/api";
 import { v } from "convex/values";
 import { reportError } from "./helpers/reportError";
 import {
-  normalizeBookingOption,
   normalizeFlightOption,
   normalizePriceInsights,
 } from "./lib/serpApiFlights";
@@ -212,35 +211,69 @@ export const enrichAndSeedDeal = internalAction({
       if (!useSearchApi) p.append("adults", String(adults));
       const raw = await call(p);
       if (raw) {
-        const opts = Array.isArray(raw?.booking_options)
-          ? raw.booking_options.map((o: any, i: number) =>
-              normalizeBookingOption(o, i)
-            )
+        const rawOpts: any[] = Array.isArray(raw?.booking_options)
+          ? raw.booking_options
           : [];
-        // Pick the cheapest provider that has a URL.
-        const withUrl = opts.filter((o: any) => o?.bookingRequest?.url);
-        const pick =
-          withUrl.length > 0
-            ? withUrl.reduce((m: any, o: any) =>
-                (o.price ?? Infinity) < (m.price ?? Infinity) ? o : m
-              )
-            : opts[0];
-        if (pick) {
-          // Capture the SerpApi POST-based booking_request so the app can
-          // resolve it to the real provider URL at click-time (mirrors the
-          // regular trip flight booking flow).
-          if (pick.bookingRequest?.url && pick.bookingRequest?.postData) {
-            bookingRequest = {
-              url: pick.bookingRequest.url,
-              postData: pick.bookingRequest.postData,
+
+        // A radar row stores ONE `bookingRequest`, so it must book the whole
+        // itinerary. Split / separate-ticket options cover a single leg each
+        // (searchapi.io nests them under `departure`/`arrival`, SerpApi under
+        // `departing`/`returning`) and carry that leg's half-price — so a
+        // naive cheapest-first pick always selects them and sends the user to
+        // an outbound-only checkout while the card shows the round-trip fare.
+        // Only whole-itinerary options qualify: `together` when the vendor
+        // nests it, otherwise a flat option with no split legs present.
+        const whole = rawOpts
+          .map((o: any) => {
+            const leg =
+              o?.together ??
+              (o?.departure || o?.arrival || o?.departing || o?.returning
+                ? null
+                : o);
+            const br = leg?.booking_request;
+            if (!br?.url || !br?.post_data) return null;
+            return {
+              price:
+                typeof leg.price === "number" ? leg.price : Number(leg.price),
+              extensions: Array.isArray(leg.extensions)
+                ? leg.extensions
+                : undefined,
+              bookingRequest: {
+                url: String(br.url),
+                postData: String(br.post_data),
+              },
             };
-          }
+          })
+          .filter(Boolean) as Array<{
+          price: number;
+          extensions?: string[];
+          bookingRequest: { url: string; postData: string };
+        }>;
+
+        // Cheapest provider that books the full trip.
+        const pick = whole.length
+          ? whole.reduce((m, o) =>
+              (o.price || Infinity) < (m.price || Infinity) ? o : m
+            )
+          : null;
+
+        if (pick) {
+          // Capture the POST-based booking_request so the app can resolve it
+          // to the real provider URL at click-time (mirrors the regular trip
+          // flight booking flow).
+          bookingRequest = pick.bookingRequest;
           const bag = parseBaggage(pick.extensions);
           cabinBaggage = bag.cabinBaggage;
           checkedBaggage = bag.checkedBaggage;
-          if (totalPrice == null && pick.price != null) {
-            totalPrice = Number(pick.price);
+          if (totalPrice == null && Number.isFinite(pick.price)) {
+            totalPrice = pick.price;
           }
+        } else if (rawOpts.length > 0) {
+          // Every provider offered split tickets only — keep the Google
+          // Flights fallback rather than link to half the trip.
+          console.warn(
+            `[radar-auto] ${args.origin}->${args.destination}: ${rawOpts.length} booking option(s), none whole-itinerary; using fallback link`
+          );
         }
       }
     }

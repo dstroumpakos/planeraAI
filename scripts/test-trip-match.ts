@@ -358,5 +358,37 @@ check(
 );
 check("a lone booking still yields one group", groupJourneyLegs([V3NA7P_OUT]).length, 1);
 
+console.log("\ngroupJourneyLegs - flight times handed to create-trip");
+// You arrive when the OUTBOUND lands, and leave when the RETURN takes off.
+// Getting these backwards would hand create-trip the times you were at home.
+check("arrival is the outbound's landing", grouped[0].arrivalAt, V3NA7P_OUT.endAt);
+check("departure is the return's take-off", grouped[0].departureAt, V3NA7P_RET.startAt);
+check(
+    "one-way has an arrival but no departure",
+    (() => {
+        const g = groupJourneyLegs([V3NA7P_OUT])[0];
+        return [g.arrivalAt, g.departureAt];
+    })(),
+    [V3NA7P_OUT.endAt, undefined]
+);
+check(
+    "hotels carry no flight times",
+    (() => {
+        const g = groupJourneyLegs([
+            { _id: "h", type: "hotel", title: "Hotel Sacher", startAt: day("2026-12-12T14:00:00Z"), endAt: day("2026-12-16T10:00:00Z") },
+        ])[0];
+        return [g.arrivalAt, g.departureAt];
+    })(),
+    [undefined, undefined]
+);
+check(
+    "times survive legs arriving out of order",
+    (() => {
+        const g = groupJourneyLegs([V3NA7P_RET, V3NA7P_OUT])[0];
+        return [g.arrivalAt, g.departureAt];
+    })(),
+    [V3NA7P_OUT.endAt, V3NA7P_RET.startAt]
+);
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);

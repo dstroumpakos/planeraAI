@@ -101,4 +101,15 @@ crons.interval(
     {},
 );
 
+// Every 3 days, ask OpenAI to write a marketing newsletter for each language
+// that has confirmed subscribers. Drafts land in the admin Newsletter section
+// as "pending_approval" — nothing is ever sent without a human approving it,
+// and a language with an un-actioned draft is skipped so they never pile up.
+crons.interval(
+    "generate-ai-newsletter-drafts",
+    { hours: 72 },
+    internal.newsletterAi.generateAiCampaigns,
+    {},
+);
+
 export default crons;

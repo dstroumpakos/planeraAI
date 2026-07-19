@@ -1680,18 +1680,33 @@ export default defineSchema({
         sourceFilter: v.optional(v.string()),   // undefined = all sources ("web"|"app")
         countryFilter: v.optional(v.string()),  // undefined = all countries (ISO-2, lowercase)
         // --- Lifecycle ---
+        // draft            — manually composed, send on demand
+        // pending_approval — AI-generated, waiting for an admin decision
+        // scheduled        — approved, waiting for its scheduled send time
+        // rejected         — admin declined the AI draft (kept for the record)
         status: v.union(
             v.literal("draft"),
+            v.literal("pending_approval"),
+            v.literal("scheduled"),
             v.literal("sending"),
             v.literal("sent"),
             v.literal("failed"),
+            v.literal("rejected"),
         ),
         targeted: v.optional(v.float64()), // recipients matched at send time
         sent: v.optional(v.float64()),
         failed: v.optional(v.float64()),
-        createdBy: v.string(),             // admin userId who composed it
+        createdBy: v.string(),             // admin userId, or "ai" for generated drafts
         createdAt: v.float64(),
         sentAt: v.optional(v.float64()),   // when the send completed
+        // --- AI generation / scheduling ---
+        scheduledAt: v.optional(v.float64()),   // when an approved campaign fires
+        generatedByAi: v.optional(v.boolean()),
+        aiModel: v.optional(v.string()),
+        sendRationale: v.optional(v.string()),  // why the AI picked that send time
+        // Content angle (e.g. "flight-deals", "ai-planning"). Rotated server-side
+        // so consecutive AI emails to the same audience are never alike.
+        theme: v.optional(v.string())
     })
         .index("by_status", ["status"])
         .index("by_createdAt", ["createdAt"]),

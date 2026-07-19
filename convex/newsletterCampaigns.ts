@@ -153,6 +153,9 @@ const campaignContentArgs = {
   languageFilter: v.optional(v.string()),
   sourceFilter: v.optional(v.string()),
   countryFilter: v.optional(v.string()),
+  // Optional send time for a manually composed campaign. Empty = send on
+  // demand; set = the composer schedules it via `approveCampaign`.
+  scheduledAt: v.optional(v.float64()),
 };
 
 // ---------------------------------------------------------------------------
@@ -182,6 +185,12 @@ export const listCampaigns = query({
       failed: c.failed ?? 0,
       createdAt: c.createdAt,
       sentAt: c.sentAt,
+      scheduledAt: c.scheduledAt,
+      generatedByAi: c.generatedByAi ?? false,
+      sendRationale: c.sendRationale,
+      theme: c.theme,
+      heading: c.heading,
+      para1: c.para1,
     }));
   },
 });
@@ -321,8 +330,9 @@ export const updateCampaign = mutation({
     await requireAdmin(ctx, args.token);
     const campaign = await ctx.db.get(args.campaignId);
     if (!campaign) throw new ConvexError("Campaign not found.");
-    if (campaign.status !== "draft") {
-      throw new ConvexError("Only draft campaigns can be edited.");
+    // AI drafts are editable too — that's the point of the review step.
+    if (campaign.status !== "draft" && campaign.status !== "pending_approval") {
+      throw new ConvexError("Only draft or pending campaigns can be edited.");
     }
     const { token, campaignId, ...content } = args;
     await ctx.db.patch(campaignId, content);
@@ -338,8 +348,8 @@ export const deleteCampaign = mutation({
     await requireAdmin(ctx, args.token);
     const campaign = await ctx.db.get(args.campaignId);
     if (!campaign) return null;
-    if (campaign.status !== "draft") {
-      throw new ConvexError("Only draft campaigns can be deleted.");
+    if (campaign.status !== "draft" && campaign.status !== "rejected") {
+      throw new ConvexError("Only draft or rejected campaigns can be deleted.");
     }
     await ctx.db.delete(args.campaignId);
     return null;
@@ -423,6 +433,102 @@ export const sendTestEmail = action({
       },
     );
     return { success: res.success, error: res.error };
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Admin: approve / reject AI-generated drafts
+// ---------------------------------------------------------------------------
+
+/**
+ * Approve a pending AI draft and SCHEDULE it for the given time (defaults to
+ * the AI's suggested `scheduledAt`). Nothing goes out until that moment, and
+ * `startScheduledCampaign` re-checks the status when the timer fires — so
+ * cancelling is just a status change, no job bookkeeping needed.
+ */
+export const approveCampaign = mutation({
+  args: {
+    token: v.string(),
+    campaignId: v.id("newsletterCampaigns"),
+    scheduledAt: v.optional(v.float64()),
+  },
+  returns: v.object({ scheduledAt: v.float64() }),
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx, args.token);
+    const campaign = await ctx.db.get(args.campaignId);
+    if (!campaign) throw new ConvexError("Campaign not found.");
+    if (campaign.status !== "pending_approval" && campaign.status !== "draft") {
+      throw new ConvexError("Only a pending or draft campaign can be approved.");
+    }
+
+    const when = args.scheduledAt ?? campaign.scheduledAt ?? Date.now();
+    if (when < Date.now() - 60_000) {
+      throw new ConvexError("Scheduled time is in the past.");
+    }
+
+    await ctx.db.patch(args.campaignId, {
+      status: "scheduled",
+      scheduledAt: when,
+      targeted: 0,
+      sent: 0,
+      failed: 0,
+    });
+    await ctx.scheduler.runAt(when, internal.newsletterCampaigns.startScheduledCampaign, {
+      campaignId: args.campaignId,
+    });
+    return { scheduledAt: when };
+  },
+});
+
+/** Decline an AI draft. Kept (not deleted) so the record survives. */
+export const rejectCampaign = mutation({
+  args: { token: v.string(), campaignId: v.id("newsletterCampaigns") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx, args.token);
+    const campaign = await ctx.db.get(args.campaignId);
+    if (!campaign) throw new ConvexError("Campaign not found.");
+    if (campaign.status !== "pending_approval") {
+      throw new ConvexError("Only a pending campaign can be rejected.");
+    }
+    await ctx.db.patch(args.campaignId, { status: "rejected" });
+    return null;
+  },
+});
+
+/**
+ * Pull a scheduled campaign back to draft before it fires. The pending
+ * scheduler job stays queued but no-ops, since it only acts on "scheduled".
+ */
+export const cancelScheduledCampaign = mutation({
+  args: { token: v.string(), campaignId: v.id("newsletterCampaigns") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx, args.token);
+    const campaign = await ctx.db.get(args.campaignId);
+    if (!campaign) throw new ConvexError("Campaign not found.");
+    if (campaign.status !== "scheduled") {
+      throw new ConvexError("Only a scheduled campaign can be cancelled.");
+    }
+    await ctx.db.patch(args.campaignId, { status: "draft", scheduledAt: undefined });
+    return null;
+  },
+});
+
+/** Scheduler callback: start the send if the campaign is still scheduled. */
+export const startScheduledCampaign = internalMutation({
+  args: { campaignId: v.id("newsletterCampaigns") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const campaign = await ctx.db.get(args.campaignId);
+    // Cancelled / already sent / rejected in the meantime — do nothing.
+    if (!campaign || campaign.status !== "scheduled") return null;
+    await ctx.db.patch(args.campaignId, { status: "sending" });
+    await ctx.scheduler.runAfter(0, internal.newsletterCampaigns.processCampaignSend, {
+      campaignId: args.campaignId,
+      cursor: null,
+    });
+    return null;
   },
 });
 

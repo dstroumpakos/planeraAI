@@ -444,6 +444,8 @@ export default function CreateTripScreen() {
     const prefilledBudget = params.prefilledBudget as string | undefined;
     const prefilledTravelers = params.prefilledTravelers as string | undefined;
     const prefilledInterests = params.prefilledInterests as string | undefined;
+    const prefilledArrivalTime = params.prefilledArrivalTime as string | undefined;
+    const prefilledDepartureTime = params.prefilledDepartureTime as string | undefined;
     
     // @ts-ignore
     const createTrip = useAuthenticatedMutation(api.trips.create as any);
@@ -556,9 +558,12 @@ export default function CreateTripScreen() {
         skipFlights: false,
         skipHotel: false,
         preferredFlightTime: "any" as "any" | "morning" | "afternoon" | "evening" | "night",
-        // Arrival/Departure times (optional, ISO string in destination timezone)
-        arrivalTime: null as string | null,
-        departureTime: null as string | null,
+        // Arrival/Departure times (optional, ISO string in destination timezone).
+        // Prefilled when the trip is being created off a real flight booking —
+        // the caller has already encoded them the same way applySelectedTime
+        // does (local wall-clock hours carried on a UTC instant).
+        arrivalTime: (prefilledArrivalTime || null) as string | null,
+        departureTime: (prefilledDepartureTime || null) as string | null,
     });
 
         // V1: Compute per-person budget on the fly
