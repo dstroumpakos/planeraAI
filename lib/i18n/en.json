@@ -1867,6 +1867,12 @@
     "keepStandalone": "Keep as a standalone booking",
     "yourBookings": "Your bookings",
     "manage": "Manage",
-    "confirmedSubtitle": "Confirmed and locked — your plan works around these."
+    "confirmedSubtitle": "Confirmed and locked — your plan works around these.",
+    "planTripTo": "Plan your {{destination}} trip",
+    "planTripGeneric": "Plan a trip around this",
+    "createTripTo": "Create a trip to {{destination}}",
+    "createTripGeneric": "Create a new trip",
+    "roundTrip": "Round trip",
+    "legCount": "{{count}} flights"
   }
 }

@@ -48,6 +48,7 @@ import type * as helpers_inboundEmail from "../helpers/inboundEmail.js";
 import type * as helpers_itinerary from "../helpers/itinerary.js";
 import type * as helpers_reportError from "../helpers/reportError.js";
 import type * as helpers_subscription from "../helpers/subscription.js";
+import type * as helpers_tripMatch from "../helpers/tripMatch.js";
 import type * as helpers_unsplash from "../helpers/unsplash.js";
 import type * as http from "../http.js";
 import type * as iapVerify from "../iapVerify.js";
@@ -158,6 +159,7 @@ declare const fullApi: ApiFromModules<{
   "helpers/itinerary": typeof helpers_itinerary;
   "helpers/reportError": typeof helpers_reportError;
   "helpers/subscription": typeof helpers_subscription;
+  "helpers/tripMatch": typeof helpers_tripMatch;
   "helpers/unsplash": typeof helpers_unsplash;
   http: typeof http;
   iapVerify: typeof iapVerify;

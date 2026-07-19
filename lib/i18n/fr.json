@@ -1867,6 +1867,12 @@
     "keepStandalone": "Conserver comme réservation indépendante",
     "yourBookings": "Vos réservations",
     "manage": "Gérer",
-    "confirmedSubtitle": "Confirmées et verrouillées — votre programme s'organise autour."
+    "confirmedSubtitle": "Confirmées et verrouillées — votre programme s'organise autour.",
+    "planTripTo": "Planifiez votre voyage à {{destination}}",
+    "planTripGeneric": "Planifier un voyage autour de cette réservation",
+    "createTripTo": "Créer un voyage à {{destination}}",
+    "createTripGeneric": "Créer un nouveau voyage",
+    "roundTrip": "Aller-retour",
+    "legCount": "{{count}} vols"
   }
 }

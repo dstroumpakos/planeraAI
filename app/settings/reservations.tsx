@@ -6,6 +6,7 @@ import { useQuery } from "convex/react";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import { api } from "@/convex/_generated/api";
+import { groupJourneyLegs } from "@/convex/helpers/tripMatch";
 import { useToken, useAuthenticatedMutation } from "@/lib/useAuthenticatedMutation";
 import { useTheme } from "@/lib/ThemeContext";
 import { useTranslation } from "react-i18next";
@@ -84,15 +85,19 @@ export default function Reservations() {
         setTimeout(() => setCopied(false), 2000);
     }, [address]);
 
-    const handleConfirm = useCallback(async (item: any) => {
-        setBusyId(item._id);
+    // Every action applies to the whole booking. Confirming an outbound flight
+    // but not its return would leave half a journey in review.
+    const handleConfirm = useCallback(async (group: any) => {
+        setBusyId(group.key);
         try {
-            if (!item.tripId) {
+            if (group.legs.some((leg: any) => !leg.tripId)) {
                 // Nothing to attach it to yet — ask where it belongs first.
-                setPickerFor(item);
+                setPickerFor(group);
                 return;
             }
-            await confirmReservation({ reservationId: item._id });
+            for (const leg of group.legs) {
+                await confirmReservation({ reservationId: leg._id });
+            }
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         } catch (e: any) {
             Alert.alert(t("common.error"), e?.message ?? "Could not confirm this booking.");
@@ -101,10 +106,12 @@ export default function Reservations() {
         }
     }, [confirmReservation, t]);
 
-    const handleReject = useCallback(async (item: any) => {
-        setBusyId(item._id);
+    const handleReject = useCallback(async (group: any) => {
+        setBusyId(group.key);
         try {
-            await rejectReservation({ reservationId: item._id });
+            for (const leg of group.legs) {
+                await rejectReservation({ reservationId: leg._id });
+            }
         } catch (e: any) {
             Alert.alert(t("common.error"), e?.message ?? "Could not dismiss this booking.");
         } finally {
@@ -112,17 +119,46 @@ export default function Reservations() {
         }
     }, [rejectReservation, t]);
 
-    const handlePickTrip = useCallback(async (tripId: string | null) => {
-        const item = pickerFor;
+    /**
+     * A booking we could not match is the strongest trip-creation signal in the
+     * app: a real reservation, to a real place, on dates the user already
+     * committed to. Send them into create-trip with all of it filled in.
+     *
+     * A round trip prefills the real window: outbound departure to return
+     * arrival. A one-way has no return to end on, and create-trip defaults a
+     * missing end date to "a week from today" — which for a future flight lands
+     * BEFORE the start — so we derive a week from the booking instead.
+     */
+    const handlePlanTrip = useCallback((group: any) => {
         setPickerFor(null);
-        if (!item) return;
+        setBusyId(null);
+        const params: Record<string, string> = {};
+        if (group?.destination) params.prefilledDestination = group.destination;
+        if (group?.startAt) {
+            params.prefilledStartDate = String(group.startAt);
+            params.prefilledEndDate = String(
+                group.endAt && group.endAt > group.startAt
+                    ? group.endAt
+                    : group.startAt + 7 * 24 * 60 * 60 * 1000
+            );
+        }
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        router.push({ pathname: "/create-trip", params } as any);
+    }, [router]);
+
+    const handlePickTrip = useCallback(async (tripId: string | null) => {
+        const group = pickerFor;
+        setPickerFor(null);
+        if (!group) return;
         try {
-            if (tripId) {
-                await confirmReservation({ reservationId: item._id, tripId });
-            } else {
-                // Confirm as a standalone booking, unattached to any trip.
-                await assignToTrip({ reservationId: item._id });
-                await confirmReservation({ reservationId: item._id });
+            for (const leg of group.legs) {
+                if (tripId) {
+                    await confirmReservation({ reservationId: leg._id, tripId });
+                } else {
+                    // Confirm as a standalone booking, unattached to any trip.
+                    await assignToTrip({ reservationId: leg._id });
+                    await confirmReservation({ reservationId: leg._id });
+                }
             }
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         } catch (e: any) {
@@ -133,17 +169,29 @@ export default function Reservations() {
     }, [pickerFor, confirmReservation, assignToTrip, t]);
 
     const items = data?.items ?? [];
-    const needsReview = useMemo(() => items.filter((i: any) => i.status === "needs_review"), [items]);
-    const confirmed = useMemo(() => items.filter((i: any) => i.status === "confirmed"), [items]);
-    const cancelled = useMemo(() => items.filter((i: any) => i.status === "cancelled"), [items]);
+    // Group within a status, never across one: a cancelled outbound must not be
+    // folded into a still-active return.
+    const byStatus = useCallback(
+        (status: string) => groupJourneyLegs(items.filter((i: any) => i.status === status)),
+        [items]
+    );
+    const needsReview = useMemo(() => byStatus("needs_review"), [byStatus]);
+    const confirmed = useMemo(() => byStatus("confirmed"), [byStatus]);
+    const cancelled = useMemo(() => byStatus("cancelled"), [byStatus]);
 
-    const renderCard = (item: any, showActions: boolean) => {
+    const renderCard = (group: any, showActions: boolean) => {
+        const item = group.legs[0];
         const meta = TYPE_META[item.type] ?? TYPE_META.other;
-        const busy = busyId === item._id;
+        const busy = busyId === group.key;
+        const multiLeg = group.legs.length > 1;
+        // Any leg from an unverified sender taints the booking.
+        const unverified = group.legs.some((leg: any) => leg.senderVerified === false);
+        // Legs of one booking share a trip; the first one speaks for all.
+        const trip = group.legs.find((leg: any) => leg.trip)?.trip ?? null;
 
         return (
             <View
-                key={item._id}
+                key={group.key}
                 style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
             >
                 <View style={styles.cardHeader}>
@@ -152,15 +200,20 @@ export default function Reservations() {
                     </View>
                     <View style={styles.cardHeaderText}>
                         <Text style={[styles.cardTitle, { color: colors.text }]} numberOfLines={2}>
-                            {item.title}
+                            {group.label}
                         </Text>
-                        {!!item.provider && (
-                            <Text style={[styles.cardProvider, { color: colors.textMuted }]} numberOfLines={1}>
-                                {item.provider}
-                            </Text>
-                        )}
+                        <Text style={[styles.cardProvider, { color: colors.textMuted }]} numberOfLines={1}>
+                            {[
+                                group.isRoundTrip
+                                    ? t("reservations.roundTrip", { defaultValue: "Round trip" })
+                                    : multiLeg
+                                        ? t("reservations.legCount", { count: group.legs.length, defaultValue: "{{count}} flights" })
+                                        : null,
+                                item.provider,
+                            ].filter(Boolean).join(" · ")}
+                        </Text>
                     </View>
-                    {item.senderVerified === false && (
+                    {unverified && (
                         <View style={styles.unverifiedPill}>
                             <Ionicons name="alert-circle-outline" size={12} color="#B45309" />
                             <Text style={styles.unverifiedText}>{t("reservations.unverified", { defaultValue: "Unverified sender" })}</Text>
@@ -168,8 +221,25 @@ export default function Reservations() {
                     )}
                 </View>
 
+                {/* One row per leg, so a round trip reads as an itinerary. */}
+                {multiLeg && (
+                    <View style={styles.legList}>
+                        {group.legs.map((leg: any) => (
+                            <View key={leg._id} style={styles.legRow}>
+                                <Ionicons name="ellipse" size={6} color={meta.color} />
+                                <Text style={[styles.legTitle, { color: colors.text }]} numberOfLines={1}>
+                                    {leg.title}
+                                </Text>
+                                <Text style={[styles.legWhen, { color: colors.textMuted }]} numberOfLines={1}>
+                                    {formatWhen(leg.startAt, leg.endAt)}
+                                </Text>
+                            </View>
+                        ))}
+                    </View>
+                )}
+
                 <View style={styles.metaRow}>
-                    {!!item.startAt && (
+                    {!multiLeg && !!item.startAt && (
                         <View style={styles.metaItem}>
                             <Ionicons name="time-outline" size={13} color={colors.textMuted} />
                             <Text style={[styles.metaText, { color: colors.textMuted }]}>
@@ -183,24 +253,24 @@ export default function Reservations() {
                             <Text style={[styles.metaText, { color: colors.textMuted }]}>{item.confirmationCode}</Text>
                         </View>
                     )}
-                    {typeof item.price === "number" && (
+                    {typeof group.price === "number" && (
                         <View style={styles.metaItem}>
                             <Ionicons name="pricetag-outline" size={13} color={colors.textMuted} />
                             <Text style={[styles.metaText, { color: colors.textMuted }]}>
-                                {item.currency === "EUR" ? "€" : (item.currency ? item.currency + " " : "")}{item.price}
+                                {group.currency === "EUR" ? "€" : (group.currency ? group.currency + " " : "")}{group.price}
                             </Text>
                         </View>
                     )}
                 </View>
 
-                {item.trip ? (
+                {trip ? (
                     <TouchableOpacity
                         style={styles.tripLink}
-                        onPress={() => router.push(`/trip/${item.trip._id}` as any)}
+                        onPress={() => router.push(`/trip/${trip._id}` as any)}
                     >
                         <Ionicons name="link-outline" size={13} color={colors.text} />
                         <Text style={[styles.tripLinkText, { color: colors.text }]} numberOfLines={1}>
-                            {item.trip.destination}
+                            {trip.destination}
                         </Text>
                     </TouchableOpacity>
                 ) : (
@@ -208,6 +278,22 @@ export default function Reservations() {
                         <Text style={[styles.unmatchedText, { color: colors.textMuted }]}>
                             {t("reservations.noTripYet", { defaultValue: "Not linked to a trip yet" })}
                         </Text>
+                        {item.status !== "cancelled" && (
+                            <TouchableOpacity
+                                style={[styles.planTripBtn, { borderColor: meta.color + "55", backgroundColor: meta.color + "14" }]}
+                                onPress={() => handlePlanTrip(group)}
+                            >
+                                <Ionicons name="sparkles-outline" size={13} color={meta.color} />
+                                <Text style={[styles.planTripText, { color: meta.color }]} numberOfLines={1}>
+                                    {group.destination
+                                        ? t("reservations.planTripTo", {
+                                            destination: group.destination,
+                                            defaultValue: "Plan your {{destination}} trip",
+                                        })
+                                        : t("reservations.planTripGeneric", { defaultValue: "Plan a trip around this" })}
+                                </Text>
+                            </TouchableOpacity>
+                        )}
                     </View>
                 )}
 
@@ -215,7 +301,7 @@ export default function Reservations() {
                     <View style={styles.actions}>
                         <TouchableOpacity
                             style={[styles.actionBtn, styles.rejectBtn, { borderColor: colors.border }]}
-                            onPress={() => handleReject(item)}
+                            onPress={() => handleReject(group)}
                             disabled={busy}
                         >
                             <Text style={[styles.rejectText, { color: colors.textMuted }]}>
@@ -224,14 +310,14 @@ export default function Reservations() {
                         </TouchableOpacity>
                         <TouchableOpacity
                             style={[styles.actionBtn, styles.confirmBtn]}
-                            onPress={() => handleConfirm(item)}
+                            onPress={() => handleConfirm(group)}
                             disabled={busy}
                         >
                             {busy ? (
                                 <ActivityIndicator size="small" color="#1A1A1A" />
                             ) : (
                                 <Text style={styles.confirmText}>
-                                    {item.tripId
+                                    {group.legs.every((leg: any) => leg.tripId)
                                         ? t("reservations.addToTrip", { defaultValue: "Add to trip" })
                                         : t("reservations.chooseTrip", { defaultValue: "Choose trip" })}
                                 </Text>
@@ -360,6 +446,21 @@ export default function Reservations() {
                                 </TouchableOpacity>
                             ))}
                         </ScrollView>
+                        {/* None of the listed trips fit — the way out is a new one. */}
+                        <TouchableOpacity
+                            style={[styles.modalCreate, { borderColor: colors.border }]}
+                            onPress={() => handlePlanTrip(pickerFor)}
+                        >
+                            <Ionicons name="add-circle-outline" size={18} color="#F5C451" />
+                            <Text style={[styles.modalCreateText, { color: colors.text }]} numberOfLines={1}>
+                                {pickerFor?.destination
+                                    ? t("reservations.createTripTo", {
+                                        destination: pickerFor.destination,
+                                        defaultValue: "Create a trip to {{destination}}",
+                                    })
+                                    : t("reservations.createTripGeneric", { defaultValue: "Create a new trip" })}
+                            </Text>
+                        </TouchableOpacity>
                         <TouchableOpacity style={styles.modalSecondary} onPress={() => handlePickTrip(null)}>
                             <Text style={[styles.modalSecondaryText, { color: colors.textMuted }]}>
                                 {t("reservations.keepStandalone", { defaultValue: "Keep as a standalone booking" })}
@@ -430,8 +531,25 @@ const styles = StyleSheet.create({
 
     tripLink: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 10 },
     tripLinkText: { fontSize: 13, fontWeight: "600" },
+    legList: { marginTop: 10, gap: 6 },
+    legRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+    legTitle: { fontSize: 13, fontWeight: "600", flexShrink: 1 },
+    legWhen: { fontSize: 12, marginLeft: "auto" },
+
     unmatchedRow: { marginTop: 10 },
     unmatchedText: { fontSize: 12.5, fontStyle: "italic" },
+    planTripBtn: {
+        flexDirection: "row",
+        alignItems: "center",
+        alignSelf: "flex-start",
+        gap: 6,
+        marginTop: 8,
+        paddingVertical: 7,
+        paddingHorizontal: 11,
+        borderRadius: 9,
+        borderWidth: 1,
+    },
+    planTripText: { fontSize: 12.5, fontWeight: "700", flexShrink: 1 },
 
     actions: { flexDirection: "row", gap: 10, marginTop: 14 },
     actionBtn: { flex: 1, height: 42, borderRadius: 11, alignItems: "center", justifyContent: "center" },
@@ -456,6 +574,18 @@ const styles = StyleSheet.create({
     },
     tripOptionText: { fontSize: 15, fontWeight: "600", flex: 1 },
     tripOptionDate: { fontSize: 13 },
+    modalCreate: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 8,
+        marginTop: 8,
+        paddingVertical: 14,
+        borderRadius: 12,
+        borderWidth: 1,
+        borderStyle: "dashed",
+    },
+    modalCreateText: { fontSize: 14.5, fontWeight: "700", flexShrink: 1 },
     modalSecondary: { paddingVertical: 14, alignItems: "center" },
     modalSecondaryText: { fontSize: 14, fontWeight: "600" },
     modalCancel: { paddingVertical: 12, alignItems: "center" },

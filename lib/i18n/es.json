@@ -1867,6 +1867,12 @@
     "keepStandalone": "Mantener como reserva independiente",
     "yourBookings": "Tus reservas",
     "manage": "Gestionar",
-    "confirmedSubtitle": "Confirmadas y fijadas: tu plan se adapta a ellas."
+    "confirmedSubtitle": "Confirmadas y fijadas: tu plan se adapta a ellas.",
+    "planTripTo": "Planifica tu viaje a {{destination}}",
+    "planTripGeneric": "Planifica un viaje en torno a esto",
+    "createTripTo": "Crear un viaje a {{destination}}",
+    "createTripGeneric": "Crear un viaje nuevo",
+    "roundTrip": "Ida y vuelta",
+    "legCount": "{{count}} vuelos"
   }
 }

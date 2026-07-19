@@ -2,6 +2,12 @@ import { v } from "convex/values";
 import { authQuery, authMutation } from "./functions";
 import { internalMutation, internalQuery } from "./_generated/server";
 import { ALIAS_LENGTH } from "./helpers/inboundEmail";
+import {
+    buildMatchHaystack,
+    extractDestination,
+    extractOrigin,
+    pickMatchingTrip,
+} from "./helpers/tripMatch";
 
 /**
  * Reservation Inbox — the DB surface.
@@ -16,10 +22,6 @@ import { ALIAS_LENGTH } from "./helpers/inboundEmail";
  * confirms. DKIM/SPF results are recorded for display and ranking, not for
  * auto-approval.
  */
-
-// A reservation this far outside the trip window still counts as a match
-// (red-eyes, late check-outs, a train the evening before departure).
-const TRIP_MATCH_SLACK_MS = 36 * 60 * 60 * 1000;
 
 // Domain the inbound MX record points at. Kept in one place so the client, the
 // emails and the webhook agree. Override per-deployment with
@@ -57,50 +59,6 @@ function buildDedupeKey(
     // Bucket to the day: the same booking re-sent often differs by seconds.
     const day = startAt ? Math.floor(startAt / 86_400_000) : "";
     return `${userId}|${type}|${identity}|${day}`;
-}
-
-/**
- * Normalize a place string for loose comparison ("Barcelona, Spain" → "barcelona spain").
- */
-function normalizePlace(value: string | undefined): string {
-    if (!value) return "";
-    return value
-        .toLowerCase()
-        .replace(/[^a-z0-9\s]+/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-}
-
-/**
- * Pick the best trip for a reservation: the window must overlap, then prefer a
- * destination that actually appears in the reservation's location/title.
- * Returns null when nothing overlaps — an unmatched reservation is a valid
- * (and product-relevant) outcome, not a failure.
- */
-function pickMatchingTrip(trips: any[], startAt: number | undefined, haystack: string): any | null {
-    if (!startAt) return null;
-
-    const overlapping = trips.filter((trip) => {
-        if (trip.status === "archived") return false;
-        const from = trip.startDate - TRIP_MATCH_SLACK_MS;
-        const to = trip.endDate + TRIP_MATCH_SLACK_MS;
-        return startAt >= from && startAt <= to;
-    });
-
-    if (overlapping.length === 0) return null;
-    if (overlapping.length === 1) return overlapping[0];
-
-    const normalizedHaystack = normalizePlace(haystack);
-    const byDestination = overlapping.filter((trip) => {
-        const tokens = normalizePlace(trip.destination).split(" ").filter((t: string) => t.length > 3);
-        return tokens.some((token: string) => normalizedHaystack.includes(token));
-    });
-    if (byDestination.length > 0) return byDestination[0];
-
-    // Ambiguous on dates alone — take the trip whose start is nearest.
-    return overlapping.sort(
-        (a, b) => Math.abs(a.startDate - startAt) - Math.abs(b.startDate - startAt)
-    )[0];
 }
 
 // ---------------------------------------------------------------------------
@@ -146,6 +104,10 @@ export const upsertFromEmail = internalMutation({
         parseConfidence: v.optional(v.float64()),
         parseModel: v.optional(v.string()),
         isCancellation: v.optional(v.boolean()),
+        // Destination of the whole journey this row came from, decided across
+        // every leg in the confirmation. Set for a return flight so it joins the
+        // outbound trip instead of proposing a trip to the traveller's home.
+        tripDestination: v.optional(v.string()),
     },
     handler: async (ctx, args) => {
         const now = Date.now();
@@ -174,10 +136,18 @@ export const upsertFromEmail = internalMutation({
             .withIndex("by_user", (q) => q.eq("userId", args.userId))
             .collect();
 
-        const haystack = [args.location, args.title, args.details?.arrivalCity, args.details?.city]
-            .filter(Boolean)
-            .join(" ");
-        const matched = pickMatchingTrip(trips, args.startAt, haystack);
+        // The journey-wide destination wins when the action worked one out; it
+        // saw every leg, this mutation only sees one.
+        const destinationHint =
+            args.tripDestination ||
+            extractDestination(args.type, args.location, args.title, args.details);
+
+        const matched = pickMatchingTrip(trips, args.startAt, {
+            destination:
+                destinationHint ||
+                buildMatchHaystack(args.type, args.location, args.title, args.details),
+            origin: extractOrigin(args.type, args.title, args.details),
+        });
 
         if (existing) {
             await ctx.db.patch(existing._id, {
@@ -190,6 +160,7 @@ export const upsertFromEmail = internalMutation({
                 startAt: args.startAt ?? existing.startAt,
                 endAt: args.endAt ?? existing.endAt,
                 location: args.location ?? existing.location,
+                destinationHint: destinationHint ?? existing.destinationHint,
                 price: args.price ?? existing.price,
                 currency: args.currency ?? existing.currency,
                 details: args.details ?? existing.details,
@@ -211,6 +182,7 @@ export const upsertFromEmail = internalMutation({
             startAt: args.startAt,
             endAt: args.endAt,
             location: args.location,
+            destinationHint,
             price: args.price,
             currency: args.currency,
             details: args.details,

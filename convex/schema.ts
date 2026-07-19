@@ -1743,6 +1743,12 @@ export default defineSchema({
         startAt: v.optional(v.float64()),
         endAt: v.optional(v.float64()),
         location: v.optional(v.string()),          // address / airport pair / city
+        // Where this booking is headed, as a name a human would type ("Rome").
+        // Derived from the arrival end at parse time — `location` is the
+        // DEPARTURE terminal for flights, so it cannot stand in for this.
+        // Drives both trip matching and the "plan a trip here" prompt shown
+        // when nothing matched. Absent when we could not derive one confidently.
+        destinationHint: v.optional(v.string()),
         price: v.optional(v.float64()),
         currency: v.optional(v.string()),
         // Per-type extras: flight number, cabin, room type, guest count, rawStart…

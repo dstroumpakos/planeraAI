@@ -1867,6 +1867,12 @@
     "keepStandalone": "Als eigenständige Buchung behalten",
     "yourBookings": "Deine Buchungen",
     "manage": "Verwalten",
-    "confirmedSubtitle": "Bestätigt und fest eingeplant – dein Plan richtet sich danach."
+    "confirmedSubtitle": "Bestätigt und fest eingeplant – dein Plan richtet sich danach.",
+    "planTripTo": "Plane deine Reise nach {{destination}}",
+    "planTripGeneric": "Eine Reise darum herum planen",
+    "createTripTo": "Reise nach {{destination}} erstellen",
+    "createTripGeneric": "Neue Reise erstellen",
+    "roundTrip": "Hin- und Rückflug",
+    "legCount": "{{count}} Flüge"
   }
 }

@@ -1867,6 +1867,12 @@
     "keepStandalone": "الاحتفاظ بها كحجز مستقل",
     "yourBookings": "حجوزاتك",
     "manage": "إدارة",
-    "confirmedSubtitle": "مؤكدة ومثبّتة — خطتك تُنظَّم حولها."
+    "confirmedSubtitle": "مؤكدة ومثبّتة — خطتك تُنظَّم حولها.",
+    "planTripTo": "خطّط رحلتك إلى {{destination}}",
+    "planTripGeneric": "خطّط رحلة حول هذا الحجز",
+    "createTripTo": "إنشاء رحلة إلى {{destination}}",
+    "createTripGeneric": "إنشاء رحلة جديدة",
+    "roundTrip": "ذهاب وعودة",
+    "legCount": "{{count}} رحلات"
   }
 }

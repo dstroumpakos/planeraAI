@@ -11,6 +11,7 @@ import {
     htmlToText,
     toTimestamp,
 } from "./helpers/inboundEmail";
+import { journeyDestination } from "./helpers/tripMatch";
 
 /**
  * Reservation Inbox — inbound email parsing.
@@ -201,7 +202,22 @@ export const parseInboundEmail = internalAction({
 
         // Cap per message: a legitimate confirmation is 1-6 rows. More than that
         // means a malformed parse or an attempt to flood the inbox.
-        for (const row of rows.slice(0, 8)) {
+        const legs = rows.slice(0, 8);
+
+        // A round trip is ONE trip. Decided across all legs before writing any
+        // of them, because the return flight on its own reads as a booking to
+        // the traveller's home city. See journeyDestination.
+        const tripDestination = journeyDestination(
+            legs.map((row) => ({
+                type: VALID_TYPES.has(row?.type as string) ? (row.type as string) : "other",
+                title: (row?.title ?? "").toString(),
+                location: row?.location?.toString(),
+                details: row?.details,
+                startAt: toTimestamp(row?.startAt),
+            }))
+        );
+
+        for (const row of legs) {
             const type = VALID_TYPES.has(row?.type as string) ? row.type : "other";
             const title = (row?.title ?? "").toString().trim().slice(0, 200);
             if (!title) continue;
@@ -225,6 +241,7 @@ export const parseInboundEmail = internalAction({
                     parseConfidence: typeof row.confidence === "number" ? row.confidence : undefined,
                     parseModel: MODEL,
                     isCancellation,
+                    tripDestination,
                 });
 
             created += 1;
