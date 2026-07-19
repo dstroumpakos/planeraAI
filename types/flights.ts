@@ -333,11 +333,22 @@ export interface FlightCalendarQuery {
   currency?: string; // ISO 4217, defaults to EUR
 }
 
+export interface FlightCalendarReturn {
+  date: string; // YYYY-MM-DD return date
+  price: number; // indicative round-trip fare for this departure+return pair
+}
 export interface FlightCalendarDate {
   date: string; // YYYY-MM-DD departure date
   returnDate?: string; // YYYY-MM-DD return that gave this date's cheapest fare
   price: number; // indicative round-trip fare
   isLowest?: boolean; // engine flagged this as a lowest-price date
+  /**
+   * Every priced return for this departure, cheapest first. Only populated on
+   * the PUBLIC path (`flightCalendarPublic`, opts.includeReturns), which is the
+   * one that renders a two-leg picker; the mobile teaser strip shows a single
+   * date and would only pay the payload cost for nothing.
+   */
+  returns?: FlightCalendarReturn[];
 }
 
 export interface FlightCalendar {

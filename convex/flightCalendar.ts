@@ -20,7 +20,7 @@
  * The API key never crosses the frontend boundary and is never logged.
  */
 
-import { action } from "./_generated/server";
+import { action, internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { reportError } from "./helpers/reportError";
@@ -147,6 +147,31 @@ export const flightCalendarPublic = action({
      * future month (e.g. "October") instead of only the next few weeks.
      */
     startOffsetDays: v.optional(v.float64()),
+    /**
+     * Party + fare filters. `adults` is a correctness input, not a nicety: the
+     * cheapest fare class may not have N seats, so a 1-adult price multiplied
+     * by N understates a group trip.
+     */
+    adults: v.optional(v.float64()),
+    children: v.optional(v.float64()),
+    travelClass: v.optional(
+      v.union(
+        v.literal("economy"),
+        v.literal("premium_economy"),
+        v.literal("business"),
+        v.literal("first_class")
+      )
+    ),
+    stops: v.optional(
+      v.union(
+        v.literal("any"),
+        v.literal("nonstop"),
+        v.literal("one_stop_or_fewer"),
+        v.literal("two_stops_or_fewer")
+      )
+    ),
+    carryOnBags: v.optional(v.float64()),
+    checkedBags: v.optional(v.float64()),
   },
   handler: async (ctx, args): Promise<FlightCalendar | null> => {
     const device = (args.deviceId || "").trim();
@@ -172,8 +197,27 @@ export const flightCalendarPublic = action({
       // collides with the compact single-window teaser under the same route.
       // The start offset is part of the key: a scan of October must not serve
       // a cached scan of August.
+      // `|r1` marks the payload shape that carries per-departure return options.
+      // Bumping it retires entries cached before the two-leg picker existed,
+      // which would otherwise serve a calendar the widget cannot page a return
+      // leg from for up to 12h after deploy.
       const startOffset = args.startOffsetDays ?? 0;
-      const cacheKey = `${buildCacheKey(input)}|wide|off${Math.round(startOffset)}`;
+      // Filters change the fares, so they MUST be part of the key — otherwise a
+      // business-class or 3-adult scan would serve (and poison) the economy
+      // single-adult entry for the same route.
+      const filterKey = [
+        args.adults && args.adults > 1 ? `a${args.adults}` : "",
+        args.children ? `c${args.children}` : "",
+        args.travelClass && args.travelClass !== "economy" ? args.travelClass : "",
+        args.stops && args.stops !== "any" ? args.stops : "",
+        args.carryOnBags ? `cb${args.carryOnBags}` : "",
+        args.checkedBags ? `kb${args.checkedBags}` : "",
+      ]
+        .filter(Boolean)
+        .join(",");
+      const cacheKey =
+        `${buildCacheKey(input)}|wide|off${Math.round(startOffset)}|r1` +
+        (filterKey ? `|f:${filterKey}` : "");
       const cached: FlightCalendar | null = await ctx.runQuery(
         internal.flightSearchCache.readCache,
         { cacheKey }
@@ -191,6 +235,15 @@ export const flightCalendarPublic = action({
         windows: 3,
         maxDates: 60,
         startOffsetDays: args.startOffsetDays,
+        // Public callers (ChatGPT app, marketing widget) render a two-leg
+        // picker, so they need every return option per departure.
+        includeReturns: true,
+        adults: args.adults,
+        children: args.children,
+        travelClass: args.travelClass,
+        stops: args.stops,
+        carryOnBags: args.carryOnBags,
+        checkedBags: args.checkedBags,
       });
 
       console.log(
@@ -223,5 +276,32 @@ export const flightCalendarPublic = action({
       });
       throw err;
     }
+  },
+});
+
+/**
+ * Cheapest-fare lookup for a flexible-date price watch (see
+ * `routePriceAlerts.ts`). Internal and unauthenticated by design: the caller is
+ * our own cron, which already bounds how many watches it prices per tick.
+ *
+ * Uses the single-window scan — a watch only needs the cheapest fare in the
+ * near window, not the wide multi-window grid the ChatGPT calendar renders.
+ */
+export const fetchForWatch = internalAction({
+  args: {
+    departureId: v.string(),
+    arrivalId: v.string(),
+    currency: v.string(),
+    adults: v.optional(v.float64()),
+  },
+  handler: async (_ctx, args): Promise<FlightCalendar | null> => {
+    return await fetchFlightCalendar(
+      {
+        departureId: args.departureId,
+        arrivalId: args.arrivalId,
+        currency: args.currency,
+      },
+      { adults: args.adults }
+    );
   },
 });

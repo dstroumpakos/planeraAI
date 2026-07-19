@@ -377,6 +377,21 @@ export const searchFlightsPublic = action({
   },
 });
 
+/**
+ * Server-side search with no auth and no rate limit, for scheduled work such as
+ * the route price-alert cron. NOT reachable from a client — internal only.
+ *
+ * Deliberately skips the per-caller rate limiter: the caller is our own cron,
+ * which already bounds its batch size, and throttling it would silently stop
+ * fare watches from being checked.
+ */
+export const internalSearch = internalAction({
+  args: { input: FLIGHT_SEARCH_INPUT },
+  handler: async (ctx, args): Promise<NormalizedFlightSearchResponse> => {
+    return await _runSearch(ctx, args.input as FlightSearchInput, undefined);
+  },
+});
+
 // =========================== getBookingOptions ==============================
 
 export const getBookingOptions = action({

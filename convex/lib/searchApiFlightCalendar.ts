@@ -128,13 +128,43 @@ export interface CalendarOptions {
    * the next few weeks. The return window tracks it by the same base offset.
    */
   startOffsetDays?: number;
+  /**
+   * Keep every priced return per departure, not just the cheapest one, so the
+   * caller can offer a real return-leg picker. Off by default — the mobile
+   * strip shows one date and does not need the extra payload.
+   */
+  includeReturns?: boolean;
+  /** Cap on returns kept per departure when includeReturns is set. */
+  maxReturnsPerDate?: number;
+
+  /**
+   * Passenger + fare filters, forwarded verbatim to the engine.
+   *
+   * `adults` matters for correctness, not just filtering: a fare is only
+   * bookable for as many seats as the cheapest class actually has. Pricing a
+   * 1-adult calendar and multiplying by the party size understates a 2-adult
+   * trip (verified: ATH→JFK 3–10 Dec priced 473 for one but 1085 for two, not
+   * 946). Pass the real party size and the engine prices what is bookable.
+   */
+  adults?: number;
+  children?: number;
+  travelClass?: "economy" | "premium_economy" | "business" | "first_class";
+  stops?: "any" | "nonstop" | "one_stop_or_fewer" | "two_stops_or_fewer";
+  carryOnBags?: number;
+  checkedBags?: number;
 }
 
 // Each window spans this many days; derived from the base window so the two
 // constants above stay the single source of truth.
 const WINDOW_LEN_DAYS = OUT_END - OUT_START + 1; // 14
 
-type DepartureInfo = { price: number; returnDate?: string; isLowest: boolean };
+type DepartureInfo = {
+  price: number;
+  returnDate?: string;
+  isLowest: boolean;
+  /** return date → cheapest fare seen for that pairing (only when requested) */
+  returns?: Map<string, number>;
+};
 
 /**
  * Fetch ONE ~14-day outbound window (one google_flights_calendar call, ≤200
@@ -148,7 +178,12 @@ async function fillWindow(
   currency: string,
   outStart: number,
   retStart: number,
-  perDeparture: Map<string, DepartureInfo>
+  perDeparture: Map<string, DepartureInfo>,
+  includeReturns = false,
+  filters?: Pick<
+    CalendarOptions,
+    "adults" | "children" | "travelClass" | "stops" | "carryOnBags" | "checkedBags"
+  >
 ): Promise<void> {
   const params = new URLSearchParams();
   params.append("engine", "google_flights_calendar");
@@ -163,6 +198,26 @@ async function fillWindow(
   params.append("return_date_start", isoOffset(retStart));
   params.append("return_date_end", isoOffset(retStart + (RET_END - RET_START)));
   params.append("currency", currency);
+  // Only send non-default filters — the engine treats an explicit default the
+  // same as omitting it, and a shorter query keeps the cache key readable.
+  if (filters?.adults && filters.adults > 1) {
+    params.append("adults", String(filters.adults));
+  }
+  if (filters?.children && filters.children > 0) {
+    params.append("children", String(filters.children));
+  }
+  if (filters?.travelClass && filters.travelClass !== "economy") {
+    params.append("travel_class", filters.travelClass);
+  }
+  if (filters?.stops && filters.stops !== "any") {
+    params.append("stops", filters.stops);
+  }
+  if (filters?.carryOnBags && filters.carryOnBags > 0) {
+    params.append("carry_on_bags", String(filters.carryOnBags));
+  }
+  if (filters?.checkedBags && filters.checkedBags > 0) {
+    params.append("checked_bags", String(filters.checkedBags));
+  }
   // NOTE: `hl` intentionally omitted — the calendar engine rejects region codes
   // (e.g. "en-GB") and the response carries no localizable text anyway.
 
@@ -178,8 +233,21 @@ async function fillWindow(
     const returnDate = typeof c?.return === "string" ? c.return : undefined;
     const isLowest = Boolean(c?.is_lowest_price);
     const existing = perDeparture.get(date);
+
+    // The engine emits one row per (departure, return) pair. Collapsing to the
+    // cheapest row loses every other return for that day, which is exactly what
+    // a two-leg picker needs — so keep them all when asked.
+    let returns = existing?.returns;
+    if (includeReturns && returnDate) {
+      if (!returns) returns = new Map<string, number>();
+      const seen = returns.get(returnDate);
+      if (seen === undefined || price < seen) returns.set(returnDate, price);
+    }
+
     if (!existing || price < existing.price) {
-      perDeparture.set(date, { price, returnDate, isLowest });
+      perDeparture.set(date, { price, returnDate, isLowest, returns });
+    } else if (returns) {
+      existing.returns = returns;
     }
   }
 }
@@ -226,7 +294,9 @@ export async function fetchFlightCalendar(
       currency,
       baseOut + shift,
       baseRet + shift,
-      perDeparture
+      perDeparture,
+      opts?.includeReturns,
+      opts
     );
   }
 
@@ -253,11 +323,24 @@ export async function fetchFlightCalendar(
     departureId,
     arrivalId,
     currency,
-    dates: picked.map((p) => ({
-      date: p.date,
-      returnDate: p.returnDate,
-      price: p.price,
-      isLowest: p.isLowest,
-    })),
+    dates: picked.map((p) => {
+      const maxReturns = opts?.maxReturnsPerDate ?? 14;
+      const returns =
+        opts?.includeReturns && p.returns
+          ? [...p.returns.entries()]
+              .map(([date, price]) => ({ date, price }))
+              .sort((a, b) => a.price - b.price)
+              .slice(0, maxReturns)
+              // Chronological for display; price order already decided the cut.
+              .sort((a, b) => a.date.localeCompare(b.date))
+          : undefined;
+      return {
+        date: p.date,
+        returnDate: p.returnDate,
+        price: p.price,
+        isLowest: p.isLowest,
+        ...(returns && returns.length ? { returns } : {}),
+      };
+    }),
   };
 }

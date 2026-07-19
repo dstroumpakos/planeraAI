@@ -1631,6 +1631,65 @@ export default defineSchema({
 
     // Newsletter funnel subscribers (double opt-in + drip sequence).
     // Captured from the marketing site and in-app opt-in card.
+    // Per-route fare watches. Distinct from `newsletterSubscribers`, which is a
+    // curated regional deal list: a row here watches ONE origin→destination
+    // (optionally one date pair) and emails that subscriber when THAT fare
+    // drops. Created anonymously from the ChatGPT app / website, so identity is
+    // an email address plus double opt-in — never an account.
+    routePriceAlerts: defineTable({
+        email: v.string(),
+        departureId: v.string(),          // IATA, upper-case
+        arrivalId: v.string(),
+        // Omitted = "any dates" — the watch then tracks the cheapest fare in the
+        // rolling calendar window rather than one specific pair.
+        outboundDate: v.optional(v.string()), // YYYY-MM-DD
+        returnDate: v.optional(v.string()),
+        adults: v.optional(v.float64()),
+        travelClass: v.optional(v.string()),
+        stops: v.optional(v.string()),
+        currency: v.string(),
+
+        // Fare when the watch was created — what "dropped" is measured against.
+        baselinePrice: v.float64(),
+        // Explicit user target ("tell me under €400"). Absent = notify on any
+        // meaningful drop below the baseline.
+        targetPrice: v.optional(v.float64()),
+
+        lastCheckedPrice: v.optional(v.float64()),
+        lastCheckedAt: v.optional(v.float64()),
+        // Guards repeat emails: we only re-notify on a further drop below this.
+        lastNotifiedPrice: v.optional(v.float64()),
+        lastNotifiedAt: v.optional(v.float64()),
+        notifyCount: v.optional(v.float64()),
+        consecutiveFailures: v.optional(v.float64()),
+
+        status: v.union(
+            v.literal("pending"),       // awaiting double opt-in
+            v.literal("active"),
+            v.literal("unsubscribed"),
+            v.literal("expired")        // travel date passed, or watch aged out
+        ),
+        confirmToken: v.string(),
+        unsubscribeToken: v.string(),
+
+        language: v.optional(v.string()),
+        source: v.optional(v.string()),   // "chatgpt-app" | "web" | ...
+        userId: v.optional(v.string()),   // set if a logged-in user created it
+
+        createdAt: v.float64(),
+        confirmedAt: v.optional(v.float64()),
+        unsubscribedAt: v.optional(v.float64()),
+        // When this watch stops being useful (travel date, or a hard cap).
+        expiresAt: v.float64(),
+        // Cron ordering: the earliest moment this row should be re-priced.
+        nextCheckAt: v.float64(),
+    })
+        .index("by_confirm_token", ["confirmToken"])
+        .index("by_unsubscribe_token", ["unsubscribeToken"])
+        .index("by_email", ["email"])
+        // Drives the cron: scan active rows whose next check is due.
+        .index("by_status_and_next_check", ["status", "nextCheckAt"]),
+
     newsletterSubscribers: defineTable({
         email: v.string(),
         status: v.union(

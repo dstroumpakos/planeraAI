@@ -15,6 +15,16 @@ crons.interval(
 );
 
 // Soft-delete expired deals after 24 hours
+// Per-route fare watches. Ticks hourly, but each individual watch is re-priced
+// at most every 12h and the batch per tick is bounded, so cost scales with the
+// number of watches rather than with cron frequency.
+crons.interval(
+    "check-route-price-alerts",
+    { hours: 1 },
+    internal.routePriceAlerts.checkDueAlerts,
+    {},
+);
+
 crons.interval(
     "soft-delete-expired-deals",
     { hours: 1 },

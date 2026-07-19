@@ -96,6 +96,8 @@ import type * as publishedItinerariesActions from "../publishedItinerariesAction
 import type * as referrals from "../referrals.js";
 import type * as reservations from "../reservations.js";
 import type * as reservationsInbound from "../reservationsInbound.js";
+import type * as routeAlertEmails from "../routeAlertEmails.js";
+import type * as routePriceAlerts from "../routePriceAlerts.js";
 import type * as shareCards from "../shareCards.js";
 import type * as shareCardsAction from "../shareCardsAction.js";
 import type * as sights from "../sights.js";
@@ -208,6 +210,8 @@ declare const fullApi: ApiFromModules<{
   referrals: typeof referrals;
   reservations: typeof reservations;
   reservationsInbound: typeof reservationsInbound;
+  routeAlertEmails: typeof routeAlertEmails;
+  routePriceAlerts: typeof routePriceAlerts;
   shareCards: typeof shareCards;
   shareCardsAction: typeof shareCardsAction;
   sights: typeof sights;
