@@ -29,6 +29,7 @@ import type * as errorReporter from "../errorReporter.js";
 import type * as errorReporterDb from "../errorReporterDb.js";
 import type * as explore from "../explore.js";
 import type * as exploreDestination from "../exploreDestination.js";
+import type * as exploreDestinationPublic from "../exploreDestinationPublic.js";
 import type * as explorePublic from "../explorePublic.js";
 import type * as features from "../features.js";
 import type * as flightBooking from "../flightBooking.js";
@@ -62,6 +63,7 @@ import type * as lib_searchApiExploreDestination from "../lib/searchApiExploreDe
 import type * as lib_searchApiFlightCalendar from "../lib/searchApiFlightCalendar.js";
 import type * as lib_searchApiFlightSearch from "../lib/searchApiFlightSearch.js";
 import type * as lib_searchApiFlights from "../lib/searchApiFlights.js";
+import type * as lib_searchCacheKeys from "../lib/searchCacheKeys.js";
 import type * as lib_serpApiFlights from "../lib/serpApiFlights.js";
 import type * as lowFareRadar from "../lowFareRadar.js";
 import type * as lowFareRadarAuto from "../lowFareRadarAuto.js";
@@ -104,6 +106,7 @@ import type * as sights from "../sights.js";
 import type * as sightsAction from "../sightsAction.js";
 import type * as stats from "../stats.js";
 import type * as streaks from "../streaks.js";
+import type * as translatePublic from "../translatePublic.js";
 import type * as travelers from "../travelers.js";
 import type * as tripCollaborators from "../tripCollaborators.js";
 import type * as tripShareLinks from "../tripShareLinks.js";
@@ -143,6 +146,7 @@ declare const fullApi: ApiFromModules<{
   errorReporterDb: typeof errorReporterDb;
   explore: typeof explore;
   exploreDestination: typeof exploreDestination;
+  exploreDestinationPublic: typeof exploreDestinationPublic;
   explorePublic: typeof explorePublic;
   features: typeof features;
   flightBooking: typeof flightBooking;
@@ -176,6 +180,7 @@ declare const fullApi: ApiFromModules<{
   "lib/searchApiFlightCalendar": typeof lib_searchApiFlightCalendar;
   "lib/searchApiFlightSearch": typeof lib_searchApiFlightSearch;
   "lib/searchApiFlights": typeof lib_searchApiFlights;
+  "lib/searchCacheKeys": typeof lib_searchCacheKeys;
   "lib/serpApiFlights": typeof lib_serpApiFlights;
   lowFareRadar: typeof lowFareRadar;
   lowFareRadarAuto: typeof lowFareRadarAuto;
@@ -218,6 +223,7 @@ declare const fullApi: ApiFromModules<{
   sightsAction: typeof sightsAction;
   stats: typeof stats;
   streaks: typeof streaks;
+  translatePublic: typeof translatePublic;
   travelers: typeof travelers;
   tripCollaborators: typeof tripCollaborators;
   tripShareLinks: typeof tripShareLinks;

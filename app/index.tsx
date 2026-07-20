@@ -15,7 +15,13 @@ import * as SecureStore from "expo-secure-store";
 
 // Fallback colors for when theme is not available (e.g., during initial load)
 const COLORS = LIGHT_COLORS;
-const ENABLE_GOOGLE = false;
+// Google Sign-In needs only a web client ID on Android, but on iOS it also
+// needs an iOS OAuth client plus its reversed URL scheme registered through the
+// google-signin config plugin. Until that iOS client exists, Android is the
+// only platform where the button can actually complete a sign-in — iOS users
+// have Apple Sign-In, which Google would otherwise sit next to as a dead
+// button. Flip this to `true` once `iosUrlScheme` is configured.
+const ENABLE_GOOGLE = Platform.OS === "android";
 // Mirror of PENDING_INVITE_KEY in app/invite/[token].tsx — a trip invite the
 // user opened before signing in, to be resumed once authenticated.
 const PENDING_INVITE_KEY = "pendingInviteToken";

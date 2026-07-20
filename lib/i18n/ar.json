@@ -505,7 +505,14 @@
     "noPreviousPurchases": "لم نتمكن من العثور على مشتريات سابقة لاستعادتها.",
     "alreadyActiveRestore": "لديك بالفعل اشتراك نشط. إذا لم يظهر، جرب الضغط على 'استعادة المشتريات' أدناه.",
     "alreadyActiveSyncRestore": "لديك بالفعل اشتراك نشط. يرجى الضغط على 'استعادة المشتريات' لمزامنته مع حسابك.",
-    "noPurchasesContact": "لم نتمكن من العثور على مشتريات سابقة لاستعادتها. إذا كنت تعتقد أن هذا خطأ، يرجى التواصل مع الدعم."
+    "noPurchasesContact": "لم نتمكن من العثور على مشتريات سابقة لاستعادتها. إذا كنت تعتقد أن هذا خطأ، يرجى التواصل مع الدعم.",
+    "billingUnavailableTitle": "غير متوفر على أندرويد بعد",
+    "billingUnavailableBody": "يمكن حاليًا شراء Planera Pro من تطبيق iOS فقط. الدفع عبر Google Play قادم قريبًا — يبقى حسابك ورحلاتك كما هي على كلا النظامين.",
+    "billingUnavailableCta": "غير متوفر على أندرويد بعد",
+    "priceUnavailable": "—",
+    "couldNotVerify": "تعذّر التحقق من عملية الشراء لديك مع المتجر.",
+    "missingReceipt": "إيصال المتجر مفقود — لا يمكن التحقق من عملية الشراء.",
+    "securedWithPlayStore": "مؤمَّن عبر Google Play"
   },
   "destinations": {
     "allDestinations": "جميع الوجهات",
@@ -1230,6 +1237,10 @@
     "searchOnIberia": "ابحث عن رحلات على Iberia",
     "searchFlightsOnVolotea": "رحلات اقتصادية عبر أوروبا",
     "searchOnVolotea": "ابحث عن رحلات على Volotea",
+    "searchFlightsOnAirSerbia": "رحلات مباشرة عبر بلغراد",
+    "searchOnAirSerbia": "احجز رحلات على Air Serbia",
+    "searchFlightsOnLot": "عبر وارسو إلى أوروبا وأمريكا وآسيا",
+    "searchOnLot": "احجز رحلات على LOT",
     "searchHotelsOnTripcom": "فنادق وإقامات حول العالم",
     "searchOnTripcomHotels": "ابحث عن فنادق على Trip.com",
     "searchStaysOnEsky": "عروض الفنادق والإقامة",

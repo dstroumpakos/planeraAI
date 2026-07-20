@@ -1711,7 +1711,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 8,
     paddingHorizontal: 12,
-    paddingVertical: Platform.OS === "ios" ? 10 : 4,
+    // Android TextInput carries its own vertical padding, so it needs less
+    // from the container to match the iOS box height.
+    paddingVertical: Platform.OS === "ios" ? 10 : 8,
     borderRadius: 12,
     borderWidth: 1,
     marginBottom: 12,

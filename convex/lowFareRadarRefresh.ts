@@ -273,6 +273,8 @@ export const refreshManualDealPrices = internalAction({
             matchType: match.matchType,
             matchedFlight,
             ...(ceiling != null ? { ceiling } : {}),
+            // Persisted on the deal for the newsletter's "% below typical" badge.
+            ...(typical != null ? { typicalPrice: typical } : {}),
           });
 
           const changeRow = (): PriceChange => ({

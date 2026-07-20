@@ -25,20 +25,10 @@ import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { reportError } from "./helpers/reportError";
 import { fetchFlightCalendar } from "./lib/searchApiFlightCalendar";
+import { calendarCacheKey as buildCacheKey } from "./lib/searchCacheKeys";
 import type { FlightCalendar, FlightCalendarQuery } from "../types/flights";
 
 const CALENDAR_CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12h
-
-function buildCacheKey(q: FlightCalendarQuery): string {
-  const today = new Date().toISOString().split("T")[0];
-  return [
-    "calendar:v1",
-    today, // rolling window → refresh daily
-    q.departureId.trim().toUpperCase(),
-    q.arrivalId.trim().toUpperCase(),
-    (q.currency || "EUR").toUpperCase(),
-  ].join("|");
-}
 
 export const flightCalendar = action({
   args: {
@@ -275,6 +265,63 @@ export const flightCalendarPublic = action({
         arrivalId: args.input?.arrivalId,
       });
       throw err;
+    }
+  },
+});
+
+/**
+ * Cache-backed single-window calendar for the newsletter's route block.
+ * Internal and unauthenticated by design: the caller is our own campaign
+ * fan-out, which fetches once per send batch — after the first batch (and for
+ * any app user browsing the same route) this is a pure cache hit, so a large
+ * send costs at most one searchapi call per 12h TTL window.
+ */
+export const fetchForCampaign = internalAction({
+  args: {
+    departureId: v.string(),
+    arrivalId: v.string(),
+    currency: v.optional(v.string()),
+  },
+  handler: async (ctx, args): Promise<FlightCalendar | null> => {
+    const input: FlightCalendarQuery = {
+      departureId: args.departureId,
+      arrivalId: args.arrivalId,
+      currency: args.currency,
+    };
+    if (!input.departureId?.trim() || !input.arrivalId?.trim()) return null;
+
+    try {
+      const cacheKey = buildCacheKey(input);
+      const cached: FlightCalendar | null = await ctx.runQuery(
+        internal.flightSearchCache.readCache,
+        { cacheKey }
+      );
+      if (cached) return cached;
+
+      const result = await fetchFlightCalendar(input);
+      if (result && result.dates.length > 0) {
+        try {
+          await ctx.runMutation(internal.flightSearchCache.writeCache, {
+            cacheKey,
+            kind: "calendar",
+            ttlMs: CALENDAR_CACHE_TTL_MS,
+            normalizedResults: result,
+            departureId: result.departureId,
+            arrivalId: result.arrivalId,
+            currency: result.currency,
+          });
+        } catch {
+          console.error("[calendar] campaign cache write failed");
+        }
+      }
+      return result;
+    } catch (err) {
+      // A missing strip must never fail a newsletter send — report and omit.
+      await reportError(ctx, "flightCalendar:fetchForCampaign", err, {
+        departureId: args.departureId,
+        arrivalId: args.arrivalId,
+      });
+      return null;
     }
   },
 });

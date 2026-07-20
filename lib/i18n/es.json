@@ -505,7 +505,14 @@
     "noPreviousPurchases": "No pudimos encontrar compras anteriores para restaurar.",
     "alreadyActiveRestore": "Ya tienes una suscripción activa. Si no aparece, intenta tocar 'Restaurar Compras' abajo.",
     "alreadyActiveSyncRestore": "Ya tienes una suscripción activa. Por favor toca 'Restaurar Compras' para sincronizarla con tu cuenta.",
-    "noPurchasesContact": "No pudimos encontrar compras anteriores para restaurar. Si crees que esto es un error, contacta con soporte."
+    "noPurchasesContact": "No pudimos encontrar compras anteriores para restaurar. Si crees que esto es un error, contacta con soporte.",
+    "billingUnavailableTitle": "Aún no disponible en Android",
+    "billingUnavailableBody": "Por ahora, Planera Pro solo se puede comprar en la app de iOS. Los pagos con Google Play llegarán pronto: tu cuenta y tus viajes son los mismos en ambas plataformas.",
+    "billingUnavailableCta": "Aún no disponible en Android",
+    "priceUnavailable": "—",
+    "couldNotVerify": "No se pudo verificar tu compra con la tienda.",
+    "missingReceipt": "Falta el recibo de la tienda: no se puede verificar la compra.",
+    "securedWithPlayStore": "Protegido con Google Play"
   },
   "destinations": {
     "allDestinations": "Todos los Destinos",
@@ -1225,6 +1232,10 @@
     "searchOnIberia": "Buscar Vuelos en Iberia",
     "searchFlightsOnVolotea": "Vuelos de bajo coste por Europa",
     "searchOnVolotea": "Buscar Vuelos en Volotea",
+    "searchFlightsOnAirSerbia": "Vuelos directos vía Belgrado",
+    "searchOnAirSerbia": "Reservar Vuelos en Air Serbia",
+    "searchFlightsOnLot": "Vía Varsovia a Europa, EE. UU. y Asia",
+    "searchOnLot": "Reservar Vuelos en LOT",
     "searchHotelsOnTripcom": "Hoteles y alojamientos en todo el mundo",
     "searchOnTripcomHotels": "Buscar Hoteles en Trip.com",
     "searchStaysOnEsky": "Ofertas de hoteles y alojamientos",

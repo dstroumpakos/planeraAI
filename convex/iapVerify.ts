@@ -22,6 +22,7 @@ import {
 } from "@apple/app-store-server-library";
 import { getAppleRootCertificates } from "./lib/appleRootCerts";
 import { BILLING_GRACE_PERIOD_MS } from "./helpers/subscription";
+import { refreshGooglePurchaseExpiry } from "./iapVerifyGoogle";
 
 const PRODUCTION_URL = "https://buy.itunes.apple.com/verifyReceipt";
 const SANDBOX_URL = "https://sandbox.itunes.apple.com/verifyReceipt";
@@ -394,11 +395,31 @@ export const verifyAndApplyApplePurchase = action({
  * `users.refreshSubscriptionExpiry` ("refreshed" | "downgraded" | ...).
  */
 async function refreshOneSubscription(ctx: any, userId: string): Promise<string> {
-  const sub: { receipt: string; productId: string } | null = await ctx.runQuery(
-    internal.users.getLatestSubscriptionReceipt,
-    { userId }
-  );
+  const sub: {
+    receipt: string;
+    productId: string;
+    platform: "ios" | "android";
+  } | null = await ctx.runQuery(internal.users.getLatestSubscriptionReceipt, {
+    userId,
+  });
   if (!sub?.receipt) return "no_receipt";
+
+  // Play subscriptions must be re-verified against Google. Sending a Play
+  // purchase token to Apple's verifyReceipt would fail every run and, without
+  // this branch, silently downgrade paying Android subscribers.
+  if (sub.platform === "android") {
+    const fresh = await refreshGooglePurchaseExpiry(sub.receipt);
+    if (!fresh) return "unchanged";
+    const googleResult: { action: string } = await ctx.runMutation(
+      internal.users.refreshSubscriptionExpiry,
+      {
+        userId,
+        expiresAt: fresh.expiresAt,
+        originalTransactionId: fresh.originalTransactionId,
+      }
+    );
+    return googleResult.action;
+  }
 
   const resp = await verifyAppleReceipt(sub.receipt);
   if (resp.status !== 0) {

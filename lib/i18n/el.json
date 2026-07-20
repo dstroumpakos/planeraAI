@@ -505,7 +505,14 @@
     "noPreviousPurchases": "Δεν βρήκαμε προηγούμενες αγορές για επαναφορά.",
     "alreadyActiveRestore": "Έχετε ήδη ενεργή συνδρομή. Αν δεν εμφανίζεται, δοκιμάστε να πατήσετε 'Επαναφορά Αγορών' παρακάτω.",
     "alreadyActiveSyncRestore": "Έχετε ήδη ενεργή συνδρομή. Πατήστε 'Επαναφορά Αγορών' για να τη συγχρονίσετε με τον λογαριασμό σας.",
-    "noPurchasesContact": "Δεν βρήκαμε προηγούμενες αγορές για επαναφορά. Εάν πιστεύετε ότι πρόκειται για σφάλμα, επικοινωνήστε με την υποστήριξη."
+    "noPurchasesContact": "Δεν βρήκαμε προηγούμενες αγορές για επαναφορά. Εάν πιστεύετε ότι πρόκειται για σφάλμα, επικοινωνήστε με την υποστήριξη.",
+    "billingUnavailableTitle": "Δεν είναι ακόμη διαθέσιμο στο Android",
+    "billingUnavailableBody": "Το Planera Pro μπορεί προς το παρόν να αγοραστεί μόνο από την εφαρμογή iOS. Οι πληρωμές μέσω Google Play έρχονται σύντομα — ο λογαριασμός και τα ταξίδια σας παραμένουν ίδια και στις δύο πλατφόρμες.",
+    "billingUnavailableCta": "Δεν είναι ακόμη διαθέσιμο στο Android",
+    "priceUnavailable": "—",
+    "couldNotVerify": "Δεν ήταν δυνατή η επαλήθευση της αγοράς σας με το κατάστημα.",
+    "missingReceipt": "Λείπει η απόδειξη του καταστήματος — η αγορά δεν μπορεί να επαληθευτεί.",
+    "securedWithPlayStore": "Ασφαλής μέσω Google Play"
   },
   "destinations": {
     "allDestinations": "Όλοι οι Προορισμοί",
@@ -1230,6 +1237,10 @@
     "searchOnIberia": "Αναζήτηση Πτήσεων στην Iberia",
     "searchFlightsOnVolotea": "Οικονομικές πτήσεις σε όλη την Ευρώπη",
     "searchOnVolotea": "Αναζήτηση Πτήσεων στη Volotea",
+    "searchFlightsOnAirSerbia": "Απευθείας πτήσεις μέσω Βελιγραδίου",
+    "searchOnAirSerbia": "Κράτηση Πτήσεων στην Air Serbia",
+    "searchFlightsOnLot": "Μέσω Βαρσοβίας σε Ευρώπη, ΗΠΑ & Ασία",
+    "searchOnLot": "Κράτηση Πτήσεων στη LOT",
     "searchHotelsOnTripcom": "Ξενοδοχεία & καταλύματα παγκοσμίως",
     "searchOnTripcomHotels": "Αναζήτηση Ξενοδοχείων στο Trip.com",
     "searchStaysOnEsky": "Προσφορές ξενοδοχείων & καταλυμάτων",

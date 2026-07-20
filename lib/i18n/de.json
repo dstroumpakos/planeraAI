@@ -505,7 +505,14 @@
     "noPreviousPurchases": "Wir konnten keine früheren Käufe zum Wiederherstellen finden.",
     "alreadyActiveRestore": "Sie haben bereits ein aktives Abonnement. Falls es nicht angezeigt wird, tippen Sie unten auf 'Käufe Wiederherstellen'.",
     "alreadyActiveSyncRestore": "Sie haben bereits ein aktives Abonnement. Bitte tippen Sie auf 'Käufe Wiederherstellen', um es mit Ihrem Konto zu synchronisieren.",
-    "noPurchasesContact": "Wir konnten keine früheren Käufe zum Wiederherstellen finden. Wenn Sie glauben, dass dies ein Fehler ist, kontaktieren Sie bitte den Support."
+    "noPurchasesContact": "Wir konnten keine früheren Käufe zum Wiederherstellen finden. Wenn Sie glauben, dass dies ein Fehler ist, kontaktieren Sie bitte den Support.",
+    "billingUnavailableTitle": "Auf Android noch nicht verfügbar",
+    "billingUnavailableBody": "Planera Pro kann derzeit nur in der iOS-App gekauft werden. Google-Play-Zahlungen folgen in Kürze — dein Konto und deine Reisen bleiben auf beiden Plattformen gleich.",
+    "billingUnavailableCta": "Auf Android noch nicht verfügbar",
+    "priceUnavailable": "—",
+    "couldNotVerify": "Dein Kauf konnte nicht mit dem Store verifiziert werden.",
+    "missingReceipt": "Beleg des Stores fehlt — der Kauf kann nicht verifiziert werden.",
+    "securedWithPlayStore": "Gesichert über Google Play"
   },
   "destinations": {
     "allDestinations": "Alle Reiseziele",
@@ -1230,6 +1237,10 @@
     "searchOnIberia": "Flüge auf Iberia suchen",
     "searchFlightsOnVolotea": "Günstige Flüge durch Europa",
     "searchOnVolotea": "Flüge auf Volotea suchen",
+    "searchFlightsOnAirSerbia": "Direktflüge über Belgrad",
+    "searchOnAirSerbia": "Flüge auf Air Serbia buchen",
+    "searchFlightsOnLot": "Über Warschau nach Europa, USA & Asien",
+    "searchOnLot": "Flüge auf LOT buchen",
     "searchHotelsOnTripcom": "Hotels & Unterkünfte weltweit",
     "searchOnTripcomHotels": "Hotels auf Trip.com suchen",
     "searchStaysOnEsky": "Hotel- & Unterkunftsangebote",

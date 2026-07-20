@@ -8,6 +8,7 @@ import { useState, useEffect } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useTheme } from "@/lib/ThemeContext";
 import { useIAP } from "@/lib/useIAP";
+import { finishRestoredPurchase, type PurchaseResult } from "@/lib/iap";
 import { useTranslation } from "react-i18next";
 
 export default function SubscriptionScreen() {
@@ -21,12 +22,15 @@ export default function SubscriptionScreen() {
     // client-supplied productId/transactionId without server-side proof.
     // @ts-ignore - API types may not include this yet on first deploy
     const verifyApplePurchase = useAction(api.iapVerify.verifyAndApplyApplePurchase);
+    // @ts-ignore - API types may not include this yet on first deploy
+    const verifyGooglePurchase = useAction((api as any).iapVerifyGoogle.verifyAndApplyGooglePurchase);
     const userPlan = useQuery(api.users.getPlan as any, token ? { token } : "skip");
     
     // IAP hook for real Apple StoreKit purchases
     const {
         isLoading: iapLoading,
         error: iapError,
+        billingSupported,
         yearlySubscription,
         monthlySubscription,
         singleTrip,
@@ -60,11 +64,51 @@ export default function SubscriptionScreen() {
     const yearlyPrice = yearlySubscription?.price || null;
     const monthlyPrice = monthlySubscription?.price || null;
     const singleTripPrice = singleTrip?.price || null;
-    
+
     // Check if products are loaded (real StoreKit products, not mocks)
     const productsLoaded = yearlyPrice && monthlyPrice;
 
+    // Without a store connection the prices above are mocks, so show a dash
+    // rather than a number the user could be charged nothing like.
+    const priceLabel = (price: string | null) =>
+        !billingSupported ? t('subscription.priceUnavailable') : price || t('common.loading');
+
+    // Route each receipt to the verifier for the store that issued it: Apple
+    // takes a StoreKit receipt/JWS, Google takes a Play purchase token. Both
+    // return the same shape.
+    const verifyPurchase = async (result: PurchaseResult): Promise<any> => {
+        const common = {
+            token: token!,
+            productId: result.productId!,
+            transactionId: result.transactionId!,
+        };
+        if (result.platform === 'android') {
+            return await verifyGooglePurchase({ ...common, purchaseToken: result.receipt! });
+        }
+        return await verifyApplePurchase({ ...common, receipt: result.receipt! });
+    };
+
+    // Verify a purchase recovered by restore, then settle it with the store.
+    // Play auto-refunds anything left unacknowledged/unconsumed after 3 days,
+    // so a granted entitlement must be followed by finishing the purchase.
+    const verifyRestoredPurchase = async (result: PurchaseResult): Promise<boolean> => {
+        const vr: any = await verifyPurchase(result);
+        if (!vr?.success) return false;
+        if (result.platform === 'android' && result.receipt) {
+            await finishRestoredPurchase(result.productId!, result.receipt);
+        }
+        return true;
+    };
+
     const handlePurchase = async () => {
+        if (!billingSupported) {
+            Alert.alert(
+                t('subscription.billingUnavailableTitle'),
+                t('subscription.billingUnavailableBody')
+            );
+            return;
+        }
+
         if (!token) {
             Alert.alert(t('common.error'), t('subscription.signInToPurchase'));
             return;
@@ -110,17 +154,12 @@ export default function SubscriptionScreen() {
 
             if (result.success && result.transactionId) {
                 if (!result.receipt) {
-                    throw new Error("Missing App Store receipt — purchase cannot be verified.");
+                    throw new Error(t('subscription.missingReceipt'));
                 }
-                // Verify the receipt with Apple, then apply entitlement server-side
-                const verifyRes: any = await verifyApplePurchase({
-                    token,
-                    productId: result.productId!,
-                    transactionId: result.transactionId,
-                    receipt: result.receipt,
-                });
+                // Verify the receipt with the store, then apply entitlement server-side
+                const verifyRes: any = await verifyPurchase(result);
                 if (!verifyRes?.success) {
-                    throw new Error(verifyRes?.error || "Could not verify purchase with Apple.");
+                    throw new Error(verifyRes?.error || t('subscription.couldNotVerify'));
                 }
 
                 if (Platform.OS !== "web") {
@@ -146,13 +185,7 @@ export default function SubscriptionScreen() {
                         for (const r of successfulRestores) {
                             if (!r.receipt) continue;
                             try {
-                                const vr: any = await verifyApplePurchase({
-                                    token,
-                                    productId: r.productId!,
-                                    transactionId: r.transactionId!,
-                                    receipt: r.receipt,
-                                });
-                                if (vr?.success) anyVerified = true;
+                                if (await verifyRestoredPurchase(r)) anyVerified = true;
                             } catch (e) {
                                 console.warn("[Subscription] Restore verify failed for", r.productId, e);
                             }
@@ -194,6 +227,14 @@ export default function SubscriptionScreen() {
     };
 
     const handleRestorePurchases = async () => {
+        if (!billingSupported) {
+            Alert.alert(
+                t('subscription.billingUnavailableTitle'),
+                t('subscription.billingUnavailableBody')
+            );
+            return;
+        }
+
         if (!token) {
             Alert.alert(t('common.error'), t('subscription.signInToRestore'));
             return;
@@ -213,13 +254,7 @@ export default function SubscriptionScreen() {
                 for (const r of successfulRestores) {
                     if (!r.receipt) continue;
                     try {
-                        const vr: any = await verifyApplePurchase({
-                            token,
-                            productId: r.productId!,
-                            transactionId: r.transactionId!,
-                            receipt: r.receipt,
-                        });
-                        if (vr?.success) anyVerified = true;
+                        if (await verifyRestoredPurchase(r)) anyVerified = true;
                     } catch (e) {
                         console.warn("[Subscription] Restore verify failed for", r.productId, e);
                     }
@@ -252,7 +287,7 @@ export default function SubscriptionScreen() {
 
     const isSubscriptionActive = userPlan?.isSubscriptionActive;
     const isProcessing = loading !== null || restoring || iapLoading;
-    const purchaseDisabled = isProcessing || (Platform.OS === 'ios' && !productsLoaded);
+    const purchaseDisabled = isProcessing || !billingSupported || !productsLoaded;
 
     // Current paid plan banner: show which subscription (monthly/yearly) the
     // user is on, plus renew/expire date, when they have an active sub.
@@ -310,6 +345,22 @@ export default function SubscriptionScreen() {
                     </View>
                 )}
 
+                {/* No store connection on this platform — explain instead of
+                    showing mock prices behind a button that cannot succeed. */}
+                {!billingSupported && (
+                    <View style={[styles.currentPlanCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                        <Ionicons name="information-circle" size={22} color={colors.textMuted} />
+                        <View style={styles.currentPlanInfo}>
+                            <Text style={[styles.currentPlanName, { color: colors.text }]}>
+                                {t('subscription.billingUnavailableTitle')}
+                            </Text>
+                            <Text style={[styles.currentPlanDetail, { color: colors.textMuted }]}>
+                                {t('subscription.billingUnavailableBody')}
+                            </Text>
+                        </View>
+                    </View>
+                )}
+
                 {/* Yearly Plan - Best Value */}
                 <TouchableOpacity 
                     style={[
@@ -331,7 +382,7 @@ export default function SubscriptionScreen() {
                             </View>
                         </View>
                         <View style={styles.planPriceContainer}>
-                            <Text style={[styles.planPrice, { color: colors.text }]}>{yearlyPrice || t('common.loading')}</Text>
+                            <Text style={[styles.planPrice, { color: colors.text }]}>{priceLabel(yearlyPrice)}</Text>
                             <Text style={[styles.planPeriod, { color: colors.textMuted }]}>{t('subscription.perYear')}</Text>
                         </View>
                         <Text style={[styles.planBilled, { color: colors.textMuted }]}>{t('subscription.billedAnnually')} <Text style={{ color: '#DC2626' }}>{t('subscription.cancelAnytime')}</Text></Text>
@@ -369,7 +420,7 @@ export default function SubscriptionScreen() {
                             <Text style={[styles.planName, { color: colors.text }]}>{t('subscription.proMonthly')}</Text>
                         </View>
                         <View style={styles.planPriceContainer}>
-                            <Text style={[styles.planPrice, { color: colors.text }]}>{monthlyPrice || t('common.loading')}</Text>
+                            <Text style={[styles.planPrice, { color: colors.text }]}>{priceLabel(monthlyPrice)}</Text>
                             <Text style={[styles.planPeriod, { color: colors.textMuted }]}>{t('subscription.perMonth')}</Text>
                         </View>
                         <Text style={[styles.planBilled, { color: colors.textMuted }]}>{t('subscription.billedMonthly')} <Text style={{ color: '#DC2626' }}>{t('subscription.cancelAnytime')}</Text></Text>
@@ -408,7 +459,7 @@ export default function SubscriptionScreen() {
                             <Text style={[styles.planSubtext, { color: colors.textMuted }]}>{t('subscription.oneTimePurchase')}</Text>
                         </View>
                         <View style={styles.planPriceContainer}>
-                            <Text style={[styles.planPrice, { color: colors.text }]}>{singleTripPrice || t('common.loading')}</Text>
+                            <Text style={[styles.planPrice, { color: colors.text }]}>{priceLabel(singleTripPrice)}</Text>
                             <Text style={[styles.planPeriod, { color: colors.textMuted }]}>{t('subscription.perTrip')}</Text>
                         </View>
                         <View style={styles.featuresList}>
@@ -444,7 +495,13 @@ export default function SubscriptionScreen() {
                         <Text style={[styles.linkText, { color: colors.textSecondary }]}>{t('auth.privacyPolicy')}</Text>
                     </TouchableOpacity>
                     <Text style={[styles.linkDot, { color: colors.textMuted }]}>•</Text>
-                    <TouchableOpacity onPress={() => Linking.openURL("https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")}>
+                    <TouchableOpacity
+                        onPress={() =>
+                            Platform.OS === 'android'
+                                ? router.push("/terms")
+                                : Linking.openURL("https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")
+                        }
+                    >
                         <Text style={[styles.linkText, { color: colors.textSecondary }]}>{t('auth.termsOfUse')}</Text>
                     </TouchableOpacity>
                 </View>
@@ -457,7 +514,7 @@ export default function SubscriptionScreen() {
                     )}
                 </TouchableOpacity>
 
-                {iapError && Platform.OS === 'ios' ? (
+                {iapError && billingSupported ? (
                     <Text style={[styles.termsText, { color: '#DC2626', marginTop: 12 }]}>
                         {iapError}
                     </Text>
@@ -475,16 +532,24 @@ export default function SubscriptionScreen() {
                         <ActivityIndicator size="small" color={colors.text} />
                     ) : (
                         <Text style={[styles.ctaButtonText, { color: colors.text }]}>
-                            {!productsLoaded && Platform.OS === 'ios' 
-                                ? t('subscription.loadingProducts') 
-                                : selectedPlan === "single" ? t('subscription.purchaseTripCredit') : t('subscription.startMyNextEra')}
+                            {!billingSupported
+                                ? t('subscription.billingUnavailableCta')
+                                : !productsLoaded
+                                    ? t('subscription.loadingProducts')
+                                    : selectedPlan === "single" ? t('subscription.purchaseTripCredit') : t('subscription.startMyNextEra')}
                         </Text>
                     )}
                 </TouchableOpacity>
-                <View style={styles.securedRow}>
-                    <Ionicons name="lock-closed" size={14} color={colors.textMuted} />
-                    <Text style={[styles.securedText, { color: colors.textMuted }]}>{t('subscription.securedWithAppStore')}</Text>
-                </View>
+                {billingSupported && (
+                    <View style={styles.securedRow}>
+                        <Ionicons name="lock-closed" size={14} color={colors.textMuted} />
+                        <Text style={[styles.securedText, { color: colors.textMuted }]}>
+                            {Platform.OS === 'android'
+                                ? t('subscription.securedWithPlayStore')
+                                : t('subscription.securedWithAppStore')}
+                        </Text>
+                    </View>
+                )}
             </View>
         </SafeAreaView>
     );

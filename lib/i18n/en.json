@@ -505,7 +505,14 @@
     "noPreviousPurchases": "We couldn't find any previous purchases to restore.",
     "alreadyActiveRestore": "You already have an active subscription. If it's not showing, try tapping 'Restore Purchases' below.",
     "alreadyActiveSyncRestore": "You already have an active subscription. Please tap 'Restore Purchases' to sync it to your account.",
-    "noPurchasesContact": "We couldn't find any previous purchases to restore. If you believe this is an error, please contact support."
+    "noPurchasesContact": "We couldn't find any previous purchases to restore. If you believe this is an error, please contact support.",
+    "billingUnavailableTitle": "Not available on Android yet",
+    "billingUnavailableBody": "Planera Pro can currently only be purchased in the iOS app. Google Play billing is coming soon — your account and trips stay the same on both.",
+    "billingUnavailableCta": "Not available on Android yet",
+    "priceUnavailable": "—",
+    "couldNotVerify": "Could not verify your purchase with the store.",
+    "missingReceipt": "Missing store receipt — purchase cannot be verified.",
+    "securedWithPlayStore": "Secured with Google Play"
   },
   "destinations": {
     "allDestinations": "All Destinations",
@@ -1225,6 +1232,10 @@
     "searchOnIberia": "Search Flights on Iberia",
     "searchFlightsOnVolotea": "Low-cost flights across Europe",
     "searchOnVolotea": "Search Flights on Volotea",
+    "searchFlightsOnAirSerbia": "Direct flights via Belgrade",
+    "searchOnAirSerbia": "Book Flights on Air Serbia",
+    "searchFlightsOnLot": "Via Warsaw to Europe, USA & Asia",
+    "searchOnLot": "Book Flights on LOT",
     "searchHotelsOnTripcom": "Hotels & stays worldwide",
     "searchOnTripcomHotels": "Search Hotels on Trip.com",
     "searchStaysOnEsky": "Hotels & accommodation deals",

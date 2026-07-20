@@ -112,6 +112,7 @@ export const get = query({
       currency: v.optional(v.string()),
       payload: v.any(),
       capturedAt: v.float64(),
+      updatedAt: v.optional(v.float64()),
     })
   ),
   handler: async (ctx, args) => {
@@ -133,8 +134,82 @@ export const get = query({
       language: row.language,
       currency: row.currency,
       payload: row.payload,
+      // `capturedAt` stays the ORIGINAL save: it dates the price snapshot, and
+      // a later refine of the itinerary does not re-price anything.
       capturedAt: row.createdAt,
+      updatedAt: row.updatedAt,
     };
+  },
+});
+
+/**
+ * Replace a saved trip's card in place, keeping its slug (and therefore its
+ * link) stable. Used when the user refines a trip from inside ChatGPT —
+ * "swap day 3 for something outdoorsy" should update the link they already
+ * shared, not mint a second one.
+ *
+ * Access model: the slug IS the credential, exactly as in `save`/`get`. Anyone
+ * who holds the link can also rewrite the trip behind it — an accepted
+ * consequence of a capability URL with no accounts. This is why nothing
+ * private should ever be stored here, and why the returned payload is only
+ * ever a trip card.
+ *
+ * Unknown slugs return `{ updated: false }` rather than throwing, so a stale
+ * link in a long conversation degrades into "save it again" instead of an
+ * error card.
+ */
+export const update = mutation({
+  args: {
+    slug: v.string(),
+    payload: v.any(),
+    destination: v.optional(v.string()),
+    days: v.optional(v.float64()),
+    language: v.optional(v.string()),
+    currency: v.optional(v.string()),
+  },
+  returns: v.object({
+    updated: v.boolean(),
+    slug: v.string(),
+    url: v.string(),
+    revision: v.float64(),
+  }),
+  handler: async (ctx, args) => {
+    const slug = args.slug.trim().toLowerCase();
+    const url = `https://www.planeraai.app/t/${slug}`;
+    if (!slug) return { updated: false, slug, url, revision: 0 };
+
+    if (args.payload == null || typeof args.payload !== "object") {
+      throw new ConvexError("A trip payload is required.");
+    }
+    if (JSON.stringify(args.payload).length > MAX_PAYLOAD_BYTES) {
+      throw new ConvexError("This trip is too large to save.");
+    }
+    if (args.days !== undefined && !(args.days >= 1 && args.days <= 30)) {
+      throw new ConvexError("Trip length must be between 1 and 30 days.");
+    }
+
+    const row = await ctx.db
+      .query("mcpSavedTrips")
+      .withIndex("by_slug", (q) => q.eq("slug", slug))
+      .unique();
+    if (!row) return { updated: false, slug, url, revision: 0 };
+
+    const revision = (row.revision ?? 0) + 1;
+    await ctx.db.patch(row._id, {
+      payload: args.payload,
+      // Only overwrite metadata the caller actually re-sent; a refine that
+      // changes nothing but the itinerary must not blank the currency.
+      ...(args.destination?.trim()
+        ? { destination: args.destination.trim() }
+        : {}),
+      ...(args.days !== undefined ? { days: args.days } : {}),
+      ...(args.language ? { language: args.language } : {}),
+      ...(args.currency ? { currency: args.currency } : {}),
+      updatedAt: Date.now(),
+      revision,
+    });
+
+    return { updated: true, slug, url, revision };
   },
 });
 

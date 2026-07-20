@@ -34,6 +34,8 @@ export function buildClickUrl(linkId: string, deepTarget?: string): string {
 const TRIPCOM_EVERGREEN = "15735051";
 const IBERIA_EVERGREEN = "15736023";
 const VOLOTEA_EVERGREEN = "15735255";
+const AIRSERBIA_EVERGREEN = "15735227";
+const LOT_EVERGREEN = "16998075";
 
 // Non-deep-link homepage/landing links, keyed by language (fallback: en).
 const KIWI_BY_LANG: Record<string, string> = {
@@ -56,6 +58,22 @@ const ESKY_BY_LANG: Record<string, string> = {
 };
 const TRIPCOM_HOTELS_BY_LANG: Record<string, string> = {
   de: "17000323",
+};
+// Air Serbia localized "book now" text links (homepage landings).
+const AIRSERBIA_BY_LANG: Record<string, string> = {
+  en: "13957405",
+  el: "13971287",
+  es: "13971292",
+  fr: "13957403",
+  de: "13957404",
+};
+// LOT country-homepage links (LOT localizes by market, not language).
+const LOT_BY_LANG: Record<string, string> = {
+  en: "16943085",
+  el: "17250142",
+  es: "17249841",
+  fr: "17249821",
+  de: "16943099",
 };
 
 function pickByLang(map: Record<string, string>, lang: string): string {
@@ -166,7 +184,9 @@ export type FlightPartnerKey =
   | "kiwi"
   | "esky"
   | "iberia"
-  | "volotea";
+  | "volotea"
+  | "airserbia"
+  | "lot";
 
 /** Returns the final (CJ-wrapped when available) flight URL for a partner. */
 export function buildFlightLink(
@@ -190,6 +210,16 @@ export function buildFlightLink(
         return buildClickUrl(VOLOTEA_BY_LANG[p.lang]);
       }
       return buildClickUrl(VOLOTEA_EVERGREEN, voloteaHomeTarget(p.lang));
+    case "airserbia":
+      if (AIRSERBIA_BY_LANG[p.lang]) {
+        return buildClickUrl(AIRSERBIA_BY_LANG[p.lang]);
+      }
+      return buildClickUrl(AIRSERBIA_EVERGREEN);
+    case "lot":
+      if (LOT_BY_LANG[p.lang]) {
+        return buildClickUrl(LOT_BY_LANG[p.lang]);
+      }
+      return buildClickUrl(LOT_EVERGREEN);
     default:
       return skyscannerFlightTarget(p);
   }

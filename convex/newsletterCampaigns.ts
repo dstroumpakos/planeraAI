@@ -37,15 +37,38 @@ import { assertAdmin } from "./admin";
 import {
   renderEmail,
   renderDealsBlock,
+  renderItinerariesBlock,
+  renderSightsBlock,
+  renderAttractionsBlock,
+  renderPackagesBlock,
+  renderGuidesBlock,
+  renderSpotlightBlock,
+  renderCalendarBlock,
+  renderTeaserBlock,
   normalizeLang,
   pickTopDeals,
+  pickGuides,
+  dealPriceSignal,
   CJ_BANNERS,
   FOOTER_COPY,
+  INVITE_COPY,
   MARKETING_FROM,
   MARKETING_EMAIL,
   BASE_URL,
+  queryFeaturedDeals,
+  queryFeaturedItineraries,
+  queryFeaturedSights,
+  queryFeaturedAttractions,
+  queryFeaturedPackages,
   type DealForEmail,
+  type ItineraryForEmail,
+  type SightForEmail,
+  type AttractionForEmail,
+  type PackageForEmail,
+  type RouteBlockMeta,
 } from "./newsletter";
+import { calendarCacheKey, exploreDestCacheKey } from "./lib/searchCacheKeys";
+import type { FlightCalendar, ExploreDestinationFlights } from "../types/flights";
 
 // Self-referential + cross-file internal references hit the type-inference wall
 // until `convex dev` regenerates types; the `as any` cast is the same trick
@@ -96,19 +119,96 @@ interface CampaignContent {
   heroImg?: string;
   includeDeals: boolean;
   dealCount?: number;
+  // Optional enrichment blocks — each is opt-in and paired with a count. If
+  // the flag is on but no content is available at send-time the block is
+  // silently omitted; a missing section is always better than an empty one.
+  includeItineraries?: boolean;
+  itineraryCount?: number;
+  includeSights?: boolean;
+  sightCount?: number;
+  includeAttractions?: boolean;
+  attractionCount?: number;
+  includePackages?: boolean;
+  packageCount?: number;
+  includeGuides?: boolean;
+  guideCount?: number;
+  includeSpotlight?: boolean;
+  // Live-price route block (one pinned route, fetched fresh at send time).
+  routeBlock?: "calendar" | "teaser";
+  routeOrigin?: string;
+  routeDestination?: string;
+  routeOriginCity?: string;
+  routeDestinationCity?: string;
+  routeCurrency?: string;
   bannerKey?: string;
 }
 
+/**
+ * Everything the renderer needs beyond the campaign's own fields — the live
+ * content already-fetched-and-picked by the caller. Kept as a single arg so
+ * new block types can be added without another signature bump.
+ */
+interface CampaignExtras {
+  deals: DealForEmail[];
+  itineraries: ItineraryForEmail[];
+  sights: SightForEmail[];
+  attractions: AttractionForEmail[];
+  packages: PackageForEmail[];
+  // Large "trip of the week" card; when both spotlight and the itinerary list
+  // are on, the builders dedupe so the spotlighted trip never appears twice.
+  spotlight: ItineraryForEmail | null;
+  // Route-block payloads — at most one is non-null, matching `routeBlock`.
+  // Null on a fetch/cache miss, in which case the block is silently omitted.
+  calendar: FlightCalendar | null;
+  teaser: ExploreDestinationFlights | null;
+}
+
 function renderCampaignEmail(
-  campaign: CampaignContent,
+  campaign: CampaignContent & { countryFilter?: string },
   language: string | undefined,
   unsubscribeToken: string,
-  deals: DealForEmail[],
+  extras: CampaignExtras,
 ): { subject: string; html: string; text: string } {
   const lang = normalizeLang(language);
   const unsubscribeUrl = `${BASE_URL}/newsletter/unsubscribe?token=${unsubscribeToken}`;
-  const dealsBlock =
-    campaign.includeDeals && deals.length ? renderDealsBlock(deals, lang) : undefined;
+
+  // Guides are constants (no DB), so they're picked here per-recipient — a
+  // Greek reader gets the Greek pages even on an all-languages campaign.
+  const guides = campaign.includeGuides
+    ? pickGuides(language, clampCount(campaign.guideCount, 2, 3), campaign.countryFilter)
+    : [];
+
+  // Display cities for the route block, falling back to the IATA codes so a
+  // half-filled route still renders something sensible.
+  const routeMeta: RouteBlockMeta = {
+    originCity: campaign.routeOriginCity || campaign.routeOrigin || "",
+    destinationCity: campaign.routeDestinationCity || campaign.routeDestination || "",
+  };
+
+  // Enrichment blocks concatenate into a single HTML string in a stable
+  // order — the spotlight centerpiece, then inspiration (itineraries → sights
+  // → guides), then commercial (attractions → packages → route prices →
+  // flight deals). An unavailable block collapses to "" so ordering never
+  // leaves a visible gap.
+  const enrichment = [
+    campaign.includeSpotlight && extras.spotlight
+      ? renderSpotlightBlock(extras.spotlight, lang) : "",
+    campaign.includeItineraries && extras.itineraries.length
+      ? renderItinerariesBlock(extras.itineraries, lang) : "",
+    campaign.includeSights && extras.sights.length
+      ? renderSightsBlock(extras.sights, lang) : "",
+    guides.length ? renderGuidesBlock(guides, lang) : "",
+    campaign.includeAttractions && extras.attractions.length
+      ? renderAttractionsBlock(extras.attractions, lang) : "",
+    campaign.includePackages && extras.packages.length
+      ? renderPackagesBlock(extras.packages, lang) : "",
+    campaign.routeBlock === "calendar" && extras.calendar
+      ? renderCalendarBlock(extras.calendar, routeMeta, lang) : "",
+    campaign.routeBlock === "teaser" && extras.teaser
+      ? renderTeaserBlock(extras.teaser, routeMeta, lang) : "",
+    campaign.includeDeals && extras.deals.length
+      ? renderDealsBlock(extras.deals, lang) : "",
+  ].filter(Boolean).join("");
 
   const html = renderEmail({
     lang,
@@ -123,23 +223,90 @@ function renderCampaignEmail(
     // Affiliate banner is opt-in per campaign; the key is validated against
     // the CJ creative set so an unknown value just renders nothing.
     banner: (campaign.bannerKey && CJ_BANNERS[campaign.bannerKey as keyof typeof CJ_BANNERS]) || null,
-    dealsBlock,
+    dealsBlock: enrichment || undefined,
+    invite: true,
   });
 
-  const dealsText =
-    campaign.includeDeals && deals.length
-      ? "\n\n" +
-        deals
-          .map((d) => `${d.originCity} → ${d.destinationCity}: ${Math.round(d.price)} ${d.currency}`)
-          .join("\n")
-      : "";
-
-  const text =
-    `${campaign.heading}\n\n${campaign.para1}` +
-    `${campaign.para2 ? "\n\n" + campaign.para2 : ""}${dealsText}\n\n` +
-    `${campaign.ctaText}: ${campaign.ctaUrl}\n\n` +
-    `${FOOTER_COPY[lang].contact} ${MARKETING_EMAIL}\n\n` +
-    `${FOOTER_COPY[lang].unsubscribe}: ${unsubscribeUrl}`;
+  // Plain-text alternative: same content, no images, no styling. Some clients
+  // (and screen readers) prefer this, and it drives spam scoring down.
+  const textParts: string[] = [`${campaign.heading}`, campaign.para1];
+  if (campaign.para2) textParts.push(campaign.para2);
+  if (campaign.includeSpotlight && extras.spotlight) {
+    const s = extras.spotlight;
+    textParts.push(
+      `★ ${s.title} — ${s.destination} (${Math.round(s.durationDays)}d)\n` +
+        `${BASE_URL}/explore/${encodeURIComponent(s.slug)}`,
+    );
+  }
+  if (campaign.includeItineraries && extras.itineraries.length) {
+    textParts.push(
+      extras.itineraries
+        .map((i) => `• ${i.title} — ${i.destination} (${i.durationDays}d)`)
+        .join("\n"),
+    );
+  }
+  if (campaign.includeSights && extras.sights.length) {
+    textParts.push(extras.sights.map((s) => `• ${s.name}`).join("\n"));
+  }
+  if (guides.length) {
+    textParts.push(
+      guides.map((g) => `• ${g.title} — ${BASE_URL}/guides/${g.slug}`).join("\n"),
+    );
+  }
+  if (campaign.includeAttractions && extras.attractions.length) {
+    textParts.push(
+      extras.attractions
+        .map((a) => {
+          const price = a.price != null && a.currency
+            ? ` — from ${Math.round(a.price)} ${a.currency}` : "";
+          return `• ${a.displayTitle}${price}`;
+        })
+        .join("\n"),
+    );
+  }
+  if (campaign.includePackages && extras.packages.length) {
+    textParts.push(
+      extras.packages
+        .map((p) => `• ${p.title} — from ${Math.round(p.priceFrom)} ${p.priceCurrency}`)
+        .join("\n"),
+    );
+  }
+  if (campaign.routeBlock === "calendar" && extras.calendar?.dates?.length) {
+    const top = extras.calendar.dates.filter((d) => d.price > 0).slice(0, 3);
+    if (top.length) {
+      textParts.push(
+        `${routeMeta.originCity} → ${routeMeta.destinationCity}:\n` +
+          top.map((d) => `• ${d.date}: ${Math.round(d.price)} ${extras.calendar!.currency}`).join("\n"),
+      );
+    }
+  }
+  if (campaign.routeBlock === "teaser" && extras.teaser) {
+    const prices = (extras.teaser.flights ?? [])
+      .map((f) => f.price)
+      .filter((p): p is number => typeof p === "number" && p > 0);
+    const cheapest = extras.teaser.cheapestPrice ?? (prices.length ? Math.min(...prices) : undefined);
+    if (cheapest) {
+      textParts.push(
+        `${routeMeta.originCity} → ${routeMeta.destinationCity}: from ${Math.round(cheapest)} ${extras.teaser.currency}`,
+      );
+    }
+  }
+  if (campaign.includeDeals && extras.deals.length) {
+    textParts.push(
+      extras.deals
+        .map((d) => {
+          const signal = dealPriceSignal(d);
+          const note = signal?.kind === "below_typical" ? ` (-${signal.pct}%)` : "";
+          return `• ${d.originCity} → ${d.destinationCity}: ${Math.round(d.price)} ${d.currency}${note}`;
+        })
+        .join("\n"),
+    );
+  }
+  textParts.push(`${INVITE_COPY[lang].text} ${BASE_URL}`);
+  textParts.push(`${campaign.ctaText}: ${campaign.ctaUrl}`);
+  textParts.push(`${FOOTER_COPY[lang].contact} ${MARKETING_EMAIL}`);
+  textParts.push(`${FOOTER_COPY[lang].unsubscribe}: ${unsubscribeUrl}`);
+  const text = textParts.join("\n\n");
 
   return { subject: campaign.subject, html, text };
 }
@@ -156,6 +323,26 @@ const campaignContentArgs = {
   heroImg: v.optional(v.string()),
   includeDeals: v.boolean(),
   dealCount: v.optional(v.float64()),
+  // Optional enrichment blocks — parallel structure to includeDeals/dealCount.
+  includeItineraries: v.optional(v.boolean()),
+  itineraryCount: v.optional(v.float64()),
+  includeSights: v.optional(v.boolean()),
+  sightCount: v.optional(v.float64()),
+  includeAttractions: v.optional(v.boolean()),
+  attractionCount: v.optional(v.float64()),
+  includePackages: v.optional(v.boolean()),
+  packageCount: v.optional(v.float64()),
+  includeGuides: v.optional(v.boolean()),
+  guideCount: v.optional(v.float64()),
+  includeSpotlight: v.optional(v.boolean()),
+  // Live-price route block: pin one route and render it as either a
+  // "cheapest days to fly" calendar strip or a "flights from €X" teaser card.
+  routeBlock: v.optional(v.union(v.literal("calendar"), v.literal("teaser"))),
+  routeOrigin: v.optional(v.string()),
+  routeDestination: v.optional(v.string()),
+  routeOriginCity: v.optional(v.string()),
+  routeDestinationCity: v.optional(v.string()),
+  routeCurrency: v.optional(v.string()),
   bannerKey: v.optional(v.string()),
   languageFilter: v.optional(v.string()),
   sourceFilter: v.optional(v.string()),
@@ -364,6 +551,180 @@ export const deleteCampaign = mutation({
 });
 
 // ---------------------------------------------------------------------------
+// Enrichment content plumbing
+//
+// Deals stay per-subscriber (existing behaviour — a Greek subscriber sees GR
+// deals, a German one sees DE deals — driven by the deal's `origin` IATA).
+// The other enrichment blocks are picked ONCE per send at the campaign's
+// `countryFilter`, because that's the audience the marketer targeted; running
+// extra queries per subscriber for content that changes far more slowly
+// than fares would be wasteful and cache-hostile. Exceptions: guides (pure
+// constants, picked per recipient language inside the renderer) and the
+// route block (fetched per batch through the shared searchapi cache).
+// ---------------------------------------------------------------------------
+
+// Clamp helper: read a count, default to `def`, keep inside [1, hi].
+function clampCount(n: number | undefined, def: number, hi: number): number {
+  const raw = Math.round(Number.isFinite(n as number) ? (n as number) : def);
+  return Math.min(hi, Math.max(1, raw));
+}
+
+/**
+ * How many itineraries to fetch, and how to split them: the spotlight (when
+ * on) takes the top-ranked one, the list gets the rest — so the same trip is
+ * never both the centerpiece and a list row.
+ */
+function splitItineraries(
+  campaign: CampaignContent,
+  fetched: ItineraryForEmail[],
+): { spotlight: ItineraryForEmail | null; itineraries: ItineraryForEmail[] } {
+  const spotlight = campaign.includeSpotlight ? (fetched[0] ?? null) : null;
+  const itineraries = campaign.includeItineraries
+    ? fetched.slice(campaign.includeSpotlight ? 1 : 0)
+    : [];
+  return { spotlight, itineraries };
+}
+
+function itineraryFetchCount(campaign: CampaignContent): number {
+  return (
+    (campaign.includeItineraries ? clampCount(campaign.itineraryCount, 2, 3) : 0) +
+    (campaign.includeSpotlight ? 1 : 0)
+  );
+}
+
+/** The route block's pinned route, or null when not (fully) configured. */
+function routeBlockInputs(
+  campaign: CampaignContent,
+): { kind: "calendar" | "teaser"; origin: string; destination: string; currency?: string } | null {
+  if (!campaign.routeBlock || !campaign.routeOrigin || !campaign.routeDestination) return null;
+  return {
+    kind: campaign.routeBlock,
+    origin: campaign.routeOrigin,
+    destination: campaign.routeDestination,
+    currency: campaign.routeCurrency,
+  };
+}
+
+/**
+ * Direct read of the shared searchapi cache (same rows
+ * `flightSearchCache.readCache` serves), for query contexts that cannot call
+ * the fetch actions. Expired rows read as misses.
+ */
+async function readSearchCacheFromDb(db: any, cacheKey: string): Promise<any | null> {
+  const row = await db
+    .query("flightSearchCache")
+    .withIndex("by_cacheKey", (q: any) => q.eq("cacheKey", cacheKey))
+    .first();
+  if (!row || row.expiresAt < Date.now()) return null;
+  return row.normalizedResults;
+}
+
+/**
+ * Query-context build (used by `previewCampaign`). No runQuery hops. The
+ * route block is CACHE-ONLY here — a query can't hit searchapi — so a preview
+ * may omit it on a cold cache; the test-send (an action) always shows it.
+ */
+async function buildExtrasFromDb(
+  db: any,
+  campaign: CampaignContent & { countryFilter?: string; languageFilter?: string },
+  deals: DealForEmail[],
+): Promise<CampaignExtras> {
+  const country = campaign.countryFilter;
+  const itinMax = itineraryFetchCount(campaign);
+  const route = routeBlockInputs(campaign);
+  const [fetchedItins, sights, attractions, packages, calendar, teaser] = await Promise.all([
+    itinMax
+      ? queryFeaturedItineraries(db, { country, max: itinMax })
+      : Promise.resolve<ItineraryForEmail[]>([]),
+    campaign.includeSights
+      ? queryFeaturedSights(db, { max: clampCount(campaign.sightCount, 3, 5) })
+      : Promise.resolve<SightForEmail[]>([]),
+    campaign.includeAttractions
+      ? queryFeaturedAttractions(db, { country, max: clampCount(campaign.attractionCount, 3, 4) })
+      : Promise.resolve<AttractionForEmail[]>([]),
+    campaign.includePackages
+      ? queryFeaturedPackages(db, { country, max: clampCount(campaign.packageCount, 2, 3) })
+      : Promise.resolve<PackageForEmail[]>([]),
+    route?.kind === "calendar"
+      ? readSearchCacheFromDb(db, calendarCacheKey({
+          departureId: route.origin, arrivalId: route.destination, currency: route.currency,
+        })) as Promise<FlightCalendar | null>
+      : Promise.resolve<FlightCalendar | null>(null),
+    route?.kind === "teaser"
+      ? readSearchCacheFromDb(db, exploreDestCacheKey({
+          departureId: route.origin, arrivalId: route.destination, currency: route.currency,
+          hl: campaign.languageFilter,
+        })) as Promise<ExploreDestinationFlights | null>
+      : Promise.resolve<ExploreDestinationFlights | null>(null),
+  ]);
+  return {
+    deals: campaign.includeDeals
+      ? pickTopDeals(deals, country, clampCount(campaign.dealCount, 3, 5))
+      : [],
+    ...splitItineraries(campaign, fetchedItins),
+    sights,
+    attractions,
+    packages,
+    calendar,
+    teaser,
+  };
+}
+
+/**
+ * Action-context build (used by `sendTestEmail` and the fan-out). Same shape
+ * as `buildExtrasFromDb` but goes through runQuery, since actions have no
+ * direct db handle. Deals list is passed in so the send loop can re-slice it
+ * per subscriber.
+ */
+async function fetchExtrasForCampaign(
+  ctx: any,
+  campaign: CampaignContent & { countryFilter?: string; languageFilter?: string },
+  deals: DealForEmail[],
+): Promise<CampaignExtras> {
+  const country = campaign.countryFilter;
+  const itinMax = itineraryFetchCount(campaign);
+  const route = routeBlockInputs(campaign);
+  const [fetchedItins, sights, attractions, packages, calendar, teaser] = await Promise.all([
+    itinMax
+      ? ctx.runQuery(internal.newsletter.getFeaturedItineraries, { country, max: itinMax })
+      : Promise.resolve<ItineraryForEmail[]>([]),
+    campaign.includeSights
+      ? ctx.runQuery(internal.newsletter.getFeaturedSights, { max: clampCount(campaign.sightCount, 3, 5) })
+      : Promise.resolve<SightForEmail[]>([]),
+    campaign.includeAttractions
+      ? ctx.runQuery(internal.newsletter.getFeaturedAttractions, { country, max: clampCount(campaign.attractionCount, 3, 4) })
+      : Promise.resolve<AttractionForEmail[]>([]),
+    campaign.includePackages
+      ? ctx.runQuery(internal.newsletter.getFeaturedPackages, { country, max: clampCount(campaign.packageCount, 2, 3) })
+      : Promise.resolve<PackageForEmail[]>([]),
+    // Route-block prices are fetched live (cache-backed, so at most one
+    // searchapi call per TTL window across all batches of a send).
+    route?.kind === "calendar"
+      ? ctx.runAction(internal.flightCalendar.fetchForCampaign, {
+          departureId: route.origin, arrivalId: route.destination, currency: route.currency,
+        })
+      : Promise.resolve<FlightCalendar | null>(null),
+    route?.kind === "teaser"
+      ? ctx.runAction(internal.exploreDestination.fetchTeaserForCampaign, {
+          departureId: route.origin, arrivalId: route.destination, currency: route.currency,
+          hl: campaign.languageFilter,
+        })
+      : Promise.resolve<ExploreDestinationFlights | null>(null),
+  ]);
+  return {
+    deals: campaign.includeDeals
+      ? pickTopDeals(deals, country, clampCount(campaign.dealCount, 3, 5))
+      : [],
+    ...splitItineraries(campaign, fetchedItins),
+    sights,
+    attractions,
+    packages,
+    calendar,
+    teaser,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Admin: send test / start
 // ---------------------------------------------------------------------------
 
@@ -382,6 +743,35 @@ export const resolveAdminEmail = internalQuery({
       .withIndex("by_user", (q: any) => q.eq("userId", userId))
       .first();
     return { email: settings?.email ?? null };
+  },
+});
+
+/**
+ * Render a campaign to HTML without sending anything, so the admin dashboard
+ * can show it in an iframe. Goes through the exact same `renderCampaignEmail`
+ * path as the real fan-out — including live deals for the campaign's country —
+ * so the preview is what subscribers actually receive.
+ *
+ * Read-only and side-effect free: no Postmark call, no send ledger, and a
+ * throwaway unsubscribe token that is never linked to a subscriber.
+ */
+export const previewCampaign = query({
+  args: { token: v.string(), campaignId: v.id("newsletterCampaigns") },
+  returns: v.union(
+    v.null(),
+    v.object({ subject: v.string(), html: v.string(), text: v.string() }),
+  ),
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx, args.token);
+    const campaign = await ctx.db.get(args.campaignId);
+    if (!campaign) return null;
+
+    const allDeals: DealForEmail[] = campaign.includeDeals
+      ? await queryFeaturedDeals(ctx.db)
+      : [];
+    const extras = await buildExtrasFromDb(ctx.db, campaign, allDeals);
+
+    return renderCampaignEmail(campaign, undefined, "preview-token", extras);
   },
 });
 
@@ -417,16 +807,12 @@ export const sendTestEmail = action({
     const allDeals: DealForEmail[] = campaign.includeDeals
       ? await ctx.runQuery(internal.newsletter.getFeaturedDeals, {})
       : [];
+    const extras: CampaignExtras = await fetchExtrasForCampaign(ctx, campaign, allDeals);
 
     // Test emails use a throwaway unsubscribe token — they never touch the
     // list. Preview shows the country-targeted deals if a country is set,
     // else the global top picks.
-    const mail = renderCampaignEmail(
-      campaign,
-      undefined,
-      "test-preview-token",
-      pickTopDeals(allDeals, campaign.countryFilter, campaign.dealCount ?? 3),
-    );
+    const mail = renderCampaignEmail(campaign, undefined, "test-preview-token", extras);
     const res: { success: boolean; error?: string } = await ctx.runAction(
       internal.postmark.sendRawEmail,
       {
@@ -703,6 +1089,11 @@ export const processCampaignSend = internalAction({
     const allDeals: DealForEmail[] = campaign.includeDeals
       ? await ctx.runQuery(internal.newsletter.getFeaturedDeals, {})
       : [];
+    // Enrichment content is fetched once per BATCH (not per subscriber): it
+    // is campaign-country scoped, unlike deals which re-slice per subscriber
+    // below. Refetching each batch (not once per campaign) keeps a long
+    // fan-out from pinning hours-stale attraction prices.
+    const batchExtras: CampaignExtras = await fetchExtrasForCampaign(ctx, campaign, allDeals);
 
     const pageResult: {
       page: Array<{
@@ -736,12 +1127,13 @@ export const processCampaignSend = internalAction({
 
     for (const sub of pageResult.page) {
       if (!unsentSet.has(String(sub._id))) continue;
-      const mail = renderCampaignEmail(
-        campaign,
-        sub.language,
-        sub.unsubscribeToken,
-        pickTopDeals(allDeals, sub.country, campaign.dealCount ?? 3),
-      );
+      // Deals re-slice per subscriber country; the other blocks are shared.
+      const mail = renderCampaignEmail(campaign, sub.language, sub.unsubscribeToken, {
+        ...batchExtras,
+        deals: campaign.includeDeals
+          ? pickTopDeals(allDeals, sub.country, clampCount(campaign.dealCount, 3, 5))
+          : [],
+      });
       const res: { success: boolean; error?: string } = await ctx.runAction(
         internal.postmark.sendRawEmail,
         {

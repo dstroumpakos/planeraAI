@@ -140,7 +140,7 @@ export default defineSchema({
         .index("by_user", ["userId"])
         .index("by_original_transaction", ["originalTransactionId"]),
 
-    // Apple In-App Purchase transaction history
+    // In-App Purchase transaction history (Apple StoreKit + Google Play)
     iapTransactions: defineTable({
         userId: v.string(),
         productId: v.string(),
@@ -148,6 +148,12 @@ export default defineSchema({
         receipt: v.optional(v.string()),
         originalTransactionId: v.optional(v.string()),
         processedAt: v.float64(),
+        // Which store issued the receipt. Absent on rows written before Play
+        // billing existed, which are all Apple — treat undefined as "ios".
+        // The renewal cron uses this to pick the right verifier; sending a Play
+        // purchase token to Apple's verifyReceipt would fail and, left
+        // unrouted, would downgrade paying Android subscribers.
+        platform: v.optional(v.union(v.literal("ios"), v.literal("android"))),
         status: v.union(
             v.literal("completed"),
             v.literal("restored"),
@@ -813,6 +819,11 @@ export default defineSchema({
         totalPrice: v.optional(v.float64()),
         originalPrice: v.optional(v.float64()),
         currency: v.string(),         // "EUR", "USD", etc.
+        // Route's typical fare (Google price-insights midpoint, or live-option
+        // median) captured on the last price refresh. Powers the "X% below
+        // typical" badge in newsletters and the low-fare expiry ceiling. Absent
+        // until the deal's first refresh.
+        typicalPrice: v.optional(v.float64()),
         // Baggage
         cabinBaggage: v.optional(v.string()),   // "1x 8kg"
         checkedBaggage: v.optional(v.string()),  // "1x 23kg"
@@ -1735,7 +1746,34 @@ export default defineSchema({
         heroImg: v.optional(v.string()),   // hosted image URL shown at the top
         includeDeals: v.boolean(),         // append live Low-Fare Radar deal cards
         dealCount: v.optional(v.float64()), // how many deal cards (1-5, default 3)
-        // Affiliate banner to append: "tripcom" | "kiwi" | "welcome" (CJ creatives).
+        // --- Optional enrichment blocks. Each is an opt-in section rendered
+        // AFTER the main copy in a stable order (spotlight → itineraries →
+        // sights → guides → attractions → packages → route block → deals), so
+        // a marketer or the AI can compose a themed email without touching the
+        // renderer. Counts clamp to the ranges enforced in newsletterAi.ts /
+        // renderCampaignEmail.
+        includeItineraries: v.optional(v.boolean()),   // /explore destination guides
+        itineraryCount: v.optional(v.float64()),       // 1-3, default 2
+        includeSights: v.optional(v.boolean()),        // top sights for the audience's country
+        sightCount: v.optional(v.float64()),           // 1-5, default 3
+        includeAttractions: v.optional(v.boolean()),   // bookable attractions (GetYourGuide etc.)
+        attractionCount: v.optional(v.float64()),      // 1-4, default 3
+        includePackages: v.optional(v.boolean()),      // partner OTA packages
+        packageCount: v.optional(v.float64()),         // 1-3, default 2
+        includeGuides: v.optional(v.boolean()),        // /guides SEO landing pages
+        guideCount: v.optional(v.float64()),           // 1-3, default 2
+        includeSpotlight: v.optional(v.boolean()),     // large "trip of the week" card (top itinerary)
+        // Live-price route block: one flight route rendered as either a
+        // "cheapest days to fly" calendar strip or a "flights from €X" teaser
+        // card. The route is pinned at compose time (validated against live
+        // deals for AI drafts); prices are fetched fresh at send time.
+        routeBlock: v.optional(v.union(v.literal("calendar"), v.literal("teaser"))),
+        routeOrigin: v.optional(v.string()),           // IATA, e.g. "ATH"
+        routeDestination: v.optional(v.string()),      // IATA, e.g. "LIS"
+        routeOriginCity: v.optional(v.string()),       // "Athens" — display only
+        routeDestinationCity: v.optional(v.string()),  // "Lisbon" — display only
+        routeCurrency: v.optional(v.string()),         // ISO 4217, default EUR
+        // Affiliate banner to append: "tripcom" | "kiwi" | "welcome" | "lot" | "airserbia" (CJ creatives).
         bannerKey: v.optional(v.string()),
         // --- Targeting (opted-in subscribers only) ---
         languageFilter: v.optional(v.string()), // undefined = all languages
@@ -1888,6 +1926,11 @@ export default defineSchema({
         views: v.float64(),
         createdAt: v.float64(),
         lastViewedAt: v.optional(v.float64()),
+        // Set by `update` when the trip is refined from the ChatGPT app. The
+        // share page shows the fare snapshot's age off `createdAt`, so this is
+        // deliberately a separate field rather than a bump of the original.
+        updatedAt: v.optional(v.float64()),
+        revision: v.optional(v.float64()),
     })
         .index("by_slug", ["slug"])
         .index("by_createdAt", ["createdAt"]),

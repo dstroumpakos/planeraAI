@@ -801,6 +801,8 @@ export const applyVerifiedApplePurchase = internalMutation({
         receipt: v.string(),
         expiresAt: v.optional(v.float64()),
         originalTransactionId: v.optional(v.string()),
+        // Defaults to "ios" for callers predating Play billing.
+        platform: v.optional(v.union(v.literal("ios"), v.literal("android"))),
     },
     returns: v.object({
         success: v.boolean(),
@@ -812,6 +814,7 @@ export const applyVerifiedApplePurchase = internalMutation({
     }),
     handler: async (ctx, args) => {
         const { userId, productId, transactionId, receipt, expiresAt, originalTransactionId } = args;
+        const platform = args.platform ?? "ios";
 
         // Idempotency: ignore replays of the same transaction
         const existingTx = await ctx.db
@@ -833,6 +836,7 @@ export const applyVerifiedApplePurchase = internalMutation({
             transactionId,
             receipt,
             originalTransactionId,
+            platform,
             processedAt: Date.now(),
             status: "completed",
         });
@@ -924,7 +928,11 @@ export const getSubscriptionsNeedingRefresh = internalQuery({
 export const getLatestSubscriptionReceipt = internalQuery({
     args: { userId: v.string() },
     returns: v.union(
-        v.object({ receipt: v.string(), productId: v.string() }),
+        v.object({
+            receipt: v.string(),
+            productId: v.string(),
+            platform: v.union(v.literal("ios"), v.literal("android")),
+        }),
         v.null()
     ),
     handler: async (ctx, { userId }) => {
@@ -941,7 +949,13 @@ export const getLatestSubscriptionReceipt = internalQuery({
             )
             .sort((a, b) => b.processedAt - a.processedAt)[0];
         return latest?.receipt
-            ? { receipt: latest.receipt, productId: latest.productId }
+            ? {
+                receipt: latest.receipt,
+                productId: latest.productId,
+                // Rows written before Play billing carry no platform; they are
+                // all Apple.
+                platform: latest.platform ?? ("ios" as const),
+            }
             : null;
     },
 });

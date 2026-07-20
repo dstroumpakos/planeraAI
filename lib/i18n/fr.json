@@ -505,7 +505,14 @@
     "noPreviousPurchases": "Nous n'avons trouvé aucun achat précédent à restaurer.",
     "alreadyActiveRestore": "Vous avez déjà un abonnement actif. S'il ne s'affiche pas, essayez de toucher 'Restaurer les Achats' ci-dessous.",
     "alreadyActiveSyncRestore": "Vous avez déjà un abonnement actif. Veuillez toucher 'Restaurer les Achats' pour le synchroniser avec votre compte.",
-    "noPurchasesContact": "Nous n'avons trouvé aucun achat précédent à restaurer. Si vous pensez qu'il s'agit d'une erreur, veuillez contacter le support."
+    "noPurchasesContact": "Nous n'avons trouvé aucun achat précédent à restaurer. Si vous pensez qu'il s'agit d'une erreur, veuillez contacter le support.",
+    "billingUnavailableTitle": "Pas encore disponible sur Android",
+    "billingUnavailableBody": "Planera Pro ne peut actuellement être acheté que dans l'app iOS. Le paiement via Google Play arrive bientôt — votre compte et vos voyages restent identiques sur les deux plateformes.",
+    "billingUnavailableCta": "Pas encore disponible sur Android",
+    "priceUnavailable": "—",
+    "couldNotVerify": "Impossible de vérifier votre achat auprès de la boutique.",
+    "missingReceipt": "Reçu de la boutique manquant — l'achat ne peut pas être vérifié.",
+    "securedWithPlayStore": "Sécurisé par Google Play"
   },
   "destinations": {
     "allDestinations": "Toutes les Destinations",
@@ -1230,6 +1237,10 @@
     "searchOnIberia": "Rechercher des Vols sur Iberia",
     "searchFlightsOnVolotea": "Vols low-cost à travers l'Europe",
     "searchOnVolotea": "Rechercher des Vols sur Volotea",
+    "searchFlightsOnAirSerbia": "Vols directs via Belgrade",
+    "searchOnAirSerbia": "Réserver des Vols sur Air Serbia",
+    "searchFlightsOnLot": "Via Varsovie vers l'Europe, les USA et l'Asie",
+    "searchOnLot": "Réserver des Vols sur LOT",
     "searchHotelsOnTripcom": "Hôtels & hébergements dans le monde",
     "searchOnTripcomHotels": "Rechercher des Hôtels sur Trip.com",
     "searchStaysOnEsky": "Offres d'hôtels & d'hébergements",

@@ -837,6 +837,10 @@ export const applyPriceRefresh = internalMutation({
     // above this, the deal is no longer a low fare and gets expired so the
     // radar only ever surfaces genuine deals. Omitted → no ceiling check.
     ceiling: v.optional(v.float64()),
+    // Route's typical fare from the same refresh (pre-ratio, unlike `ceiling`).
+    // Persisted on the deal so downstream surfaces (newsletter deal cards) can
+    // show "X% below typical" without another API call. Omitted → left as-is.
+    typicalPrice: v.optional(v.float64()),
   },
   handler: async (ctx, args) => {
     const existing = await ctx.db.get(args.id);
@@ -851,6 +855,13 @@ export const applyPriceRefresh = internalMutation({
       return { changed: false as const, expired: false as const };
 
     const priceChanged = newPrice !== oldPrice;
+
+    // Refresh the stored typical price whenever the caller measured one; a
+    // missing/junk value leaves the previous reading in place.
+    const typicalPatch =
+      args.typicalPrice != null && args.typicalPrice > 0
+        ? { typicalPrice: Math.round(args.typicalPrice) }
+        : {};
 
     // Preserve a multi-passenger total by scaling it proportionally with the
     // per-person price (deals store `price` as per-person, `totalPrice` as the
@@ -888,6 +899,7 @@ export const applyPriceRefresh = internalMutation({
         updatedAt: now,
         changeCount: ((existing as any).changeCount || 0) + 1,
         changeLog: [...prevLog, entry],
+        ...typicalPatch,
       });
       return {
         changed: priceChanged,
@@ -900,7 +912,7 @@ export const applyPriceRefresh = internalMutation({
 
     if (!priceChanged) {
       // No change — record that we checked so admins can see it's fresh.
-      await ctx.db.patch(args.id, { updatedAt: Date.now() });
+      await ctx.db.patch(args.id, { updatedAt: Date.now(), ...typicalPatch });
       return { changed: false as const, expired: false as const };
     }
 
@@ -912,6 +924,7 @@ export const applyPriceRefresh = internalMutation({
       updatedAt: Date.now(),
       changeCount: ((existing as any).changeCount || 0) + 1,
       changeLog: [...prevLog, entry],
+      ...typicalPatch,
     });
 
     // Notify watchers on a genuine drop (same behavior as the admin update).

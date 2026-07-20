@@ -3721,6 +3721,8 @@ export default function TripDetails() {
                             {renderAffiliateFlightCard({ partner: 'esky', item: 'esky', brand: 'eSky', badge: 'eS', color: '#00A1E0', subtitle: t('tripDetail.searchFlightsOnEsky'), cta: t('tripDetail.searchOnEsky') })}
                             {renderAffiliateFlightCard({ partner: 'iberia', item: 'iberia', brand: 'Iberia', badge: 'IB', color: '#D7192D', subtitle: t('tripDetail.searchFlightsOnIberia'), cta: t('tripDetail.searchOnIberia') })}
                             {renderAffiliateFlightCard({ partner: 'volotea', item: 'volotea', brand: 'Volotea', badge: 'VO', color: '#9B1B5A', subtitle: t('tripDetail.searchFlightsOnVolotea'), cta: t('tripDetail.searchOnVolotea') })}
+                            {renderAffiliateFlightCard({ partner: 'airserbia', item: 'airserbia', brand: 'Air Serbia', badge: 'JU', color: '#0F2D53', subtitle: t('tripDetail.searchFlightsOnAirSerbia'), cta: t('tripDetail.searchOnAirSerbia') })}
+                            {renderAffiliateFlightCard({ partner: 'lot', item: 'lot', brand: 'LOT Polish Airlines', badge: 'LO', color: '#252668', subtitle: t('tripDetail.searchFlightsOnLot'), cta: t('tripDetail.searchOnLot') })}
                         </View>
                     )}
 

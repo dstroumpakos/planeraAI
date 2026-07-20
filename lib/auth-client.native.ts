@@ -262,7 +262,22 @@ function createNativeAuthClient() {
       
       // Configure if not already done
       await configureGoogleSignIn();
-      
+
+      // Android routes Google Sign-In through Play Services; without this check
+      // a missing or outdated install surfaces as an opaque signIn() failure
+      // instead of the resolvable "update Play Services" system dialog.
+      if (Platform.OS === "android") {
+        try {
+          await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+        } catch (e) {
+          console.warn("[Auth] Play Services unavailable:", e);
+          return {
+            data: null,
+            error: new Error("Google Play Services is required to sign in with Google."),
+          };
+        }
+      }
+
       // Check if user has previously signed in and sign out to ensure fresh sign-in
       try {
         const currentUser = GoogleSignin.getCurrentUser();

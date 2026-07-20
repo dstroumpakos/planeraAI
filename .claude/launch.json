@@ -4,8 +4,14 @@
     {
       "name": "planeraai-web",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--prefix", "C:\\Users\\nioni\\planeraai-web"],
-      "port": 3000
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--prefix",
+        "C:\\Users\\nioni\\planeraai-web"
+      ],
+      "port": 3000,
+      "autoPort": true
     }
   ]
 }
