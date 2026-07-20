@@ -40,9 +40,13 @@ export const getRecentPublicTrips = query({
       .order("desc")
       .take(15);
 
+    // Coarsen the creation time to midnight UTC. The ticker only needs rough
+    // recency ("today / a few days ago"); exposing the exact millisecond let
+    // anyone enumerate precise trip-creation timing, so we truncate to the day.
+    const DAY_MS = 24 * 60 * 60 * 1000;
     return trips.map((t) => ({
       destination: t.destination,
-      createdAt: t._creationTime,
+      createdAt: Math.floor(t._creationTime / DAY_MS) * DAY_MS,
     }));
   },
 });

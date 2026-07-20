@@ -53,6 +53,7 @@ import type * as helpers_tripMatch from "../helpers/tripMatch.js";
 import type * as helpers_unsplash from "../helpers/unsplash.js";
 import type * as http from "../http.js";
 import type * as iapVerify from "../iapVerify.js";
+import type * as iapVerifyGoogle from "../iapVerifyGoogle.js";
 import type * as images from "../images.js";
 import type * as insights from "../insights.js";
 import type * as lib_airportCountry from "../lib/airportCountry.js";
@@ -170,6 +171,7 @@ declare const fullApi: ApiFromModules<{
   "helpers/unsplash": typeof helpers_unsplash;
   http: typeof http;
   iapVerify: typeof iapVerify;
+  iapVerifyGoogle: typeof iapVerifyGoogle;
   images: typeof images;
   insights: typeof insights;
   "lib/airportCountry": typeof lib_airportCountry;

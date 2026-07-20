@@ -36,6 +36,93 @@ export const listActive = query({
   },
 });
 
+/**
+ * Public-facing deal feed for the website widget.
+ *
+ * Unlike `listActive` (which returns whole documents and is meant for internal
+ * / app callers), this projects each deal to an explicit allowlist of display
+ * fields and caps the result to `limit`. It never leaks operational metadata:
+ * click counters, change logs, soft-delete/update timestamps, the raw SerpApi
+ * booking POST payload, or the internal `active` flag are all dropped.
+ */
+export const listActivePublic = query({
+  args: {
+    origin: v.optional(v.string()),
+    // Homepage shows 3; other widgets may ask for more. Hard-capped below.
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const limit = Math.min(Math.max(args.limit ?? 3, 1), 50);
+
+    let deals;
+    if (args.origin) {
+      deals = await ctx.db
+        .query("lowFareRadar")
+        .withIndex("by_origin", (q) => q.eq("origin", args.origin!))
+        .collect();
+    } else {
+      deals = await ctx.db
+        .query("lowFareRadar")
+        .withIndex("by_active", (q) => q.eq("active", true))
+        .collect();
+    }
+
+    return deals
+      .filter(
+        (d) => d.active && !d.deletedAt && (!d.expiresAt || d.expiresAt > now)
+      )
+      .slice(0, limit)
+      .map((d) => ({
+        // Opaque document handle — needed for React keys and click-through
+        // tracking mutations; not sensitive.
+        id: d._id,
+        // Route
+        origin: d.origin,
+        originCity: d.originCity,
+        destination: d.destination,
+        destinationCity: d.destinationCity,
+        // Airline
+        airline: d.airline,
+        airlineLogo: d.airlineLogo,
+        flightNumber: d.flightNumber,
+        // Outbound leg
+        outboundDate: d.outboundDate,
+        outboundDeparture: d.outboundDeparture,
+        outboundArrival: d.outboundArrival,
+        outboundDuration: d.outboundDuration,
+        outboundStops: d.outboundStops,
+        outboundSegments: d.outboundSegments,
+        // Return leg
+        returnDate: d.returnDate,
+        returnDeparture: d.returnDeparture,
+        returnArrival: d.returnArrival,
+        returnDuration: d.returnDuration,
+        returnAirline: d.returnAirline,
+        returnFlightNumber: d.returnFlightNumber,
+        returnStops: d.returnStops,
+        returnSegments: d.returnSegments,
+        // Pricing
+        price: d.price,
+        totalPrice: d.totalPrice,
+        originalPrice: d.originalPrice,
+        currency: d.currency,
+        typicalPrice: d.typicalPrice,
+        // Baggage
+        cabinBaggage: d.cabinBaggage,
+        checkedBaggage: d.checkedBaggage,
+        // Presentation
+        isRecommended: d.isRecommended,
+        dealTag: d.dealTag,
+        bookingUrl: d.bookingUrl,
+        expiresAt: d.expiresAt,
+        notes: d.notes,
+        travelMonthFrom: d.travelMonthFrom,
+        travelMonthTo: d.travelMonthTo,
+      }));
+  },
+});
+
 /** Read active attraction affiliate mappings for one destination (used by itinerary generation). */
 export const getActiveAttractionLinksForDestination = query({
   args: {
