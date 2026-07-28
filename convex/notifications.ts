@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query, action, internalMutation, internalQuery, internalAction } from "./_generated/server";
 import { internal as _internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 import { authMutation, authQuery } from "./functions";
 
 // Type assertion: `internal.notifications` won't exist until `npx convex dev` regenerates types
@@ -132,10 +133,38 @@ export const logNotification = internalMutation({
 });
 
 // ─── Internal: Get all trips that need notifications ───
-export const getTripsForNotifications = internalQuery({
-    args: {},
-    handler: async (ctx) => {
-        const now = Date.now();
+/**
+ * ONE PAGE of the trips a notification pass cares about.
+ *
+ * Why paginated, and why thin rows: this used to `.collect()` three bounded
+ * date windows and return the matching trips whole. Trip documents embed the
+ * entire generated `itinerary`, so they average ~57 KB — the collect read
+ * 9.94 MB in a single transaction (62% of the 16 MB limit) and shipped 4.86 MB
+ * back to the action, all to send a handful of push notifications that need a
+ * destination name and an id. Convex has no column projection, so the only way
+ * to bound the read is to bound the ROWS per transaction: the caller walks
+ * pages, and `maximumBytesRead` caps each one at the database layer.
+ *
+ * `window` selects which bounded index range to walk:
+ *   - "start"       → startDate in [now - maxTrip, now + 7d]: feeds both the
+ *                     countdown reminders and the currently-active briefings
+ *   - "ended"       → endDate in [now - 30d, now - 1d]: post-trip review
+ *   - "anniversary" → endDate ~1 year ago (±2d)
+ */
+const NOTIF_PAGE_MAX_BYTES = 2 * 1024 * 1024;
+
+export const _notifTripsWindowPage = internalQuery({
+    args: {
+        window: v.union(v.literal("start"), v.literal("ended"), v.literal("anniversary")),
+        cursor: v.union(v.string(), v.null()),
+        numItems: v.number(),
+        // Pinned by the caller for the whole walk. Every page has to produce the
+        // exact same index range or Convex rejects the cursor with
+        // `InvalidCursor` — and `Date.now()` advances between transactions, so
+        // it cannot be read inside this handler.
+        now: v.number(),
+    },
+    handler: async (ctx, { window, cursor, numItems, now }) => {
         const dayMs = 24 * 60 * 60 * 1000;
         const sevenDaysMs = 7 * dayMs;
         const thirtyDaysMs = 30 * dayMs;
@@ -145,82 +174,81 @@ export const getTripsForNotifications = internalQuery({
         // case that keeps reads bounded. Tunable if reads grow.
         const maxTripMs = 60 * dayMs;
 
-        const results: {
-            upcoming: any[];
-            active: any[];
-            recentlyEnded: any[];
-            anniversary: any[];
-        } = {
-            upcoming: [],
-            active: [],
-            recentlyEnded: [],
-            anniversary: [],
-        };
+        const q =
+            window === "start"
+                ? ctx.db
+                      .query("trips")
+                      .withIndex("by_status_startDate", (ix) =>
+                          ix
+                              .eq("status", "completed")
+                              .gte("startDate", now - maxTripMs)
+                              .lte("startDate", now + sevenDaysMs),
+                      )
+                : window === "ended"
+                  ? ctx.db
+                        .query("trips")
+                        .withIndex("by_status_endDate", (ix) =>
+                            ix
+                                .eq("status", "completed")
+                                .gte("endDate", now - thirtyDaysMs)
+                                .lte("endDate", now - dayMs),
+                        )
+                  : ctx.db
+                        .query("trips")
+                        .withIndex("by_status_endDate", (ix) =>
+                            ix
+                                .eq("status", "completed")
+                                .gte("endDate", now - 367 * dayMs)
+                                .lte("endDate", now - 363 * dayMs),
+                        );
 
-        // Upcoming (start within 7 days) and active (currently ongoing) trips:
-        // both live in a bounded startDate window, so query that range instead
-        // of scanning every completed trip.
-        const startWindowTrips = await ctx.db
-            .query("trips")
-            .withIndex("by_status_startDate", (q) =>
-                q
-                    .eq("status", "completed")
-                    .gte("startDate", now - maxTripMs)
-                    .lte("startDate", now + sevenDaysMs),
-            )
-            .collect();
+        const res = await q.paginate({
+            cursor,
+            numItems,
+            maximumBytesRead: NOTIF_PAGE_MAX_BYTES,
+        });
 
-        for (const trip of startWindowTrips) {
-            const { startDate, endDate } = trip;
-            const daysUntilStart = Math.ceil((startDate - now) / dayMs);
+        // Project to just what the notification loop uses. `today` replaces the
+        // whole itinerary blob for active trips: the briefing only ever needed
+        // the current day's activity count and its first entry.
+        const rows = res.page.map((trip: any) => {
+            const daysUntilStart = Math.ceil((trip.startDate - now) / dayMs);
+            const isActive = now >= trip.startDate && now <= trip.endDate;
+            const currentDay = isActive
+                ? Math.ceil((now - trip.startDate) / dayMs) + 1
+                : null;
 
-            // Upcoming: 7, 3, or 1 day(s) before start
-            if (daysUntilStart >= 0 && daysUntilStart <= 7) {
-                results.upcoming.push({ ...trip, daysUntilStart });
+            let today: { activityCount: number; firstTime: string; firstTitle: string } | null = null;
+            if (currentDay !== null) {
+                const dayData = trip.itinerary?.dayByDayItinerary?.find(
+                    (d: any) => d.day === currentDay,
+                );
+                if (dayData) {
+                    const first = dayData.activities?.[0];
+                    today = {
+                        activityCount: dayData.activities?.length || 0,
+                        firstTime: first?.startTime || first?.time || "morning",
+                        firstTitle: first?.title || "your first stop",
+                    };
+                }
             }
 
-            // Currently active (between start and end date)
-            if (now >= startDate && now <= endDate) {
-                const currentDay = Math.ceil((now - startDate) / dayMs) + 1;
-                results.active.push({ ...trip, currentDay });
-            }
-        }
+            return {
+                _id: trip._id,
+                userId: trip.userId,
+                destination: trip.destination,
+                startDate: trip.startDate,
+                endDate: trip.endDate,
+                userAtDestination: trip.userAtDestination,
+                lastLocationCheckAt: trip.lastLocationCheckAt,
+                daysUntilStart,
+                daysSinceEnd: Math.ceil((now - trip.endDate) / dayMs),
+                currentDay,
+                today,
+            };
+        });
 
-        // Post-trip: ended 1-30 days ago — bounded endDate window.
-        const recentlyEndedTrips = await ctx.db
-            .query("trips")
-            .withIndex("by_status_endDate", (q) =>
-                q
-                    .eq("status", "completed")
-                    .gte("endDate", now - thirtyDaysMs)
-                    .lte("endDate", now - dayMs),
-            )
-            .collect();
-        for (const trip of recentlyEndedTrips) {
-            const daysSinceEnd = Math.ceil((now - trip.endDate) / dayMs);
-            if (daysSinceEnd >= 1 && daysSinceEnd <= 30) {
-                results.recentlyEnded.push({ ...trip, daysSinceEnd });
-            }
-        }
-
-        // Anniversary: ended roughly 1 year ago (±2 days tolerance) — bounded window.
-        const anniversaryTrips = await ctx.db
-            .query("trips")
-            .withIndex("by_status_endDate", (q) =>
-                q
-                    .eq("status", "completed")
-                    .gte("endDate", now - 367 * dayMs)
-                    .lte("endDate", now - 363 * dayMs),
-            )
-            .collect();
-        for (const trip of anniversaryTrips) {
-            const daysSinceEnd = Math.ceil((now - trip.endDate) / dayMs);
-            if (daysSinceEnd >= 363 && daysSinceEnd <= 367) {
-                results.anniversary.push({ ...trip, daysSinceEnd });
-            }
-        }
-
-        return results;
+        return { rows, isDone: res.isDone, continueCursor: res.continueCursor };
     },
 });
 
@@ -474,7 +502,68 @@ export const processScheduledNotifications = internalAction({
     handler: async (ctx) => {
         console.log("🔔 Running scheduled notification check...");
 
-        const trips = await ctx.runQuery(internal.notifications.getTripsForNotifications, {});
+        // Walk each bounded window a page at a time — trip documents are fat
+        // (~57 KB, they embed the itinerary), so the read has to be spread
+        // across transactions rather than collected in one. See
+        // `_notifTripsWindowPage`.
+        type NotifTripRow = {
+            _id: Id<"trips">;
+            userId: string;
+            destination: string;
+            startDate: number;
+            endDate: number;
+            userAtDestination?: boolean;
+            lastLocationCheckAt?: number;
+            daysUntilStart: number;
+            daysSinceEnd: number;
+            currentDay: number | null;
+            today: { activityCount: number; firstTime: string; firstTitle: string } | null;
+        };
+
+        // Pinned once so every page of every window walks an identical index
+        // range; a drifting `now` invalidates the pagination cursor.
+        const windowNow = Date.now();
+
+        const collectWindow = async (
+            window: "start" | "ended" | "anniversary",
+        ): Promise<NotifTripRow[]> => {
+            const out: NotifTripRow[] = [];
+            let cursor: string | null = null;
+            // Page budget: a byte-capped page can come back short, so never
+            // trust `isDone` alone to end the loop.
+            for (let page = 0; page < 500; page++) {
+                const res: {
+                    rows: NotifTripRow[];
+                    isDone: boolean;
+                    continueCursor: string;
+                } = await ctx.runQuery(internal.notifications._notifTripsWindowPage, {
+                    window,
+                    cursor,
+                    numItems: 15,
+                    now: windowNow,
+                });
+                out.push(...res.rows);
+                if (res.isDone || res.continueCursor === cursor) break;
+                cursor = res.continueCursor;
+            }
+            return out;
+        };
+
+        // The startDate window feeds two buckets: trips about to start
+        // (countdowns) and trips happening right now (morning briefings).
+        const startWindow = await collectWindow("start");
+        const trips = {
+            upcoming: startWindow.filter(
+                (t) => t.daysUntilStart >= 0 && t.daysUntilStart <= 7,
+            ),
+            active: startWindow.filter((t) => t.currentDay !== null),
+            recentlyEnded: (await collectWindow("ended")).filter(
+                (t) => t.daysSinceEnd >= 1 && t.daysSinceEnd <= 30,
+            ),
+            anniversary: (await collectWindow("anniversary")).filter(
+                (t) => t.daysSinceEnd >= 363 && t.daysSinceEnd <= 367,
+            ),
+        };
 
         // ── Phase 1: Countdown reminders (7d, 3d, 1d before trip) ──
         for (const trip of trips.upcoming) {
@@ -530,15 +619,14 @@ export const processScheduledNotifications = internalAction({
                     continue;
                 }
 
-                const { currentDay } = trip;
-                const dayData = trip.itinerary?.dayByDayItinerary?.find((d: any) => d.day === currentDay);
+                // `today` is the current day's summary, extracted from the
+                // itinerary inside the page query so the blob never travels.
+                const { currentDay, today } = trip;
+                // currentDay is always set for the active bucket; the explicit
+                // check is what narrows it out of `number | null`.
+                if (!today || currentDay === null) continue;
 
-                if (!dayData) continue;
-
-                const activityCount = dayData.activities?.length || 0;
-                const firstActivity = dayData.activities?.[0];
-                const firstTime = firstActivity?.startTime || firstActivity?.time || "morning";
-                const firstTitle = firstActivity?.title || "your first stop";
+                const { activityCount, firstTime, firstTitle } = today;
 
                 // Get user language for translations
                 const userSettings = await ctx.runQuery(internal.notifications.getUserNotificationSettings, {

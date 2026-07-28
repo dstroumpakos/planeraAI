@@ -14,6 +14,7 @@ import {
     ScrollView,
     Animated,
     Alert,
+    Modal,
 } from "react-native";
 import { useToken, useAuthenticatedAction } from "@/lib/useAuthenticatedMutation";
 import { useQuery, useMutation } from "convex/react";
@@ -24,6 +25,7 @@ import { useTheme } from "@/lib/ThemeContext";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import AIConsentModal from "@/components/AIConsentModal";
+import { AtlasCardRenderer, type AtlasCardData } from "@/components/AtlasCards";
 import { useTranslation } from "react-i18next";
 
 // Animated typing dots component
@@ -75,6 +77,13 @@ interface Message {
     role: "user" | "assistant";
     content: string;
     timestamp: Date;
+    /**
+     * Structured tool output emitted by the server. Rendered above the prose so
+     * the answer leads with the data rather than describing it.
+     */
+    cards?: AtlasCardData[];
+    /** Follow-up questions offered as tappable chips under the last reply. */
+    suggestions?: string[];
 }
 
 // Helper to detect weather JSON block
@@ -105,20 +114,6 @@ const extractRestaurantJson = (content: string): { restaurantData: any[] | null;
         }
     }
     return { restaurantData: null, cleanContent: content };
-};
-
-// Helper to extract weather info from text (fallback)
-const detectWeatherInResponse = (text: string) => {
-    // Simple regex to find temperature patterns like "24°C" or "75°F"
-    const tempMatch = text.match(/(\d+)[°º](?:C|F)?/);
-    // detect city
-    const cityMatch = text.match(/in\s+([A-Z][a-z]+(?:\s[A-Z][a-z]+)*)/);
-    
-    return {
-        hasWeather: !!tempMatch,
-        temp: tempMatch ? tempMatch[1] : null,
-        city: cityMatch ? cityMatch[1] : null
-    };
 };
 
 // Weather Card Component
@@ -482,28 +477,12 @@ const FormattedMessage = ({ content, colors, isDarkMode }: { content: string; co
             </View>
         );
     }
-    
-    // Fallback to old regex detection if no JSON block (backward compatibility)
-    const oldWeatherInfo = detectWeatherInResponse(content);
-    if (oldWeatherInfo.hasWeather && oldWeatherInfo.temp && !weatherData) {
-        return (
-            <View>
-                <View style={[formatStyles.weatherCard, { backgroundColor: isDarkMode ? 'rgba(255,229,0,0.1)' : '#FFF8E1' }]}>
-                    <View style={formatStyles.weatherHeader}>
-                        <Ionicons name="partly-sunny" size={28} color={colors.primary} />
-                        <View style={formatStyles.weatherInfo}>
-                            <Text style={[formatStyles.weatherTemp, { color: colors.text }]}>{oldWeatherInfo.temp}°C</Text>
-                            {oldWeatherInfo.city && (
-                                <Text style={[formatStyles.weatherCity, { color: colors.textMuted }]}>{oldWeatherInfo.city}</Text>
-                            )}
-                        </View>
-                    </View>
-                </View>
-                {elements}
-            </View>
-        );
-    }
 
+    // NOTE: this used to fall back to scraping a temperature out of the prose
+    // ("24°C" → mini weather card) when no JSON block was present. Cards now
+    // arrive as structured data from the server and are rendered by the caller,
+    // so that heuristic would double up the card on every weather answer — and
+    // it fired on any number followed by a degree sign, weather or not.
     return <View>{elements}</View>;
 };
 
@@ -569,11 +548,6 @@ const formatStyles = StyleSheet.create({
         lineHeight: 22,
         paddingTop: 2,
     },
-    weatherCard: {
-        borderRadius: 12,
-        padding: 12,
-        marginBottom: 12,
-    },
     weatherGradientCard: {
         borderRadius: 16,
         padding: 20,
@@ -629,22 +603,6 @@ const formatStyles = StyleSheet.create({
         fontSize: 12,
         fontWeight: '600',
     },
-    weatherHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    weatherInfo: {
-        marginLeft: 12,
-    },
-    weatherTemp: {
-        fontSize: 24,
-        fontWeight: '700',
-    },
-    weatherCity: {
-        fontSize: 13,
-        marginTop: 2,
-    },
-    
     // Forecast Styles
     forecastContainer: {
         marginTop: 16,
@@ -681,9 +639,16 @@ const formatStyles = StyleSheet.create({
 });
 
 const EXAMPLE_PROMPTS = [
+    // The first three lead with what Atlas can now do that it couldn't before:
+    // resolve "my trip" from the user's own data, read their deal radar, and
+    // answer with live rates.
+    { labelKey: "atlas.myTripWeather", icon: "airplane" as const },
+    { labelKey: "atlas.dealsFromMe", icon: "pricetag" as const },
+    { labelKey: "atlas.currencyJapan", icon: "swap-horizontal" as const },
     { labelKey: "atlas.visaJapan", icon: "document-text" as const },
     { labelKey: "atlas.weatherRome", icon: "partly-sunny" as const },
     { labelKey: "atlas.restaurantsParis", icon: "restaurant" as const },
+    { labelKey: "atlas.holidaysSpain", icon: "flag" as const },
     { labelKey: "atlas.cashKorea", icon: "cash" as const },
     { labelKey: "atlas.vaccinesThailand", icon: "medkit" as const },
     { labelKey: "atlas.bestTimeBali", icon: "calendar" as const },
@@ -692,7 +657,7 @@ const EXAMPLE_PROMPTS = [
 export default function AtlasScreen() {
     const { token, isLoading: tokenLoading } = useToken();
     const { colors, isDarkMode } = useTheme();
-    const { t } = useTranslation();
+    const { t, i18n } = useTranslation();
     const insets = useSafeAreaInsets();
     const flatListRef = useRef<FlatList>(null);
     const atlasChat = useAuthenticatedAction(api.atlas.chat, token);
@@ -709,6 +674,25 @@ export default function AtlasScreen() {
     const [isLoading, setIsLoading] = useState(false);
     const [keyboardVisible, setKeyboardVisible] = useState(false);
 
+    // Server-side thread this tab is appending to. Null until the first reply
+    // comes back (or until a past thread is opened from history).
+    const [conversationId, setConversationId] = useState<string | null>(null);
+    const [showHistory, setShowHistory] = useState(false);
+    // Set when a past thread is tapped; drives the getConversation fetch below.
+    const [pendingOpenId, setPendingOpenId] = useState<string | null>(null);
+
+    // Thread list for the history sheet. Only fetched while the sheet is open.
+    const conversations = useQuery(
+        api.atlasDb.listConversations as any,
+        token && showHistory ? { token, limit: 30 } : "skip"
+    ) as any[] | undefined;
+    const deleteConversation = useMutation(api.atlasDb.deleteConversation as any);
+
+    const openConversation = useQuery(
+        api.atlasDb.getConversation as any,
+        token && pendingOpenId ? { token, conversationId: pendingOpenId } : "skip"
+    ) as any;
+
     useEffect(() => {
         const keyboardDidShow = Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true));
         const keyboardDidHide = Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false));
@@ -717,6 +701,34 @@ export default function AtlasScreen() {
             keyboardDidHide.remove();
         };
     }, []);
+
+    // Hydrate the transcript once a past thread's messages arrive.
+    useEffect(() => {
+        if (!pendingOpenId || !openConversation) return;
+        setMessages(
+            (openConversation.messages ?? []).map((m: any) => ({
+                id: m._id,
+                role: m.role,
+                content: m.content,
+                timestamp: new Date(m.createdAt),
+                cards: Array.isArray(m.cards) ? m.cards : [],
+                suggestions: Array.isArray(m.suggestions) ? m.suggestions : [],
+            }))
+        );
+        setConversationId(openConversation._id);
+        setPendingOpenId(null);
+        setShowHistory(false);
+    }, [pendingOpenId, openConversation]);
+
+    /** Reset to an empty thread; the next reply mints a new conversation id. */
+    const startNewChat = () => {
+        setMessages([]);
+        setConversationId(null);
+        setInputText("");
+        if (Platform.OS !== 'web') {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        }
+    };
 
     const sendMessage = async (text?: string) => {
         const messageText = text || inputText.trim();
@@ -745,19 +757,48 @@ export default function AtlasScreen() {
         setIsLoading(true);
 
         try {
-            // Prepare messages for the Convex action
-            const chatMessages = [...messages, userMessage].map(msg => ({
+            // Only the tail is sent — the server trims again, but there is no
+            // reason to pay upload cost for turns it will discard.
+            const chatMessages = [...messages, userMessage].slice(-12).map(msg => ({
                 role: msg.role as "user" | "assistant",
                 content: msg.content,
             }));
-            
-            const response = await atlasChat({ messages: chatMessages });
-            
+
+            const response = await atlasChat({
+                messages: chatMessages,
+                // Held as a plain string in component state; the server
+                // re-validates ownership before appending to it.
+                conversationId: (conversationId ?? undefined) as any,
+                language: i18n.language?.split("-")[0] || "en",
+                // Opt in to the rich response. Without this the action returns
+                // the legacy bare string that older shipped builds expect.
+                structured: true,
+            }) as any;
+
+            if (response?.rateLimited) {
+                // The server encodes the retry delay as RATE_LIMITED:<minutes>
+                // so the copy can be localised on this side.
+                const minutes = parseInt(String(response.text).split(":")[1] ?? "60", 10);
+                setMessages(prev => [...prev, {
+                    id: (Date.now() + 1).toString(),
+                    role: "assistant",
+                    content: t('atlas.rateLimited', { minutes }),
+                    timestamp: new Date(),
+                }]);
+                return;
+            }
+
+            if (response?.conversationId) {
+                setConversationId(response.conversationId);
+            }
+
             const assistantMessage: Message = {
                 id: (Date.now() + 1).toString(),
                 role: "assistant",
-                content: response as string,
+                content: response?.text ?? "",
                 timestamp: new Date(),
+                cards: Array.isArray(response?.cards) ? response.cards : [],
+                suggestions: Array.isArray(response?.suggestions) ? response.suggestions : [],
             };
 
             setMessages(prev => [...prev, assistantMessage]);
@@ -775,9 +816,14 @@ export default function AtlasScreen() {
         }
     };
 
-    const renderMessage = ({ item }: { item: Message }) => {
+    const renderMessage = ({ item, index }: { item: Message; index: number }) => {
         const isUser = item.role === "user";
-        
+        const cards = item.cards ?? [];
+        // Chips only make sense on the newest reply — older ones would offer
+        // follow-ups to a question the conversation has already moved past.
+        const isLast = index === messages.length - 1;
+        const suggestions = !isUser && isLast && !isLoading ? (item.suggestions ?? []) : [];
+
         return (
             <View style={[
                 styles.messageContainer,
@@ -788,18 +834,58 @@ export default function AtlasScreen() {
                         <Ionicons name="globe" size={16} color={colors.text} />
                     </View>
                 )}
-                <View style={[
-                    styles.messageBubble,
-                    isUser 
-                        ? [styles.userBubble, { backgroundColor: colors.primary }]
-                        : [styles.assistantBubble, { backgroundColor: colors.card, borderColor: colors.border }],
-                ]}>
-                    {isUser ? (
-                        <Text style={[styles.messageText, { color: colors.text }]}>
-                            {item.content}
-                        </Text>
-                    ) : (
-                        <FormattedMessage content={item.content} colors={colors} isDarkMode={isDarkMode} />
+                <View style={{ flexShrink: 1 }}>
+                    <View style={[
+                        styles.messageBubble,
+                        isUser
+                            ? [styles.userBubble, { backgroundColor: colors.primary }]
+                            : [styles.assistantBubble, { backgroundColor: colors.card, borderColor: colors.border }],
+                    ]}>
+                        {isUser ? (
+                            <Text style={[styles.messageText, { color: colors.text }]}>
+                                {item.content}
+                            </Text>
+                        ) : (
+                            <>
+                                {cards.map((card, i) => {
+                                    // Weather and restaurants keep their existing
+                                    // bespoke components; everything else goes
+                                    // through the shared renderer.
+                                    if (card.type === "weather") {
+                                        return <WeatherCard key={`c-${i}`} data={card.data} />;
+                                    }
+                                    if (card.type === "restaurants") {
+                                        return (
+                                            <RestaurantCard
+                                                key={`c-${i}`}
+                                                restaurants={card.data?.restaurants ?? []}
+                                                colors={colors}
+                                                isDarkMode={isDarkMode}
+                                            />
+                                        );
+                                    }
+                                    return <AtlasCardRenderer key={`c-${i}`} card={card} />;
+                                })}
+                                <FormattedMessage content={item.content} colors={colors} isDarkMode={isDarkMode} />
+                            </>
+                        )}
+                    </View>
+
+                    {suggestions.length > 0 && (
+                        <View style={styles.suggestionsRow}>
+                            {suggestions.map((s, i) => (
+                                <TouchableOpacity
+                                    key={`s-${i}`}
+                                    style={[styles.suggestionChip, { backgroundColor: colors.card, borderColor: colors.border }]}
+                                    onPress={() => sendMessage(s)}
+                                    activeOpacity={0.7}
+                                >
+                                    <Text style={[styles.suggestionText, { color: colors.text }]} numberOfLines={1}>
+                                        {s}
+                                    </Text>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
                     )}
                 </View>
             </View>
@@ -868,10 +954,27 @@ export default function AtlasScreen() {
                         <View style={[styles.headerIcon, { backgroundColor: colors.primary }]}>
                             <Ionicons name="globe" size={24} color={colors.text} />
                         </View>
-                        <View>
+                        <View style={{ flex: 1 }}>
                             <Text style={[styles.headerTitle, { color: colors.text }]}>{t('atlas.atlas')}</Text>
                             <Text style={[styles.headerSubtitle, { color: colors.textMuted }]}>{t('atlas.travelAssistant')}</Text>
                         </View>
+
+                        <TouchableOpacity
+                            style={[styles.headerButton, { borderColor: colors.border }]}
+                            onPress={() => setShowHistory(true)}
+                            accessibilityLabel={t('atlas.history')}
+                        >
+                            <Ionicons name="time-outline" size={20} color={colors.text} />
+                        </TouchableOpacity>
+                        {messages.length > 0 && (
+                            <TouchableOpacity
+                                style={[styles.headerButton, { borderColor: colors.border }]}
+                                onPress={startNewChat}
+                                accessibilityLabel={t('atlas.newChat')}
+                            >
+                                <Ionicons name="create-outline" size={20} color={colors.text} />
+                            </TouchableOpacity>
+                        )}
                     </View>
                 </View>
 
@@ -906,6 +1009,7 @@ export default function AtlasScreen() {
                             ref={flatListRef}
                             data={messages}
                             renderItem={renderMessage}
+                            extraData={isLoading}
                             keyExtractor={item => item.id}
                             contentContainerStyle={[styles.messagesContent, { paddingBottom: 16 }]}
                             showsVerticalScrollIndicator={false}
@@ -964,6 +1068,90 @@ export default function AtlasScreen() {
                     </View>
                 </KeyboardAvoidingView>
             </SafeAreaView>
+
+            {/* Conversation history */}
+            <Modal
+                visible={showHistory}
+                animationType="slide"
+                transparent
+                onRequestClose={() => setShowHistory(false)}
+            >
+                <View style={styles.historyBackdrop}>
+                    <View style={[styles.historySheet, { backgroundColor: colors.background, paddingBottom: Math.max(insets.bottom, 16) }]}>
+                        <View style={[styles.historyHeader, { borderBottomColor: colors.border }]}>
+                            <Text style={[styles.historyTitle, { color: colors.text }]}>{t('atlas.history')}</Text>
+                            <TouchableOpacity onPress={() => setShowHistory(false)}>
+                                <Ionicons name="close" size={24} color={colors.textMuted} />
+                            </TouchableOpacity>
+                        </View>
+
+                        {conversations === undefined ? (
+                            <View style={styles.historyEmpty}>
+                                <ActivityIndicator color={colors.primary} />
+                            </View>
+                        ) : conversations.length === 0 ? (
+                            <View style={styles.historyEmpty}>
+                                <Ionicons name="chatbubbles-outline" size={40} color={colors.textMuted} />
+                                <Text style={[styles.historyEmptyText, { color: colors.textMuted }]}>
+                                    {t('atlas.noHistory')}
+                                </Text>
+                            </View>
+                        ) : (
+                            <ScrollView style={{ maxHeight: 420 }}>
+                                {conversations.map((c: any) => (
+                                    <View
+                                        key={c._id}
+                                        style={[styles.historyRow, { borderBottomColor: colors.border }]}
+                                    >
+                                        <TouchableOpacity
+                                            style={{ flex: 1 }}
+                                            onPress={() => setPendingOpenId(c._id)}
+                                            activeOpacity={0.7}
+                                        >
+                                            <Text style={[styles.historyRowTitle, { color: colors.text }]} numberOfLines={1}>
+                                                {c.title}
+                                            </Text>
+                                            <Text style={[styles.historyRowMeta, { color: colors.textMuted }]}>
+                                                {new Date(c.updatedAt).toLocaleDateString()} · {c.messageCount} {t('atlas.messages')}
+                                            </Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            onPress={() => {
+                                                Alert.alert(
+                                                    t('atlas.deleteChat'),
+                                                    t('atlas.deleteChatConfirm'),
+                                                    [
+                                                        { text: t('common.cancel'), style: 'cancel' },
+                                                        {
+                                                            text: t('common.delete'),
+                                                            style: 'destructive',
+                                                            onPress: async () => {
+                                                                try {
+                                                                    await deleteConversation({ token: token || "", conversationId: c._id });
+                                                                    // Clear the transcript if the open thread was the one removed.
+                                                                    if (conversationId === c._id) {
+                                                                        setMessages([]);
+                                                                        setConversationId(null);
+                                                                    }
+                                                                } catch (e) {
+                                                                    console.error("Failed to delete conversation:", e);
+                                                                }
+                                                            },
+                                                        },
+                                                    ]
+                                                );
+                                            }}
+                                            style={{ padding: 8 }}
+                                        >
+                                            <Ionicons name="trash-outline" size={18} color={colors.textMuted} />
+                                        </TouchableOpacity>
+                                    </View>
+                                ))}
+                            </ScrollView>
+                        )}
+                    </View>
+                </View>
+            </Modal>
 
             {/* AI Data Consent Modal */}
             <AIConsentModal
@@ -1051,6 +1239,78 @@ const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
     headerSubtitle: {
         fontSize: 13,
         marginTop: 2,
+    },
+    headerButton: {
+        width: 38,
+        height: 38,
+        borderRadius: 12,
+        borderWidth: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginLeft: 8,
+    },
+    suggestionsRow: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 6,
+        marginTop: 8,
+        marginLeft: 4,
+    },
+    suggestionChip: {
+        borderRadius: 16,
+        borderWidth: 1,
+        paddingVertical: 7,
+        paddingHorizontal: 12,
+        maxWidth: '100%',
+    },
+    suggestionText: {
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    historyBackdrop: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.45)',
+        justifyContent: 'flex-end',
+    },
+    historySheet: {
+        borderTopLeftRadius: 20,
+        borderTopRightRadius: 20,
+        paddingHorizontal: 16,
+        paddingTop: 8,
+    },
+    historyHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingVertical: 14,
+        borderBottomWidth: 1,
+    },
+    historyTitle: {
+        fontSize: 18,
+        fontWeight: '700',
+    },
+    historyEmpty: {
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 48,
+        gap: 12,
+    },
+    historyEmptyText: {
+        fontSize: 14,
+    },
+    historyRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 14,
+        borderBottomWidth: 1,
+    },
+    historyRowTitle: {
+        fontSize: 14,
+        fontWeight: '600',
+    },
+    historyRowMeta: {
+        fontSize: 12,
+        marginTop: 3,
     },
     chatContainer: {
         flex: 1,

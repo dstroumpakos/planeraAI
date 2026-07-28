@@ -72,6 +72,12 @@ export const listActivePublic = query({
       .filter(
         (d) => d.active && !d.deletedAt && (!d.expiresAt || d.expiresAt > now)
       )
+      // Rank server-side (recommended first, then cheapest) so a small `limit`
+      // still returns the *best* deals rather than an arbitrary index-order slice.
+      .sort((a, b) => {
+        if (!!a.isRecommended !== !!b.isRecommended) return a.isRecommended ? -1 : 1;
+        return a.price - b.price;
+      })
       .slice(0, limit)
       .map((d) => ({
         // Opaque document handle — needed for React keys and click-through
@@ -328,6 +334,14 @@ function validateAffiliateUrl(url: string) {
   }
 }
 
+/**
+ * How many of a user's most recent trips to read when cross-matching deal
+ * destinations against places they've already planned. Bounded because trip
+ * documents are fat (~57 KB each, they embed the whole itinerary) and this is
+ * only used for a soft relevance badge — see the comment at the read site.
+ */
+const TRIP_MATCH_SCAN_LIMIT = 40;
+
 /** Get deals matching a user's home airport (for app home page) */
 export const getDealsForUser = authQuery({
   args: {},
@@ -365,12 +379,20 @@ export const getDealsForUser = authQuery({
       .withIndex("by_origin", (q: any) => q.eq("origin", homeIata))
       .collect();
 
-    // Also get user's trip destinations to cross-match
+    // Also get user's trip destinations to cross-match.
+    //
+    // This only needs `destination` + `status`, but Convex reads whole documents
+    // and a trip row averages ~57 KB (it embeds the full `itinerary`) — reading
+    // every trip a heavy user owns cost 10.19 MB per call, 64% of the 16 MB
+    // transaction limit. The cross-match only drives a soft "matches your
+    // interests" badge, so bound it to the most recent trips: newer trips are
+    // the ones whose destinations still reflect what the user wants.
     const userId = ctx.user?.userId || ctx.user?._id;
     const trips = await ctx.db
       .query("trips")
       .withIndex("by_user", (q: any) => q.eq("userId", userId))
-      .collect();
+      .order("desc")
+      .take(TRIP_MATCH_SCAN_LIMIT);
 
     const savedDestinations = new Set(
       trips
@@ -881,6 +903,10 @@ export const softDeleteExpiredDeals = internalMutation({
  *     self-refresh through the search-seeding path and age out in 7 days.
  *   - outbound (and return, if round-trip) date still in the future — searchapi
  *     returns nothing for past dates, so re-pricing them is wasted quota.
+ *
+ * Ordered stalest-first (oldest `updatedAt`), so when a run stops on its cap or
+ * time budget the leftovers are the ones the next run starts with — coverage
+ * rotates instead of the same head of the list being re-priced every time.
  */
 export const listRefreshableDeals = internalQuery({
   args: {},
@@ -892,15 +918,20 @@ export const listRefreshableDeals = internalQuery({
       .withIndex("by_active", (q) => q.eq("active", true))
       .collect();
 
-    return deals.filter(
-      (d) =>
-        d.active &&
-        !d.deletedAt &&
-        d.dealTag !== "AUTO" &&
-        !!d.outboundDate &&
-        d.outboundDate >= today &&
-        (!d.returnDate || d.returnDate >= today)
-    );
+    return deals
+      .filter(
+        (d) =>
+          d.active &&
+          !d.deletedAt &&
+          d.dealTag !== "AUTO" &&
+          !!d.outboundDate &&
+          d.outboundDate >= today &&
+          (!d.returnDate || d.returnDate >= today)
+      )
+      .sort(
+        (a, b) =>
+          (a.updatedAt ?? a._creationTime) - (b.updatedAt ?? b._creationTime)
+      );
   },
 });
 
@@ -1032,16 +1063,35 @@ export const applyPriceRefresh = internalMutation({
 // Keep in sync with the interval in lowFareRadarRefresh.ts / crons.ts.
 const RADAR_REFRESH_INTERVAL_MS = 4 * 24 * 60 * 60 * 1000;
 
+/**
+ * How long a `running` lock stays believable. A refresh run is a Convex action,
+ * so it can never legitimately outlive the platform's action time limit
+ * (10 min); if the lock is older than this the run was killed mid-flight and
+ * never reached `markRadarRefreshCompleted`. Without this the stale lock parks
+ * the cron forever — which is exactly what happened on 2026-07-25.
+ */
+export const RADAR_RUN_LOCK_STALE_MS = 20 * 60 * 1000;
+
+/**
+ * Retry gap used when a run stops early on its time budget: the leftover deals
+ * are re-priced on the next hourly tick instead of waiting out the full 4 days.
+ */
+export const RADAR_REFRESH_RETRY_SOON_MS = 60 * 60 * 1000;
+
 /** Admin: current refresh state for the widget countdown + "refresh now" UI. */
 export const getRefreshStatus = query({
   args: { adminKey: v.string() },
   handler: async (ctx, args) => {
     validateAdminKey(args.adminKey);
     const state = await ctx.db.query("radarRefreshState").first();
+    // A lock older than the action time limit belongs to a killed run — don't
+    // show it as "running" (and don't let it disable the "refresh now" button).
+    const lockAge = Date.now() - (state?.runStartedAt ?? state?.updatedAt ?? 0);
+    const running = !!state?.running && lockAge < RADAR_RUN_LOCK_STALE_MS;
     return {
       lastRefreshAt: state?.lastRefreshAt ?? null,
       nextRefreshAt: state?.nextRefreshAt ?? null,
-      running: !!state?.running,
+      running,
       lastResult: state?.lastResult ?? null,
       intervalMs: RADAR_REFRESH_INTERVAL_MS,
       // Server clock so the widget can render a drift-free countdown.
@@ -1056,9 +1106,13 @@ export const getRadarRefreshStateInternal = internalQuery({
   handler: async (ctx) => {
     const state = await ctx.db.query("radarRefreshState").first();
     if (!state) return null;
+    const lockAge = Date.now() - (state.runStartedAt ?? state.updatedAt);
     return {
       nextRefreshAt: state.nextRefreshAt,
-      running: !!state.running,
+      // Only a fresh lock blocks a new run; a stale one means the previous run
+      // was killed before it could clear it.
+      running: !!state.running && lockAge < RADAR_RUN_LOCK_STALE_MS,
+      staleLock: !!state.running && lockAge >= RADAR_RUN_LOCK_STALE_MS,
     };
   },
 });
@@ -1087,11 +1141,12 @@ export const markRadarRefreshStarted = internalMutation({
     const now = Date.now();
     const state = await ctx.db.query("radarRefreshState").first();
     if (state) {
-      await ctx.db.patch(state._id, { running: true, updatedAt: now });
+      await ctx.db.patch(state._id, { running: true, runStartedAt: now, updatedAt: now });
     } else {
       await ctx.db.insert("radarRefreshState", {
         nextRefreshAt: now + RADAR_REFRESH_INTERVAL_MS,
         running: true,
+        runStartedAt: now,
         updatedAt: now,
       });
     }
@@ -1108,11 +1163,17 @@ export const markRadarRefreshCompleted = internalMutation({
       notFound: v.float64(),
       failed: v.float64(),
       expired: v.optional(v.float64()),
+      skipped: v.optional(v.float64()),
     }),
+    // Set when the run stopped on its time budget with deals still to price:
+    // come back in an hour for the leftovers instead of in four days.
+    retrySoon: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
-    const nextRefreshAt = now + RADAR_REFRESH_INTERVAL_MS;
+    const nextRefreshAt =
+      now +
+      (args.retrySoon ? RADAR_REFRESH_RETRY_SOON_MS : RADAR_REFRESH_INTERVAL_MS);
     const lastResult = { ...args.result, at: now };
     const state = await ctx.db.query("radarRefreshState").first();
     if (state) {
@@ -1120,6 +1181,7 @@ export const markRadarRefreshCompleted = internalMutation({
         lastRefreshAt: now,
         nextRefreshAt,
         running: false,
+        runStartedAt: undefined,
         lastResult,
         updatedAt: now,
       });

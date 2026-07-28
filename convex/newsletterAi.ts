@@ -137,6 +137,7 @@ Write ONE short marketing newsletter email. Rules:
 - CONTENT BLOCKS: besides deals, the email can append cards rendered from the REAL content listed in the user message (itineraries / attractions / packages). Rules:
     * Only set a block's include* flag to true if matching content is listed below AND it genuinely fits the assigned theme. 1-2 blocks maximum — an email with everything is an email about nothing.
     * The cards render automatically; do NOT restate their contents (titles, prices) in para1/para2. The copy should set them up, not duplicate them.
+    * If you set a flightRoute below, the email is ABOUT that destination: itinerary, sights, attraction and package cards are then restricted to it, and a block with nothing there renders as nothing at all. So either pick a route matching the content listed below, or keep the email destination-free ("none").
 - includeItineraries (true/false) + itineraryCount (1-3, default 2): ready-made destination guides from Explore. Fits destination-inspiration and community-explore themes.
 - includeSights (true/false) + sightCount (1-5, default 3): top sights with a one-line description. Fits destination-inspiration.
 - includeAttractions (true/false) + attractionCount (1-4, default 3): bookable tickets/tours with real prices. Fits destination and seasonal themes.
@@ -147,7 +148,7 @@ Write ONE short marketing newsletter email. Rules:
     "calendar" appends a "cheapest days to fly" date/price strip for that route — fits flight-deals, route-spotlight, weekend-escape and seasonal themes.
     "teaser" appends a single "Flights to X — from €Y" price card — fits destination-inspiration.
     The prices are fetched live at send time, so do NOT quote them in para1/para2. Use "none" when no deals are listed or no route fits the theme.
-- heroImage: a big photo at the top. Pick the one that fits the email, or "none":
+- heroImage: a big photo at the top. When you set a flightRoute, the header is automatically swapped for a real photo of that destination, and your pick below is only the fallback — so choose the stock photo that fits the email, or "none" for no header photo at all:
     "flights" (planes / airport — fare and booking emails)
     "plan"    (maps / planning — AI itinerary emails)
     "explore" (landscapes / discovery — destination and community emails)

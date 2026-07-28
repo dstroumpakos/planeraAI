@@ -237,6 +237,12 @@ export async function fetchExploreDestinations(
         typeof flight?.airline_name === "string"
           ? flight.airline_name
           : undefined,
+      // Kept for logos + affiliate matching — a display name is too fuzzy to
+      // match on. Not documented for this engine, so treat it as best-effort.
+      airlineCode:
+        typeof flight?.airline_code === "string" && flight.airline_code.trim()
+          ? flight.airline_code.trim().toUpperCase()
+          : undefined,
       flightDuration:
         typeof flight?.flight_duration === "string"
           ? flight.flight_duration

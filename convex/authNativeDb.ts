@@ -1,4 +1,5 @@
 import { internalMutation, internalQuery } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { v } from "convex/values";
 
 // Result type for upsertUserAndCreateSession
@@ -79,6 +80,19 @@ export const upsertUserAndCreateSession = internalMutation({
         currency: "USD",
       });
       console.log("[AuthNativeDb] Created new user settings:", newSettingsId);
+
+      // Auto-enrol brand-new users into the newsletter (single opt-in). Shared
+      // across iOS/Android/web since all auth flows land here. Needs a real
+      // email (Apple only reveals it on the *first* sign-in, which is now).
+      if (args.email) {
+        await ctx.scheduler.runAfter(0, internal.newsletter.enrollAppUser, {
+          email: args.email,
+          userId: uniqueUserId,
+          language: "en",
+          source: args.platform ? `signup_${args.platform}` : "app_signup",
+        });
+        console.log("[AuthNativeDb] Scheduled newsletter auto-enrolment");
+      }
     } else if (args.email || args.name) {
       // Update existing user with any new info from provider (only if fields are empty)
       const updates: Record<string, string> = {};
@@ -92,6 +106,19 @@ export const upsertUserAndCreateSession = internalMutation({
       if (Object.keys(updates).length > 0) {
         await ctx.db.patch(existingSettings._id, updates);
         console.log("[AuthNativeDb] Updated user settings with:", Object.keys(updates));
+      }
+
+      // An existing account that had no email until now (common with Apple
+      // Sign-In) — enrol it too. `enrollAppUser` is idempotent and respects
+      // prior opt-outs, so this is safe.
+      if (updates.email) {
+        await ctx.scheduler.runAfter(0, internal.newsletter.enrollAppUser, {
+          email: updates.email,
+          userId: uniqueUserId,
+          language: existingSettings.language ?? "en",
+          source: args.platform ? `signup_${args.platform}` : "app_signup",
+        });
+        console.log("[AuthNativeDb] Scheduled newsletter auto-enrolment (late email)");
       }
     }
     

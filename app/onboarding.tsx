@@ -249,6 +249,8 @@ export default function Onboarding() {
             <Text style={styles.primaryButtonText}>{t('onboarding.startSetup')}</Text>
             <Ionicons name="arrow-forward" size={20} color="#FFF" />
           </TouchableOpacity>
+
+          <Text style={styles.consentNote}>{t('onboarding.newsletterConsent')}</Text>
         </ScrollView>
       </SafeAreaView>
       </>
@@ -758,6 +760,14 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#78716C",
     lineHeight: 18,
+  },
+  consentNote: {
+    fontSize: 12,
+    color: "#9B9B9B",
+    textAlign: "center",
+    lineHeight: 17,
+    marginTop: 16,
+    paddingHorizontal: 8,
   },
   featuresList: {
     marginBottom: 24,

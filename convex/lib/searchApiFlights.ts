@@ -27,6 +27,14 @@
 
 const SEARCHAPI_ENDPOINT = "https://www.searchapi.io/api/v1/search";
 
+/**
+ * Per-request timeout. The refresh cron makes one call per deal, sequentially,
+ * inside an action that Convex kills at 10 minutes — an untimed request that
+ * hangs would burn the whole run (and, before the stale-lock guard, park the
+ * cron). Google Flights responses normally land in a few seconds.
+ */
+const SEARCHAPI_TIMEOUT_MS = 25_000;
+
 function getSearchApiKey(): string | null {
   const key = process.env.SEARCHAPI_API_KEY;
   if (!key || typeof key !== "string" || key.trim().length === 0) {
@@ -62,32 +70,44 @@ async function callSearchApi(
   key: string
 ): Promise<any | null> {
   params.append("api_key", key);
-  let res: Response;
+  // The timeout covers the body read as well as the connection, so a response
+  // that stalls mid-stream can't hang the caller either.
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), SEARCHAPI_TIMEOUT_MS);
   try {
-    res = await fetch(`${SEARCHAPI_ENDPOINT}?${params.toString()}`, {
+    const res = await fetch(`${SEARCHAPI_ENDPOINT}?${params.toString()}`, {
       method: "GET",
       headers: { Accept: "application/json" },
+      signal: abort.signal,
     });
-  } catch {
-    console.error("[searchapi-flights] Network error");
-    return null;
-  }
 
-  if (!res.ok) {
-    console.error(`[searchapi-flights] HTTP ${res.status}`);
-    return null;
-  }
+    if (!res.ok) {
+      console.error(`[searchapi-flights] HTTP ${res.status}`);
+      return null;
+    }
 
-  try {
-    const json = await res.json();
+    let json: any;
+    try {
+      json = await res.json();
+    } catch (err) {
+      if ((err as Error)?.name === "AbortError") throw err;
+      console.error("[searchapi-flights] Invalid JSON response");
+      return null;
+    }
     if (json?.error) {
       console.error("[searchapi-flights] API error:", String(json.error));
       return null;
     }
     return json;
-  } catch {
-    console.error("[searchapi-flights] Invalid JSON response");
+  } catch (err) {
+    console.error(
+      (err as Error)?.name === "AbortError"
+        ? `[searchapi-flights] Timed out after ${SEARCHAPI_TIMEOUT_MS}ms`
+        : "[searchapi-flights] Network error"
+    );
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 

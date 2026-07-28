@@ -164,6 +164,17 @@ function ExploreCard({
           </Text>
         ) : null}
         <View style={styles.cardMetaRow}>
+          {dest.airline ? (
+            <View style={[styles.cardMetaItem, styles.cardMetaAirline]}>
+              <Ionicons name="airplane-outline" size={11} color={colors.textMuted} />
+              <Text
+                style={[styles.cardMetaText, styles.cardMetaAirlineText, { color: colors.textMuted }]}
+                numberOfLines={1}
+              >
+                {dest.airline}
+              </Text>
+            </View>
+          ) : null}
           {dest.stops != null && (
             <View style={styles.cardMetaItem}>
               <Ionicons name="git-branch-outline" size={11} color={colors.textMuted} />
@@ -737,6 +748,10 @@ const styles = StyleSheet.create({
   cardMetaRow: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 8 },
   cardMetaItem: { flexDirection: "row", alignItems: "center", gap: 3 },
   cardMetaText: { fontSize: 11, fontWeight: "600" },
+  // Carrier names run long ("Turkish Airlines"); let this item give up width
+  // instead of pushing stops/duration off the card.
+  cardMetaAirline: { flexShrink: 1, minWidth: 0 },
+  cardMetaAirlineText: { flexShrink: 1 },
   stateBox: { alignItems: "center", justifyContent: "center", paddingVertical: 60, gap: 14 },
   stateText: { fontSize: 14, fontWeight: "600", textAlign: "center", paddingHorizontal: 30 },
   retryBtn: { paddingHorizontal: 20, paddingVertical: 12, borderRadius: 14 },

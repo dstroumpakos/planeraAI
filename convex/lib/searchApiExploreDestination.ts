@@ -150,6 +150,13 @@ function normalizeFlight(
       (typeof raw.airline_name === "string" && raw.airline_name) ||
       (typeof raw.airline === "string" && raw.airline) ||
       undefined,
+    // The engine returns `airline_code` alongside the display name (verified in
+    // the live response documented above). Keep it: the name is too fuzzy to
+    // match on for logos or affiliate attribution.
+    airlineCode:
+      typeof raw.airline_code === "string" && raw.airline_code.trim()
+        ? raw.airline_code.trim().toUpperCase()
+        : undefined,
     stops: toNumber(raw.stops),
     departureAirport: toAirportCode(
       raw.departure_airport ?? raw.departure_id ?? raw.departure

@@ -54,7 +54,25 @@ async function getUserIdFromToken(ctx: any, token: string): Promise<string | nul
 // trips/insights carry large blobs), plus the pagination envelope. One page =
 // one query execution with its own read budget, so this scales past the
 // per-execution limit a single `.collect()` would hit.
+//
+// NOTE ON READ COST: projecting in JS shrinks the *returned* payload, not the
+// bytes READ — Convex has no column projection, so every row costs its full
+// document size. `trips` rows average ~57 KB (they carry the whole generated
+// `itinerary` blob), which is why the trips scan is the one that shows up in
+// dashboard Insights. `maximumBytesRead` below caps a page at the database
+// layer, so no single execution can approach the 16 MB transaction limit no
+// matter how many rows the paginator decides to scan.
 // ===========================================================================
+
+/**
+ * Per-page read ceiling for the fat `trips` scan: 2 MB, i.e. 12% of the 16 MB
+ * per-transaction limit. Well above any single trip document (the largest
+ * multi-city itineraries are a few hundred KB), so a page always makes forward
+ * progress; far enough below the limit that the "nearing bytes read" insight
+ * can't fire. When the cap truncates a page, `paginate` returns fewer rows with
+ * `isDone: false` and `scanAll` simply continues from `continueCursor`.
+ */
+const TRIPS_PAGE_MAX_BYTES = 2 * 1024 * 1024;
 
 interface TripRow {
   status: string;
@@ -74,7 +92,14 @@ interface TripRow {
 export const _tripsPage = internalQuery({
   args: { cursor: v.union(v.string(), v.null()), numItems: v.number() },
   handler: async (ctx, { cursor, numItems }) => {
-    const res = await ctx.db.query("trips").paginate({ cursor, numItems });
+    const res = await ctx.db.query("trips").paginate({
+      cursor,
+      numItems,
+      // Hard ceiling on bytes pulled into this transaction — see
+      // TRIPS_PAGE_MAX_BYTES. Independent of `numItems`, which only bounds the
+      // rows the paginator *returns*, not the bytes it reads getting there.
+      maximumBytesRead: TRIPS_PAGE_MAX_BYTES,
+    });
     const rows: TripRow[] = res.page.map((t: any) => ({
       status: t.status,
       startDate: t.startDate,
@@ -338,15 +363,29 @@ export const recomputeAdminKpis = internalAction({
     const now = startedAt;
 
     // ---- generic paginator over a projected page query ----
+    // Byte-capped pages (see TRIPS_PAGE_MAX_BYTES) can come back short, so the
+    // loop must not assume a full page means progress. It stops on a cursor
+    // that stops advancing, and on a page budget, so a pathological page can
+    // never spin this action until the platform kills it.
+    const MAX_PAGES_PER_TABLE = 2000;
     async function scanAll<T>(
       run: (cursor: string | null) => Promise<{ rows: T[]; isDone: boolean; continueCursor: string }>,
       onRows: (rows: T[]) => void,
+      label = "table",
     ) {
       let cursor: string | null = null;
-      for (;;) {
+      for (let page = 0; ; page++) {
         const res = await run(cursor);
         onRows(res.rows);
         if (res.isDone) break;
+        if (res.continueCursor === cursor) {
+          console.error(`[admin-kpis] ${label}: cursor stopped advancing, stopping scan`);
+          break;
+        }
+        if (page + 1 >= MAX_PAGES_PER_TABLE) {
+          console.error(`[admin-kpis] ${label}: hit ${MAX_PAGES_PER_TABLE}-page cap, KPIs may be partial`);
+          break;
+        }
         cursor = res.continueCursor;
       }
     }
@@ -374,7 +413,10 @@ export const recomputeAdminKpis = internalAction({
 
     await scanAll<TripRow>(
       (cursor) =>
-        ctx.runQuery(internal.adminKpis._tripsPage, { cursor, numItems: 50 }) as Promise<{
+        // 15 rows/page (not 500 like the thin tables): trips are the fat rows,
+        // ~57 KB each, so 15 keeps a normal page under ~1 MB. The byte cap
+        // inside _tripsPage is the backstop if a page runs into big itineraries.
+        ctx.runQuery(internal.adminKpis._tripsPage, { cursor, numItems: 15 }) as Promise<{
           rows: TripRow[]; isDone: boolean; continueCursor: string;
         }>,
       (rows) => {
@@ -401,6 +443,7 @@ export const recomputeAdminKpis = internalAction({
           }
         }
       },
+      "trips",
     );
 
     // ---------- USERS ----------

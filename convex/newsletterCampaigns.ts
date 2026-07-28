@@ -31,7 +31,7 @@ import {
   internalMutation,
   internalAction,
 } from "./_generated/server";
-import { internal as _internal } from "./_generated/api";
+import { api as _api, internal as _internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import { assertAdmin } from "./admin";
 import {
@@ -48,6 +48,7 @@ import {
   normalizeLang,
   pickTopDeals,
   pickGuides,
+  destinationFocusFrom,
   dealPriceSignal,
   CJ_BANNERS,
   FOOTER_COPY,
@@ -60,12 +61,17 @@ import {
   queryFeaturedSights,
   queryFeaturedAttractions,
   queryFeaturedPackages,
+  queryDestinationHero,
+  destinationHeroCacheKey,
+  isCuratedHero,
   type DealForEmail,
   type ItineraryForEmail,
   type SightForEmail,
   type AttractionForEmail,
   type PackageForEmail,
   type RouteBlockMeta,
+  type DestinationFocus,
+  type DestinationHero,
 } from "./newsletter";
 import { calendarCacheKey, exploreDestCacheKey } from "./lib/searchCacheKeys";
 import type { FlightCalendar, ExploreDestinationFlights } from "../types/flights";
@@ -74,6 +80,9 @@ import type { FlightCalendar, ExploreDestinationFlights } from "../types/flights
 // until `convex dev` regenerates types; the `as any` cast is the same trick
 // crons.ts / adminKpis.ts use. Results are still annotated by hand.
 const internal = _internal as any;
+// Same escape hatch for the public `images` actions (Unsplash lives in a
+// "use node" module, reachable only through the function reference).
+const api = _api as any;
 
 // Subscribers processed per fan-out tick. Matches the drip batch size.
 const SEND_BATCH_SIZE = 50;
@@ -161,6 +170,9 @@ interface CampaignExtras {
   // Null on a fetch/cache miss, in which case the block is silently omitted.
   calendar: FlightCalendar | null;
   teaser: ExploreDestinationFlights | null;
+  // Photo OF the pinned destination for the header, when we have one; null
+  // leaves the campaign's curated marketing photo in place.
+  hero: DestinationHero | null;
 }
 
 function renderCampaignEmail(
@@ -173,10 +185,25 @@ function renderCampaignEmail(
   const unsubscribeUrl = `${BASE_URL}/newsletter/unsubscribe?token=${unsubscribeToken}`;
 
   // Guides are constants (no DB), so they're picked here per-recipient — a
-  // Greek reader gets the Greek pages even on an all-languages campaign.
+  // Greek reader gets the Greek pages even on an all-languages campaign. The
+  // focus drops guides about a different destination than the pinned one.
   const guides = campaign.includeGuides
-    ? pickGuides(language, clampCount(campaign.guideCount, 2, 3), campaign.countryFilter)
+    ? pickGuides(
+        language,
+        clampCount(campaign.guideCount, 2, 3),
+        campaign.countryFilter,
+        campaignFocus(campaign),
+      )
     : [];
+
+  // An email about a place leads with a photo OF that place: a pinned
+  // destination replaces the curated stock hero (which is only ever a
+  // stand-in for "some travel photo"). A URL the marketer pasted themselves
+  // is respected as-is, and "no image" stays no image.
+  const useDestinationHero = !!extras.hero && isCuratedHero(campaign.heroImg);
+  const heroImg = useDestinationHero ? extras.hero!.url : campaign.heroImg || undefined;
+  const heroCredit = useDestinationHero ? extras.hero!.credit : undefined;
+  const heroCreditUrl = useDestinationHero ? extras.hero!.creditUrl : undefined;
 
   // Display cities for the route block, falling back to the IATA codes so a
   // half-filled route still renders something sensible.
@@ -219,7 +246,9 @@ function renderCampaignEmail(
     ctaText: campaign.ctaText,
     ctaUrl: campaign.ctaUrl,
     unsubscribeUrl,
-    heroImg: campaign.heroImg ?? undefined,
+    heroImg,
+    heroCredit,
+    heroCreditUrl,
     // Affiliate banner is opt-in per campaign; the key is validated against
     // the CJ creative set so an unknown value just renders nothing.
     banner: (campaign.bannerKey && CJ_BANNERS[campaign.bannerKey as keyof typeof CJ_BANNERS]) || null,
@@ -425,6 +454,85 @@ export const estimateAudience = query({
   },
 });
 
+/**
+ * The actual opted-in list, for the admin dashboard: who signed up, when, from
+ * where, and in what language. Defaults to confirmed ("active") subscribers —
+ * the people a campaign would actually reach — but any status can be listed.
+ *
+ * `counts` always covers the whole table so the UI can show the funnel
+ * (pending → active → unsubscribed) regardless of the current filter.
+ */
+export const listSubscribers = query({
+  args: {
+    token: v.string(),
+    status: v.optional(
+      v.union(
+        v.literal("active"),
+        v.literal("pending"),
+        v.literal("unsubscribed"),
+        v.literal("all"),
+      ),
+    ),
+    // Case-insensitive substring match on the email address.
+    search: v.optional(v.string()),
+    languageFilter: v.optional(v.string()),
+    sourceFilter: v.optional(v.string()),
+    countryFilter: v.optional(v.string()),
+    limit: v.optional(v.float64()),
+  },
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx, args.token);
+
+    const statuses =
+      !args.status || args.status === "all"
+        ? (["active", "pending", "unsubscribed"] as const)
+        : ([args.status] as const);
+
+    const counts = { active: 0, pending: 0, unsubscribed: 0 };
+    let rows: any[] = [];
+    for (const status of ["active", "pending", "unsubscribed"] as const) {
+      const batch = await ctx.db
+        .query("newsletterSubscribers")
+        .withIndex("by_status", (q) => q.eq("status", status))
+        .collect();
+      counts[status] = batch.length;
+      if ((statuses as readonly string[]).includes(status)) rows.push(...batch);
+    }
+
+    const search = args.search?.trim().toLowerCase();
+    rows = rows.filter(
+      (s) =>
+        (!search || s.email.includes(search)) &&
+        matchesFilter(s, args.languageFilter, args.sourceFilter, args.countryFilter),
+    );
+
+    const matched = rows.length;
+    // Newest signups first — the interesting end of the list.
+    rows.sort((a, b) => b.createdAt - a.createdAt);
+    const limit = Math.min(Math.max(args.limit ?? 200, 1), 1000);
+
+    return {
+      counts,
+      matched,
+      subscribers: rows.slice(0, limit).map((s) => ({
+        _id: s._id,
+        email: s.email,
+        status: s.status,
+        source: s.source,
+        language: s.language,
+        country: s.country,
+        // Whether the row came from a logged-in app user (vs. a website form).
+        hasAccount: !!s.userId,
+        dripStage: s.dripStage,
+        createdAt: s.createdAt,
+        confirmedAt: s.confirmedAt,
+        unsubscribedAt: s.unsubscribedAt,
+        lastEmailSentAt: s.lastEmailSentAt,
+      })),
+    };
+  },
+});
+
 // ---------------------------------------------------------------------------
 // Admin: one-time legacy backfill
 // ---------------------------------------------------------------------------
@@ -495,6 +603,21 @@ function matchesFilter(
   return true;
 }
 
+/**
+ * Look up the pinned destination's header photo in the background, so the next
+ * preview already shows it. Cheap and idempotent: the action returns early
+ * unless a destination is pinned over a curated stock hero, and a cache hit
+ * makes no network call.
+ */
+async function scheduleHeroWarm(ctx: any, content: HeroInputs): Promise<void> {
+  if (!content.routeDestinationCity && !content.routeDestination) return;
+  await ctx.scheduler.runAfter(0, internal.newsletterCampaigns.warmDestinationHero, {
+    heroImg: content.heroImg,
+    routeDestination: content.routeDestination,
+    routeDestinationCity: content.routeDestinationCity,
+  });
+}
+
 /** Create a new draft campaign. */
 export const createCampaign = mutation({
   args: { token: v.string(), ...campaignContentArgs },
@@ -508,6 +631,7 @@ export const createCampaign = mutation({
       createdBy: userId,
       createdAt: Date.now(),
     });
+    await scheduleHeroWarm(ctx, content);
     return { campaignId };
   },
 });
@@ -530,6 +654,8 @@ export const updateCampaign = mutation({
     }
     const { token, campaignId, ...content } = args;
     await ctx.db.patch(campaignId, content);
+    // Destination may have just changed — warm the new one's photo.
+    await scheduleHeroWarm(ctx, content);
     return null;
   },
 });
@@ -592,6 +718,40 @@ function itineraryFetchCount(campaign: CampaignContent): number {
   );
 }
 
+/** The campaign fields that name the destination an email is about. */
+type PinnedDestination = Pick<
+  CampaignContent,
+  "routeDestination" | "routeDestinationCity"
+>;
+
+/** …plus the header photo, which the destination can replace. */
+type HeroInputs = PinnedDestination & Pick<CampaignContent, "heroImg">;
+
+/**
+ * The campaign's pinned DESTINATION, or null when none was chosen.
+ *
+ * It comes from the route fields because that's where the composer captures
+ * "the place this email is about" — and it applies even when the live-price
+ * route block itself is off, since a marketer who pinned Malta wants Malta
+ * content either way. Every destination-specific block is then restricted to
+ * it, and a block with nothing there is dropped rather than filled with
+ * another destination (see the focus notes in newsletter.ts).
+ */
+function campaignFocus(campaign: PinnedDestination): DestinationFocus | null {
+  return destinationFocusFrom(campaign.routeDestinationCity, campaign.routeDestination);
+}
+
+/** Pinned-destination args forwarded to every featured-content query. */
+function focusArgs(campaign: PinnedDestination): {
+  destinationCity?: string;
+  destinationIata?: string;
+} {
+  return {
+    destinationCity: campaign.routeDestinationCity,
+    destinationIata: campaign.routeDestination,
+  };
+}
+
 /** The route block's pinned route, or null when not (fully) configured. */
 function routeBlockInputs(
   campaign: CampaignContent,
@@ -632,18 +792,19 @@ async function buildExtrasFromDb(
   const country = campaign.countryFilter;
   const itinMax = itineraryFetchCount(campaign);
   const route = routeBlockInputs(campaign);
-  const [fetchedItins, sights, attractions, packages, calendar, teaser] = await Promise.all([
+  const focus = focusArgs(campaign);
+  const [fetchedItins, sights, attractions, packages, calendar, teaser, hero] = await Promise.all([
     itinMax
-      ? queryFeaturedItineraries(db, { country, max: itinMax })
+      ? queryFeaturedItineraries(db, { country, max: itinMax, ...focus })
       : Promise.resolve<ItineraryForEmail[]>([]),
     campaign.includeSights
-      ? queryFeaturedSights(db, { max: clampCount(campaign.sightCount, 3, 5) })
+      ? queryFeaturedSights(db, { max: clampCount(campaign.sightCount, 3, 5), ...focus })
       : Promise.resolve<SightForEmail[]>([]),
     campaign.includeAttractions
-      ? queryFeaturedAttractions(db, { country, max: clampCount(campaign.attractionCount, 3, 4) })
+      ? queryFeaturedAttractions(db, { country, max: clampCount(campaign.attractionCount, 3, 4), ...focus })
       : Promise.resolve<AttractionForEmail[]>([]),
     campaign.includePackages
-      ? queryFeaturedPackages(db, { country, max: clampCount(campaign.packageCount, 2, 3) })
+      ? queryFeaturedPackages(db, { country, max: clampCount(campaign.packageCount, 2, 3), ...focus })
       : Promise.resolve<PackageForEmail[]>([]),
     route?.kind === "calendar"
       ? readSearchCacheFromDb(db, calendarCacheKey({
@@ -656,10 +817,16 @@ async function buildExtrasFromDb(
           hl: campaign.languageFilter,
         })) as Promise<ExploreDestinationFlights | null>
       : Promise.resolve<ExploreDestinationFlights | null>(null),
+    // Hero: DB sources only here. A preview before the first send can therefore
+    // still show the stock photo; the test-send warms the cache and the next
+    // preview matches what subscribers get.
+    isCuratedHero(campaign.heroImg)
+      ? queryDestinationHero(db, focus)
+      : Promise.resolve<DestinationHero | null>(null),
   ]);
   return {
     deals: campaign.includeDeals
-      ? pickTopDeals(deals, country, clampCount(campaign.dealCount, 3, 5))
+      ? pickTopDeals(deals, country, clampCount(campaign.dealCount, 3, 5), campaignFocus(campaign))
       : [],
     ...splitItineraries(campaign, fetchedItins),
     sights,
@@ -667,8 +834,98 @@ async function buildExtrasFromDb(
     packages,
     calendar,
     teaser,
+    hero,
   };
 }
+
+/**
+ * The destination hero for an action context (test send, fan-out, or the warm
+ * scheduled when a draft is saved):
+ *   1. the cached Unsplash hero for this destination;
+ *   2. a fresh Unsplash search, cached so previews and later batches reuse it;
+ *   3. a published itinerary's hero as the offline fallback.
+ * Never throws — a missing header photo must not fail a campaign.
+ */
+async function fetchDestinationHero(
+  ctx: any,
+  campaign: HeroInputs,
+): Promise<DestinationHero | null> {
+  // Only a curated stock hero is up for replacement (a pasted URL wins, and
+  // "no image" means no image), so don't spend an Unsplash call otherwise.
+  if (!isCuratedHero(campaign.heroImg)) return null;
+  const focus = campaignFocus(campaign);
+  if (!focus) return null;
+
+  try {
+    const cached: DestinationHero | null = await ctx.runQuery(
+      internal.newsletter.getCachedDestinationHero,
+      focusArgs(campaign),
+    );
+    if (cached) return cached;
+
+    const photo: {
+      url: string;
+      photographer: string;
+      photographerUrl?: string;
+      attribution: string;
+      downloadLocation?: string;
+      unsplashId: string;
+    } | null = await ctx.runAction(api.images.getNewsletterHeroImage, {
+      destination: focus.label,
+    });
+    if (photo?.url) {
+      await ctx.runMutation(internal.newsletter.cacheDestinationHero, {
+        cacheKey: destinationHeroCacheKey(focus),
+        url: photo.url,
+        photographer: photo.photographer,
+        photographerUrl: photo.photographerUrl,
+        attribution: photo.attribution,
+        unsplashId: photo.unsplashId,
+      });
+      // Unsplash asks API clients to ping the download endpoint when a photo
+      // is actually used; a failure there must not affect the send.
+      try {
+        if (photo.downloadLocation) {
+          await ctx.runAction(api.images.trackUnsplashDownload, {
+            downloadLocation: photo.downloadLocation,
+          });
+        }
+      } catch {
+        /* tracking only */
+      }
+      return {
+        url: photo.url,
+        credit: photo.photographer,
+        creditUrl: photo.photographerUrl ?? photo.attribution,
+      };
+    }
+  } catch (e) {
+    console.error("newsletter destination hero fetch failed:", e);
+  }
+
+  // Unsplash unavailable (no key, rate limit, no match): fall back to whatever
+  // photo of the destination the database already holds.
+  return await ctx.runQuery(internal.newsletter.getDestinationHero, focusArgs(campaign));
+}
+
+/**
+ * Warm the destination hero cache off the composer's save, so the admin preview
+ * shows the real destination photo without having to send a test first. Runs
+ * detached from the mutation: a failed lookup only means the preview keeps the
+ * stock photo until the send fetches it.
+ */
+export const warmDestinationHero = internalAction({
+  args: {
+    heroImg: v.optional(v.string()),
+    routeDestination: v.optional(v.string()),
+    routeDestinationCity: v.optional(v.string()),
+  },
+  returns: v.null(),
+  handler: async (ctx, args): Promise<null> => {
+    await fetchDestinationHero(ctx, args);
+    return null;
+  },
+});
 
 /**
  * Action-context build (used by `sendTestEmail` and the fan-out). Same shape
@@ -684,18 +941,19 @@ async function fetchExtrasForCampaign(
   const country = campaign.countryFilter;
   const itinMax = itineraryFetchCount(campaign);
   const route = routeBlockInputs(campaign);
-  const [fetchedItins, sights, attractions, packages, calendar, teaser] = await Promise.all([
+  const focus = focusArgs(campaign);
+  const [fetchedItins, sights, attractions, packages, calendar, teaser, hero] = await Promise.all([
     itinMax
-      ? ctx.runQuery(internal.newsletter.getFeaturedItineraries, { country, max: itinMax })
+      ? ctx.runQuery(internal.newsletter.getFeaturedItineraries, { country, max: itinMax, ...focus })
       : Promise.resolve<ItineraryForEmail[]>([]),
     campaign.includeSights
-      ? ctx.runQuery(internal.newsletter.getFeaturedSights, { max: clampCount(campaign.sightCount, 3, 5) })
+      ? ctx.runQuery(internal.newsletter.getFeaturedSights, { max: clampCount(campaign.sightCount, 3, 5), ...focus })
       : Promise.resolve<SightForEmail[]>([]),
     campaign.includeAttractions
-      ? ctx.runQuery(internal.newsletter.getFeaturedAttractions, { country, max: clampCount(campaign.attractionCount, 3, 4) })
+      ? ctx.runQuery(internal.newsletter.getFeaturedAttractions, { country, max: clampCount(campaign.attractionCount, 3, 4), ...focus })
       : Promise.resolve<AttractionForEmail[]>([]),
     campaign.includePackages
-      ? ctx.runQuery(internal.newsletter.getFeaturedPackages, { country, max: clampCount(campaign.packageCount, 2, 3) })
+      ? ctx.runQuery(internal.newsletter.getFeaturedPackages, { country, max: clampCount(campaign.packageCount, 2, 3), ...focus })
       : Promise.resolve<PackageForEmail[]>([]),
     // Route-block prices are fetched live (cache-backed, so at most one
     // searchapi call per TTL window across all batches of a send).
@@ -710,10 +968,11 @@ async function fetchExtrasForCampaign(
           hl: campaign.languageFilter,
         })
       : Promise.resolve<ExploreDestinationFlights | null>(null),
+    fetchDestinationHero(ctx, campaign),
   ]);
   return {
     deals: campaign.includeDeals
-      ? pickTopDeals(deals, country, clampCount(campaign.dealCount, 3, 5))
+      ? pickTopDeals(deals, country, clampCount(campaign.dealCount, 3, 5), campaignFocus(campaign))
       : [],
     ...splitItineraries(campaign, fetchedItins),
     sights,
@@ -721,6 +980,7 @@ async function fetchExtrasForCampaign(
     packages,
     calendar,
     teaser,
+    hero,
   };
 }
 
@@ -1094,6 +1354,8 @@ export const processCampaignSend = internalAction({
     // below. Refetching each batch (not once per campaign) keeps a long
     // fan-out from pinning hours-stale attraction prices.
     const batchExtras: CampaignExtras = await fetchExtrasForCampaign(ctx, campaign, allDeals);
+    // Pinned destination, so the per-subscriber deal slice below stays on it.
+    const focus = campaignFocus(campaign);
 
     const pageResult: {
       page: Array<{
@@ -1131,7 +1393,7 @@ export const processCampaignSend = internalAction({
       const mail = renderCampaignEmail(campaign, sub.language, sub.unsubscribeToken, {
         ...batchExtras,
         deals: campaign.includeDeals
-          ? pickTopDeals(allDeals, sub.country, clampCount(campaign.dealCount, 3, 5))
+          ? pickTopDeals(allDeals, sub.country, clampCount(campaign.dealCount, 3, 5), focus)
           : [],
       });
       const res: { success: boolean; error?: string } = await ctx.runAction(

@@ -267,6 +267,8 @@ export interface ExploreDestination {
   price?: number;
   stops?: number;
   airline?: string;
+  /** IATA carrier code (e.g. "A3"), when the engine supplies one. */
+  airlineCode?: string;
   flightDuration?: string;
   avgHotelPerNight?: number;
   outboundDate?: string; // YYYY-MM-DD
@@ -302,6 +304,8 @@ export interface ExploreDestinationFlight {
   /** Indicative price (discovery signal, not bookable). */
   price?: number;
   airline?: string;
+  /** IATA carrier code (e.g. "A3") — the key for logos + affiliate matching. */
+  airlineCode?: string;
   stops?: number;
   departureAirport?: string; // IATA
   arrivalAirport?: string; // IATA

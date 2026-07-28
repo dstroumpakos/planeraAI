@@ -20,9 +20,12 @@
  */
 
 import { query, mutation, internalQuery, internalMutation, internalAction } from "./_generated/server";
+import { authQuery, authMutation } from "./functions";
 import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import { iataToCountry } from "./lib/airportCountry";
+import { lookupCountryFacts } from "./lib/countryFacts";
+import { AIRPORTS } from "../lib/airports";
 import type { FlightCalendar, ExploreDestinationFlights } from "../types/flights";
 
 // ---------------------------------------------------------------------------
@@ -399,6 +402,22 @@ export const HERO_IMAGES: Record<string, string> = {
   explore: `${BASE_URL}/nl-hero-explore.jpg`,
 };
 
+/**
+ * Is this hero one of the curated stock photos (vs a URL the marketer pasted)?
+ * A curated photo is a placeholder for "some travel image", so a campaign that
+ * pins a destination upgrades it to a photo OF that destination; a hand-picked
+ * URL means that exact image and is always left alone.
+ */
+export function isCuratedHero(url?: string): boolean {
+  return !!url && Object.values(HERO_IMAGES).includes(url);
+}
+
+/** Unsplash asks that credit links carry referral UTMs. */
+function withUnsplashUtm(url: string): string {
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}utm_source=planera_ai&utm_medium=referral`;
+}
+
 const STAGE_HERO_IMG: Record<EmailKey, string | null> = {
   confirm: null,
   welcome: `${BASE_URL}/nl-hero-welcome.jpg`,
@@ -422,8 +441,8 @@ export const CJ_BANNERS: Record<"tripcom" | "kiwi" | "welcome" | "lot" | "airser
     alt: "Trip.com — save on flights and hotels",
   },
   kiwi: {
-    img: "https://www.ftjcfx.com/image-101641262-13236165",
-    click: "https://www.kqzyfj.com/click-101641262-13236165",
+    img: "https://www.tqlkg.com/image-101641262-13236145",
+    click: "https://www.anrdoezrs.net/click-101641262-13236145",
     alt: "Kiwi.com — find cheap flights",
   },
   welcome: {
@@ -615,6 +634,10 @@ export function renderEmail(opts: {
   ctaUrl: string;
   unsubscribeUrl: string;
   heroImg?: string;
+  // Photographer name + profile link for a destination hero, rendered as a
+  // small Unsplash credit line under the image.
+  heroCredit?: string;
+  heroCreditUrl?: string;
   banner?: CjBanner | null;
   dealsBlock?: string;
   // Marketing emails show a small invite-your-travel-buddies nudge above the
@@ -639,10 +662,22 @@ export function renderEmail(opts: {
       </td></tr>`
     : "";
 
+  // Destination heroes come from Unsplash, whose API terms ask for a credit
+  // linking back to the photographer and to Unsplash (with referral UTMs); the
+  // curated stock photos are ours and pass no credit.
+  const creditName = opts.heroCredit
+    ? opts.heroCreditUrl
+      ? `<a href="${withUnsplashUtm(opts.heroCreditUrl)}" target="_blank" style="color:#B0B0B0;text-decoration:underline;">${opts.heroCredit}</a>`
+      : opts.heroCredit
+    : "";
+  const heroCreditRow = creditName
+    ? `
+        <p style="margin:6px 0 0;font-size:10px;line-height:1.4;color:#B0B0B0;direction:${dir};text-align:${align};">Photo: ${creditName} / <a href="${withUnsplashUtm("https://unsplash.com")}" target="_blank" style="color:#B0B0B0;text-decoration:underline;">Unsplash</a></p>`
+    : "";
   const heroRow = opts.heroImg
     ? `
       <tr><td style="padding:20px 40px 0;">
-        <img src="${opts.heroImg}" alt="" width="520" style="display:block;width:100%;max-width:520px;height:auto;border:0;border-radius:14px;outline:none;text-decoration:none;" />
+        <img src="${opts.heroImg}" alt="" width="520" style="display:block;width:100%;max-width:520px;height:auto;border:0;border-radius:14px;outline:none;text-decoration:none;" />${heroCreditRow}
       </td></tr>`
     : "";
 
@@ -973,6 +1008,183 @@ export const confirm = mutation({
   },
 });
 
+// ---------------------------------------------------------------------------
+// Authenticated in-app enrollment (single opt-in)
+//
+// A logged-in app user already gave us a real email at sign-up, so we skip the
+// double opt-in confirmation step and enrol them straight as `active`, send the
+// welcome email, and rely on the one-tap unsubscribe link in every footer.
+// Two entry points share `enrollActiveSubscriber`:
+//   - `enrollAppUser`  — internal, scheduled from auth when a new user is
+//                        created (auto-enrolment across iOS/Android/web).
+//   - `subscribeMe`    — public authed mutation, called by the in-app
+//                        "get deals in your inbox" prompt (fallback for users
+//                        who signed up before auto-enrolment existed).
+// ---------------------------------------------------------------------------
+
+type EnrollResult = "active" | "already_active" | "unsubscribed" | "invalid";
+
+/**
+ * Enrol an authenticated user as an ACTIVE subscriber and send the welcome
+ * email. Idempotent and consent-preserving:
+ *   - already `active`      → no-op (never re-sends the welcome email);
+ *   - previously `unsubscribed` → left untouched (we never resurrect an opt-out);
+ *   - `pending` or brand-new → promoted straight to `active`.
+ */
+async function enrollActiveSubscriber(
+  ctx: { db: any; scheduler: any },
+  args: {
+    email: string;
+    userId?: string;
+    language?: string;
+    country?: string;
+    source?: string;
+  },
+): Promise<EnrollResult> {
+  const email = normalizeEmail(args.email);
+  if (!EMAIL_REGEX.test(email)) return "invalid";
+
+  const existing = await ctx.db
+    .query("newsletterSubscribers")
+    .withIndex("by_email", (q: any) => q.eq("email", email))
+    .unique();
+
+  // Honour a prior opt-out — auto-enrolment must never re-subscribe someone
+  // who explicitly unsubscribed.
+  if (existing && existing.status === "unsubscribed") return "unsubscribed";
+  if (existing && existing.status === "active") return "already_active";
+
+  const now = Date.now();
+  const country = normalizeCountry(args.country);
+  const unsubscribeToken = existing?.unsubscribeToken ?? randomToken();
+  const language = args.language ?? existing?.language;
+
+  if (existing) {
+    // Re-arm a pending row straight to active (single opt-in).
+    await ctx.db.patch(existing._id, {
+      status: "active",
+      source: args.source ?? existing.source,
+      language,
+      country: country ?? existing.country,
+      userId: args.userId ?? existing.userId,
+      unsubscribeToken,
+      dripStage: 0,
+      confirmedAt: now,
+      unsubscribedAt: undefined,
+      lastEmailSentAt: now,
+    });
+  } else {
+    await ctx.db.insert("newsletterSubscribers", {
+      email,
+      status: "active",
+      source: args.source ?? "app",
+      language,
+      country,
+      userId: args.userId,
+      confirmToken: randomToken(), // unused for single opt-in, but schema-required
+      unsubscribeToken,
+      dripStage: 0,
+      confirmedAt: now,
+      lastEmailSentAt: now,
+      createdAt: now,
+    });
+  }
+
+  // Welcome email (drip stage 0) with this week's featured deals — the same
+  // lead-magnet the double opt-in `confirm` flow sends, prefer local fares.
+  const allDeals = await queryFeaturedDeals(ctx.db);
+  const featuredDeals = pickTopDeals(allDeals, country);
+  const mail = dripEmail(0, language, unsubscribeToken, featuredDeals);
+  await ctx.scheduler.runAfter(0, internal.postmark.sendRawEmail, {
+    to: email,
+    subject: mail.subject,
+    html: mail.html,
+    text: mail.text,
+    from: MARKETING_FROM,
+    replyTo: MARKETING_EMAIL,
+  });
+
+  return "active";
+}
+
+/**
+ * Auto-enrol a newly-created user. Scheduled from the auth upsert (see
+ * `authNativeDb.upsertUserAndCreateSession`) so every new signup on any
+ * platform lands in the newsletter without per-app code. No-op without a valid
+ * email or if the address already opted out.
+ */
+export const enrollAppUser = internalMutation({
+  args: {
+    email: v.string(),
+    userId: v.optional(v.string()),
+    language: v.optional(v.string()),
+    country: v.optional(v.string()),
+    source: v.optional(v.string()),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await enrollActiveSubscriber(ctx, {
+      email: args.email,
+      userId: args.userId,
+      language: args.language,
+      country: args.country,
+      source: args.source ?? "app_signup",
+    });
+    return null;
+  },
+});
+
+/**
+ * Current subscription status for the signed-in user, keyed off their account
+ * email. Drives the in-app opt-in prompt: only "none" should be prompted.
+ */
+export const myStatus = authQuery({
+  args: {},
+  handler: async (ctx: any) => {
+    const raw = ctx.user?.email;
+    if (!raw) return { status: "none" as const };
+    const email = normalizeEmail(raw);
+    const sub = await ctx.db
+      .query("newsletterSubscribers")
+      .withIndex("by_email", (q: any) => q.eq("email", email))
+      .unique();
+    return {
+      status: (sub?.status ?? "none") as
+        | "none"
+        | "pending"
+        | "active"
+        | "unsubscribed",
+    };
+  },
+});
+
+/**
+ * Enrol the signed-in user from the in-app opt-in prompt. Single opt-in — same
+ * path as auto-enrolment. `language` should be the app's current UI language.
+ */
+export const subscribeMe = authMutation({
+  args: {
+    language: v.optional(v.string()),
+    country: v.optional(v.string()),
+  },
+  returns: v.object({ success: v.boolean(), status: v.string() }),
+  handler: async (ctx: any, args: any) => {
+    const email = ctx.user?.email;
+    if (!email) return { success: false, status: "no_email" };
+    const status = await enrollActiveSubscriber(ctx, {
+      email,
+      userId: ctx.user.userId,
+      language: args.language ?? ctx.user.language,
+      country: args.country,
+      source: "app_prompt",
+    });
+    return {
+      success: status === "active" || status === "already_active",
+      status,
+    };
+  },
+});
+
 /**
  * Unsubscribe via the token embedded in every email footer.
  */
@@ -1106,23 +1318,172 @@ export async function queryFeaturedDeals(db: {
   }));
 }
 
+// ---------------------------------------------------------------------------
+// Destination focus
+//
+// A campaign can pin ONE destination (the route block's arrival airport + its
+// display city). When it does, every destination-specific block has to stay on
+// that destination: Rome sights under a "flights to Malta" headline read as a
+// bug. So a block with nothing for the pinned destination is DROPPED rather
+// than filled with somewhere else — same rule the blocks already follow when
+// they have no content at all.
+//
+// Deals are the one exception: each card names its own route, so they can't be
+// misread as being about the pinned destination. They get re-ranked toward it
+// and fall back to the usual picks, never emptied.
+//
+// Matching is token-based because every source spells destinations its own
+// way: "Rome, Italy" (published itineraries), "rome" (attraction links),
+// "rome-italy" (destinationSights keys), "FCO" (deals).
+// ---------------------------------------------------------------------------
+
+export interface DestinationFocus {
+  /** As pinned on the campaign, e.g. "Malta" or "Rome, Italy". */
+  label: string;
+  /** Normalized first segment: "Rome, Italy" → "rome". */
+  cityToken: string;
+  /** Normalized country name when resolvable: "Rome, Italy" → "italy". */
+  countryToken?: string;
+  /** Uppercase IATA of the pinned arrival airport, when one was given. */
+  iata?: string;
+  /** ISO-3166-1 alpha-2 of the destination country, lowercase, when known. */
+  countryCode?: string;
+  /**
+   * True when the pinned destination IS a whole country ("Malta"), in which
+   * case any place inside it is on-destination. For a city ("Rome") only that
+   * city is — a Florence itinerary is still the wrong place for the email.
+   */
+  countryWide: boolean;
+}
+
+/** Lowercase, dash-joined place token: "Rome, Italy" → "rome-italy". */
+function placeToken(s: string): string {
+  return s
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+/**
+ * ISO-2 (lowercase) from whatever a row happens to store: an ISO-2 code, or a
+ * country name we can look up. Undefined when neither works.
+ */
+function toCountryCode(value?: string): string | undefined {
+  const raw = value?.trim();
+  if (!raw) return undefined;
+  if (/^[a-z]{2}$/i.test(raw)) return raw.toLowerCase();
+  return lookupCountryFacts(raw)?.cca2.toLowerCase();
+}
+
+/**
+ * Build a focus from a campaign's pinned destination. The city label wins —
+ * it's what the email actually prints — and the IATA code fills in the city
+ * (for the airports we know) and the country.
+ */
+export function destinationFocusFrom(
+  city?: string,
+  iata?: string,
+): DestinationFocus | null {
+  const code = iata?.trim().toUpperCase() || undefined;
+  const airport = code ? AIRPORTS.find((a) => a.code === code) : undefined;
+  const label = (city?.trim() || airport?.city || "").trim();
+  if (!label) return null;
+
+  const segments = label.split(",").map((s) => s.trim()).filter(Boolean);
+  const head = segments[0] ?? label;
+  const cityToken = placeToken(head);
+  if (!cityToken) return null;
+
+  // "Malta" resolves as a country name on its own; "Rome" does not.
+  const headCountry = lookupCountryFacts(head);
+  const tailCountry =
+    segments.length > 1 ? lookupCountryFacts(segments[segments.length - 1]) : null;
+  const country = tailCountry ?? headCountry ?? (airport?.country ? lookupCountryFacts(airport.country) : null);
+
+  return {
+    label,
+    cityToken,
+    countryToken: country ? placeToken(country.name) : undefined,
+    iata: code,
+    countryCode: country?.cca2.toLowerCase() ?? iataToCountry(code),
+    countryWide: segments.length === 1 && !!headCountry,
+  };
+}
+
+/** Does a dash-joined key contain `token` as a whole dash-delimited run? */
+function keyHasToken(key: string, token: string): boolean {
+  if (!key || !token) return false;
+  return (
+    key === token ||
+    key.startsWith(`${token}-`) ||
+    key.endsWith(`-${token}`) ||
+    key.includes(`-${token}-`)
+  );
+}
+
+/** Is this row's place the pinned destination? */
+export function focusMatchesPlace(
+  focus: DestinationFocus,
+  place: { city?: string; countryCode?: string; countryName?: string },
+): boolean {
+  const cityToken = placeToken((place.city ?? "").split(",")[0] ?? "");
+  if (cityToken && keyHasToken(cityToken, focus.cityToken)) return true;
+  // Only a country-wide destination widens to "anywhere in the country".
+  if (!focus.countryWide || !focus.countryCode) return false;
+  const rowCode = toCountryCode(place.countryCode) ?? toCountryCode(place.countryName);
+  return !!rowCode && rowCode === focus.countryCode;
+}
+
+/**
+ * Same test for a `destinationSights` cache key ("valletta-malta", "rome-italy",
+ * "athens-el" — city, optional country, optional language suffix).
+ */
+export function focusMatchesDestinationKey(
+  focus: DestinationFocus,
+  key: string,
+): boolean {
+  const base = (key ?? "").toLowerCase();
+  if (keyHasToken(base, focus.cityToken)) return true;
+  return (
+    focus.countryWide && !!focus.countryToken && keyHasToken(base, focus.countryToken)
+  );
+}
+
+/** Is this deal's arrival the pinned destination? */
+function dealMatchesFocus(focus: DestinationFocus, deal: DealForEmail): boolean {
+  if (focus.iata && deal.destination?.toUpperCase() === focus.iata) return true;
+  return focusMatchesPlace(focus, {
+    city: deal.destinationCity,
+    countryCode: iataToCountry(deal.destination),
+  });
+}
+
 /**
  * Pick the top `max` deals for a subscriber's country. Deals departing from
  * that country (by origin IATA) are preferred; if none exist we fall back to
  * the global-cheapest list so an email is never left without deals. `deals`
  * must already be sorted (recommended-first, price asc) — as returned by
  * `queryFeaturedDeals`.
+ *
+ * With a `focus`, deals INTO the pinned destination are preferred over the
+ * rest (the country preference then applies within them). Unlike the other
+ * blocks the fall-back is kept: a deal card carries its own route label, so a
+ * Lisbon card in a Malta email is a different offer, not a wrong one.
  */
 export function pickTopDeals(
   deals: DealForEmail[],
   country?: string,
   max = 3,
+  focus?: DestinationFocus | null,
 ): DealForEmail[] {
+  const onFocus = focus ? deals.filter((d) => dealMatchesFocus(focus, d)) : [];
+  const pool = onFocus.length ? onFocus : deals;
   if (country) {
-    const local = deals.filter((d) => iataToCountry(d.origin) === country);
+    const local = pool.filter((d) => iataToCountry(d.origin) === country);
     if (local.length) return local.slice(0, max);
   }
-  return deals.slice(0, max);
+  return pool.slice(0, max);
 }
 
 // ---------------------------------------------------------------------------
@@ -1151,6 +1512,10 @@ export interface ItineraryForEmail {
   budgetLevel: string;
   bestSeason?: string;
   heroImage?: string;
+  // Photographer of `heroImage` (Unsplash) + their profile link, when the row
+  // recorded them.
+  heroImageCredit?: string;
+  heroImageCreditUrl?: string;
 }
 
 export interface SightForEmail {
@@ -1433,6 +1798,10 @@ const GUIDE_PAGES: Array<{
   // Restrict a locally-relevant guide to one audience country (ISO-2). The
   // language check still applies: Greek readers always qualify for "gr".
   onlyForCountry?: string;
+  // City token of the destination a guide is ABOUT. Such a guide is dropped
+  // when the campaign pins a different destination (a Rome reading card has no
+  // business in a Malta email); with no destination pinned it stays eligible.
+  onlyForDestination?: string;
   en: GuideForEmail;
   el: GuideForEmail;
 }> = [
@@ -1448,6 +1817,7 @@ const GUIDE_PAGES: Array<{
   },
   {
     id: "rome-5-days",
+    onlyForDestination: "rome",
     en: { slug: "5-days-in-rome", title: "Plan 5 perfect days in Rome", description: "A ready-made Rome itinerary you can copy, tweak and follow." },
     el: { slug: "5-imeres-sti-romi", title: "Οργάνωσε 5 τέλειες ημέρες στη Ρώμη", description: "Ένα έτοιμο πρόγραμμα για τη Ρώμη που μπορείς να προσαρμόσεις." },
   },
@@ -1468,16 +1838,20 @@ const GUIDE_PAGES: Array<{
  * Pick `max` guides for an audience. Pure and DB-free (guides are constants).
  * The starting index rotates weekly so consecutive campaigns don't keep
  * showing the same two guides. Greek pages for Greek readers, English
- * otherwise; country-restricted guides only for their audience.
+ * otherwise; country-restricted guides only for their audience, and
+ * destination-specific guides only when the campaign pins that destination.
  */
 export function pickGuides(
   language: string | undefined,
   max: number,
   country?: string,
+  focus?: DestinationFocus | null,
 ): GuideForEmail[] {
   const lang = normalizeLang(language);
   const eligible = GUIDE_PAGES.filter(
-    (g) => !g.onlyForCountry || g.onlyForCountry === country || (g.onlyForCountry === "gr" && lang === "el"),
+    (g) =>
+      (!g.onlyForCountry || g.onlyForCountry === country || (g.onlyForCountry === "gr" && lang === "el")) &&
+      (!g.onlyForDestination || !focus || focus.cityToken === g.onlyForDestination),
   );
   if (!eligible.length) return [];
   const week = Math.floor(Date.now() / (7 * 24 * 60 * 60 * 1000));
@@ -1722,23 +2096,61 @@ const MAX_ITIN_SAMPLE = 6;
 const MAX_SIGHTS_SAMPLE = 8;
 const MAX_ATTR_SAMPLE = 8;
 const MAX_PKG_SAMPLE = 6;
+// Bundles read when a destination-focused sights lookup has to fall back to
+// scanning (the indexed prefix read covers the common "<city>-…" keys).
+const FOCUS_SIGHTS_SCAN = 100;
+// Sorts after every character a normalized destination key can contain
+// (lowercase alphanumerics and dashes), so [token, token + this) is a prefix
+// range on `destinationKey`.
+const KEY_SUFFIX_MAX = "{";
+
+/**
+ * The pinned destination for these opts, or null when none is pinned. Every
+ * `queryFeatured*` helper takes the same two fields so callers can forward the
+ * campaign's route destination without knowing how matching works.
+ */
+export interface FocusOpts {
+  /** Display city pinned on the campaign, e.g. "Malta". */
+  destinationCity?: string;
+  /** Arrival IATA pinned on the campaign, e.g. "MLA". */
+  destinationIata?: string;
+}
+
+function focusOf(opts: FocusOpts): DestinationFocus | null {
+  return destinationFocusFrom(opts.destinationCity, opts.destinationIata);
+}
+
+// `FocusOpts` as Convex validators, so an action-context send and a
+// query-context preview filter on exactly the same fields.
+const focusValidators = {
+  destinationCity: v.optional(v.string()),
+  destinationIata: v.optional(v.string()),
+};
 
 /**
  * Published itineraries, prioritising ones from the audience's country when
  * `country` is set. `sourceTripCount` is the closest thing we have to a
  * quality signal (guides aggregated from more trips are more trustworthy).
+ * With a pinned destination, only itineraries for it are eligible — an empty
+ * result means the block is dropped.
  */
 export async function queryFeaturedItineraries(
   db: { query: (t: "publishedItineraries") => any },
-  opts: { country?: string; max?: number } = {},
+  opts: { country?: string; max?: number } & FocusOpts = {},
 ): Promise<ItineraryForEmail[]> {
   const rows = await db
     .query("publishedItineraries")
     .withIndex("by_status", (q: any) => q.eq("status", "published"))
     .collect();
 
+  const focus = focusOf(opts);
   const scored = rows
-    .filter((r: any) => r.slug && r.title)
+    .filter(
+      (r: any) =>
+        r.slug &&
+        r.title &&
+        (!focus || focusMatchesPlace(focus, { city: r.destination, countryName: r.country })),
+    )
     .map((r: any) => {
       const cc: string | undefined = typeof r.country === "string"
         ? r.country.slice(0, 2).toLowerCase() : undefined;
@@ -1764,8 +2176,141 @@ export async function queryFeaturedItineraries(
       budgetLevel: row.budgetLevel,
       bestSeason: row.bestSeason,
       heroImage: row.heroImage,
+      heroImageCredit: row.heroImageData?.photographer,
+      heroImageCreditUrl:
+        row.heroImageData?.photographerUrl ?? row.heroImageData?.attribution,
     }));
 }
+
+// ---------------------------------------------------------------------------
+// Destination hero photo
+//
+// A campaign about a place should LEAD with that place. Sources, cheapest
+// first, so the admin preview (a query) and the send (an action) agree:
+//   1. `imageCache` — an Unsplash photo the send path already looked up;
+//   2. a published itinerary's hero image for the same destination;
+//   3. a live Unsplash lookup — actions only, cached into (1) for next time.
+// Nothing found leaves the campaign's own marketing photo in place.
+// ---------------------------------------------------------------------------
+
+export interface DestinationHero {
+  url: string;
+  /** Photographer name, when known — rendered as a credit under the image. */
+  credit?: string;
+  /** Where the credit links: the photographer's profile, else the photo page. */
+  creditUrl?: string;
+}
+
+/**
+ * Cache key for a destination hero. The city token (not the typed label) keys
+ * it, so "Malta" and "malta " share one entry.
+ */
+export function destinationHeroCacheKey(focus: DestinationFocus): string {
+  return `hero:${focus.cityToken}`;
+}
+
+/** Step 1 only: the Unsplash hero a previous send already cached. */
+export async function queryCachedDestinationHero(
+  db: any,
+  opts: FocusOpts,
+): Promise<DestinationHero | null> {
+  const focus = focusOf(opts);
+  if (!focus) return null;
+
+  const cached = await db
+    .query("imageCache")
+    .withIndex("by_query_and_type", (q: any) =>
+      q.eq("query", destinationHeroCacheKey(focus)).eq("type", "destination"),
+    )
+    .first();
+  if (cached?.url) {
+    return {
+      url: cached.url,
+      credit: cached.photographer || undefined,
+      creditUrl: cached.photographerUrl || cached.attribution || undefined,
+    };
+  }
+  return null;
+}
+
+/** Steps 1-2: everything reachable from the database alone. */
+export async function queryDestinationHero(
+  db: any,
+  opts: FocusOpts,
+): Promise<DestinationHero | null> {
+  const cached = await queryCachedDestinationHero(db, opts);
+  if (cached) return cached;
+  if (!focusOf(opts)) return null;
+
+  // Published itineraries carry an Unsplash hero of the destination already.
+  const itins = await queryFeaturedItineraries(db, { ...opts, max: 1 });
+  const withImage = itins.find((i) => i.heroImage);
+  if (withImage?.heroImage) {
+    return {
+      url: withImage.heroImage,
+      credit: withImage.heroImageCredit,
+      creditUrl: withImage.heroImageCreditUrl,
+    };
+  }
+  return null;
+}
+
+const destinationHeroValidator = v.object({
+  url: v.string(),
+  credit: v.optional(v.string()),
+  creditUrl: v.optional(v.string()),
+});
+
+export const getDestinationHero = internalQuery({
+  args: focusValidators,
+  returns: v.union(v.null(), destinationHeroValidator),
+  handler: async (ctx, args): Promise<DestinationHero | null> =>
+    queryDestinationHero(ctx.db, args),
+});
+
+export const getCachedDestinationHero = internalQuery({
+  args: focusValidators,
+  returns: v.union(v.null(), destinationHeroValidator),
+  handler: async (ctx, args): Promise<DestinationHero | null> =>
+    queryCachedDestinationHero(ctx.db, args),
+});
+
+/**
+ * Remember a destination hero fetched during a send, so later batches, later
+ * campaigns and the admin preview reuse it instead of re-querying Unsplash.
+ */
+export const cacheDestinationHero = internalMutation({
+  args: {
+    cacheKey: v.string(),
+    url: v.string(),
+    photographer: v.string(),
+    photographerUrl: v.optional(v.string()),
+    attribution: v.string(),
+    unsplashId: v.optional(v.string()),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("imageCache")
+      .withIndex("by_query_and_type", (q: any) =>
+        q.eq("query", args.cacheKey).eq("type", "destination"),
+      )
+      .first();
+    const row = {
+      query: args.cacheKey,
+      type: "destination" as const,
+      url: args.url,
+      photographer: args.photographer,
+      photographerUrl: args.photographerUrl,
+      attribution: args.attribution,
+      unsplashId: args.unsplashId ?? "",
+      cachedAt: Date.now(),
+    };
+    if (existing) await ctx.db.patch(existing._id, row);
+    else await ctx.db.insert("imageCache", row);
+    return null;
+  },
+});
 
 /**
  * Top sights across recently-generated destinations. We don't know per-country
@@ -1774,16 +2319,34 @@ export async function queryFeaturedItineraries(
  */
 export async function queryFeaturedSights(
   db: { query: (t: "destinationSights") => any },
-  opts: { destinationKey?: string; max?: number } = {},
+  opts: { destinationKey?: string; max?: number } & FocusOpts = {},
 ): Promise<SightForEmail[]> {
   // A destination key drives a tight lookup; otherwise fall back to the most
   // recent bundles across destinations.
+  const focus = focusOf(opts);
   let bundles: any[];
   if (opts.destinationKey) {
     bundles = await db
       .query("destinationSights")
       .withIndex("by_destination_key", (q: any) => q.eq("destinationKey", opts.destinationKey))
       .collect();
+  } else if (focus) {
+    // Keys are "<city>[-country][-lang]", so an indexed prefix read finds the
+    // pinned city directly; the bounded recent-rows scan is only for keys where
+    // the city isn't first ("valletta-malta" under a Malta focus).
+    bundles = (
+      await db
+        .query("destinationSights")
+        .withIndex("by_destination_key", (q: any) =>
+          q.gte("destinationKey", focus.cityToken).lt("destinationKey", focus.cityToken + KEY_SUFFIX_MAX),
+        )
+        .take(20)
+    ).filter((b: any) => focusMatchesDestinationKey(focus, b.destinationKey));
+    if (!bundles.length) {
+      bundles = (
+        await db.query("destinationSights").order("desc").take(FOCUS_SIGHTS_SCAN)
+      ).filter((b: any) => focusMatchesDestinationKey(focus, b.destinationKey));
+    }
   } else {
     bundles = await db.query("destinationSights").order("desc").take(20);
   }
@@ -1819,18 +2382,30 @@ export async function queryFeaturedSights(
 /**
  * Bookable attractions, prioritising `topSite` rows and (if given) the
  * audience's country. Only active rows with a live affiliate URL are eligible.
+ * With a pinned destination, only attractions there are eligible at all — a
+ * ticket for another city is worse than no card.
  */
 export async function queryFeaturedAttractions(
   db: { query: (t: "attractionAffiliateLinks") => any },
-  opts: { country?: string; max?: number } = {},
+  opts: { country?: string; max?: number } & FocusOpts = {},
 ): Promise<AttractionForEmail[]> {
   const rows = await db
     .query("attractionAffiliateLinks")
     .withIndex("by_active", (q: any) => q.eq("active", true))
     .collect();
 
+  const focus = focusOf(opts);
   const scored = rows
-    .filter((r: any) => r.affiliateUrl && r.displayTitle)
+    .filter(
+      (r: any) =>
+        r.affiliateUrl &&
+        r.displayTitle &&
+        (!focus ||
+          focusMatchesPlace(focus, {
+            city: r.destinationCity,
+            countryCode: r.destinationCountry,
+          })),
+    )
     .map((r: any) => {
       const localMatch = opts.country && r.destinationCountry === opts.country ? 1 : 0;
       return {
@@ -1860,10 +2435,25 @@ export async function queryFeaturedAttractions(
  */
 export async function queryFeaturedPackages(
   db: { query: (t: "otaPackages") => any },
-  opts: { country?: string; max?: number } = {},
+  opts: { country?: string; max?: number } & FocusOpts = {},
 ): Promise<PackageForEmail[]> {
+  const focus = focusOf(opts);
   let rows: any[];
-  if (opts.country) {
+  if (focus) {
+    // A pinned destination overrides the audience-country preference AND its
+    // global fallback: a Malta email only ever shows Malta packages.
+    rows = await db
+      .query("otaPackages")
+      .withIndex("by_active", (q: any) => q.eq("active", true))
+      .collect();
+    rows = rows.filter((r: any) =>
+      focusMatchesPlace(focus, {
+        city: r.destinationCity,
+        countryCode: r.destinationCountryCode,
+        countryName: r.destinationCountry,
+      }),
+    );
+  } else if (opts.country) {
     rows = await db
       .query("otaPackages")
       .withIndex("by_country", (q: any) => q.eq("destinationCountryCode", opts.country).eq("active", true))
@@ -1927,25 +2517,25 @@ function titleCase(s: string): string {
 }
 
 export const getFeaturedItineraries = internalQuery({
-  args: { country: v.optional(v.string()), max: v.optional(v.float64()) },
+  args: { country: v.optional(v.string()), max: v.optional(v.float64()), ...focusValidators },
   handler: async (ctx, args): Promise<ItineraryForEmail[]> =>
     queryFeaturedItineraries(ctx.db, args),
 });
 
 export const getFeaturedSights = internalQuery({
-  args: { destinationKey: v.optional(v.string()), max: v.optional(v.float64()) },
+  args: { destinationKey: v.optional(v.string()), max: v.optional(v.float64()), ...focusValidators },
   handler: async (ctx, args): Promise<SightForEmail[]> =>
     queryFeaturedSights(ctx.db, args),
 });
 
 export const getFeaturedAttractions = internalQuery({
-  args: { country: v.optional(v.string()), max: v.optional(v.float64()) },
+  args: { country: v.optional(v.string()), max: v.optional(v.float64()), ...focusValidators },
   handler: async (ctx, args): Promise<AttractionForEmail[]> =>
     queryFeaturedAttractions(ctx.db, args),
 });
 
 export const getFeaturedPackages = internalQuery({
-  args: { country: v.optional(v.string()), max: v.optional(v.float64()) },
+  args: { country: v.optional(v.string()), max: v.optional(v.float64()), ...focusValidators },
   handler: async (ctx, args): Promise<PackageForEmail[]> =>
     queryFeaturedPackages(ctx.db, args),
 });

@@ -122,4 +122,14 @@ crons.interval(
     {},
 );
 
+// Atlas memoises tool results (weather, FX, holidays, TripAdvisor) with TTLs
+// from 30 minutes to 30 days. Expired rows are ignored on read but never
+// removed, so sweep them nightly. Bounded to 500 rows per run.
+crons.interval(
+    "purge-atlas-tool-cache",
+    { hours: 24 },
+    internal.atlasDb.purgeExpiredToolCache,
+    {},
+);
+
 export default crons;

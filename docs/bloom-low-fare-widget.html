@@ -2200,7 +2200,7 @@
       if (res && res.alreadyRunning) {
         toast('A refresh is already running.', 'info');
       } else if (res) {
-        toast('Refreshed ' + res.checked + ' deal(s): ' + res.updated + ' price change(s), ' + res.notFound + ' flight(s) not found.', 'success');
+        toast('Refreshed ' + res.checked + ' deal(s): ' + res.updated + ' price change(s), ' + res.notFound + ' flight(s) not found.' + (res.skipped ? ' ' + res.skipped + ' deferred to the next hourly tick.' : ''), 'success');
       }
       loadRefreshStatus();
       loadDeals();

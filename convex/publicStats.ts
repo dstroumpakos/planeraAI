@@ -63,10 +63,20 @@ function normaliseDestination(destination: string | undefined): string | null {
 // One page of trips. Reads full docs (Convex can't project columns) but only a
 // small page at a time, so a single execution stays well under the byte limit.
 // Returns only the small fields the aggregates need — never full docs.
+//
+// `numItems` bounds the rows RETURNED, not the bytes read getting there, and a
+// trip row averages ~57 KB (it embeds the whole `itinerary`). Measured at
+// 4.39 MB per page before the cap below — 27% of the 16 MB transaction limit.
+const TRIPS_PAGE_MAX_BYTES = 2 * 1024 * 1024;
+
 export const _tripsStatsPage = internalQuery({
   args: { cursor: v.union(v.string(), v.null()), numItems: v.number() },
   handler: async (ctx, { cursor, numItems }) => {
-    const res = await ctx.db.query("trips").paginate({ cursor, numItems });
+    const res = await ctx.db.query("trips").paginate({
+      cursor,
+      numItems,
+      maximumBytesRead: TRIPS_PAGE_MAX_BYTES,
+    });
     // Raw destinations (for top-destinations) and a completed-trip tally.
     const rawDestinations: string[] = [];
     let completedCount = 0;
@@ -146,7 +156,7 @@ export const recomputeLandingStats = internalAction({
         continueCursor: string;
       } = await ctx.runQuery(internal.publicStats._tripsStatsPage, {
         cursor,
-        numItems: 50, // small page: itineraries are large, keep each read modest
+        numItems: 15, // small page: itineraries are large, keep each read modest
       });
       tripsCount += res.count;
       completedTripsCount += res.completedCount;
@@ -156,6 +166,9 @@ export const recomputeLandingStats = internalAction({
         destCounts.set(raw, (destCounts.get(raw) ?? 0) + 1);
       }
       if (res.isDone) break;
+      // A byte-capped page can come back short; guard against a cursor that
+      // stops advancing rather than looping until the action is killed.
+      if (res.continueCursor === cursor) break;
       cursor = res.continueCursor;
     }
 

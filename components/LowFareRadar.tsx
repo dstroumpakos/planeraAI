@@ -18,6 +18,7 @@ import { useAction } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useTheme } from "@/lib/ThemeContext";
 import { useTranslation } from "react-i18next";
+import { AirlineLogo } from "@/components/AirlineLogo";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const CARD_WIDTH = SCREEN_WIDTH - 64;
@@ -619,7 +620,8 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
               activeOpacity={0.9}
               onPress={() => toggleExpand(deal._id)}
             >
-              {/* Tags */}
+              {/* Tags + carrier logo */}
+              <View style={styles.cardHeader}>
               <View style={styles.tagRow}>
                 {deal.isExpired && (
                   <View
@@ -686,6 +688,12 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
                     </Text>
                   </View>
                 )}
+              </View>
+                <AirlineLogo
+                  airline={deal.airline}
+                  logo={deal.airlineLogo}
+                  flightNumber={deal.flightNumber}
+                />
               </View>
 
               {/* Route */}
@@ -1262,10 +1270,16 @@ const styles = StyleSheet.create({
       android: { elevation: 4 },
     }),
   },
+  cardHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    marginBottom: 14,
+  },
   tagRow: {
+    flex: 1,
     flexDirection: "row",
     gap: 6,
-    marginBottom: 14,
     flexWrap: "wrap",
   },
   dealTagBadge: {

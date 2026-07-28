@@ -36,6 +36,12 @@ import {
 // practice; this is a backstop against runaway quota use.
 const MAX_DEALS_PER_RUN = 100;
 
+// Wall-clock budget for the deal loop. Convex kills an action at 10 minutes,
+// and a killed run never reaches `markRadarRefreshCompleted` — leaving the
+// `running` lock set and parking the cron. So stop pricing deals well before
+// the limit, report what got done, and pick up the rest on the next tick.
+const RUN_BUDGET_MS = 6 * 60 * 1000;
+
 // Low-fare ceiling: a deal stays on the radar only while its fare is at or
 // below the route's typical price times this ratio. Above it, the deal is no
 // longer a "low fare" and gets expired on refresh. 1.0 = expire once the fare
@@ -128,7 +134,7 @@ function buildReportEmail(
         <p style="margin:0;font-size:14px;color:#4A4A4A;">
           Checked <strong>${summary.checked}</strong> deal(s) · <strong style="color:#34C759;">${summary.updated}</strong> price change(s) ·
           <strong style="color:#EF4444;">${summary.expired}</strong> expired (above ceiling) ·
-          ${summary.unchanged} unchanged · ${summary.notFound} flight(s) not found · ${summary.failed} failed.
+          ${summary.unchanged} unchanged · ${summary.notFound} flight(s) not found · ${summary.failed} failed${summary.skipped ? ` · <strong>${summary.skipped}</strong> deferred to the next tick` : ""}.
         </p>
       </td></tr>
       <tr><td style="padding:16px 32px 32px;">
@@ -150,7 +156,7 @@ function buildReportEmail(
 
   const textLines = [
     `Low-Fare Radar — price refresh (${when})`,
-    `Checked ${summary.checked} · updated ${summary.updated} · expired ${summary.expired} · unchanged ${summary.unchanged} · not found ${summary.notFound} · failed ${summary.failed}`,
+    `Checked ${summary.checked} · updated ${summary.updated} · expired ${summary.expired} · unchanged ${summary.unchanged} · not found ${summary.notFound} · failed ${summary.failed} · deferred ${summary.skipped}`,
     "",
     ...(changes.length
       ? changes.map((c) =>
@@ -195,6 +201,8 @@ type RefreshResult = {
   notFound: number;
   failed: number;
   expired: number;
+  /** Eligible deals not priced this run (per-run cap or time budget). */
+  skipped: number;
 };
 
 /**
@@ -213,7 +221,9 @@ export const refreshManualDealPrices = internalAction({
     let notFound = 0; // API returned options, but not the deal's specific flight
     let failed = 0;
     let expired = 0;  // deals retired for exceeding the low-fare ceiling
+    let skipped = 0;  // eligible but not reached (cap or time budget)
     const changes: PriceChange[] = [];
+    const startedAt = Date.now();
 
     try {
       const deals: any[] = await ctx.runQuery(
@@ -221,7 +231,20 @@ export const refreshManualDealPrices = internalAction({
         {}
       );
 
-      for (const deal of deals.slice(0, MAX_DEALS_PER_RUN)) {
+      const batch = deals.slice(0, MAX_DEALS_PER_RUN);
+      skipped = deals.length - batch.length;
+
+      for (const [i, deal] of batch.entries()) {
+        // Out of time — leave the rest for the next tick (the completion
+        // mutation shortens the countdown when anything is skipped).
+        if (Date.now() - startedAt > RUN_BUDGET_MS) {
+          skipped += batch.length - i;
+          console.warn(
+            `[radar-refresh] time budget hit after ${checked} deal(s); ${skipped} left for the next tick`
+          );
+          break;
+        }
+
         try {
           // Query with adults=1 so the returned fare is per-person, matching
           // how radar deals store `price` (labelled "/pp" in the UI).
@@ -308,13 +331,13 @@ export const refreshManualDealPrices = internalAction({
       }
 
       console.log(
-        `[radar-refresh] checked=${checked} updated=${updated} expired=${expired} unchanged=${unchanged} notFound=${notFound} failed=${failed} (of ${deals.length} eligible)`
+        `[radar-refresh] checked=${checked} updated=${updated} expired=${expired} unchanged=${unchanged} notFound=${notFound} failed=${failed} skipped=${skipped} (of ${deals.length} eligible, ${Math.round((Date.now() - startedAt) / 1000)}s)`
       );
 
       // Email a price-change report so the run is observable end-to-end.
       // Best-effort: a mail failure must not fail the refresh.
       try {
-        const summary: RefreshResult = { checked, updated, unchanged, notFound, failed, expired };
+        const summary: RefreshResult = { checked, updated, unchanged, notFound, failed, expired, skipped };
         const { subject, html, text } = buildReportEmail(summary, changes);
         const mail: { success: boolean; error?: string } = await ctx.runAction(
           internal.postmark.sendRawEmail,
@@ -329,13 +352,15 @@ export const refreshManualDealPrices = internalAction({
         console.error("[radar-refresh] report email threw", err);
       }
     } finally {
-      // Always reset the countdown, even if the run threw partway through.
+      // Always release the lock and reset the countdown, even if the run threw
+      // partway through. `retrySoon` keeps unpriced deals from waiting 4 days.
       await ctx.runMutation(internal.lowFareRadar.markRadarRefreshCompleted, {
-        result: { checked, updated, unchanged, notFound, failed, expired },
+        result: { checked, updated, unchanged, notFound, failed, expired, skipped },
+        ...(skipped > 0 ? { retrySoon: true } : {}),
       });
     }
 
-    return { checked, updated, unchanged, notFound, failed, expired };
+    return { checked, updated, unchanged, notFound, failed, expired, skipped };
   },
 });
 
@@ -343,6 +368,11 @@ export const refreshManualDealPrices = internalAction({
  * Cron tick (hourly). Runs the refresh only when `nextRefreshAt` is due and no
  * run is already in progress. Keeps the DB-tracked countdown authoritative so
  * the admin "refresh now" button can meaningfully reset it.
+ *
+ * A `running` lock older than `RADAR_RUN_LOCK_STALE_MS` is treated as stale
+ * (`getRadarRefreshStateInternal` resolves that) — a killed run must not park
+ * the cron indefinitely. The refresh is *scheduled* rather than awaited so the
+ * tick returns immediately and the long run gets its own full time budget.
  */
 export const radarRefreshTick = internalAction({
   args: {},
@@ -358,7 +388,16 @@ export const radarRefreshTick = internalAction({
     }
     if (state.running) return;
     if (Date.now() < state.nextRefreshAt) return;
-    await ctx.runAction(internal.lowFareRadarRefresh.refreshManualDealPrices, {});
+    if (state.staleLock) {
+      console.warn(
+        "[radar-refresh] clearing stale running lock from a killed run"
+      );
+    }
+    await ctx.scheduler.runAfter(
+      0,
+      internal.lowFareRadarRefresh.refreshManualDealPrices,
+      {}
+    );
   },
 });
 
@@ -395,6 +434,7 @@ export const triggerRefreshNow = action({
         notFound: 0,
         failed: 0,
         expired: 0,
+        skipped: 0,
         alreadyRunning: true,
       };
     }

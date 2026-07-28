@@ -379,6 +379,67 @@ export const getRestaurantImage = action({
   },
 });
 
+/**
+ * Landscape hero photo for a newsletter header.
+ *
+ * Same search as `getDestinationImage`, but tuned for a full-width email hero:
+ * a retina-sized URL (the hero renders at 520 CSS px) and the extra metadata a
+ * correct Unsplash credit needs — photographer profile link and photo id. Kept
+ * separate rather than widening `getDestinationImage`, whose return validator
+ * (and the app screens behind it) expect exactly the fields it has today.
+ */
+export const getNewsletterHeroImage = action({
+  args: { destination: v.string(), width: v.optional(v.number()) },
+  returns: v.union(
+    v.object({
+      url: v.string(),
+      photographer: v.string(),
+      photographerUrl: v.optional(v.string()),
+      attribution: v.string(),
+      downloadLocation: v.optional(v.string()),
+      unsplashId: v.string(),
+    }),
+    v.null()
+  ),
+  handler: async (ctx, args) => {
+    const accessKey = process.env.UNSPLASH_ACCESS_KEY;
+    if (!accessKey) {
+      console.error("UNSPLASH_ACCESS_KEY not set");
+      return null;
+    }
+    const query = resolveIataInQuery(
+      normalizeDestinationToEnglish(args.destination)
+    );
+    try {
+      const response = await fetch(
+        `https://api.unsplash.com/search/photos?query=${encodeURIComponent(query)}` +
+          `&per_page=1&orientation=landscape&content_filter=high`,
+        { headers: { Authorization: `Client-ID ${accessKey}` } }
+      );
+      if (!response.ok) {
+        console.error("Unsplash API error:", response.status);
+        return null;
+      }
+      const data = (await response.json()) as {
+        results?: Array<UnsplashPhoto & { id?: string }>;
+      };
+      const photo = data.results?.[0];
+      if (!photo?.urls?.regular) return null;
+      return {
+        url: optimizeUnsplashUrl(photo.urls.regular, args.width ?? 1040, 75),
+        photographer: photo.user.name,
+        photographerUrl: photo.user.links.html,
+        attribution: photo.links.html,
+        downloadLocation: photo.links.download_location,
+        unsplashId: photo.id ?? "",
+      };
+    } catch (error) {
+      console.error("Error fetching Unsplash hero image:", error);
+      return null;
+    }
+  },
+});
+
 export const trackUnsplashDownload = action({
   args: { downloadLocation: v.string() },
   returns: v.null(),

@@ -302,6 +302,9 @@ export default defineSchema({
         ),
         url: v.string(),
         photographer: v.string(),
+        // Photographer's Unsplash profile — the link an Unsplash credit points
+        // at. Optional: rows cached before this field existed don't have one.
+        photographerUrl: v.optional(v.string()),
         attribution: v.string(),
         unsplashId: v.string(),
         cachedAt: v.float64(),
@@ -867,6 +870,7 @@ export default defineSchema({
         lastRefreshAt: v.optional(v.float64()),  // when the last refresh completed
         nextRefreshAt: v.float64(),              // when the next refresh is due
         running: v.optional(v.boolean()),        // guard against overlapping runs
+        runStartedAt: v.optional(v.float64()),   // when `running` was set — lets a killed run's lock go stale
         lastResult: v.optional(v.object({
             checked: v.float64(),
             updated: v.float64(),
@@ -874,6 +878,7 @@ export default defineSchema({
             notFound: v.float64(),
             failed: v.float64(),
             expired: v.optional(v.float64()),  // deals retired for exceeding the low-fare ceiling
+            skipped: v.optional(v.float64()),  // eligible deals left for the next tick (time budget)
             at: v.float64(),
         })),
         updatedAt: v.float64(),
@@ -1222,6 +1227,58 @@ export default defineSchema({
         count: v.float64(),
     })
         .index("by_user", ["userId"]),
+
+    // ───────────────────────────── Atlas assistant ──────────────────────────
+    // Fixed-window rate limit for Atlas chat turns. Atlas calls OpenAI on every
+    // turn (plus a second call per tool round-trip), so an unmetered chat is an
+    // open-ended bill. Deliberately a separate table from
+    // `flightSearchRateLimits` so a chatty Atlas session can't eat the user's
+    // flight-search budget, and vice versa.
+    atlasRateLimits: defineTable({
+        userId: v.string(),
+        windowStart: v.float64(),
+        count: v.float64(),
+    })
+        .index("by_user", ["userId"]),
+
+    // One Atlas chat thread. Previously the whole conversation lived in React
+    // state on the Atlas tab and was lost on unmount; persisting it also gives
+    // us the corpus needed to see what users actually ask.
+    atlasConversations: defineTable({
+        userId: v.string(),
+        title: v.string(),             // derived from the first user message
+        createdAt: v.float64(),
+        updatedAt: v.float64(),
+        messageCount: v.float64(),
+    })
+        .index("by_user_updated", ["userId", "updatedAt"]),
+
+    // Individual turns. `cards` holds the structured tool output the UI renders
+    // (weather / deals / sights / …) so a reopened thread redraws its cards
+    // instead of degrading to plain text.
+    atlasMessages: defineTable({
+        conversationId: v.id("atlasConversations"),
+        userId: v.string(),
+        role: v.union(v.literal("user"), v.literal("assistant")),
+        content: v.string(),
+        cards: v.optional(v.any()),
+        suggestions: v.optional(v.array(v.string())),
+        toolsUsed: v.optional(v.array(v.string())),
+        createdAt: v.float64(),
+    })
+        .index("by_conversation", ["conversationId", "createdAt"])
+        .index("by_user", ["userId"]),
+
+    // Short-TTL cache for Atlas tool results. TripAdvisor detail lookups are an
+    // N+1 (five detail fetches per restaurant question) and country/holiday
+    // facts barely change, so identical tool calls are served from here.
+    atlasToolCache: defineTable({
+        key: v.string(),               // `${toolName}:${normalized args}`
+        payload: v.any(),
+        expiresAt: v.float64(),
+    })
+        .index("by_key", ["key"])
+        .index("by_expires", ["expiresAt"]),
 
     // Cache for AI-resolved IATA codes. When the static destination→airport
     // map can't resolve a city, we ask OpenAI for the nearest airport's IATA
