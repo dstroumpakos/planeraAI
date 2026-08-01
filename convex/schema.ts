@@ -715,9 +715,37 @@ export default defineSchema({
         // Unique-user tap counter (incremented only on the first tap per user)
         uniqueTaps: v.optional(v.float64()),
         createdAt: v.float64(),
+        // Which auto-template actually went out ("lastCall" | "discount" |
+        // "roundTrip" | "oneWay"), or "custom". Lets the admin widget report
+        // CTR per copy variant instead of just CTR per send.
+        variantId: v.optional(v.string()),
+        // Why targeted users did NOT get a push. Without this the widget can
+        // only show an opaque "N failed".
+        skipReasons: v.optional(v.object({
+            noToken: v.optional(v.float64()),
+            optedOut: v.optional(v.float64()),
+            frequencyCapped: v.optional(v.float64()),
+            pushError: v.optional(v.float64()),
+        })),
+        // Lifecycle. Absent on rows written before scheduling existed — treat
+        // a missing status as "sent".
+        status: v.optional(v.string()), // "scheduled" | "sending" | "sent" | "cancelled" | "failed"
+        // Epoch ms this send is/was scheduled for (absent = sent immediately).
+        scheduledFor: v.optional(v.float64()),
+        // Scheduler job id, so a scheduled send can actually be called off.
+        scheduledJobId: v.optional(v.string()),
+        // Set by the admin cancel button; the send loop checks it between chunks.
+        cancelRequested: v.optional(v.boolean()),
+        // True when wishlist-based targeting widened the audience beyond the
+        // home-airport match.
+        wishlistTargeted: v.optional(v.boolean()),
+        // Frozen send parameters, so a scheduled run can re-resolve its
+        // audience at fire time rather than using a stale snapshot.
+        params: v.optional(v.any()),
     })
         .index("by_createdAt", ["createdAt"])
-        .index("by_deal", ["dealId"]),
+        .index("by_deal", ["dealId"])
+        .index("by_status", ["status"]),
 
     // One row per (broadcast, user) tap — used to compute unique tap counts and
     // (later) per-user funnel analytics.
@@ -1991,5 +2019,24 @@ export default defineSchema({
     })
         .index("by_slug", ["slug"])
         .index("by_createdAt", ["createdAt"]),
+
+    // One row per operator stats report email (see statsReports.ts + the
+    // weekly/monthly crons). Two jobs: an audit trail of what was sent, and the
+    // BASELINE the next report of the same period diffs against — the only way
+    // to get a per-period number out of counters the source tables keep as
+    // running totals (radar clicks, affiliate clicks, MRR). `metrics` holds the
+    // whole computed payload ({ period, snapshot }) and is intentionally
+    // untyped so the report can gain fields without a migration.
+    statsReportRuns: defineTable({
+        period: v.string(),            // "weekly" | "monthly"
+        periodStart: v.float64(),      // window start (ms, inclusive)
+        periodEnd: v.float64(),        // window end (ms, exclusive)
+        sentAt: v.float64(),
+        to: v.string(),
+        emailSent: v.boolean(),        // false when Postmark rejected the send
+        emailError: v.optional(v.string()),
+        metrics: v.any(),
+    })
+        .index("by_period_sentAt", ["period", "sentAt"]),
 });
 

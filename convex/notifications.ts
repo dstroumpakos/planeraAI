@@ -378,6 +378,162 @@ export const removeInvalidToken = internalMutation({
     },
 });
 
+// ─── Batched push sending (used by admin broadcasts) ───
+//
+// `sendPushNotification` above is the per-user path: it re-checks preferences,
+// re-reads tokens and POSTs to Expo once per user. That is fine for a single
+// trip reminder, but a broadcast to a few thousand users would mean a few
+// thousand sequential HTTP round-trips inside one action — slow enough to risk
+// a partial send with no way to resume.
+//
+// Expo accepts up to 100 messages per request, so broadcasts resolve their
+// audience (and preference checks) up front and then push through here in
+// chunks. See `lowFareRadar.executeBroadcast`.
+
+/** Max messages Expo accepts in a single /push/send call. */
+export const EXPO_PUSH_CHUNK_SIZE = 100;
+
+export const removeInvalidTokensBatch = internalMutation({
+    args: { tokenIds: v.array(v.id("pushTokens")) },
+    handler: async (ctx, args) => {
+        for (const id of args.tokenIds) {
+            try {
+                await ctx.db.delete(id);
+            } catch {
+                // Already gone (another send cleaned it up) — ignore.
+            }
+        }
+    },
+});
+
+export const logNotificationsBatch = internalMutation({
+    args: {
+        rows: v.array(v.object({
+            userId: v.string(),
+            type: v.string(),
+            title: v.string(),
+            body: v.string(),
+        })),
+    },
+    handler: async (ctx, args) => {
+        const sentAt = Date.now();
+        for (const r of args.rows) {
+            await ctx.db.insert("notificationLog", {
+                userId: r.userId,
+                type: r.type,
+                sentAt,
+                title: r.title,
+                body: r.body,
+            });
+        }
+    },
+});
+
+/**
+ * Send one chunk of already-resolved push messages via the Expo Push API.
+ *
+ * Callers are responsible for preference checks — this does NOT re-read
+ * userSettings. Pass at most EXPO_PUSH_CHUNK_SIZE messages.
+ *
+ * Returns per-user delivery so the caller can count users (not devices):
+ * a user counts as delivered if at least one of their devices accepted.
+ */
+export const sendExpoBatch = internalAction({
+    args: {
+        messages: v.array(v.object({
+            userId: v.string(),
+            tokenId: v.id("pushTokens"),
+            token: v.string(),
+            title: v.string(),
+            body: v.string(),
+            data: v.optional(v.any()),
+        })),
+        type: v.string(),
+        // When false, skip writing notificationLog rows (used by dry sends).
+        log: v.optional(v.boolean()),
+    },
+    handler: async (ctx, args): Promise<{ deliveredUserIds: string[]; failedUserIds: string[]; invalidTokens: number }> => {
+        if (args.messages.length === 0) {
+            return { deliveredUserIds: [], failedUserIds: [], invalidTokens: 0 };
+        }
+
+        const payload = args.messages.map((m) => ({
+            to: m.token,
+            sound: "default",
+            title: m.title,
+            body: m.body,
+            data: m.data || {},
+        }));
+
+        let tickets: any[] = [];
+        try {
+            const response = await fetch("https://exp.host/--/api/v2/push/send", {
+                method: "POST",
+                headers: {
+                    "Accept": "application/json",
+                    "Accept-Encoding": "gzip, deflate",
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify(payload),
+            });
+            const result = await response.json();
+            tickets = Array.isArray(result?.data) ? result.data : [];
+            if (!response.ok && tickets.length === 0) {
+                console.error("❌ Expo push batch rejected:", JSON.stringify(result).substring(0, 300));
+            }
+        } catch (error) {
+            console.error("❌ Expo push batch failed:", error);
+            // Whole chunk failed — every user in it is a failure.
+            return {
+                deliveredUserIds: [],
+                failedUserIds: Array.from(new Set(args.messages.map((m) => m.userId))),
+                invalidTokens: 0,
+            };
+        }
+
+        // Expo returns one ticket per message, in order.
+        const okByUser = new Map<string, boolean>();
+        const badTokenIds: Id<"pushTokens">[] = [];
+
+        args.messages.forEach((m, i) => {
+            const ticket = tickets[i];
+            // No ticket at all → treat as a failure for that device.
+            const ok = !!ticket && ticket.status === "ok";
+            okByUser.set(m.userId, (okByUser.get(m.userId) || false) || ok);
+            if (ticket && ticket.status === "error" && ticket.details?.error === "DeviceNotRegistered") {
+                badTokenIds.push(m.tokenId);
+            }
+        });
+
+        if (badTokenIds.length > 0) {
+            await ctx.runMutation(internal.notifications.removeInvalidTokensBatch, {
+                tokenIds: badTokenIds,
+            });
+        }
+
+        const deliveredUserIds: string[] = [];
+        const failedUserIds: string[] = [];
+        for (const [userId, ok] of okByUser.entries()) {
+            (ok ? deliveredUserIds : failedUserIds).push(userId);
+        }
+
+        if (args.log !== false && deliveredUserIds.length > 0) {
+            // One log row per delivered user (not per device).
+            const seen = new Set<string>();
+            const rows: Array<{ userId: string; type: string; title: string; body: string }> = [];
+            for (const m of args.messages) {
+                if (seen.has(m.userId)) continue;
+                if (!okByUser.get(m.userId)) continue;
+                seen.add(m.userId);
+                rows.push({ userId: m.userId, type: args.type, title: m.title, body: m.body });
+            }
+            await ctx.runMutation(internal.notifications.logNotificationsBatch, { rows });
+        }
+
+        return { deliveredUserIds, failedUserIds, invalidTokens: badTokenIds.length };
+    },
+});
+
 // ─── Notification translations per language ───
 const NOTIF_TRANSLATIONS: Record<string, Record<string, string>> = {
     en: {

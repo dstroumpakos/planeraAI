@@ -1,4 +1,4 @@
-import { query, mutation, internalMutation, internalQuery, action } from "./_generated/server";
+import { query, mutation, internalMutation, internalQuery, action, internalAction } from "./_generated/server";
 import { authQuery } from "./functions";
 import { internal as _internal } from "./_generated/api";
 import { ConvexError, v } from "convex/values";
@@ -1225,10 +1225,217 @@ export const getUsersByHomeAirport = internalQuery({
   },
 });
 
+// ─── Broadcast audience resolution ───
+//
+// One resolver, used by BOTH the admin's reach preview and the actual send, so
+// the number the admin sees before pressing Send is the number that gets a
+// push. (Previously the widget estimated reach from `getHomeAirports`, which
+// counts every user with a home airport — including users who muted deal
+// alerts and users with no device token — so it always over-promised.)
+
+const DEAL_PUSH_TYPE = "deal_broadcast";
+/** Default: don't push the same user more than one deal alert every 3 days. */
+const DEFAULT_DEAL_FREQUENCY_CAP_DAYS = 3;
+
+type BroadcastRecipient = {
+  userId: string;
+  language: string | undefined;
+  homeAirport: string | null;
+  viaWishlist: boolean;
+  tokens: Array<{ tokenId: any; token: string }>;
+};
+
+type BroadcastAudience = {
+  recipients: BroadcastRecipient[];
+  /** Users matching the targeting rules, before deliverability filtering. */
+  matched: number;
+  /** Users who will actually receive a push. */
+  deliverable: number;
+  skipReasons: { noToken: number; optedOut: number; frequencyCapped: number };
+  byAirport: Array<{ code: string; matched: number; deliverable: number }>;
+  wishlistMatched: number;
+};
+
+/** Extract the trailing IATA code from a free-form home airport string. */
+function extractIata(homeAirport: string | undefined | null): string | null {
+  if (!homeAirport) return null;
+  const m = homeAirport.toUpperCase().match(/\b([A-Z]{3})\b/g);
+  return m ? m[m.length - 1] : null;
+}
+
+/**
+ * Resolve who receives a deal broadcast and why everyone else doesn't.
+ *
+ * Reads userSettings + pushTokens in full (same order of magnitude as the
+ * existing getHomeAirports admin query) and one notificationLog row per
+ * candidate when a frequency cap is active.
+ */
+async function resolveDealAudienceImpl(
+  ctx: any,
+  args: {
+    origins: string[];
+    /** Also include users who wishlisted this destination, any home airport. */
+    wishlistDestination?: string;
+    /** Skip users pushed a deal within this many days. 0 disables. */
+    frequencyCapDays?: number;
+    /** Deal alerts respect `dealAlerts`; onboarding nudges only respect the master toggle. */
+    requireDealAlerts?: boolean;
+  }
+): Promise<BroadcastAudience> {
+  const wanted = new Set(args.origins.map((o) => o.toUpperCase()));
+  const allSettings = await ctx.db.query("userSettings").collect();
+
+  // userId → candidate
+  const candidates = new Map<string, { settings: any; homeAirport: string | null; viaWishlist: boolean }>();
+  const settingsByUser = new Map<string, any>();
+
+  for (const s of allSettings) {
+    if (!s.userId) continue;
+    settingsByUser.set(s.userId, s);
+    const code = extractIata(s.homeAirport);
+    if (code && wanted.has(code)) {
+      candidates.set(s.userId, { settings: s, homeAirport: code, viaWishlist: false });
+    }
+  }
+
+  // Wishlist widening: users who saved this destination are the warmest
+  // audience for it, but were previously unreachable — targeting was
+  // home-airport only.
+  let wishlistMatched = 0;
+  if (args.wishlistDestination) {
+    const needle = args.wishlistDestination.trim().toLowerCase();
+    if (needle.length >= 3) {
+      const wishes = await ctx.db.query("wishlist").collect();
+      for (const w of wishes) {
+        const dest = (w.destination || "").toLowerCase();
+        if (!dest) continue;
+        if (dest !== needle && !dest.includes(needle) && !needle.includes(dest)) continue;
+        const settings = settingsByUser.get(w.userId);
+        if (!settings) continue; // no settings row → no prefs, no tokens
+        wishlistMatched++;
+        if (!candidates.has(w.userId)) {
+          candidates.set(w.userId, {
+            settings,
+            homeAirport: extractIata(settings.homeAirport),
+            viaWishlist: true,
+          });
+        }
+      }
+    }
+  }
+
+  // Tokens, bulk — one scan instead of one query per user.
+  const tokensByUser = new Map<string, Array<{ tokenId: any; token: string }>>();
+  const allTokens = await ctx.db.query("pushTokens").collect();
+  for (const t of allTokens) {
+    if (!candidates.has(t.userId)) continue;
+    const list = tokensByUser.get(t.userId) || [];
+    list.push({ tokenId: t._id, token: t.token });
+    tokensByUser.set(t.userId, list);
+  }
+
+  const capDays = args.frequencyCapDays ?? 0;
+  const capCutoff = capDays > 0 ? Date.now() - capDays * 24 * 60 * 60 * 1000 : null;
+
+  const recipients: BroadcastRecipient[] = [];
+  const skipReasons = { noToken: 0, optedOut: 0, frequencyCapped: 0 };
+  const airportStats = new Map<string, { code: string; matched: number; deliverable: number }>();
+
+  const bump = (code: string | null, key: "matched" | "deliverable") => {
+    const c = code || "—";
+    const row = airportStats.get(c) || { code: c, matched: 0, deliverable: 0 };
+    row[key]++;
+    airportStats.set(c, row);
+  };
+
+  for (const [userId, cand] of candidates.entries()) {
+    const s = cand.settings;
+    bump(cand.homeAirport, "matched");
+
+    // Preference gates — mirrors notifications.sendPushNotification, which
+    // would otherwise silently drop these users after we'd already counted them.
+    if (s.pushNotifications === false) { skipReasons.optedOut++; continue; }
+    if (args.requireDealAlerts !== false && s.dealAlerts === false) { skipReasons.optedOut++; continue; }
+
+    const tokens = tokensByUser.get(userId);
+    if (!tokens || tokens.length === 0) { skipReasons.noToken++; continue; }
+
+    if (capCutoff !== null) {
+      const recent = await ctx.db
+        .query("notificationLog")
+        .withIndex("by_user_type", (q: any) => q.eq("userId", userId).eq("type", DEAL_PUSH_TYPE))
+        .order("desc")
+        .first();
+      if (recent && recent.sentAt >= capCutoff) { skipReasons.frequencyCapped++; continue; }
+    }
+
+    bump(cand.homeAirport, "deliverable");
+    recipients.push({
+      userId,
+      language: s.language,
+      homeAirport: cand.homeAirport,
+      viaWishlist: cand.viaWishlist,
+      tokens,
+    });
+  }
+
+  return {
+    recipients,
+    matched: candidates.size,
+    deliverable: recipients.length,
+    skipReasons,
+    byAirport: Array.from(airportStats.values()).sort((a, b) => b.matched - a.matched),
+    wishlistMatched,
+  };
+}
+
+export const resolveDealAudience = internalQuery({
+  args: {
+    origins: v.array(v.string()),
+    wishlistDestination: v.optional(v.string()),
+    frequencyCapDays: v.optional(v.float64()),
+    requireDealAlerts: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => resolveDealAudienceImpl(ctx, args),
+});
+
+/**
+ * Admin: how many users would ACTUALLY receive this broadcast, and why the
+ * rest wouldn't. Drives the reach summary in the widget's send modal.
+ */
+export const getBroadcastReach = query({
+  args: {
+    adminKey: v.string(),
+    origins: v.array(v.string()),
+    wishlistDestination: v.optional(v.string()),
+    frequencyCapDays: v.optional(v.float64()),
+  },
+  handler: async (ctx, args) => {
+    validateAdminKey(args.adminKey);
+    const audience = await resolveDealAudienceImpl(ctx, {
+      origins: args.origins,
+      wishlistDestination: args.wishlistDestination,
+      frequencyCapDays: args.frequencyCapDays ?? DEFAULT_DEAL_FREQUENCY_CAP_DAYS,
+      requireDealAlerts: true,
+    });
+    // Recipient list stays server-side; the widget only needs the counts.
+    return {
+      matched: audience.matched,
+      deliverable: audience.deliverable,
+      skipReasons: audience.skipReasons,
+      byAirport: audience.byAirport,
+      wishlistMatched: audience.wishlistMatched,
+    };
+  },
+});
+
 /**
  * Admin action: send a deal-alert push notification to every user whose home
- * airport matches the deal's origin (or any of the optional `originsOverride`).
- * Returns counts so the admin widget can show a summary.
+ * airport matches the deal's origin (or any of the optional `originsOverride`),
+ * optionally widened to users who wishlisted the destination.
+ *
+ * Supports dry-run (count only) and scheduling. The actual sending happens in
+ * `executeBroadcast` so that immediate and scheduled sends share one code path.
  */
 export const broadcastDealToHomeAirports = action({
   args: {
@@ -1241,8 +1448,24 @@ export const broadcastDealToHomeAirports = action({
     // "Deal found" template per user language.
     customTitle: v.optional(v.string()),
     customBody: v.optional(v.string()),
+    // Count the audience and return without sending or logging a broadcast.
+    dryRun: v.optional(v.boolean()),
+    // Also target users who wishlisted this deal's destination.
+    includeWishlist: v.optional(v.boolean()),
+    // Skip users already sent a deal alert within N days (0 disables).
+    frequencyCapDays: v.optional(v.float64()),
+    // Epoch ms. When in the future, the send is queued instead of run now.
+    scheduledFor: v.optional(v.float64()),
   },
-  handler: async (ctx, args): Promise<{ targeted: number; sent: number; skipped: number; broadcastId: string }> => {
+  handler: async (ctx, args): Promise<{
+    targeted: number;
+    sent: number;
+    skipped: number;
+    broadcastId: string | null;
+    matched: number;
+    skipReasons: { noToken: number; optedOut: number; frequencyCapped: number };
+    scheduled: boolean;
+  }> => {
     // Validate admin key
     const expected = process.env.CONVEX_LOW_FARE_ADMIN_KEY;
     if (!expected) {
@@ -1264,63 +1487,343 @@ export const broadcastDealToHomeAirports = action({
       : [finalDeal.origin]
     ).map((o: string) => o.toUpperCase());
 
-    // Find matching users
-    const users: Array<{ userId: string; language?: string; homeAirport: string }> =
-      await ctx.runQuery(internal.lowFareRadar.getUsersByHomeAirport, { origins });
+    const frequencyCapDays = args.frequencyCapDays ?? DEFAULT_DEAL_FREQUENCY_CAP_DAYS;
+    const wishlistDestination = args.includeWishlist
+      ? (finalDeal.destinationCity || finalDeal.destination)
+      : undefined;
 
-    // Create a broadcast log row up front so we can include its id in the push
-    // payload. Counts are patched in once we know them.
+    // Dry run: resolve the audience, report, send nothing, log nothing.
+    if (args.dryRun) {
+      const audience: BroadcastAudience = await ctx.runQuery(internal.lowFareRadar.resolveDealAudience, {
+        origins,
+        wishlistDestination,
+        frequencyCapDays,
+        requireDealAlerts: true,
+      });
+      return {
+        targeted: audience.deliverable,
+        sent: 0,
+        skipped: 0,
+        broadcastId: null,
+        matched: audience.matched,
+        skipReasons: audience.skipReasons,
+        scheduled: false,
+      };
+    }
+
+    const mode = args.customTitle || args.customBody ? "custom" : "auto";
+    const variantId = mode === "custom"
+      ? "custom"
+      : pickBroadcastVariant("en", finalDeal).variant.id;
+
+    const params = {
+      dealId: args.dealId,
+      origins,
+      customTitle: args.customTitle,
+      customBody: args.customBody,
+      includeWishlist: !!args.includeWishlist,
+      frequencyCapDays,
+    };
+
+    const now = Date.now();
+    const isScheduled = !!args.scheduledFor && args.scheduledFor > now + 30_000;
+
     const broadcastId: any = await ctx.runMutation(internal.lowFareRadar.createBroadcastLog, {
       dealId: args.dealId,
       origins,
-      mode: args.customTitle || args.customBody ? "custom" : "auto",
+      mode,
       customTitle: args.customTitle,
       customBody: args.customBody,
       routeSnapshot: `${finalDeal.origin} → ${finalDeal.destination}`,
-      targeted: users.length,
+      // Filled in for real by the send; a scheduled row re-resolves at fire time.
+      targeted: 0,
+      variantId,
+      status: isScheduled ? "scheduled" : "sending",
+      scheduledFor: isScheduled ? args.scheduledFor : undefined,
+      wishlistTargeted: !!args.includeWishlist,
+      params,
     });
 
-    let sent = 0;
-    let skipped = 0;
-
-    for (const u of users) {
-      const lang = u.language || "en";
-      const title = args.customTitle ?? buildBroadcastTitle(lang, finalDeal);
-      const body = args.customBody ?? buildBroadcastBody(lang, finalDeal);
-
-      try {
-        await ctx.runAction(internal.notifications.sendPushNotification, {
-          userId: u.userId,
-          title,
-          body,
-          // type begins with "deal" → respects user's dealAlerts preference
-          type: "deal_broadcast",
-          data: {
-            screen: "deal-trip",
-            dealId: args.dealId,
-            // broadcastId lets the app attribute taps back to this broadcast row
-            broadcastId: String(broadcastId),
-            origin: finalDeal.origin,
-            originCity: finalDeal.originCity,
-            destination: finalDeal.destination,
-            destinationCity: finalDeal.destinationCity,
-          },
-        });
-        sent++;
-      } catch (err) {
-        console.error(`broadcastDealToHomeAirports: failed for user ${u.userId}`, err);
-        skipped++;
-      }
+    if (isScheduled) {
+      const jobId = await ctx.scheduler.runAt(
+        args.scheduledFor!,
+        internal.lowFareRadar.executeBroadcast,
+        { broadcastId }
+      );
+      await ctx.runMutation(internal.lowFareRadar.patchBroadcast, {
+        broadcastId,
+        scheduledJobId: String(jobId),
+      });
+      return {
+        targeted: 0, sent: 0, skipped: 0,
+        broadcastId: String(broadcastId),
+        matched: 0,
+        skipReasons: { noToken: 0, optedOut: 0, frequencyCapped: 0 },
+        scheduled: true,
+      };
     }
 
-    // Patch final counts
-    await ctx.runMutation(internal.lowFareRadar.finalizeBroadcastLog, {
-      broadcastId,
-      sent,
-      skipped,
+    const result: any = await ctx.runAction(internal.lowFareRadar.executeBroadcast, { broadcastId });
+    return {
+      targeted: result.targeted,
+      sent: result.sent,
+      skipped: result.skipped,
+      broadcastId: String(broadcastId),
+      matched: result.matched,
+      skipReasons: result.skipReasons,
+      scheduled: false,
+    };
+  },
+});
+
+/**
+ * Do the actual sending for a logged broadcast row. Shared by immediate and
+ * scheduled sends. Pushes in chunks of 100 (Expo's per-request limit) instead
+ * of one HTTP round-trip per user, and honours a mid-flight cancel.
+ */
+export const executeBroadcast = internalAction({
+  args: { broadcastId: v.id("notificationBroadcasts") },
+  handler: async (ctx, args): Promise<{
+    targeted: number;
+    sent: number;
+    skipped: number;
+    matched: number;
+    skipReasons: { noToken: number; optedOut: number; frequencyCapped: number; pushError: number };
+    cancelled: boolean;
+  }> => {
+    const empty = {
+      targeted: 0, sent: 0, skipped: 0, matched: 0,
+      skipReasons: { noToken: 0, optedOut: 0, frequencyCapped: 0, pushError: 0 },
+      cancelled: false,
+    };
+
+    const row: any = await ctx.runQuery(internal.lowFareRadar.getBroadcastRow, {
+      broadcastId: args.broadcastId,
+    });
+    if (!row) return empty;
+    if (row.status === "cancelled" || row.cancelRequested) {
+      return { ...empty, cancelled: true };
+    }
+
+    const p = row.params || {};
+    const deal: any = p.dealId
+      ? await ctx.runQuery((await import("./_generated/api")).api.lowFareRadar.get, { id: p.dealId })
+      : null;
+    if (!deal) {
+      await ctx.runMutation(internal.lowFareRadar.patchBroadcast, {
+        broadcastId: args.broadcastId,
+        status: "failed",
+      });
+      return empty;
+    }
+
+    await ctx.runMutation(internal.lowFareRadar.patchBroadcast, {
+      broadcastId: args.broadcastId,
+      status: "sending",
     });
 
-    return { targeted: users.length, sent, skipped, broadcastId: String(broadcastId) };
+    // Resolve at send time, not at schedule time — opt-outs and new signups
+    // between scheduling and firing should be respected.
+    const audience: BroadcastAudience = await ctx.runQuery(internal.lowFareRadar.resolveDealAudience, {
+      origins: p.origins || [],
+      wishlistDestination: p.includeWishlist ? (deal.destinationCity || deal.destination) : undefined,
+      frequencyCapDays: p.frequencyCapDays ?? DEFAULT_DEAL_FREQUENCY_CAP_DAYS,
+      requireDealAlerts: true,
+    });
+
+    await ctx.runMutation(internal.lowFareRadar.patchBroadcast, {
+      broadcastId: args.broadcastId,
+      targeted: audience.deliverable,
+    });
+
+    const data = {
+      screen: "deal-trip",
+      dealId: p.dealId,
+      // broadcastId lets the app attribute taps back to this broadcast row
+      broadcastId: String(args.broadcastId),
+      origin: deal.origin,
+      originCity: deal.originCity,
+      destination: deal.destination,
+      destinationCity: deal.destinationCity,
+    };
+
+    // One message per device, grouped so a chunk never splits a user.
+    type Msg = { userId: string; tokenId: any; token: string; title: string; body: string; data: any };
+    const perUser: Msg[][] = audience.recipients.map((r) => {
+      const lang = (r.language || "en").toLowerCase();
+      const title = p.customTitle ?? buildBroadcastTitle(lang, deal);
+      const body = p.customBody ?? buildBroadcastBody(lang, deal);
+      return r.tokens.map((t) => ({
+        userId: r.userId, tokenId: t.tokenId, token: t.token, title, body, data,
+      }));
+    });
+
+    const CHUNK = 100;
+    let sent = 0;
+    let pushError = 0;
+    let cancelled = false;
+
+    let batch: Msg[] = [];
+    const flush = async () => {
+      if (batch.length === 0) return;
+      const res: any = await ctx.runAction(internal.notifications.sendExpoBatch, {
+        messages: batch,
+        type: DEAL_PUSH_TYPE,
+      });
+      sent += res.deliveredUserIds.length;
+      pushError += res.failedUserIds.length;
+      batch = [];
+    };
+
+    for (const userMsgs of perUser) {
+      if (batch.length + userMsgs.length > CHUNK) {
+        await flush();
+        // Cancel is checked between chunks — a mistargeted blast can be
+        // stopped instead of running to completion.
+        const check: any = await ctx.runQuery(internal.lowFareRadar.getBroadcastRow, {
+          broadcastId: args.broadcastId,
+        });
+        if (check?.cancelRequested) { cancelled = true; break; }
+      }
+      batch.push(...userMsgs);
+    }
+    if (!cancelled) await flush();
+
+    const skipReasons = {
+      noToken: audience.skipReasons.noToken,
+      optedOut: audience.skipReasons.optedOut,
+      frequencyCapped: audience.skipReasons.frequencyCapped,
+      pushError,
+    };
+
+    await ctx.runMutation(internal.lowFareRadar.finalizeBroadcastLog, {
+      broadcastId: args.broadcastId,
+      sent,
+      skipped: pushError,
+      status: cancelled ? "cancelled" : "sent",
+      skipReasons,
+    });
+
+    return {
+      targeted: audience.deliverable,
+      sent,
+      skipped: pushError,
+      matched: audience.matched,
+      skipReasons,
+      cancelled,
+    };
+  },
+});
+
+/** Admin: stop a scheduled broadcast, or halt one that's mid-send. */
+export const cancelBroadcast = mutation({
+  args: {
+    adminKey: v.string(),
+    broadcastId: v.id("notificationBroadcasts"),
+  },
+  handler: async (ctx, args) => {
+    validateAdminKey(args.adminKey);
+    const row: any = await ctx.db.get(args.broadcastId);
+    if (!row) throw new ConvexError("Broadcast not found");
+    if (row.status === "sent" || row.status === "cancelled") {
+      return { cancelled: false, reason: "Already finished" };
+    }
+
+    // Kill the queued job outright when it hasn't fired yet; the flag covers
+    // the case where it's already running.
+    if (row.scheduledJobId) {
+      try {
+        await ctx.scheduler.cancel(row.scheduledJobId as any);
+      } catch (err) {
+        console.warn("cancelBroadcast: scheduler.cancel failed", err);
+      }
+    }
+    await ctx.db.patch(args.broadcastId, {
+      cancelRequested: true,
+      status: row.status === "scheduled" ? "cancelled" : row.status,
+    });
+    return { cancelled: true, reason: null };
+  },
+});
+
+/**
+ * Admin: send one push to a single account (looked up by email) so the copy can
+ * be seen on a real device before it goes to thousands of users.
+ */
+export const sendTestPush = action({
+  args: {
+    adminKey: v.string(),
+    email: v.string(),
+    dealId: v.optional(v.id("lowFareRadar")),
+    lang: v.optional(v.string()),
+    customTitle: v.optional(v.string()),
+    customBody: v.optional(v.string()),
+  },
+  handler: async (ctx, args): Promise<{ sent: number; devices: number; title: string; body: string }> => {
+    const expected = process.env.CONVEX_LOW_FARE_ADMIN_KEY;
+    if (!expected) throw new ConvexError("CONVEX_LOW_FARE_ADMIN_KEY environment variable not set");
+    if (args.adminKey !== expected) throw new ConvexError("Unauthorized: invalid admin key");
+
+    const target: any = await ctx.runQuery(internal.lowFareRadar.findUserByEmail, {
+      email: args.email.trim().toLowerCase(),
+    });
+    if (!target) throw new ConvexError(`No account found for ${args.email}`);
+    if (!target.tokens.length) throw new ConvexError(`${args.email} has no registered device`);
+
+    let title = args.customTitle || "";
+    let body = args.customBody || "";
+    if (!title || !body) {
+      if (!args.dealId) throw new ConvexError("Provide a deal or custom copy");
+      const deal: any = await ctx.runQuery(
+        (await import("./_generated/api")).api.lowFareRadar.get,
+        { id: args.dealId }
+      );
+      if (!deal) throw new ConvexError("Deal not found");
+      const lang = (args.lang || target.language || "en").toLowerCase();
+      title = title || buildBroadcastTitle(lang, deal);
+      body = body || buildBroadcastBody(lang, deal);
+    }
+
+    // Type is deliberately NOT "deal_*": a test must not be suppressed by the
+    // tester's own deal-alert preference, and must not count toward their
+    // frequency cap.
+    const res: any = await ctx.runAction(internal.notifications.sendExpoBatch, {
+      messages: target.tokens.map((t: any) => ({
+        userId: target.userId,
+        tokenId: t.tokenId,
+        token: t.token,
+        title,
+        body,
+        data: { screen: args.dealId ? "deal-trip" : "home", dealId: args.dealId, test: true },
+      })),
+      type: "admin_test_push",
+      log: false,
+    });
+
+    return {
+      sent: res.deliveredUserIds.length,
+      devices: target.tokens.length,
+      title,
+      body,
+    };
+  },
+});
+
+export const findUserByEmail = internalQuery({
+  args: { email: v.string() },
+  handler: async (ctx, args) => {
+    const all = await ctx.db.query("userSettings").collect();
+    const match = all.find((s: any) => (s.email || "").toLowerCase() === args.email);
+    if (!match) return null;
+    const tokens = await ctx.db
+      .query("pushTokens")
+      .withIndex("by_user", (q: any) => q.eq("userId", match.userId))
+      .collect();
+    return {
+      userId: match.userId,
+      language: match.language,
+      tokens: tokens.map((t: any) => ({ tokenId: t._id, token: t.token })),
+    };
   },
 });
 
@@ -1419,7 +1922,14 @@ export const broadcastFirstTripNudge = action({
     // Use sparingly — for global announcements.
     includeUsersWithTrips: v.optional(v.boolean()),
   },
-  handler: async (ctx, args): Promise<{ targeted: number; sent: number; skipped: number; broadcastId: string | null }> => {
+  handler: async (ctx, args): Promise<{
+    targeted: number;
+    sent: number;
+    skipped: number;
+    broadcastId: string | null;
+    matched?: number;
+    skipReasons?: { noToken: number; optedOut: number; frequencyCapped: number; pushError: number };
+  }> => {
     const expected = process.env.CONVEX_LOW_FARE_ADMIN_KEY;
     if (!expected) throw new ConvexError("CONVEX_LOW_FARE_ADMIN_KEY environment variable not set");
     if (args.adminKey !== expected) throw new ConvexError("Unauthorized: invalid admin key");
@@ -1434,8 +1944,26 @@ export const broadcastFirstTripNudge = action({
         includeUsersWithTrips: args.includeUsersWithTrips,
       });
 
+    // Hydrate tokens + master push preference in one pass. Done before the
+    // dry-run returns so the preview count is the deliverable count, not the
+    // raw match count.
+    const hydrated: {
+      recipients: Array<{ userId: string; language?: string; tokens: Array<{ tokenId: any; token: string }> }>;
+      noToken: number;
+      optedOut: number;
+    } = await ctx.runQuery(internal.lowFareRadar.hydrateNudgeRecipients, {
+      userIds: users.map((u) => u.userId),
+    });
+
     if (args.dryRun) {
-      return { targeted: users.length, sent: 0, skipped: 0, broadcastId: null };
+      return {
+        targeted: hydrated.recipients.length,
+        sent: 0,
+        skipped: 0,
+        broadcastId: null,
+        matched: users.length,
+        skipReasons: { noToken: hydrated.noToken, optedOut: hydrated.optedOut, frequencyCapped: 0, pushError: 0 },
+      };
     }
 
     const hasCustom = !!(args.customCopy || args.customTitle || args.customBody);
@@ -1454,14 +1982,14 @@ export const broadcastFirstTripNudge = action({
         : args.onlyPreviouslyNotified
         ? "Follow-up: previously notified"
         : "First-trip nudge",
-      targeted: users.length,
+      targeted: hydrated.recipients.length,
+      variantId: hasCustom ? "custom" : "nudge",
+      status: "sending",
     });
 
-    let sent = 0;
-    let skipped = 0;
-
-    for (const u of users) {
-      const lang = (u.language || "en").toLowerCase();
+    type Msg = { userId: string; tokenId: any; token: string; title: string; body: string; data: any };
+    const perUser: Msg[][] = hydrated.recipients.map((r) => {
+      const lang = (r.language || "en").toLowerCase();
       const tpl = FIRST_TRIP_NUDGE_COPY[lang] || FIRST_TRIP_NUDGE_COPY.en;
 
       // Resolve copy: per-language map → single custom string → auto template.
@@ -1476,34 +2004,112 @@ export const broadcastFirstTripNudge = action({
         body = args.customBody ?? tpl.body;
       }
 
-      try {
-        await ctx.runAction(internal.notifications.sendPushNotification, {
-          userId: u.userId,
-          title,
-          body,
-          // type "deal_..." would respect dealAlerts; this is an onboarding
-          // nudge so we use a neutral type that only respects the master
-          // pushNotifications toggle.
-          type: "first_trip_nudge",
-          data: {
-            screen: "create-trip",
-            broadcastId: String(broadcastId),
-          },
-        });
-        sent++;
-      } catch (err) {
-        console.error(`broadcastFirstTripNudge: failed for user ${u.userId}`, err);
-        skipped++;
+      return r.tokens.map((t) => ({
+        userId: r.userId,
+        tokenId: t.tokenId,
+        token: t.token,
+        title,
+        body,
+        data: { screen: "create-trip", broadcastId: String(broadcastId) },
+      }));
+    });
+
+    const CHUNK = 100;
+    let sent = 0;
+    let pushError = 0;
+    let cancelled = false;
+    let batch: Msg[] = [];
+
+    const flush = async () => {
+      if (batch.length === 0) return;
+      const res: any = await ctx.runAction(internal.notifications.sendExpoBatch, {
+        messages: batch,
+        // type "deal_..." would respect dealAlerts; this is an onboarding
+        // nudge so we use a neutral type that only respects the master
+        // pushNotifications toggle (already applied when hydrating).
+        type: "first_trip_nudge",
+      });
+      sent += res.deliveredUserIds.length;
+      pushError += res.failedUserIds.length;
+      batch = [];
+    };
+
+    for (const userMsgs of perUser) {
+      if (batch.length + userMsgs.length > CHUNK) {
+        await flush();
+        const check: any = await ctx.runQuery(internal.lowFareRadar.getBroadcastRow, { broadcastId });
+        if (check?.cancelRequested) { cancelled = true; break; }
       }
+      batch.push(...userMsgs);
     }
+    if (!cancelled) await flush();
 
     await ctx.runMutation(internal.lowFareRadar.finalizeBroadcastLog, {
       broadcastId,
       sent,
-      skipped,
+      skipped: pushError,
+      status: cancelled ? "cancelled" : "sent",
+      skipReasons: {
+        noToken: hydrated.noToken,
+        optedOut: hydrated.optedOut,
+        frequencyCapped: 0,
+        pushError,
+      },
     });
 
-    return { targeted: users.length, sent, skipped, broadcastId: String(broadcastId) };
+    return {
+      targeted: hydrated.recipients.length,
+      sent,
+      skipped: pushError,
+      broadcastId: String(broadcastId),
+      matched: users.length,
+      skipReasons: {
+        noToken: hydrated.noToken,
+        optedOut: hydrated.optedOut,
+        frequencyCapped: 0,
+        pushError,
+      },
+    };
+  },
+});
+
+/**
+ * Internal: attach device tokens + master push preference to a list of nudge
+ * targets. Nudges are onboarding messages, so `dealAlerts` does not apply —
+ * only the master `pushNotifications` toggle.
+ */
+export const hydrateNudgeRecipients = internalQuery({
+  args: { userIds: v.array(v.string()) },
+  handler: async (ctx, args) => {
+    const wanted = new Set(args.userIds);
+    const allSettings = await ctx.db.query("userSettings").collect();
+    const settingsByUser = new Map<string, any>();
+    for (const s of allSettings) {
+      if (s.userId && wanted.has(s.userId)) settingsByUser.set(s.userId, s);
+    }
+
+    const tokensByUser = new Map<string, Array<{ tokenId: any; token: string }>>();
+    const allTokens = await ctx.db.query("pushTokens").collect();
+    for (const t of allTokens) {
+      if (!wanted.has(t.userId)) continue;
+      const list = tokensByUser.get(t.userId) || [];
+      list.push({ tokenId: t._id, token: t.token });
+      tokensByUser.set(t.userId, list);
+    }
+
+    const recipients: Array<{ userId: string; language?: string; tokens: Array<{ tokenId: any; token: string }> }> = [];
+    let noToken = 0;
+    let optedOut = 0;
+
+    for (const userId of args.userIds) {
+      const s = settingsByUser.get(userId);
+      if (s && s.pushNotifications === false) { optedOut++; continue; }
+      const tokens = tokensByUser.get(userId);
+      if (!tokens || tokens.length === 0) { noToken++; continue; }
+      recipients.push({ userId, language: s?.language, tokens });
+    }
+
+    return { recipients, noToken, optedOut };
   },
 });
 
@@ -1518,6 +2124,11 @@ export const createBroadcastLog = internalMutation({
     customBody: v.optional(v.string()),
     routeSnapshot: v.optional(v.string()),
     targeted: v.float64(),
+    variantId: v.optional(v.string()),
+    status: v.optional(v.string()),
+    scheduledFor: v.optional(v.float64()),
+    wishlistTargeted: v.optional(v.boolean()),
+    params: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
     return await ctx.db.insert("notificationBroadcasts", {
@@ -1533,7 +2144,35 @@ export const createBroadcastLog = internalMutation({
       taps: 0,
       uniqueTaps: 0,
       createdAt: Date.now(),
+      variantId: args.variantId,
+      status: args.status ?? "sending",
+      scheduledFor: args.scheduledFor,
+      wishlistTargeted: args.wishlistTargeted,
+      params: args.params,
     });
+  },
+});
+
+/** Internal: read a broadcast row (used by the send loop + cancel checks). */
+export const getBroadcastRow = internalQuery({
+  args: { broadcastId: v.id("notificationBroadcasts") },
+  handler: async (ctx, args) => await ctx.db.get(args.broadcastId),
+});
+
+/** Internal: patch arbitrary lifecycle fields on a broadcast row. */
+export const patchBroadcast = internalMutation({
+  args: {
+    broadcastId: v.id("notificationBroadcasts"),
+    status: v.optional(v.string()),
+    targeted: v.optional(v.float64()),
+    scheduledJobId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const patch: any = {};
+    if (args.status !== undefined) patch.status = args.status;
+    if (args.targeted !== undefined) patch.targeted = args.targeted;
+    if (args.scheduledJobId !== undefined) patch.scheduledJobId = args.scheduledJobId;
+    if (Object.keys(patch).length > 0) await ctx.db.patch(args.broadcastId, patch);
   },
 });
 
@@ -1542,11 +2181,20 @@ export const finalizeBroadcastLog = internalMutation({
     broadcastId: v.id("notificationBroadcasts"),
     sent: v.float64(),
     skipped: v.float64(),
+    status: v.optional(v.string()),
+    skipReasons: v.optional(v.object({
+      noToken: v.optional(v.float64()),
+      optedOut: v.optional(v.float64()),
+      frequencyCapped: v.optional(v.float64()),
+      pushError: v.optional(v.float64()),
+    })),
   },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.broadcastId, {
       sent: args.sent,
       skipped: args.skipped,
+      ...(args.status !== undefined ? { status: args.status } : {}),
+      ...(args.skipReasons !== undefined ? { skipReasons: args.skipReasons } : {}),
     });
   },
 });
@@ -1644,6 +2292,56 @@ export const listBroadcasts = query({
     );
 
     return enriched;
+  },
+});
+
+/**
+ * Admin: how many people who tapped this broadcast actually started a trip.
+ *
+ * Tap-through was the end of the funnel before this — but a push exists to
+ * produce trips, not taps. Computed on demand (per row the admin expands)
+ * rather than in listBroadcasts, which would make the list query heavy.
+ */
+export const getBroadcastConversions = query({
+  args: {
+    adminKey: v.string(),
+    broadcastId: v.id("notificationBroadcasts"),
+    // Trips created within this window after the tap count as converted.
+    windowHours: v.optional(v.float64()),
+  },
+  handler: async (ctx, args) => {
+    validateAdminKey(args.adminKey);
+    const windowMs = (args.windowHours ?? 72) * 60 * 60 * 1000;
+
+    const taps = await ctx.db
+      .query("notificationBroadcastTaps")
+      .withIndex("by_broadcast", (q) => q.eq("broadcastId", args.broadcastId))
+      .take(500);
+
+    let converted = 0;
+    let dealTrips = 0;
+    for (const tap of taps) {
+      const trips = await ctx.db
+        .query("trips")
+        .withIndex("by_user", (q) => q.eq("userId", tap.userId))
+        .collect();
+      const hit = trips.find(
+        (t: any) => t._creationTime >= tap.tappedAt && t._creationTime <= tap.tappedAt + windowMs
+      );
+      if (hit) {
+        converted++;
+        if ((hit as any).tripType === "deal") dealTrips++;
+      }
+    }
+
+    return {
+      tapUsers: taps.length,
+      converted,
+      dealTrips,
+      conversionRatePct: taps.length > 0 ? Math.round((converted / taps.length) * 1000) / 10 : 0,
+      windowHours: args.windowHours ?? 72,
+      truncated: taps.length === 500,
+    };
   },
 });
 

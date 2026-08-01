@@ -453,6 +453,26 @@ export const deleteInsight = mutation({
 // USERS MANAGEMENT
 // ===========================================
 
+// The saved base airport is a free-text label ("Athens, Greece (ATH)"), so pull
+// the IATA code out for the compact list row. Falls back to null when the label
+// has no 3-letter code in it.
+function extractIata(homeAirport?: string | null): string | null {
+    if (!homeAirport) return null;
+    const matches = homeAirport.toUpperCase().match(/\b([A-Z]{3})\b/g);
+    return matches?.[matches.length - 1] || null;
+}
+
+// Newsletter membership is keyed off the account email (see newsletter.myStatus),
+// not userId — web signups predate any account. `.first()` rather than `.unique()`
+// so a stale duplicate row can't break the whole admin page.
+async function getNewsletterSub(ctx: any, email?: string | null) {
+    if (!email) return null;
+    return await ctx.db
+        .query("newsletterSubscribers")
+        .withIndex("by_email", (q: any) => q.eq("email", email.trim().toLowerCase()))
+        .first();
+}
+
 export const listUsers = query({
     args: { 
         token: v.string(),
@@ -513,7 +533,10 @@ export const listUsers = query({
                     .query("userPlans")
                     .withIndex("by_user", (q: any) => q.eq("userId", settings.userId))
                     .first();
-                
+
+                // Newsletter opt-in state
+                const newsletter = await getNewsletterSub(ctx, settings.email);
+
                 return {
                     _id: user?._id,
                     settingsId: settings._id,
@@ -528,6 +551,9 @@ export const listUsers = query({
                     approvedInsightsCount: insights.filter((i: any) => i.moderationStatus === "approved").length,
                     totalLikes: insights.reduce((sum: number, i: any) => sum + (i.likes || 0), 0),
                     plan: userPlan?.plan || "free",
+                    homeAirport: settings.homeAirport || null,
+                    homeIata: extractIata(settings.homeAirport),
+                    newsletterStatus: newsletter?.status || "none",
                     createdAt: settings._creationTime,
                 };
             })
@@ -589,6 +615,9 @@ export const getUser = query({
             .collect();
         const activeSessions = sessions.filter((s: any) => s.expiresAt > Date.now());
         const lastSession = sessions.sort((a: any, b: any) => (b._creationTime || 0) - (a._creationTime || 0))[0];
+
+        // Newsletter opt-in state
+        const newsletter = await getNewsletterSub(ctx, userEmail);
         
         // Get trip destinations
         const tripDestinations = trips.map((t: any) => ({
@@ -640,6 +669,14 @@ export const getUser = query({
             tripsGenerated: userPlan?.tripsGenerated || 0,
             activeSessionsCount: activeSessions.length,
             lastActiveAt: lastSession?._creationTime || null,
+            homeAirport: settings.homeAirport || null,
+            homeIata: extractIata(settings.homeAirport),
+            newsletterStatus: newsletter?.status || "none",
+            newsletterSource: newsletter?.source || null,
+            newsletterCountry: newsletter?.country || null,
+            newsletterSubscribedAt: newsletter?.confirmedAt || newsletter?.createdAt || null,
+            newsletterUnsubscribedAt: newsletter?.unsubscribedAt || null,
+            newsletterLastEmailAt: newsletter?.lastEmailSentAt || null,
             createdAt: settings._creationTime,
         };
     },

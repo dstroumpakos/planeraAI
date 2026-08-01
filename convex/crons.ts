@@ -132,4 +132,23 @@ crons.interval(
     {},
 );
 
+// Operator stats digest: a weekly report every Sunday and a monthly report on
+// the 1st, emailed to STATS_REPORT_TO (see statsReports.ts). Times are UTC —
+// 17:00 UTC lands Sunday evening in Athens, 06:00 UTC on the 1st lands as a
+// morning read. The weekly covers the 7 days up to the moment it fires; the
+// monthly covers the whole previous calendar month.
+crons.weekly(
+    "weekly-stats-report",
+    { dayOfWeek: "sunday", hourUTC: 17, minuteUTC: 0 },
+    internal.statsReports.sendWeeklyReport,
+    {},
+);
+
+crons.monthly(
+    "monthly-stats-report",
+    { day: 1, hourUTC: 6, minuteUTC: 0 },
+    internal.statsReports.sendMonthlyReport,
+    {},
+);
+
 export default crons;

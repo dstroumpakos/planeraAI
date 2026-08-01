@@ -21,6 +21,14 @@ import { useToken, useAuthenticatedMutation } from "@/lib/useAuthenticatedMutati
 import { useTheme } from "@/lib/ThemeContext";
 import * as Haptics from "expo-haptics";
 
+// Mirrors newsletterSubscribers.status, plus "none" for users with no row at all.
+const NEWSLETTER_STATUS: Record<string, { label: string; color: string; bg: string }> = {
+    active: { label: "Subscribed", color: "#059669", bg: "rgba(16, 185, 129, 0.2)" },
+    pending: { label: "Pending", color: "#D97706", bg: "rgba(251, 191, 36, 0.2)" },
+    unsubscribed: { label: "Unsubscribed", color: "#DC2626", bg: "rgba(239, 68, 68, 0.2)" },
+    none: { label: "Not subscribed", color: "#6B7280", bg: "rgba(107, 114, 128, 0.15)" },
+};
+
 export default function AdminUserDetail() {
     const router = useRouter();
     const { id } = useLocalSearchParams();
@@ -219,6 +227,8 @@ export default function AdminUserDetail() {
         );
     }
 
+    const newsletter = NEWSLETTER_STATUS[user.newsletterStatus] || NEWSLETTER_STATUS.none;
+
     return (
         <>
             <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} />
@@ -390,6 +400,62 @@ export default function AdminUserDetail() {
                             <Text style={[styles.breakdownLabel, { color: colors.text }]}>Active Sessions</Text>
                             <Text style={[styles.breakdownValue, { color: colors.text }]}>{user.activeSessionsCount}</Text>
                         </View>
+                        <View style={styles.breakdownRow}>
+                            <Text style={[styles.breakdownLabel, { color: colors.text }]}>Base Airport</Text>
+                            {user.homeAirport ? (
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, justifyContent: 'flex-end' }}>
+                                    <Ionicons name="airplane" size={14} color={colors.primary} />
+                                    <Text style={[styles.breakdownValue, { color: colors.text, flexShrink: 1, textAlign: 'right' }]} numberOfLines={1}>
+                                        {user.homeAirport}
+                                    </Text>
+                                </View>
+                            ) : (
+                                <Text style={[styles.breakdownValue, { color: colors.textMuted }]}>Not set</Text>
+                            )}
+                        </View>
+                    </View>
+
+                    {/* Newsletter */}
+                    <View style={[styles.card, { backgroundColor: colors.card }]}>
+                        <Text style={[styles.cardTitle, { color: colors.textMuted }]}>NEWSLETTER</Text>
+                        <View style={styles.breakdownRow}>
+                            <Text style={[styles.breakdownLabel, { color: colors.text }]}>Status</Text>
+                            <View style={[styles.statusBadge, { backgroundColor: newsletter.bg }]}>
+                                <Text style={[styles.statusText, { color: newsletter.color }]}>
+                                    {newsletter.label}
+                                </Text>
+                            </View>
+                        </View>
+                        {user.newsletterSource && (
+                            <View style={styles.breakdownRow}>
+                                <Text style={[styles.breakdownLabel, { color: colors.text }]}>Source</Text>
+                                <Text style={[styles.breakdownValue, { color: colors.text }]}>{user.newsletterSource}</Text>
+                            </View>
+                        )}
+                        {user.newsletterSubscribedAt && (
+                            <View style={styles.breakdownRow}>
+                                <Text style={[styles.breakdownLabel, { color: colors.text }]}>Subscribed</Text>
+                                <Text style={[styles.breakdownValue, { color: colors.text }]}>
+                                    {new Date(user.newsletterSubscribedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                                </Text>
+                            </View>
+                        )}
+                        {user.newsletterUnsubscribedAt && (
+                            <View style={styles.breakdownRow}>
+                                <Text style={[styles.breakdownLabel, { color: colors.text }]}>Unsubscribed</Text>
+                                <Text style={[styles.breakdownValue, { color: '#DC2626' }]}>
+                                    {new Date(user.newsletterUnsubscribedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                                </Text>
+                            </View>
+                        )}
+                        {user.newsletterLastEmailAt && (
+                            <View style={styles.breakdownRow}>
+                                <Text style={[styles.breakdownLabel, { color: colors.text }]}>Last Email</Text>
+                                <Text style={[styles.breakdownValue, { color: colors.text }]}>
+                                    {new Date(user.newsletterLastEmailAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                                </Text>
+                            </View>
+                        )}
                     </View>
 
                     {/* Plan & Subscription */}

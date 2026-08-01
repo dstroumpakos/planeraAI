@@ -36,6 +36,7 @@ const IBERIA_EVERGREEN = "15736023";
 const VOLOTEA_EVERGREEN = "15735255";
 const AIRSERBIA_EVERGREEN = "15735227";
 const LOT_EVERGREEN = "16998075";
+const VUELING_EVERGREEN = "15733900";
 
 // Non-deep-link homepage/landing links, keyed by language (fallback: en).
 const KIWI_BY_LANG: Record<string, string> = {
@@ -74,6 +75,20 @@ const LOT_BY_LANG: Record<string, string> = {
   es: "17249841",
   fr: "17249821",
   de: "16943099",
+};
+// Vueling localized links. Unlike the other airlines above, every one of these
+// is deep-link enabled (CJ names them "& Deeplink enabled"), so they take a
+// `url=` target and land the traveller on their own route + dates. Vueling has
+// no Greek or Arabic creative, so el/ar fall back to en.
+// it/nl/pt are unused today but kept so adding those locales needs no CJ trip.
+const VUELING_BY_LANG: Record<string, string> = {
+  en: "11047909",
+  es: "11047810",
+  fr: "11047858",
+  de: "11047905",
+  it: "11047906",
+  nl: "11047908",
+  pt: "11051992",
 };
 
 function pickByLang(map: Record<string, string>, lang: string): string {
@@ -178,6 +193,30 @@ function voloteaHomeTarget(lang: string): string {
   return `https://www.volotea.com/${path}/`;
 }
 
+// Vueling publishes an official deeplink spec (developer/flightcalendar):
+// https://tickets.vueling.com/booking?o=&d=&dd=&rd=&adt=&c=&cur=
+// `c` is a full culture code, and `dt` there means *discount* type (resident
+// fares), not trip type — so it is deliberately omitted.
+const VUELING_CULTURE: Record<string, string> = {
+  en: "en-GB",
+  es: "es-ES",
+  fr: "fr-FR",
+  de: "de-DE",
+  it: "it-IT",
+  nl: "nl-NL",
+  pt: "pt-PT",
+};
+
+function vuelingFlightTarget(p: FlightLinkParams): string {
+  const culture = VUELING_CULTURE[p.lang] || VUELING_CULTURE.en;
+  const ret = p.returnDate ? `&rd=${p.returnDate}` : "";
+  return (
+    `https://tickets.vueling.com/booking` +
+    `?o=${p.originCode.toUpperCase()}&d=${p.destCode.toUpperCase()}` +
+    `&dd=${p.outboundDate}${ret}&adt=${p.travelers}&c=${culture}&cur=EUR`
+  );
+}
+
 export type FlightPartnerKey =
   | "tripcom"
   | "skyscanner"
@@ -186,7 +225,8 @@ export type FlightPartnerKey =
   | "iberia"
   | "volotea"
   | "airserbia"
-  | "lot";
+  | "lot"
+  | "vueling";
 
 /** Returns the final (CJ-wrapped when available) flight URL for a partner. */
 export function buildFlightLink(
@@ -220,6 +260,13 @@ export function buildFlightLink(
         return buildClickUrl(LOT_BY_LANG[p.lang]);
       }
       return buildClickUrl(LOT_EVERGREEN);
+    case "vueling":
+      // Every Vueling link we hold is deep-linkable, so the traveller always
+      // lands on their own route + dates; only the wrapper differs.
+      if (VUELING_BY_LANG[p.lang]) {
+        return buildClickUrl(VUELING_BY_LANG[p.lang], vuelingFlightTarget(p));
+      }
+      return buildClickUrl(VUELING_EVERGREEN, vuelingFlightTarget(p));
     default:
       return skyscannerFlightTarget(p);
   }

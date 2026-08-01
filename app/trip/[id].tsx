@@ -1767,6 +1767,9 @@ export default function TripDetails() {
         color: string;
         subtitle: string;
         cta: string;
+        // Foreground for the badge + CTA, for brands whose colour is too light
+        // to carry white text (e.g. Vueling yellow).
+        onColor?: string;
     }) => (
         <TouchableOpacity
             key={cfg.item}
@@ -1776,7 +1779,7 @@ export default function TripDetails() {
         >
             <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
                 <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: cfg.color, justifyContent: 'center', alignItems: 'center', marginRight: 10 }}>
-                    <Text style={{ color: '#fff', fontWeight: '800', fontSize: 13 }}>{cfg.badge}</Text>
+                    <Text style={{ color: cfg.onColor || '#fff', fontWeight: '800', fontSize: 13 }}>{cfg.badge}</Text>
                 </View>
                 <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 16, fontWeight: '700', color: colors.text }}>{cfg.brand}</Text>
@@ -1812,7 +1815,7 @@ export default function TripDetails() {
                 </View>
             </View>
             <View style={{ backgroundColor: cfg.color, borderRadius: 10, paddingVertical: 12, alignItems: 'center' }}>
-                <Text style={{ color: '#fff', fontSize: 15, fontWeight: '700' }}>{cfg.cta}</Text>
+                <Text style={{ color: cfg.onColor || '#fff', fontSize: 15, fontWeight: '700' }}>{cfg.cta}</Text>
             </View>
         </TouchableOpacity>
     );
@@ -3723,6 +3726,7 @@ export default function TripDetails() {
                             {renderAffiliateFlightCard({ partner: 'volotea', item: 'volotea', brand: 'Volotea', badge: 'VO', color: '#9B1B5A', subtitle: t('tripDetail.searchFlightsOnVolotea'), cta: t('tripDetail.searchOnVolotea') })}
                             {renderAffiliateFlightCard({ partner: 'airserbia', item: 'airserbia', brand: 'Air Serbia', badge: 'JU', color: '#0F2D53', subtitle: t('tripDetail.searchFlightsOnAirSerbia'), cta: t('tripDetail.searchOnAirSerbia') })}
                             {renderAffiliateFlightCard({ partner: 'lot', item: 'lot', brand: 'LOT Polish Airlines', badge: 'LO', color: '#252668', subtitle: t('tripDetail.searchFlightsOnLot'), cta: t('tripDetail.searchOnLot') })}
+                            {renderAffiliateFlightCard({ partner: 'vueling', item: 'vueling', brand: 'Vueling', badge: 'VY', color: '#FFCC00', onColor: '#1A1A1A', subtitle: t('tripDetail.searchFlightsOnVueling'), cta: t('tripDetail.searchOnVueling') })}
                         </View>
                     )}
 

@@ -129,6 +129,18 @@ export default function AdminUsersList() {
                                             <Ionicons name="heart" size={12} color={colors.textMuted} />
                                             <Text style={[styles.statText, { color: colors.textMuted }]}>{user.totalLikes}</Text>
                                         </View>
+                                        {user.homeIata && (
+                                            <View style={styles.statItem}>
+                                                <Ionicons name="location" size={12} color={colors.textMuted} />
+                                                <Text style={[styles.statText, { color: colors.textMuted }]}>{user.homeIata}</Text>
+                                            </View>
+                                        )}
+                                        {user.newsletterStatus === 'active' && (
+                                            <View style={[styles.badge, { backgroundColor: 'rgba(37, 99, 235, 0.2)' }]}>
+                                                <Ionicons name="mail" size={10} color="#2563EB" />
+                                                <Text style={[styles.badgeText, { color: '#2563EB' }]}>News</Text>
+                                            </View>
+                                        )}
                                         {user.plan === 'premium' && (
                                             <View style={[styles.badge, { backgroundColor: 'rgba(16, 185, 129, 0.2)' }]}>
                                                 <Text style={[styles.badgeText, { color: '#059669' }]}>Premium</Text>
@@ -244,6 +256,9 @@ const styles = StyleSheet.create({
         fontWeight: "600",
     },
     badge: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 3,
         paddingHorizontal: 6,
         paddingVertical: 2,
         borderRadius: 4,
@@ -258,6 +273,8 @@ const styles = StyleSheet.create({
     },
     statsRow: {
         flexDirection: "row",
+        alignItems: "center",
+        flexWrap: "wrap",
         marginTop: 6,
         gap: 16,
     },

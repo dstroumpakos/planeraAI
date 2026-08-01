@@ -109,6 +109,7 @@ import type * as shareCardsAction from "../shareCardsAction.js";
 import type * as sights from "../sights.js";
 import type * as sightsAction from "../sightsAction.js";
 import type * as stats from "../stats.js";
+import type * as statsReports from "../statsReports.js";
 import type * as streaks from "../streaks.js";
 import type * as translatePublic from "../translatePublic.js";
 import type * as travelers from "../travelers.js";
@@ -230,6 +231,7 @@ declare const fullApi: ApiFromModules<{
   sights: typeof sights;
   sightsAction: typeof sightsAction;
   stats: typeof stats;
+  statsReports: typeof statsReports;
   streaks: typeof streaks;
   translatePublic: typeof translatePublic;
   travelers: typeof travelers;

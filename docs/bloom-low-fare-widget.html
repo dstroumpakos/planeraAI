@@ -673,6 +673,79 @@
       background: var(--primary); color: var(--text); border-color: var(--primary);
     }
 
+    /* Pre-send banners: deal health + duplicate-send guard */
+    .notif-banner {
+      border-radius: 10px; padding: 9px 12px; font-size: 12px;
+      line-height: 1.4; margin-bottom: 10px; display: none;
+    }
+    .notif-banner.show { display: block; }
+    .notif-banner.warn { background: #FEF3C7; color: #92400E; border: 1px solid #FDE68A; }
+    .notif-banner.danger { background: #FEE2E2; color: #991B1B; border: 1px solid #FECACA; }
+    .notif-banner strong { font-weight: 700; }
+
+    /* Reach breakdown (real deliverable counts, not raw airport matches) */
+    .notif-reach { font-size: 12px; color: var(--muted); margin-top: 6px; }
+    .notif-reach .headline { color: var(--text); font-weight: 700; font-size: 13px; }
+    .notif-reach .skips { margin-top: 3px; font-size: 11px; }
+    .notif-reach .skips span { margin-right: 8px; white-space: nowrap; }
+
+    /* Options grid (wishlist widening, frequency cap, schedule) */
+    .notif-opt-row {
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      font-size: 12px; margin-top: 6px; color: var(--text);
+    }
+    .notif-opt-row label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+    .notif-opt-row select, .notif-opt-row input[type="datetime-local"], .notif-opt-row input[type="email"] {
+      padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px;
+      font-size: 12px; font-family: inherit; background: var(--bg); color: var(--text);
+    }
+    .notif-hint { font-size: 11px; color: var(--muted); margin-top: 4px; line-height: 1.4; }
+
+    /* Preview device toggle */
+    .notif-preview-tabs { display: flex; gap: 6px; margin-bottom: 8px; }
+    .notif-previews { display: grid; gap: 10px; }
+
+    /* Per-language length matrix — catches overflow in languages the admin
+       isn't previewing (DE/EL/AR run long). */
+    .notif-matrix { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 6px; }
+    .notif-matrix th {
+      text-align: left; font-weight: 700; color: var(--muted);
+      padding: 3px 6px; border-bottom: 1px solid var(--border);
+    }
+    .notif-matrix td { padding: 3px 6px; border-bottom: 1px solid var(--border); color: var(--text); }
+    .notif-matrix td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .notif-matrix td.warn { color: #b45309; font-weight: 700; }
+    .notif-matrix td.bad { color: var(--danger); font-weight: 700; }
+    .notif-matrix .trunc { color: var(--muted); }
+
+    /* Broadcast list toolbar + new row chrome */
+    .broadcast-toolbar {
+      display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 10px;
+    }
+    .broadcast-toolbar input, .broadcast-toolbar select {
+      padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px;
+      font-size: 12px; font-family: inherit; background: var(--bg); color: var(--text);
+    }
+    .broadcast-pill.status-scheduled { background: #DBEAFE; color: #1E40AF; }
+    .broadcast-pill.status-sending { background: #FEF3C7; color: #92400E; }
+    .broadcast-pill.status-cancelled { background: #E5E7EB; color: #374151; }
+    .broadcast-pill.status-failed { background: #FEE2E2; color: #991B1B; }
+    .broadcast-pill.variant { background: #EDE9FE; color: #5B21B6; }
+    .broadcast-skips {
+      font-size: 11px; color: var(--muted); margin-top: 6px;
+      display: flex; gap: 10px; flex-wrap: wrap;
+    }
+    .broadcast-actions { margin-top: 8px; display: flex; gap: 6px; flex-wrap: wrap; }
+    .broadcast-actions button {
+      padding: 4px 10px; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--bg); color: var(--text); font-size: 11px;
+      font-weight: 600; cursor: pointer;
+    }
+    .broadcast-actions button:hover { border-color: var(--text); }
+    .broadcast-actions button.danger { color: var(--danger); border-color: #FECACA; }
+    .broadcast-conv { font-size: 11px; color: var(--muted); margin-top: 6px; }
+    .broadcast-conv strong { color: var(--text); }
+
     /* Broadcast row */
     .broadcast-row {
       background: var(--card);
@@ -819,6 +892,13 @@
       transition: transform .1s;
     }
     .airport-btn:hover { transform: scale(1.03); }
+    .airport-btn:disabled { opacity: .6; cursor: default; transform: none; }
+    /* Secondary "Find deals" button: outlined so it reads as distinct from the
+       primary Create Deal action. */
+    .airport-btn-find {
+      background: transparent;
+      color: var(--primary);
+    }
 
     /* Import Deal */
     .import-card {
@@ -1196,6 +1276,9 @@
     <div class="tab" onclick="switchTab('airports')" id="tab-airports">
       <span data-i18n="tab_airports">&#127968; User Airports</span>
     </div>
+    <div class="tab" onclick="switchTab('attractions')" id="tab-attractions">
+      <span>🎟️ Attractions</span>
+    </div>
     <div class="tab" onclick="switchTab('broadcasts')" id="tab-broadcasts">
       <span>&#128226; Notifications</span>
     </div>
@@ -1517,6 +1600,79 @@
     </div>
   </div>
 
+  <!-- Attractions -->
+  <div class="content" id="content-attractions" style="display:none">
+    <div class="form-card">
+      <div class="form-section-title">🎟️ <span>Attraction Affiliate Links</span></div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>Destination City *</label>
+          <input type="text" id="a-destinationCity" placeholder="Paris">
+        </div>
+        <div class="form-group">
+          <label>Country (optional)</label>
+          <input type="text" id="a-destinationCountry" placeholder="FR">
+        </div>
+        <div class="form-group">
+          <label>Activity Title *</label>
+          <input type="text" id="a-activityTitle" placeholder="Eiffel Tower Summit Access">
+        </div>
+        <div class="form-group">
+          <label>Display Title</label>
+          <input type="text" id="a-displayTitle" placeholder="Eiffel Tower Summit Access">
+        </div>
+        <div class="form-group full">
+          <label>GetYourGuide Affiliate URL *</label>
+          <input type="url" id="a-affiliateUrl" placeholder="https://www.getyourguide.com/...">
+        </div>
+        <div class="form-group">
+          <label>Travel Style Tags (comma-separated)</label>
+          <input type="text" id="a-travelStyles" placeholder="culture, food, nightlife">
+        </div>
+        <div class="form-group">
+          <label>Partner</label>
+          <input type="text" id="a-partner" value="getyourguide">
+        </div>
+        <div class="form-group">
+          <label>Price (optional)</label>
+          <input type="number" id="a-price" min="0" step="0.01" placeholder="29.99">
+        </div>
+        <div class="form-group">
+          <label>Currency (optional)</label>
+          <input type="text" id="a-currency" maxlength="3" placeholder="EUR">
+        </div>
+        <div class="checkbox-group">
+          <input type="checkbox" id="a-topSite">
+          <label for="a-topSite">Top site (always insert)</label>
+        </div>
+        <div class="checkbox-group">
+          <input type="checkbox" id="a-active" checked>
+          <label for="a-active">Active</label>
+        </div>
+        <div class="form-group full">
+          <label>Notes</label>
+          <input type="text" id="a-notes" placeholder="Optional internal note">
+        </div>
+      </div>
+      <div class="form-actions">
+        <button class="btn-secondary" onclick="clearAttractionForm()">Clear</button>
+        <button class="btn-primary" onclick="submitAttractionLink()" id="submitAttractionBtn">Save Attraction</button>
+      </div>
+    </div>
+
+    <div class="form-card">
+      <div class="form-section-title">📋 <span>Saved Attraction Links</span></div>
+      <div class="form-group" style="margin-bottom:12px">
+        <label>Filter by destination</label>
+        <select id="attractionFilter" onchange="onAttractionFilterChange()"
+          style="width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:14px">
+          <option value="">All destinations</option>
+        </select>
+      </div>
+      <div id="attractionsList"></div>
+    </div>
+  </div>
+
   <!-- Notification Broadcasts -->
   <div class="content" id="content-broadcasts" style="display:none">
     <div class="form-card" style="margin-bottom:12px">
@@ -1593,13 +1749,33 @@
         Every push you've sent. Tap-through rate (CTR) is computed as <strong>unique tappers ÷ users sent to</strong>.
       </p>
       <div id="broadcastsSummary" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"></div>
+      <div class="broadcast-toolbar">
+        <input type="search" id="broadcastSearch" placeholder="Search route, IATA or copy…" oninput="renderBroadcasts()" style="flex:1;min-width:160px">
+        <select id="broadcastKind" onchange="renderBroadcasts()">
+          <option value="all">All types</option>
+          <option value="deal">Deal alerts</option>
+          <option value="nudge">Onboarding nudges</option>
+        </select>
+        <select id="broadcastCopy" onchange="renderBroadcasts()">
+          <option value="all">Any copy</option>
+          <option value="auto">Auto per language</option>
+          <option value="custom">Custom copy</option>
+        </select>
+        <select id="broadcastSort" onchange="renderBroadcasts()">
+          <option value="recent">Newest first</option>
+          <option value="ctr">Best CTR</option>
+          <option value="ctrLow">Worst CTR</option>
+          <option value="sent">Most sent</option>
+        </select>
+      </div>
+      <div id="broadcastVariants" style="margin-bottom:12px"></div>
       <div id="broadcastsList"></div>
     </div>
   </div>
 </div>
 
 <!-- Notification Preview Modal -->
-<div class="notif-modal-backdrop" id="notifModal">
+<div class="notif-modal-backdrop" id="notifModal" onclick="if (event.target === this) closeNotifModal()">
   <div class="notif-modal">
     <div class="notif-modal-header">
       <h3>📣 Send push notification</h3>
@@ -1607,12 +1783,35 @@
     </div>
     <div class="notif-modal-body">
 
+      <!-- Pre-send guards: deal health + "you already sent this" -->
+      <div class="notif-banner danger" id="notifDupWarning"></div>
+      <div class="notif-banner warn" id="notifDealWarning"></div>
+
       <div class="notif-section-label">Targets — home airports (IATA)</div>
       <div class="notif-target-row">
         <input type="text" id="notifTargets" class="notif-input notif-target-input"
-          placeholder="ATH, SKG, LHR" oninput="updateNotifTargetSummary()">
+          placeholder="ATH, SKG, LHR" oninput="onNotifTargetsChange()">
       </div>
       <div class="notif-target-summary" id="notifTargetSummary"></div>
+      <div class="notif-reach" id="notifReach"></div>
+
+      <div class="notif-opt-row">
+        <label title="Users who saved this destination to their wishlist, whatever their home airport">
+          <input type="checkbox" id="notifIncludeWishlist" onchange="refreshNotifReach()">
+          💖 Also target wishlisters of this destination
+        </label>
+      </div>
+      <div class="notif-opt-row">
+        <label>
+          🚦 Frequency cap
+          <select id="notifFrequencyCap" onchange="refreshNotifReach()">
+            <option value="0">Off — send to everyone</option>
+            <option value="1">Skip if pushed in last 1 day</option>
+            <option value="3" selected>Skip if pushed in last 3 days</option>
+            <option value="7">Skip if pushed in last 7 days</option>
+          </select>
+        </label>
+      </div>
 
       <div class="notif-section-label">Preview language</div>
       <div class="notif-lang-row" id="notifLangRow">
@@ -1637,16 +1836,38 @@
         Each user receives the deal in their app language. Tap a language above to preview.
       </div>
 
-      <div class="notif-section-label">Preview</div>
-      <div class="ios-notif" id="notifPreviewIOS">
-        <div class="ios-notif-icon">🌸</div>
-        <div class="ios-notif-content">
-          <div class="ios-notif-row">
-            <span class="ios-notif-app">Planera AI</span>
-            <span class="ios-notif-time">now</span>
+      <div class="notif-section-label">Preview <span id="notifVariantTag" style="text-transform:none;letter-spacing:0"></span></div>
+      <div class="notif-previews">
+        <div class="ios-notif" id="notifPreviewIOS">
+          <div class="ios-notif-icon">🌸</div>
+          <div class="ios-notif-content">
+            <div class="ios-notif-row">
+              <span class="ios-notif-app">Planera AI</span>
+              <span class="ios-notif-time">now</span>
+            </div>
+            <div class="ios-notif-title" id="notifPreviewTitle">—</div>
+            <div class="ios-notif-body" id="notifPreviewBody">—</div>
           </div>
-          <div class="ios-notif-title" id="notifPreviewTitle">—</div>
-          <div class="ios-notif-body" id="notifPreviewBody">—</div>
+        </div>
+        <!-- Android renders notifications very differently (title truncates
+             harder, body collapses to one line) — worth seeing both. -->
+        <div class="android-notif" id="notifPreviewAndroid">
+          <div class="android-notif-icon">🌸</div>
+          <div style="flex:1;min-width:0">
+            <div class="android-notif-row"><span>Planera AI</span><span>• now</span></div>
+            <div class="android-notif-title" id="notifPreviewTitleA">—</div>
+            <div class="android-notif-body" id="notifPreviewBodyA">—</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Length check across ALL languages, not just the previewed one -->
+      <div id="notifMatrixWrap">
+        <div class="notif-section-label">Length check — all languages</div>
+        <table class="notif-matrix" id="notifMatrix"></table>
+        <div class="notif-hint">
+          iOS shows ~1 line of title and up to 4 of body; Android collapses the body to 1 line
+          until expanded. Rows flagged amber/red will truncate on a phone.
         </div>
       </div>
 
@@ -1660,6 +1881,22 @@
         <textarea id="notifCustomBody" class="notif-textarea"
           maxlength="180" oninput="onNotifCustomChange()"></textarea>
         <div class="notif-charcount" id="notifBodyCount">0 / 180</div>
+      </div>
+
+      <div class="notif-section-label">Send a test first</div>
+      <div class="notif-opt-row">
+        <input type="email" id="notifTestEmail" placeholder="you@planeraai.app" style="flex:1;min-width:180px">
+        <button class="notif-mode-btn" id="notifTestBtn" onclick="sendNotifTest()">📲 Test to this account</button>
+      </div>
+      <div class="notif-hint">Goes to that account's devices only. Ignores their deal-alert setting and the frequency cap.</div>
+
+      <div class="notif-section-label">Schedule</div>
+      <div class="notif-opt-row">
+        <input type="datetime-local" id="notifSchedule" onchange="updateNotifScheduleHint()">
+        <button class="notif-mode-btn" onclick="clearNotifSchedule()">Send now instead</button>
+      </div>
+      <div class="notif-hint" id="notifScheduleHint">
+        Leave empty to send immediately. Local times at the target airports are shown once you enter IATA codes.
       </div>
 
       <div class="notif-actions">
@@ -1756,6 +1993,8 @@
       airports_no_deals: 'No deals yet',
       airports_deals: 'deals',
       airports_create: 'Create Deal',
+      airports_find: 'Find deals',
+      airports_finding: 'Searching…',
       empty_airports: 'No users have set a home airport yet.',
       // Import Deal
       tab_import: '🔗 Import Deal',
@@ -1886,6 +2125,9 @@
   var adminKey = '';
   var deals = [];
   var editingId = null;
+  var attractionLinks = [];
+  var editingAttractionId = null;
+  var attractionFilter = '';
 
   // i18n ENGINE
   function t(key) { return TRANSLATIONS[lang] && TRANSLATIONS[lang][key] || TRANSLATIONS.en[key] || key; }
@@ -1977,12 +2219,13 @@
 
   // TABS
   function switchTab(tab) {
-    ['import', 'add', 'list', 'airports', 'broadcasts'].forEach(function(t) {
+    ['import', 'add', 'list', 'airports', 'attractions', 'broadcasts'].forEach(function(t) {
       document.getElementById('content-' + t).style.display = t === tab ? 'block' : 'none';
       document.getElementById('tab-' + t).classList.toggle('active', t === tab);
     });
     if (tab === 'list') loadDeals();
     if (tab === 'airports') loadAirports();
+    if (tab === 'attractions') loadAttractionLinks();
     if (tab === 'broadcasts') loadBroadcasts();
   }
 
@@ -2200,7 +2443,7 @@
       if (res && res.alreadyRunning) {
         toast('A refresh is already running.', 'info');
       } else if (res) {
-        toast('Refreshed ' + res.checked + ' deal(s): ' + res.updated + ' price change(s), ' + res.notFound + ' flight(s) not found.' + (res.skipped ? ' ' + res.skipped + ' deferred to the next hourly tick.' : ''), 'success');
+        toast('Refreshed ' + res.checked + ' deal(s): ' + res.updated + ' price change(s), ' + res.notFound + ' flight(s) not found.', 'success');
       }
       loadRefreshStatus();
       loadDeals();
@@ -2226,6 +2469,211 @@
       console.log('[Wishlist] Loaded', wishlistDests.length, 'wishlisted destinations', wishlistDests);
       renderStats();
       renderDeals();
+    }).catch(function(err) {
+      toast('Error: ' + err.message, 'error');
+    });
+  }
+
+  function loadAttractionLinks() {
+    if (!adminKey) {
+      document.getElementById('attractionsList').innerHTML =
+        '<div class="empty-state"><div class="icon">🔌</div><p>Connect first</p></div>';
+      return;
+    }
+
+    convexQuery('lowFareRadar:listAttractionLinks', {
+      adminKey: adminKey,
+    }).then(function(rows) {
+      attractionLinks = rows || [];
+      renderAttractionLinks();
+    }).catch(function(err) {
+      toast('Error: ' + err.message, 'error');
+    });
+  }
+
+  function populateAttractionFilter() {
+    var sel = document.getElementById('attractionFilter');
+    if (!sel) return;
+    var groups = {};
+    var totalClicks = 0;
+    (attractionLinks || []).forEach(function(row) {
+      var city = (row.destinationCity || '').trim();
+      if (!city) return;
+      var key = city.toLowerCase();
+      if (!groups[key]) groups[key] = { label: city, count: 0, clicks: 0 };
+      groups[key].count++;
+      groups[key].clicks += (row.clicks || 0);
+      totalClicks += (row.clicks || 0);
+    });
+    var keys = Object.keys(groups).sort(function(a, b) {
+      return groups[a].label.localeCompare(groups[b].label);
+    });
+    // Drop a stale selection (e.g. last item of a destination deleted).
+    if (attractionFilter && !groups[attractionFilter]) attractionFilter = '';
+    var total = (attractionLinks || []).length;
+    var opts = ['<option value="">All destinations (' + total + ' links · ' + totalClicks + ' clicks)</option>'];
+    keys.forEach(function(k) {
+      var g = groups[k];
+      opts.push('<option value="' + escapeHtml(k) + '"' + (attractionFilter === k ? ' selected' : '') +
+        '>' + escapeHtml(g.label) + ' (' + g.count + ' · ' + g.clicks + ' clicks)</option>');
+    });
+    sel.innerHTML = opts.join('');
+    sel.value = attractionFilter;
+  }
+
+  function onAttractionFilterChange() {
+    var sel = document.getElementById('attractionFilter');
+    attractionFilter = sel ? (sel.value || '') : '';
+    renderAttractionLinks();
+  }
+
+  function renderAttractionLinks() {
+    var listEl = document.getElementById('attractionsList');
+    populateAttractionFilter();
+    if (!attractionLinks || attractionLinks.length === 0) {
+      listEl.innerHTML = '<div class="empty-state"><div class="icon">🎟️</div><p>No attraction links yet</p></div>';
+      return;
+    }
+
+    var rows = attractionFilter
+      ? attractionLinks.filter(function(row) { return (row.destinationCity || '').toLowerCase() === attractionFilter; })
+      : attractionLinks;
+
+    if (rows.length === 0) {
+      listEl.innerHTML = '<div class="empty-state"><div class="icon">🎟️</div><p>No attractions for this destination</p></div>';
+      return;
+    }
+
+    listEl.innerHTML = rows.map(function(row) {
+      var styles = (row.travelStyles || []).join(', ');
+      var badges = [];
+      if (row.topSite) badges.push('<span class="deal-status active">TOP SITE</span>');
+      if (!row.active) badges.push('<span class="deal-status inactive">INACTIVE</span>');
+      badges.push('<span class="deal-status active">' + escapeHtml((row.partner || 'getyourguide').toUpperCase()) + '</span>');
+      var priceText = (row.price !== undefined && row.price !== null)
+        ? ((row.currency ? (row.currency + ' ') : '') + row.price)
+        : '';
+      var clicks = row.clicks || 0;
+      badges.push('<span class="deal-status active" style="background:var(--primary);color:var(--text)">👆 ' + clicks + ' click' + (clicks === 1 ? '' : 's') + '</span>');
+      var lastClickText = row.lastClickedAt
+        ? ('Last used: ' + new Date(row.lastClickedAt).toLocaleDateString())
+        : 'Not used yet';
+
+      return '' +
+        '<div class="deal-card">' +
+          '<div class="deal-info">' +
+            '<div class="airline">' + escapeHtml(row.displayTitle || row.activityTitle) + '</div>' +
+            '<div class="dates">' + escapeHtml(row.destinationCity + (row.destinationCountry ? (', ' + row.destinationCountry.toUpperCase()) : '')) + '</div>' +
+            (priceText ? ('<div class="dates">Price: ' + escapeHtml(priceText) + '</div>') : '') +
+            (styles ? ('<div class="dates">Styles: ' + escapeHtml(styles) + '</div>') : '') +
+            '<div class="dates">👆 ' + clicks + ' click' + (clicks === 1 ? '' : 's') + ' · ' + escapeHtml(lastClickText) + '</div>' +
+            '<div class="dates"><a href="' + escapeHtml(row.affiliateUrl) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(row.affiliateUrl) + '</a></div>' +
+          '</div>' +
+          '<div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">' +
+            badges.join('') +
+          '</div>' +
+          '<div class="deal-actions">' +
+            '<button title="Edit" onclick="editAttractionLink(\'' + row._id + '\')">✏️</button>' +
+            '<button class="btn-delete" title="Delete" onclick="deleteAttractionLink(\'' + row._id + '\')">🗑️</button>' +
+          '</div>' +
+        '</div>';
+    }).join('');
+  }
+
+  function clearAttractionForm() {
+    editingAttractionId = null;
+    document.getElementById('a-destinationCity').value = '';
+    document.getElementById('a-destinationCountry').value = '';
+    document.getElementById('a-activityTitle').value = '';
+    document.getElementById('a-displayTitle').value = '';
+    document.getElementById('a-affiliateUrl').value = '';
+    document.getElementById('a-travelStyles').value = '';
+    document.getElementById('a-notes').value = '';
+    document.getElementById('a-partner').value = 'getyourguide';
+    document.getElementById('a-price').value = '';
+    document.getElementById('a-currency').value = '';
+    document.getElementById('a-topSite').checked = false;
+    document.getElementById('a-active').checked = true;
+    document.getElementById('submitAttractionBtn').innerHTML = 'Save Attraction';
+  }
+
+  function editAttractionLink(id) {
+    var row = (attractionLinks || []).find(function(r) { return r._id === id; });
+    if (!row) return;
+    editingAttractionId = id;
+    document.getElementById('a-destinationCity').value = row.destinationCity || '';
+    document.getElementById('a-destinationCountry').value = row.destinationCountry || '';
+    document.getElementById('a-activityTitle').value = row.activityTitle || '';
+    document.getElementById('a-displayTitle').value = row.displayTitle || '';
+    document.getElementById('a-affiliateUrl').value = row.affiliateUrl || '';
+    document.getElementById('a-travelStyles').value = (row.travelStyles || []).join(', ');
+    document.getElementById('a-notes').value = row.notes || '';
+    document.getElementById('a-partner').value = row.partner || 'getyourguide';
+    document.getElementById('a-price').value = (row.price !== undefined && row.price !== null) ? row.price : '';
+    document.getElementById('a-currency').value = row.currency || '';
+    document.getElementById('a-topSite').checked = !!row.topSite;
+    document.getElementById('a-active').checked = row.active !== false;
+    document.getElementById('submitAttractionBtn').innerHTML = 'Update Attraction';
+  }
+
+  function submitAttractionLink() {
+    if (!adminKey) return toast('Connect first', 'error');
+
+    var destinationCity = document.getElementById('a-destinationCity').value.trim();
+    var activityTitle = document.getElementById('a-activityTitle').value.trim();
+    var affiliateUrl = document.getElementById('a-affiliateUrl').value.trim();
+    if (!destinationCity || !activityTitle || !affiliateUrl) {
+      return toast('Fill destination, activity and URL', 'error');
+    }
+
+    var payload = {
+      adminKey: adminKey,
+      destinationCity: destinationCity,
+      destinationCountry: document.getElementById('a-destinationCountry').value.trim() || undefined,
+      activityTitle: activityTitle,
+      displayTitle: document.getElementById('a-displayTitle').value.trim() || undefined,
+      affiliateUrl: affiliateUrl,
+      partner: document.getElementById('a-partner').value.trim() || 'getyourguide',
+      topSite: !!document.getElementById('a-topSite').checked,
+      active: !!document.getElementById('a-active').checked,
+      travelStyles: document.getElementById('a-travelStyles').value
+        .split(',')
+        .map(function(s) { return s.trim(); })
+        .filter(Boolean),
+      notes: document.getElementById('a-notes').value.trim() || undefined,
+    };
+
+    var priceRaw = document.getElementById('a-price').value.trim();
+    if (priceRaw !== '') {
+      var priceNum = parseFloat(priceRaw);
+      if (!isNaN(priceNum)) payload.price = priceNum;
+    }
+    var currencyRaw = document.getElementById('a-currency').value.trim();
+    if (currencyRaw) payload.currency = currencyRaw.toUpperCase();
+
+    var promise = editingAttractionId
+      ? convexMutation('lowFareRadar:updateAttractionLink', Object.assign({}, payload, { id: editingAttractionId }))
+      : convexMutation('lowFareRadar:createAttractionLink', payload);
+
+    promise.then(function() {
+      toast(editingAttractionId ? 'Attraction updated' : 'Attraction created', 'success');
+      clearAttractionForm();
+      loadAttractionLinks();
+    }).catch(function(err) {
+      toast('Error: ' + err.message, 'error');
+    });
+  }
+
+  function deleteAttractionLink(id) {
+    if (!adminKey) return;
+    if (!confirm('Delete this attraction mapping?')) return;
+    convexMutation('lowFareRadar:deleteAttractionLink', {
+      adminKey: adminKey,
+      id: id,
+    }).then(function() {
+      toast('Attraction deleted', 'success');
+      if (editingAttractionId === id) clearAttractionForm();
+      loadAttractionLinks();
     }).catch(function(err) {
       toast('Error: ' + err.message, 'error');
     });
@@ -2609,23 +3057,76 @@
       });
   }
 
+  function broadcastIsNudge(b) {
+    return b.mode === 'first_trip_nudge' || b.mode === 'first_trip_custom';
+  }
+
+  function broadcastCtr(b) {
+    return (b.sent || 0) > 0 ? ((b.uniqueTaps || 0) / b.sent) * 100 : -1;
+  }
+
+  /** Apply the toolbar's search / type / copy filters and sort. */
+  function filteredBroadcasts() {
+    var q = (document.getElementById('broadcastSearch') || {}).value || '';
+    q = q.trim().toLowerCase();
+    var kind = (document.getElementById('broadcastKind') || {}).value || 'all';
+    var copy = (document.getElementById('broadcastCopy') || {}).value || 'all';
+    var sort = (document.getElementById('broadcastSort') || {}).value || 'recent';
+
+    var rows = (broadcasts || []).filter(function(b) {
+      if (kind === 'deal' && broadcastIsNudge(b)) return false;
+      if (kind === 'nudge' && !broadcastIsNudge(b)) return false;
+      var isCustom = b.mode === 'custom' || b.mode === 'first_trip_custom';
+      if (copy === 'custom' && !isCustom) return false;
+      if (copy === 'auto' && isCustom) return false;
+      if (!q) return true;
+      var hay = [
+        b.routeSnapshot, b.customTitle, b.customBody, b.variantId,
+        (b.origins || []).join(' '),
+        b.dealInfo ? b.dealInfo.origin + ' ' + b.dealInfo.destination + ' ' +
+          b.dealInfo.originCity + ' ' + b.dealInfo.destinationCity : '',
+      ].join(' ').toLowerCase();
+      return hay.indexOf(q) !== -1;
+    });
+
+    if (sort === 'ctr') rows.sort(function(a, b) { return broadcastCtr(b) - broadcastCtr(a); });
+    else if (sort === 'ctrLow') {
+      // Rows that never sent have no CTR — they belong at the bottom, not at
+      // the top of "worst performing".
+      rows.sort(function(a, b) {
+        var ca = broadcastCtr(a), cb = broadcastCtr(b);
+        if (ca < 0 && cb < 0) return b.createdAt - a.createdAt;
+        if (ca < 0) return 1;
+        if (cb < 0) return -1;
+        return ca - cb;
+      });
+    }
+    else if (sort === 'sent') rows.sort(function(a, b) { return (b.sent || 0) - (a.sent || 0); });
+    else rows.sort(function(a, b) { return b.createdAt - a.createdAt; });
+
+    return rows;
+  }
+
   function renderBroadcasts() {
     var listEl = document.getElementById('broadcastsList');
     var sumEl = document.getElementById('broadcastsSummary');
+    var varEl = document.getElementById('broadcastVariants');
 
     if (!broadcasts.length) {
       sumEl.innerHTML = '';
+      if (varEl) varEl.innerHTML = '';
       listEl.innerHTML = '<div class="empty-state"><div class="icon">📭</div><p>No broadcasts sent yet.</p><p style="font-size:12px;margin-top:6px">Tap the 📣 button on any active deal to send your first push.</p></div>';
       return;
     }
 
-    // Aggregate summary
-    var totalSent = 0, totalTaps = 0, totalUnique = 0, totalTargeted = 0;
+    // Aggregate summary (always across everything, not the filtered view)
+    var totalSent = 0, totalTaps = 0, totalUnique = 0, totalTargeted = 0, scheduled = 0;
     broadcasts.forEach(function(b) {
       totalSent += (b.sent || 0);
       totalTargeted += (b.targeted || 0);
       totalTaps += (b.taps || 0);
       totalUnique += (b.uniqueTaps || 0);
+      if (b.status === 'scheduled') scheduled++;
     });
     var avgCtr = totalSent > 0 ? Math.round((totalUnique / totalSent) * 1000) / 10 : 0;
 
@@ -2634,9 +3135,49 @@
       summaryCard('Pushes Sent', String(totalSent)) +
       summaryCard('Total Taps', String(totalTaps)) +
       summaryCard('Unique Tappers', String(totalUnique)) +
-      summaryCard('Avg CTR', avgCtr.toFixed(1) + '%');
+      summaryCard('Avg CTR', avgCtr.toFixed(1) + '%') +
+      (scheduled ? summaryCard('Scheduled', String(scheduled)) : '');
 
-    listEl.innerHTML = broadcasts.map(renderBroadcastRow).join('');
+    if (varEl) varEl.innerHTML = renderVariantBreakdown();
+
+    var rows = filteredBroadcasts();
+    listEl.innerHTML = rows.length
+      ? rows.map(renderBroadcastRow).join('')
+      : '<div class="empty-state"><p>No broadcasts match those filters.</p></div>';
+  }
+
+  /**
+   * CTR per copy variant. The server now records which template actually went
+   * out, so this answers "which copy earns taps" rather than just "how did
+   * this one send do".
+   */
+  function renderVariantBreakdown() {
+    var byVariant = {};
+    (broadcasts || []).forEach(function(b) {
+      if (!b.variantId || broadcastIsNudge(b)) return;
+      if (!(b.sent > 0)) return;
+      var v = byVariant[b.variantId] || (byVariant[b.variantId] = { sent: 0, unique: 0, count: 0 });
+      v.sent += b.sent || 0;
+      v.unique += b.uniqueTaps || 0;
+      v.count++;
+    });
+
+    var keys = Object.keys(byVariant);
+    if (keys.length < 2) return ''; // nothing to compare yet
+
+    keys.sort(function(a, b) {
+      return (byVariant[b].unique / byVariant[b].sent) - (byVariant[a].unique / byVariant[a].sent);
+    });
+
+    return '<div class="form-section-title" style="font-size:13px">🧪 <span>CTR by copy variant</span></div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap">' +
+      keys.map(function(k) {
+        var v = byVariant[k];
+        var ctr = (v.unique / v.sent) * 100;
+        return '<div class="broadcast-summary-card">' +
+          '<div class="lbl">' + escapeHtml(k) + ' · ' + v.count + ' send' + (v.count === 1 ? '' : 's') + '</div>' +
+          '<div class="val">' + ctr.toFixed(1) + '%</div></div>';
+      }).join('') + '</div>';
   }
 
   function summaryCard(label, value) {
@@ -2676,6 +3217,24 @@
     var originsPill = (b.origins || []).length
       ? '<span class="broadcast-pill">Targets: ' + escapeHtml(b.origins.join(', ')) + '</span>'
       : '';
+    var variantPill = (b.variantId && b.variantId !== 'custom' && b.variantId !== 'nudge')
+      ? '<span class="broadcast-pill variant">' + escapeHtml(b.variantId) + '</span>'
+      : '';
+    var wishlistPill = b.wishlistTargeted
+      ? '<span class="broadcast-pill">💖 + wishlisters</span>'
+      : '';
+
+    // Rows written before scheduling existed have no status — they're all sent.
+    var status = b.status || 'sent';
+    var statusPill = '';
+    if (status !== 'sent') {
+      var statusLabel = status === 'scheduled'
+        ? '🗓️ Scheduled' + (b.scheduledFor ? ' for ' + new Date(b.scheduledFor).toLocaleString() : '')
+        : status === 'sending' ? '📤 Sending…'
+        : status === 'cancelled' ? '🚫 Cancelled'
+        : '⚠️ Failed';
+      statusPill = '<span class="broadcast-pill status-' + status + '">' + escapeHtml(statusLabel) + '</span>';
+    }
 
     var sent = b.sent || 0;
     var taps = b.taps || 0;
@@ -2693,6 +3252,26 @@
         '</div>';
     }
 
+    // Why targeted users got nothing — beats an opaque "N failed".
+    var s = b.skipReasons || {};
+    var skipBits = [];
+    if (s.optedOut) skipBits.push('🔕 ' + s.optedOut + ' opted out');
+    if (s.noToken) skipBits.push('📵 ' + s.noToken + ' no device');
+    if (s.frequencyCapped) skipBits.push('🚦 ' + s.frequencyCapped + ' frequency-capped');
+    if (s.pushError) skipBits.push('⚠️ ' + s.pushError + ' push errors');
+    var skipHtml = skipBits.length
+      ? '<div class="broadcast-skips">' + skipBits.map(function(x) { return '<span>' + escapeHtml(x) + '</span>'; }).join('') + '</div>'
+      : '';
+
+    var actions = [];
+    if (status === 'scheduled' || status === 'sending') {
+      actions.push('<button class="danger" onclick="cancelBroadcastRow(\'' + b._id + '\')">🚫 Cancel send</button>');
+    }
+    if (unique > 0) {
+      actions.push('<button onclick="loadBroadcastConversions(\'' + b._id + '\')">📈 Trips from this push</button>');
+    }
+    var actionsHtml = actions.length ? '<div class="broadcast-actions">' + actions.join('') + '</div>' : '';
+
     var deletedClass = (d && d.deletedAt) || (!d && b.routeSnapshot && !isNudge) ? ' deleted' : '';
 
     return (
@@ -2701,16 +3280,47 @@
           '<div class="broadcast-route">' + route + '</div>' +
           '<div class="broadcast-time">' + escapeHtml(when) + '</div>' +
         '</div>' +
-        '<div class="broadcast-meta">' + modePill + originsPill + deletedBadge + '</div>' +
+        '<div class="broadcast-meta">' + statusPill + modePill + variantPill + originsPill + wishlistPill + deletedBadge + '</div>' +
         '<div class="broadcast-stats">' +
           '<div class="broadcast-stat"><div class="broadcast-stat-label">Sent</div><div class="broadcast-stat-value">' + sent + '</div></div>' +
           '<div class="broadcast-stat"><div class="broadcast-stat-label">Taps</div><div class="broadcast-stat-value">' + taps + '</div></div>' +
           '<div class="broadcast-stat"><div class="broadcast-stat-label">Unique</div><div class="broadcast-stat-value">' + unique + '</div></div>' +
           '<div class="broadcast-stat' + ctrClass + '"><div class="broadcast-stat-label">CTR</div><div class="broadcast-stat-value">' + ctrTxt + '</div></div>' +
         '</div>' +
+        skipHtml +
         preview +
+        actionsHtml +
+        '<div class="broadcast-conv" id="conv-' + b._id + '"></div>' +
       '</div>'
     );
+  }
+
+  function cancelBroadcastRow(id) {
+    if (!confirm('Cancel this broadcast? A send already in progress stops after the current batch of 100.')) return;
+    convexMutation('lowFareRadar:cancelBroadcast', { adminKey: adminKey, broadcastId: id })
+      .then(function(r) {
+        toast(r && r.cancelled ? '🚫 Broadcast cancelled' : (r && r.reason) || 'Nothing to cancel',
+          r && r.cancelled ? 'success' : 'info');
+        loadBroadcasts();
+      })
+      .catch(function(err) { toast('Cancel failed: ' + (err.message || 'Unknown error'), 'error'); });
+  }
+
+  /** Taps are not the goal — trips are. Loaded on demand per row. */
+  function loadBroadcastConversions(id) {
+    var el = document.getElementById('conv-' + id);
+    if (!el) return;
+    el.textContent = 'Loading…';
+    convexQuery('lowFareRadar:getBroadcastConversions', { adminKey: adminKey, broadcastId: id })
+      .then(function(r) {
+        el.innerHTML = '📈 <strong>' + r.converted + '</strong> of <strong>' + r.tapUsers +
+          '</strong> tappers started a trip within ' + r.windowHours + 'h (' + r.conversionRatePct + '%)' +
+          (r.dealTrips ? ' · <strong>' + r.dealTrips + '</strong> straight from the deal' : '') +
+          (r.truncated ? ' <span style="color:var(--muted)">(first 500 tappers)</span>' : '');
+      })
+      .catch(function(err) {
+        el.innerHTML = '<span style="color:var(--danger)">' + escapeHtml(err.message || 'error') + '</span>';
+      });
   }
 
   function formatBroadcastTime(ts) {
@@ -2775,9 +3385,14 @@
   }
 
   function updateNudgeCharCount() {
-    var t = document.getElementById('nudgeTitleInput').value.length;
-    var b = document.getElementById('nudgeBodyInput').value.length;
-    document.getElementById('nudgeCharCount').textContent = t + ' / 80 · ' + b + ' / 180';
+    // Grapheme count, not UTF-16 units — the presets open with an emoji.
+    var t = graphemeLen(document.getElementById('nudgeTitleInput').value);
+    var b = graphemeLen(document.getElementById('nudgeBodyInput').value);
+    var el = document.getElementById('nudgeCharCount');
+    el.textContent = t + ' / 80 · ' + b + ' / 180' +
+      (t >= 37 || b >= 110 ? '  ✂️ will truncate on a phone' : '');
+    el.style.color = (t >= 45 || b >= 145) ? 'var(--danger)'
+      : (t >= 37 || b >= 110) ? '#b45309' : 'var(--muted)';
   }
 
   var NUDGE_PRESETS = {
@@ -2857,7 +3472,16 @@
           : nudgeState.target === 'everyone'
           ? 'user with notifications enabled'
           : 'user without trips';
-        infoEl.textContent = '👥 ' + n + ' ' + label + (n === 1 ? '' : 's');
+        // `targeted` is now the deliverable count; show what was filtered out
+        // so the number isn't silently smaller than the admin expects.
+        var s = result.skipReasons || {};
+        var extra = [];
+        if (s.optedOut) extra.push('🔕 ' + s.optedOut + ' opted out');
+        if (s.noToken) extra.push('📵 ' + s.noToken + ' no device');
+        infoEl.innerHTML = '👥 <strong>' + n + '</strong> ' + label + (n === 1 ? '' : 's') +
+          ' will receive it' +
+          (result.matched !== undefined ? ' (of ' + result.matched + ' matched)' : '') +
+          (extra.length ? '<br><span style="font-size:11px">' + extra.join(' · ') + '</span>' : '');
       })
       .catch(function(err) {
         btn.disabled = false;
@@ -3027,6 +3651,7 @@
             wishlistInfo +
           '</div>' +
           dealsLabel +
+          '<button class="airport-btn airport-btn-find" onclick="seedDealsFromAirport(\'' + escapeHtml(a.code) + '\', this)">' + escapeHtml(t('airports_find')) + '</button>' +
           '<button class="airport-btn" onclick="createDealFromAirport(\'' + escapeHtml(a.code) + '\', \'' + escapeHtml(a.city).replace(/'/g, "\\'") + '\')">' + escapeHtml(t('airports_create')) + '</button>' +
         '</div>';
       }).join('');
@@ -3040,6 +3665,40 @@
     document.getElementById('f-origin').value = code;
     document.getElementById('f-originCity').value = city;
     switchTab('add');
+  }
+
+  // Auto-find & seed real curated deals for one origin airport. Scans a wide
+  // date calendar per destination to find each route's own cheapest travel
+  // dates, verifies + grades the best of them, and inserts the winners as
+  // persistent curated deals (backend: lowFareRadarSeed:seedDealsForOrigin).
+  // SLOW BY DESIGN — a full run is several minutes of live API calls, so the
+  // button stays in its loading state for a while. A run that hits the backend
+  // time budget reports `timedOut`; pressing again picks up where it left off
+  // (already-covered routes are skipped).
+  function seedDealsFromAirport(code, btn) {
+    if (!adminKey) return toast(t('msg_connect_first'), 'error');
+    if (btn && btn.disabled) return;
+    var label = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = t('airports_finding'); }
+    convexAction('lowFareRadarSeed:seedDealsForOrigin', { adminKey: adminKey, origin: code })
+      .then(function(res) {
+        var seeded = (res && res.seeded) || 0;
+        var searched = (res && res.candidatesSearched) || 0;
+        var partial = res && res.timedOut ? ' — timed out, press again for the rest' : '';
+        if (seeded > 0) {
+          toast(seeded + ' deal' + (seeded === 1 ? '' : 's') + ' found for ' + code + ' (scanned ' + searched + ')' + partial, 'success');
+        } else {
+          toast('No qualifying deals found for ' + code + ' (scanned ' + searched + ')' + partial, 'error');
+        }
+        // Refresh so the airport's "No deals yet" flips to its new count.
+        // Clearing the cache forces loadAirports to re-fetch deals too.
+        deals = [];
+        loadAirports();
+      })
+      .catch(function(err) {
+        toast('Error: ' + (err && err.message ? err.message : err), 'error');
+        if (btn) { btn.disabled = false; btn.textContent = label; }
+      });
   }
 
   // ACTIONS
@@ -3285,7 +3944,92 @@
     mode: 'auto', // 'auto' | 'custom'
     customTitle: '',
     customBody: '',
+    reach: null,        // last getBroadcastReach result
+    reachLoading: false,
+    blocked: false,     // hard block (deleted deal) — Send stays disabled
   };
+
+  var NOTIF_LANGS = ['en', 'el', 'es', 'fr', 'de', 'ar'];
+
+  // Approximate standard-time UTC offsets, used only to show the admin what
+  // the clock reads at each target airport before they fire a push. Not
+  // DST-aware — treat as ±1h. Unknown codes simply show no clock.
+  var IATA_UTC_OFFSET = {
+    ATH: 2, SKG: 2, HER: 2, RHO: 2, CFU: 2, JTR: 2, CHQ: 2, KGS: 2, JMK: 2,
+    LHR: 0, LGW: 0, STN: 0, LTN: 0, MAN: 0, EDI: 0, DUB: 0,
+    CDG: 1, ORY: 1, NCE: 1, LYS: 1, MRS: 1, BOD: 1, TLS: 1,
+    FCO: 1, MXP: 1, LIN: 1, BGY: 1, VCE: 1, NAP: 1, BLQ: 1, CTA: 1, PMO: 1,
+    BCN: 1, MAD: 1, AGP: 1, ALC: 1, VLC: 1, PMI: 1, IBZ: 1, SVQ: 1, BIO: 1,
+    LIS: 0, OPO: 0, FAO: 0, FNC: 0,
+    FRA: 1, MUC: 1, BER: 1, DUS: 1, HAM: 1, CGN: 1, STR: 1, HAJ: 1, NUE: 1,
+    VIE: 1, ZRH: 1, GVA: 1, BSL: 1, AMS: 1, EIN: 1, BRU: 1, CRL: 1, LUX: 1,
+    CPH: 1, OSL: 1, ARN: 1, GOT: 1, HEL: 2, KEF: 0,
+    PRG: 1, BUD: 1, WAW: 1, KRK: 1, GDN: 1, WRO: 1, POZ: 1, KTW: 1,
+    OTP: 2, SOF: 2, BEG: 1, ZAG: 1, SPU: 1, DBV: 1, LJU: 1, SKP: 1, TIA: 1,
+    IST: 3, SAW: 3, AYT: 3, ESB: 3, ADB: 3,
+    TLV: 2, CAI: 2, HRG: 2, SSH: 2, RAK: 1, CMN: 1, TUN: 1,
+    DXB: 4, AUH: 4, DOH: 3, RUH: 3, JED: 3, KWI: 3, BAH: 3, MCT: 4,
+    JFK: -5, EWR: -5, LGA: -5, BOS: -5, PHL: -5, IAD: -5, DCA: -5, ATL: -5,
+    MIA: -5, FLL: -5, MCO: -5, TPA: -5, ORD: -6, DFW: -6, IAH: -6, AUS: -6,
+    DEN: -7, PHX: -7, LAS: -8, LAX: -8, SFO: -8, SEA: -8, SAN: -8, PDX: -8,
+    YYZ: -5, YUL: -5, YVR: -8,
+    MEX: -6, CUN: -5, GRU: -3, GIG: -3, EZE: -3, SCL: -4, LIM: -5, BOG: -5,
+    NRT: 9, HND: 9, KIX: 9, ICN: 9, PEK: 8, PVG: 8, HKG: 8, TPE: 8,
+    BKK: 7, DMK: 7, HKT: 7, SIN: 8, KUL: 8, CGK: 7, DPS: 8, MNL: 8,
+    DEL: 5.5, BOM: 5.5, MAA: 5.5, BLR: 5.5, HYD: 5.5, CMB: 5.5, MLE: 5,
+    SYD: 10, MEL: 10, BNE: 10, PER: 8, AKL: 12,
+    JNB: 2, CPT: 2, NBO: 3, LOS: 1, ADD: 3,
+  };
+
+  /**
+   * Length as a phone counts it — one emoji is one character.
+   *
+   * `.length` counts UTF-16 units ("✈️" = 2, "🌸" = 2, flag/ZWJ emoji 4+) and
+   * even Array.from only splits to code points (still 2 for "✈️", which is
+   * ✈ + a variation selector). Intl.Segmenter gives real grapheme clusters;
+   * the fallbacks are progressively less accurate but never worse than before.
+   */
+  var _graphemeSegmenter = (function() {
+    try { return new Intl.Segmenter(undefined, { granularity: 'grapheme' }); }
+    catch (e) { return null; }
+  })();
+
+  function graphemeLen(str) {
+    if (!str) return 0;
+    if (_graphemeSegmenter) {
+      var n = 0;
+      var it = _graphemeSegmenter.segment(str)[Symbol.iterator]();
+      while (!it.next().done) n++;
+      return n;
+    }
+    try { return Array.from(str).length; } catch (e) { return str.length; }
+  }
+
+  function notifDraftKey(dealId) { return 'bloom_notif_draft_' + dealId; }
+
+  function saveNotifDraft() {
+    var d = notifModalState.deal;
+    if (!d) return;
+    try {
+      if (notifModalState.mode === 'custom' &&
+          (notifModalState.customTitle || notifModalState.customBody)) {
+        localStorage.setItem(notifDraftKey(d._id), JSON.stringify({
+          title: notifModalState.customTitle,
+          body: notifModalState.customBody,
+          lang: notifModalState.previewLang,
+        }));
+      } else {
+        localStorage.removeItem(notifDraftKey(d._id));
+      }
+    } catch (e) { /* private mode / quota — drafts are a convenience */ }
+  }
+
+  function loadNotifDraft(dealId) {
+    try {
+      var raw = localStorage.getItem(notifDraftKey(dealId));
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+  }
 
   function notifyDeal(id) {
     var deal = deals.find(function(d) { return d._id === id; });
@@ -3295,42 +4039,128 @@
     notifModalState.mode = 'auto';
     notifModalState.customTitle = '';
     notifModalState.customBody = '';
+    notifModalState.reach = null;
+    notifModalState.blocked = false;
 
     document.getElementById('notifTargets').value = (deal.origin || '').toUpperCase();
-    setNotifMode('auto');
+    document.getElementById('notifIncludeWishlist').checked = false;
+    document.getElementById('notifFrequencyCap').value = '3';
+    document.getElementById('notifSchedule').value = '';
+    document.getElementById('notifCustomTitle').value = '';
+    document.getElementById('notifCustomBody').value = '';
+
+    // Restore an unsent draft for this deal rather than silently dropping it.
+    var draft = loadNotifDraft(deal._id);
+    if (draft && (draft.title || draft.body)) {
+      notifModalState.customTitle = draft.title || '';
+      notifModalState.customBody = draft.body || '';
+      notifModalState.previewLang = draft.lang || notifModalState.previewLang;
+      document.getElementById('notifCustomTitle').value = notifModalState.customTitle;
+      document.getElementById('notifCustomBody').value = notifModalState.customBody;
+      setNotifMode('custom');
+      toast('Restored your unsent draft for this deal', 'info');
+    } else {
+      setNotifMode('auto');
+    }
+
     setNotifPreviewLang(notifModalState.previewLang);
+    checkNotifDealHealth();
+    checkNotifDuplicate();
     updateNotifTargetSummary();
+    updateNotifScheduleHint();
+    refreshNotifReach();
 
     document.getElementById('notifModal').classList.add('show');
+    document.addEventListener('keydown', notifModalKeydown);
+  }
 
-    // Auto-load home-airport stats if not already cached, then refresh the
-    // recipient-count summary so the admin sees the real numbers.
-    if (!userAirports || userAirports.length === 0) {
-      var summaryEl = document.getElementById('notifTargetSummary');
-      if (summaryEl) {
-        summaryEl.innerHTML = '<span style="color:var(--muted)">⏳ Loading user counts...</span>';
-      }
-      convexQuery('lowFareRadar:getHomeAirports', { adminKey: adminKey })
-        .then(function(result) {
-          userAirports = result || [];
-          updateNotifTargetSummary();
-        })
-        .catch(function(err) {
-          console.warn('[notifyDeal] failed to load home airports:', err.message || err);
-          updateNotifTargetSummary();
-        });
-    }
+  function notifModalKeydown(e) {
+    if (e.key === 'Escape') closeNotifModal();
   }
 
   function closeNotifModal() {
+    saveNotifDraft();
     document.getElementById('notifModal').classList.remove('show');
+    document.removeEventListener('keydown', notifModalKeydown);
   }
 
-  function setNotifPreviewLang(lang) {
-    notifModalState.previewLang = lang;
+  /** Warn about deals that shouldn't be broadcast at all. */
+  function checkNotifDealHealth() {
+    var d = notifModalState.deal;
+    var el = document.getElementById('notifDealWarning');
+    if (!d) return;
+    var issues = [];
+    var now = Date.now();
+
+    if (d.deletedAt) {
+      issues.push('This deal is <strong>deleted</strong> — users would tap through to nothing.');
+      notifModalState.blocked = true;
+    }
+    if (d.active === false) {
+      issues.push('This deal is <strong>paused</strong> and is not visible in the app.');
+    }
+    if (d.expiresAt && d.expiresAt <= now) {
+      issues.push('This deal <strong>already expired</strong>.');
+      notifModalState.blocked = true;
+    } else if (d.expiresAt && d.expiresAt - now < 24 * 60 * 60 * 1000) {
+      var hrs = Math.max(1, Math.round((d.expiresAt - now) / 3600000));
+      issues.push('Expires in <strong>' + hrs + 'h</strong> — most recipients will open it after it dies.');
+    }
+    if (d.outboundDate && new Date(d.outboundDate).getTime() < now) {
+      issues.push('The outbound date (<strong>' + escapeHtml(d.outboundDate) + '</strong>) is in the past.');
+    }
+    var stamp = d.updatedAt || d.createdAt;
+    if (stamp && now - stamp > 48 * 60 * 60 * 1000) {
+      var days = Math.round((now - stamp) / 86400000);
+      issues.push('Price last refreshed <strong>' + days + ' day' + (days === 1 ? '' : 's') +
+        ' ago</strong> — refresh before promising this fare.');
+    }
+
+    if (issues.length === 0) {
+      el.classList.remove('show');
+      el.innerHTML = '';
+    } else {
+      el.className = 'notif-banner show ' + (notifModalState.blocked ? 'danger' : 'warn');
+      el.innerHTML = (notifModalState.blocked ? '🛑 ' : '⚠️ ') + issues.join('<br>');
+    }
+    updateNotifSendButton();
+  }
+
+  /** Guard against pushing the same deal twice — pure client-side, uses the
+   *  broadcast log already loaded for the analytics tab. */
+  function checkNotifDuplicate() {
+    var d = notifModalState.deal;
+    var el = document.getElementById('notifDupWarning');
+    el.classList.remove('show');
+    el.innerHTML = '';
+    if (!d) return;
+
+    var render = function() {
+      var recent = (broadcasts || []).filter(function(b) {
+        return b.dealId === d._id && b.status !== 'cancelled' &&
+          (Date.now() - b.createdAt) < 7 * 24 * 60 * 60 * 1000;
+      });
+      if (!recent.length) return;
+      var last = recent[0];
+      el.className = 'notif-banner show danger';
+      el.innerHTML = '🔁 You already broadcast this deal <strong>' +
+        escapeHtml(formatBroadcastTime(last.createdAt)) + '</strong>' +
+        (recent.length > 1 ? ' (' + recent.length + ' times in the last 7 days)' : '') +
+        ' — ' + (last.sent || 0) + ' sent, ' + (last.uniqueTaps || 0) + ' unique taps.';
+    };
+
+    if (broadcasts && broadcasts.length) { render(); return; }
+    // Analytics tab may not have been opened yet — fetch quietly.
+    convexQuery('lowFareRadar:listBroadcasts', { adminKey: adminKey, limit: 200 })
+      .then(function(rows) { broadcasts = rows || []; render(); })
+      .catch(function() { /* guard is best-effort */ });
+  }
+
+  function setNotifPreviewLang(l) {
+    notifModalState.previewLang = l;
     var chips = document.querySelectorAll('#notifLangRow .notif-lang-chip');
     chips.forEach(function(c) {
-      c.classList.toggle('active', c.getAttribute('data-lang') === lang);
+      c.classList.toggle('active', c.getAttribute('data-lang') === l);
     });
     renderNotifPreview();
   }
@@ -3340,6 +4170,9 @@
     document.getElementById('notifModeAuto').classList.toggle('active', mode === 'auto');
     document.getElementById('notifModeCustom').classList.toggle('active', mode === 'custom');
     document.getElementById('notifCustomFields').style.display = mode === 'custom' ? 'block' : 'none';
+    // The all-language matrix only makes sense when each user gets their own
+    // language; custom copy is one fixed string for everyone.
+    document.getElementById('notifMatrixWrap').style.display = mode === 'auto' ? 'block' : 'none';
     document.getElementById('notifModeHint').textContent = mode === 'auto'
       ? 'Each user receives the deal in their app language. Tap a language above to preview.'
       : 'Send the same custom copy to every user, regardless of their app language.';
@@ -3365,7 +4198,7 @@
     var d = notifModalState.deal;
     if (!d) return;
 
-    var title, body;
+    var title, body, variantId = null;
     if (notifModalState.mode === 'custom') {
       title = notifModalState.customTitle || '(empty title)';
       body = notifModalState.customBody || '(empty body)';
@@ -3373,74 +4206,264 @@
       var p = notifBuildPreview(d, notifModalState.previewLang);
       title = p.title;
       body = p.body;
+      variantId = p.variantId;
     }
+
+    var rtl = notifModalState.mode === 'auto' && notifModalState.previewLang === 'ar';
+    ['notifPreviewTitle', 'notifPreviewBody', 'notifPreviewTitleA', 'notifPreviewBodyA']
+      .forEach(function(id) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        el.dir = rtl ? 'rtl' : 'ltr';
+        el.style.textAlign = rtl ? 'right' : '';
+      });
 
     document.getElementById('notifPreviewTitle').textContent = title;
     document.getElementById('notifPreviewBody').textContent = body;
+    document.getElementById('notifPreviewTitleA').textContent = title;
+    document.getElementById('notifPreviewBodyA').textContent = body;
+
+    var tagEl = document.getElementById('notifVariantTag');
+    tagEl.innerHTML = variantId
+      ? '<span class="broadcast-pill variant">' + escapeHtml(variantId) + '</span>'
+      : '';
 
     // Char counters for custom mode
     if (notifModalState.mode === 'custom') {
       var tEl = document.getElementById('notifTitleCount');
       var bEl = document.getElementById('notifBodyCount');
-      var tLen = (notifModalState.customTitle || '').length;
-      var bLen = (notifModalState.customBody || '').length;
+      var tLen = graphemeLen(notifModalState.customTitle);
+      var bLen = graphemeLen(notifModalState.customBody);
       tEl.textContent = tLen + ' / 80';
       bEl.textContent = bLen + ' / 180';
       tEl.className = 'notif-charcount' + (tLen > 65 ? ' warn' : '') + (tLen >= 80 ? ' bad' : '');
       bEl.className = 'notif-charcount' + (bLen > 140 ? ' warn' : '') + (bLen >= 180 ? ' bad' : '');
+    } else {
+      renderNotifMatrix();
     }
   }
 
-  function updateNotifTargetSummary() {
-    var raw = document.getElementById('notifTargets').value || '';
-    var origins = raw.split(',').map(function(s) { return s.trim().toUpperCase(); })
-      .filter(function(s) { return /^[A-Z]{3}$/.test(s); });
+  /**
+   * Every language's copy length at a glance. In auto mode the admin only ever
+   * previews one language, so an overflowing German or Greek body used to ship
+   * unnoticed.
+   */
+  function renderNotifMatrix() {
+    var d = notifModalState.deal;
+    var table = document.getElementById('notifMatrix');
+    if (!d || !table) return;
 
+    // Banner truncation thresholds (approximate, device-dependent).
+    var TITLE_WARN = 37, TITLE_BAD = 45;
+    var BODY_WARN = 110, BODY_BAD = 145;
+
+    var rows = NOTIF_LANGS.map(function(l) {
+      var p = notifBuildPreview(d, l);
+      var tl = graphemeLen(p.title);
+      var bl = graphemeLen(p.body);
+      var tCls = tl >= TITLE_BAD ? 'bad' : (tl >= TITLE_WARN ? 'warn' : '');
+      var bCls = bl >= BODY_BAD ? 'bad' : (bl >= BODY_WARN ? 'warn' : '');
+      var flags = [];
+      if (tCls) flags.push('title');
+      if (bCls) flags.push('body');
+      return '<tr>' +
+        '<td><strong>' + l.toUpperCase() + '</strong></td>' +
+        '<td class="num ' + tCls + '">' + tl + '</td>' +
+        '<td class="num ' + bCls + '">' + bl + '</td>' +
+        '<td class="trunc">' + (flags.length ? '✂️ ' + flags.join(' + ') + ' truncates' : '✓') + '</td>' +
+      '</tr>';
+    }).join('');
+
+    table.innerHTML =
+      '<tr><th>Lang</th><th style="text-align:right">Title</th>' +
+      '<th style="text-align:right">Body</th><th>On a phone</th></tr>' + rows;
+  }
+
+  function onNotifTargetsChange() {
+    updateNotifTargetSummary();
+    updateNotifScheduleHint();
+    // Debounce: the reach query scans users, don't fire it per keystroke.
+    if (notifModalState._reachTimer) clearTimeout(notifModalState._reachTimer);
+    notifModalState._reachTimer = setTimeout(refreshNotifReach, 450);
+  }
+
+  function readNotifOrigins() {
+    var raw = document.getElementById('notifTargets').value || '';
+    return raw.split(',').map(function(s) { return s.trim().toUpperCase(); })
+      .filter(function(s) { return /^[A-Z]{3}$/.test(s); });
+  }
+
+  /** Local clock at each target airport, so nobody gets pushed at 04:00. */
+  function updateNotifTargetSummary() {
+    var origins = readNotifOrigins();
     var summaryEl = document.getElementById('notifTargetSummary');
-    var sendBtn = document.getElementById('notifSendBtn');
 
     if (origins.length === 0) {
       summaryEl.innerHTML = '<span style="color:var(--danger)">⚠️ Enter at least one valid IATA code (3 letters).</span>';
-      sendBtn.disabled = true;
+      updateNotifSendButton();
       return;
     }
 
-    sendBtn.disabled = false;
-    var totalUsers = 0;
-    var perAirport = origins.map(function(code) {
-      var match = (userAirports || []).find(function(a) { return a.code === code; });
-      var count = match ? match.count : null;
-      if (count !== null) totalUsers += count;
-      return { code: code, count: count };
+    var when = notifScheduleTimestamp() || Date.now();
+    var parts = origins.map(function(code) {
+      var off = IATA_UTC_OFFSET[code];
+      if (off === undefined) return '<strong>' + code + '</strong>';
+      var local = new Date(when + off * 3600000);
+      var hh = String(local.getUTCHours()).padStart(2, '0');
+      var mm = String(local.getUTCMinutes()).padStart(2, '0');
+      var unsocial = local.getUTCHours() < 8 || local.getUTCHours() >= 22;
+      return '<strong>' + code + '</strong> <span style="color:' +
+        (unsocial ? 'var(--danger)' : 'var(--muted)') + '">' +
+        (unsocial ? '🌙 ' : '🕑 ') + hh + ':' + mm + '</span>';
     });
 
-    var hasUnknown = perAirport.some(function(a) { return a.count === null; });
-    var html = perAirport.map(function(a) {
-      return '<strong>' + a.code + '</strong>' +
-        (a.count !== null ? ' (' + a.count + ')' : ' (?)');
-    }).join(' · ');
+    summaryEl.innerHTML = parts.join(' · ');
+    updateNotifSendButton();
+  }
 
-    var totalLine = hasUnknown
-      ? '<span style="color:var(--muted)">User counts unavailable — open the User Airports tab to refresh.</span>'
-      : '👥 <strong>' + totalUsers + '</strong> user' + (totalUsers === 1 ? '' : 's') +
-        ' will receive this notification (those with deal alerts enabled).';
+  /** Ask the server who would ACTUALLY receive this — opt-outs, missing
+   *  devices and the frequency cap all removed. */
+  function refreshNotifReach() {
+    var d = notifModalState.deal;
+    var el = document.getElementById('notifReach');
+    var origins = readNotifOrigins();
+    if (!d || origins.length === 0) { el.innerHTML = ''; return; }
 
-    summaryEl.innerHTML = html + '<br>' + totalLine;
+    notifModalState.reachLoading = true;
+    notifModalState.reach = null;
+    el.innerHTML = '<span style="color:var(--muted)">⏳ Counting real recipients…</span>';
+    updateNotifSendButton();
+
+    var args = {
+      adminKey: adminKey,
+      origins: origins,
+      frequencyCapDays: Number(document.getElementById('notifFrequencyCap').value || 0),
+    };
+    if (document.getElementById('notifIncludeWishlist').checked) {
+      args.wishlistDestination = d.destinationCity || d.destination;
+    }
+
+    convexQuery('lowFareRadar:getBroadcastReach', args).then(function(r) {
+      notifModalState.reachLoading = false;
+      notifModalState.reach = r;
+      var s = r.skipReasons || {};
+      var skipped = (s.noToken || 0) + (s.optedOut || 0) + (s.frequencyCapped || 0);
+
+      var html = '<div class="headline">👥 ' + r.deliverable + ' user' +
+        (r.deliverable === 1 ? '' : 's') + ' will get this push</div>';
+      html += '<div>' + r.matched + ' matched targeting' +
+        (skipped > 0 ? ' · ' + skipped + ' filtered out' : '') + '</div>';
+      if (skipped > 0) {
+        html += '<div class="skips">' +
+          (s.optedOut ? '<span>🔕 ' + s.optedOut + ' opted out</span>' : '') +
+          (s.noToken ? '<span>📵 ' + s.noToken + ' no device</span>' : '') +
+          (s.frequencyCapped ? '<span>🚦 ' + s.frequencyCapped + ' frequency-capped</span>' : '') +
+          '</div>';
+      }
+      if (r.wishlistMatched) {
+        html += '<div class="skips"><span>💖 ' + r.wishlistMatched + ' wishlisted this destination</span></div>';
+      }
+      if (r.byAirport && r.byAirport.length > 1) {
+        html += '<div class="skips">' + r.byAirport.map(function(a) {
+          return '<span>' + escapeHtml(a.code) + ': ' + a.deliverable + '/' + a.matched + '</span>';
+        }).join('') + '</div>';
+      }
+      el.innerHTML = html;
+      updateNotifSendButton();
+    }).catch(function(err) {
+      notifModalState.reachLoading = false;
+      el.innerHTML = '<span style="color:var(--danger)">Could not count recipients: ' +
+        escapeHtml(err.message || 'error') + '</span>';
+      updateNotifSendButton();
+    });
+  }
+
+  function updateNotifSendButton() {
+    var btn = document.getElementById('notifSendBtn');
+    if (!btn) return;
+    var origins = readNotifOrigins();
+    var disabled = notifModalState.blocked || origins.length === 0 || notifModalState.reachLoading;
+    btn.disabled = disabled;
+    if (notifModalState.blocked) btn.textContent = '🛑 Deal not sendable';
+    else if (notifModalState.reachLoading) btn.textContent = '⏳ Counting…';
+    else btn.textContent = notifScheduleTimestamp() ? '🗓️ Schedule notification' : '📬 Send notification';
+  }
+
+  function notifScheduleTimestamp() {
+    var raw = document.getElementById('notifSchedule');
+    if (!raw || !raw.value) return null;
+    var ts = new Date(raw.value).getTime();
+    if (isNaN(ts) || ts <= Date.now() + 30000) return null;
+    return ts;
+  }
+
+  function clearNotifSchedule() {
+    document.getElementById('notifSchedule').value = '';
+    updateNotifScheduleHint();
+  }
+
+  function updateNotifScheduleHint() {
+    var hint = document.getElementById('notifScheduleHint');
+    var ts = notifScheduleTimestamp();
+    if (!ts) {
+      hint.textContent = 'Leave empty to send immediately. Airport clocks above show local time at send.';
+    } else {
+      var mins = Math.round((ts - Date.now()) / 60000);
+      var rel = mins < 60 ? mins + ' min' : Math.round(mins / 60) + 'h';
+      hint.textContent = 'Queued for ' + new Date(ts).toLocaleString() + ' (in ' + rel +
+        '). The audience is re-checked at send time, and you can cancel it from the Broadcasts list.';
+    }
+    updateNotifTargetSummary();
+    updateNotifSendButton();
+  }
+
+  /** Send exactly this copy to one account's devices before going wide. */
+  function sendNotifTest() {
+    var d = notifModalState.deal;
+    if (!d) return;
+    var email = (document.getElementById('notifTestEmail').value || '').trim();
+    if (!email) return toast('Enter the email of the account to test on', 'error');
+
+    var payload = { adminKey: adminKey, email: email, dealId: d._id, lang: notifModalState.previewLang };
+    if (notifModalState.mode === 'custom') {
+      payload.customTitle = (notifModalState.customTitle || '').trim();
+      payload.customBody = (notifModalState.customBody || '').trim();
+      if (!payload.customTitle || !payload.customBody) {
+        return toast('Custom title and body are required', 'error');
+      }
+    }
+
+    var btn = document.getElementById('notifTestBtn');
+    btn.disabled = true;
+    var orig = btn.textContent;
+    btn.textContent = '⏳ Sending…';
+    convexAction('lowFareRadar:sendTestPush', payload).then(function(r) {
+      btn.disabled = false;
+      btn.textContent = orig;
+      toast(r.sent > 0
+        ? '📲 Test delivered to ' + r.devices + ' device' + (r.devices === 1 ? '' : 's')
+        : '⚠️ Expo accepted nothing — device may have an expired token', r.sent > 0 ? 'success' : 'error');
+    }).catch(function(err) {
+      btn.disabled = false;
+      btn.textContent = orig;
+      toast('Test failed: ' + (err.message || 'Unknown error'), 'error');
+    });
   }
 
   function sendNotifModal() {
     var d = notifModalState.deal;
     if (!d) return;
+    if (notifModalState.blocked) return toast('This deal cannot be broadcast', 'error');
 
-    var raw = document.getElementById('notifTargets').value || '';
-    var origins = raw.split(',').map(function(s) { return s.trim().toUpperCase(); })
-      .filter(function(s) { return /^[A-Z]{3}$/.test(s); });
+    var origins = readNotifOrigins();
     if (origins.length === 0) return toast('Enter at least one valid IATA code', 'error');
 
     var payload = {
       adminKey: adminKey,
       dealId: d._id,
       originsOverride: origins,
+      includeWishlist: document.getElementById('notifIncludeWishlist').checked,
+      frequencyCapDays: Number(document.getElementById('notifFrequencyCap').value || 0),
     };
 
     if (notifModalState.mode === 'custom') {
@@ -3451,23 +4474,51 @@
       payload.customBody = cb;
     }
 
+    var scheduledFor = notifScheduleTimestamp();
+    if (scheduledFor) payload.scheduledFor = scheduledFor;
+
+    // A push is irreversible once it leaves — confirm with the real numbers.
+    var reach = notifModalState.reach;
+    var count = reach ? reach.deliverable : null;
+    var lines = [
+      (scheduledFor ? 'Schedule' : 'Send') + ' "' + d.origin + ' → ' + d.destination + '" to ' +
+        (count === null ? 'users at ' + origins.join(', ') : count + ' user' + (count === 1 ? '' : 's')) + '?',
+      '',
+      'Targets: ' + origins.join(', ') +
+        (payload.includeWishlist ? ' + wishlisters of ' + (d.destinationCity || d.destination) : ''),
+      'Copy: ' + (notifModalState.mode === 'custom' ? 'custom (one language for everyone)' : 'auto per user language'),
+      'Frequency cap: ' + (payload.frequencyCapDays ? payload.frequencyCapDays + ' day(s)' : 'OFF'),
+    ];
+    if (scheduledFor) lines.push('When: ' + new Date(scheduledFor).toLocaleString());
+    if (count === 0) lines.push('', '⚠️ Nobody currently qualifies — nothing will be sent.');
+    if (!confirm(lines.join('\n'))) return;
+
     var sendBtn = document.getElementById('notifSendBtn');
     sendBtn.disabled = true;
-    sendBtn.textContent = '⏳ Sending...';
+    sendBtn.textContent = scheduledFor ? '⏳ Scheduling…' : '⏳ Sending...';
 
     convexAction('lowFareRadar:broadcastDealToHomeAirports', payload).then(function(result) {
       sendBtn.disabled = false;
-      sendBtn.textContent = '📬 Send notification';
-      var msg = '📬 Sent to ' + (result.sent || 0) + ' / ' + (result.targeted || 0) + ' user' +
-        ((result.targeted === 1) ? '' : 's');
-      if (result.skipped) msg += ' (' + result.skipped + ' failed)';
-      toast(msg, 'success');
+      if (result.scheduled) {
+        toast('🗓️ Scheduled for ' + new Date(scheduledFor).toLocaleString() +
+          ' — cancel it any time from the Broadcasts tab', 'success');
+      } else {
+        var msg = '📬 Sent to ' + (result.sent || 0) + ' / ' + (result.targeted || 0) + ' user' +
+          ((result.targeted === 1) ? '' : 's');
+        if (result.skipped) msg += ' (' + result.skipped + ' failed)';
+        toast(msg, 'success');
+      }
+      // Draft was sent — don't resurrect it next time.
+      try { localStorage.removeItem(notifDraftKey(d._id)); } catch (e) {}
+      notifModalState.customTitle = '';
+      notifModalState.customBody = '';
       closeNotifModal();
+      updateNotifSendButton();
       // Refresh broadcasts tab data so it reflects this send next time it's opened
       loadBroadcasts();
     }).catch(function(err) {
       sendBtn.disabled = false;
-      sendBtn.textContent = '📬 Send notification';
+      updateNotifSendButton();
       toast('Notify error: ' + (err.message || 'Unknown error'), 'error');
     });
   }

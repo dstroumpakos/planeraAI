@@ -5,18 +5,35 @@
  *
  * Fills an origin airport that has users but "No deals yet" (surfaced in the
  * admin "User Airports" view) with real, graded curated deals. For one origin
- * it runs a live searchapi.io Google-Flights search to a curated list of
- * popular destinations, keeps only fares Google grades `low`/`typical` (never
- * `high`), ranks them by value, and inserts the top N as CURATED deals.
+ * it finds the best travel dates per destination, keeps only fares Google
+ * grades `low`/`typical` (never `high`), ranks them by value, and inserts the
+ * top N as CURATED deals.
  *
  * "Curated" here means: `dealTag: "SEEDED"` + no `expiresAt`, so — unlike the
  * opportunistic AUTO seeds — they persist and are re-priced by the refresh
  * cron (which only touches `dealTag !== "AUTO"` rows).
  *
- * Quota: one round-trip search per candidate destination (≈ the list length),
- * plus up to two follow-up calls per inserted winner (return leg + booking
- * options, via `enrichAndSeedDeal`). Bounded and sequential — safe as an
- * on-demand admin action, but it does spend real searchapi.io quota.
+ * THREE PHASES:
+ *
+ *   0. CALENDAR SCAN — for each candidate destination, scan a wide date grid
+ *      via `google_flights_calendar` (`fetchFlightCalendar`) and pick that
+ *      route's cheapest (departure, return) pair. Every destination therefore
+ *      gets its OWN best dates instead of one fixed window shared by all.
+ *      The scan also yields a route-local price distribution, so we can rank
+ *      by "how far below this route's own median is its best date" — a real
+ *      deal signal that doesn't need `price_insights`.
+ *   1. VERIFY — calendar fares are indicative and NOT bookable, and carry no
+ *      `price_level`. So the top `verifyTop` routes get one real
+ *      `google_flights` search on their chosen dates, which produces both a
+ *      bookable option (with tokens) and Google's low/typical/high grade.
+ *   2. ENRICH + INSERT — unchanged: return leg + booking options per winner.
+ *
+ * Quota (defaults, 24 candidates): `windows` calls per destination in phase 0
+ * (3 × 24 = 72), one search per verified route (~16), plus up to two follow-up
+ * calls per inserted winner (~20) — roughly 110 searchapi.io calls per press,
+ * versus ~44 for the old single-date-pair scan. Phase 0 runs with bounded
+ * concurrency and the whole scan is wall-clock budgeted, because Convex kills
+ * an action at 10 minutes.
  */
 
 import { action } from "./_generated/server";
@@ -31,8 +48,10 @@ import {
   SEARCHAPI_FLIGHTS_ENDPOINT,
   buildSearchApiSearchParams,
 } from "./lib/searchApiFlightSearch";
+import { fetchFlightCalendar } from "./lib/searchApiFlightCalendar";
 import { AIRPORTS } from "../lib/airports";
 import type {
+  FlightCalendar,
   FlightSearchInput,
   NormalizedFlightOption,
   PriceInsights,
@@ -75,6 +94,75 @@ const POPULAR_DESTINATIONS: Array<{ code: string; city: string }> = [
   { code: "MRU", city: "Mauritius" },
 ];
 
+/**
+ * Phase-0 scan geometry. `google_flights_calendar` caps a request at 200
+ * (outbound × return) date combinations, which the lib turns into ~14-day
+ * windows — so breadth is bought one API call at a time.
+ *
+ * 3 windows starting 21 days out covers departures ~3 to ~9 weeks ahead, which
+ * brackets the old fixed +45/+52 pair on both sides.
+ */
+const DEFAULT_CALENDAR_WINDOWS = 3;
+const DEFAULT_SCAN_START_OFFSET_DAYS = 21;
+
+/** How many top-ranked routes get a real (bookable, graded) verify search. */
+const VERIFY_HEADROOM = 6;
+
+/**
+ * Phase 0 is read-only and quota-bounded regardless of pacing, so run a few
+ * routes at once — 72 sequential calendar calls would eat most of the action's
+ * lifetime on network latency alone. Phases 1 and 2 stay sequential (they write
+ * and they burn the heavier endpoints).
+ */
+const DEFAULT_SCAN_CONCURRENCY = 4;
+
+/**
+ * Wall-clock budgets. Convex kills an action at 10 minutes, and the admin
+ * widget calls this over a plain synchronous fetch — so a run that approaches
+ * the limit is lost work AND a hung button. Phases 0+1 stop discovering at
+ * SCAN_BUDGET_MS, leaving room for phase 2 to actually seed what qualified;
+ * TOTAL_BUDGET_MS then stops seeding with margin to spare. Either cut sets
+ * `timedOut` in the result so the admin knows to press again.
+ *
+ * Expected shape of a full run at the defaults: ~72 calendar calls at
+ * concurrency 4 (~1.5 min), ~16 verify searches (~1 min), ~10 winners × 2–3
+ * enrich calls (~2 min) ≈ 4.5 min.
+ */
+const SCAN_BUDGET_MS = 3.5 * 60 * 1000;
+const TOTAL_BUDGET_MS = 7 * 60 * 1000;
+
+/** Fallback trip length when a calendar date has no paired return. */
+const FALLBACK_TRIP_NIGHTS = 7;
+
+/** Run `fn` over `items` with bounded concurrency, preserving input order. */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const workers = Array.from(
+    { length: Math.max(1, Math.min(limit, items.length)) },
+    async () => {
+      for (;;) {
+        const i = next++;
+        if (i >= items.length) return;
+        results[i] = await fn(items[i], i);
+      }
+    }
+  );
+  await Promise.all(workers);
+  return results;
+}
+
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const s = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 === 1 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
 function cityForIata(code: string): string {
   const upper = code.toUpperCase();
   const pool = POPULAR_DESTINATIONS.find((d) => d.code === upper);
@@ -86,6 +174,13 @@ function cityForIata(code: string): string {
 /** YYYY-MM-DD, `daysAhead` from now (UTC). */
 function dateAhead(daysAhead: number): string {
   const d = new Date(Date.now() + daysAhead * 24 * 60 * 60 * 1000);
+  return d.toISOString().slice(0, 10);
+}
+
+/** YYYY-MM-DD, `nights` after `date`. */
+function addNights(date: string, nights: number): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + nights);
   return d.toISOString().slice(0, 10);
 }
 
@@ -129,9 +224,37 @@ function pickCheapest(
   );
 }
 
+/**
+ * Phase-0 output: one route's best travel dates, discovered from its own
+ * calendar grid. `calendarPrice` is INDICATIVE only (the calendar engine is a
+ * discovery signal, not a bookable quote) — phase 1 re-prices it for real.
+ */
+type ScanResult = {
+  destination: string;
+  city: string;
+  outboundDate: string;
+  returnDate: string;
+  /** Indicative round-trip fare for the picked pair, or null when unknown. */
+  calendarPrice: number | null;
+  /**
+   * Fraction below this route's OWN median fare across the scanned window
+   * (0 when unknown). Higher = the picked dates are a bigger outlier for this
+   * route, which is the "is it a deal" signal price_insights would otherwise
+   * give us — except computed per-route, so it never favours short-haul just
+   * for being cheap in absolute terms.
+   */
+  calendarDiscount: number;
+  /** Departure dates the calendar priced for this route (scan breadth). */
+  datesScanned: number;
+  /** Calendar came back empty — dates fell back to the fixed window. */
+  fellBack: boolean;
+};
+
 type Candidate = {
   destination: string;
   city: string;
+  outboundDate: string;
+  returnDate: string;
   option: NormalizedFlightOption;
   priceLevel: string; // "low" | "typical"
   price: number;
@@ -179,6 +302,17 @@ export const seedDealsForOrigin = action({
     // Optional override for the public deal-tag badge. When omitted, each deal
     // is tagged by grade ("HOT DEAL" for `low` fares, none for `typical`).
     dealTag: v.optional(v.string()),
+    // ─ Phase-0 scan controls (all optional; defaults tuned for one press) ─
+    /** ~14-day calendar windows scanned per destination. 1–6. More = wider
+     *  date search and proportionally more quota. */
+    calendarWindows: v.optional(v.float64()),
+    /** Days from today where the scan starts (the lib floors this at 8). */
+    startOffsetDays: v.optional(v.float64()),
+    /** How many top-ranked routes get a real verify search. Defaults to
+     *  `count + 6` so rejected (`high`-graded) routes have replacements. */
+    verifyTop: v.optional(v.float64()),
+    /** Parallel calendar lookups in phase 0. 1–8. */
+    concurrency: v.optional(v.float64()),
   },
   handler: async (
     ctx,
@@ -186,12 +320,19 @@ export const seedDealsForOrigin = action({
   ): Promise<{
     origin: string;
     currency: string;
-    outboundDate: string;
-    returnDate: string;
+    /** Departure-date range the calendar scan covered. */
+    scanFrom: string;
+    scanTo: string;
     candidatesSearched: number;
+    calendarCalls: number;
+    /** Routes whose calendar came back empty (fixed-window fallback used). */
+    calendarEmpty: number;
+    verifySearches: number;
     skippedExisting: number;
     qualified: number;
     seeded: number;
+    /** True when the wall-clock budget cut the scan short. */
+    timedOut: boolean;
     deals: DealSummary[];
   }> => {
     validateAdminKey(args.adminKey);
@@ -206,13 +347,34 @@ export const seedDealsForOrigin = action({
     // `low` fares, none for merely-`typical` ones).
     const dealTagOverride = args.dealTag?.trim() || undefined;
 
-    // Sample a single ~6-week-out, 7-night round trip. Far enough that advance
-    // fares are available, near enough to be actionable.
-    const outboundDate = dateAhead(45);
-    const returnDate = dateAhead(52);
-    // Travel-month window (YYYY-MM) derived from the sampled dates.
-    const travelMonthFrom = outboundDate.slice(0, 7);
-    const travelMonthTo = returnDate.slice(0, 7);
+    const windows = Math.max(
+      1,
+      Math.min(Math.round(args.calendarWindows ?? DEFAULT_CALENDAR_WINDOWS), 6)
+    );
+    const startOffsetDays = Math.max(
+      0,
+      Math.round(args.startOffsetDays ?? DEFAULT_SCAN_START_OFFSET_DAYS)
+    );
+    const concurrency = Math.max(
+      1,
+      Math.min(Math.round(args.concurrency ?? DEFAULT_SCAN_CONCURRENCY), 8)
+    );
+    const verifyTop = Math.max(
+      1,
+      Math.round(args.verifyTop ?? count + VERIFY_HEADROOM)
+    );
+    const startedAt = Date.now();
+    let timedOut = false;
+
+    // Dates the scan is expected to cover, for the summary. The lib floors the
+    // start at its own minimum lead time, so mirror that here.
+    const scanFrom = dateAhead(Math.max(startOffsetDays, 8));
+    const scanTo = dateAhead(Math.max(startOffsetDays, 8) + windows * 14 - 1);
+
+    // Fixed pair used only when a route's calendar comes back empty, so a thin
+    // route degrades to the old behaviour instead of dropping out entirely.
+    const fallbackOutbound = dateAhead(45);
+    const fallbackReturn = dateAhead(52);
 
     // Skip any destination this origin already has a live deal for (AUTO or
     // curated) — `listActive` already filters to active/non-expired/non-deleted.
@@ -232,23 +394,136 @@ export const seedDealsForOrigin = action({
         d.city.toLowerCase() !== originCity
     );
 
-    const candidates: Candidate[] = [];
-    let candidatesSearched = 0;
+    // ── Phase 0 — calendar scan: find each route's own best dates ──
+    //
+    // One `fetchFlightCalendar` per destination (internally `windows` API
+    // calls). Bounded concurrency: these are read-only lookups, and running
+    // them one at a time would spend most of the action's lifetime waiting on
+    // the network. Quota is identical either way.
+    let calendarCalls = 0;
+    let calendarEmpty = 0;
 
-    // Phase 1 — search every candidate route and grade it. Sequential to keep
-    // quota bounded and avoid provider rate limits.
-    for (const dest of candidatePool) {
+    const scans: ScanResult[] = await mapWithConcurrency(
+      candidatePool,
+      concurrency,
+      async (dest): Promise<ScanResult> => {
+        const fallback: ScanResult = {
+          destination: dest.code,
+          city: dest.city,
+          outboundDate: fallbackOutbound,
+          returnDate: fallbackReturn,
+          calendarPrice: null,
+          calendarDiscount: 0,
+          datesScanned: 0,
+          fellBack: true,
+        };
+
+        // Out of time — take the fixed pair rather than start a fresh scan.
+        if (Date.now() - startedAt > SCAN_BUDGET_MS) {
+          timedOut = true;
+          return fallback;
+        }
+
+        let calendar: FlightCalendar | null = null;
+        try {
+          calendarCalls += windows;
+          calendar = await fetchFlightCalendar(
+            { departureId: origin, arrivalId: dest.code, currency },
+            {
+              windows,
+              startOffsetDays,
+              // Keep every priced date — the median below is only meaningful
+              // over the full window, not over a thinned "strip" selection.
+              maxDates: windows * 14,
+              spacingDays: 1,
+              // Party size changes which fares are actually bookable, so it
+              // must be priced in, not multiplied afterwards.
+              adults,
+            }
+          );
+        } catch {
+          console.error(`[radar-seed] calendar failed ${origin}->${dest.code}`);
+        }
+
+        const dates = calendar?.dates ?? [];
+        if (dates.length === 0) {
+          calendarEmpty++;
+          return fallback;
+        }
+
+        const best = dates.reduce((m, d) => (d.price < m.price ? d : m));
+        const mid = median(dates.map((d) => d.price));
+        const calendarDiscount =
+          mid && mid > 0 ? Math.max(0, (mid - best.price) / mid) : 0;
+
+        return {
+          destination: dest.code,
+          city: dest.city,
+          outboundDate: best.date,
+          // The calendar pairs each departure with the return that produced
+          // its cheapest fare; only synthesise one if that's missing.
+          returnDate:
+            best.returnDate && best.returnDate > best.date
+              ? best.returnDate
+              : addNights(best.date, FALLBACK_TRIP_NIGHTS),
+          calendarPrice: best.price,
+          calendarDiscount,
+          datesScanned: dates.length,
+          fellBack: false,
+        };
+      }
+    );
+
+    // Rank by the route-local discount, then by indicative price, and verify
+    // only the head of that list. Ranking on the calendar's own signal (rather
+    // than absolute cheapness) keeps a genuinely-discounted long-haul ahead of
+    // a short hop that is merely cheap.
+    const ranked = [...scans]
+      .filter(
+        (s) =>
+          args.maxPrice === undefined ||
+          s.calendarPrice === null ||
+          s.calendarPrice <= args.maxPrice
+      )
+      .sort((a, b) => {
+        if (b.calendarDiscount !== a.calendarDiscount) {
+          return b.calendarDiscount - a.calendarDiscount;
+        }
+        return (a.calendarPrice ?? Infinity) - (b.calendarPrice ?? Infinity);
+      })
+      .slice(0, verifyTop);
+
+    const candidates: Candidate[] = [];
+    const candidatesSearched = candidatePool.length;
+    let verifySearches = 0;
+
+    // ── Phase 1 — verify + grade the shortlist on its chosen dates ──
+    //
+    // Calendar fares are indicative and carry no `price_level`, so each
+    // shortlisted route gets one real search: it yields the bookable option
+    // (with the tokens phase 2 needs) and Google's low/typical/high grade.
+    // Sequential — these are the heavier endpoint.
+    for (const scan of ranked) {
+      if (Date.now() - startedAt > SCAN_BUDGET_MS) {
+        timedOut = true;
+        console.warn(
+          `[radar-seed] time budget hit after ${verifySearches} verify search(es); seeding what qualified so far`
+        );
+        break;
+      }
+
+      const dest = { code: scan.destination, city: scan.city };
       const input: FlightSearchInput = {
         departureId: origin,
         arrivalId: dest.code,
-        outboundDate,
-        returnDate,
+        outboundDate: scan.outboundDate,
+        returnDate: scan.returnDate,
         type: "round_trip",
         currency,
         adults,
         maxPrice: args.maxPrice,
       };
-      candidatesSearched++;
+      verifySearches++;
       try {
         const raw = await callSearchApi(buildSearchApiSearchParams(input));
         if (!raw) continue;
@@ -277,12 +552,19 @@ export const seedDealsForOrigin = action({
           Array.isArray(range) && range.length === 2
             ? (range[0] + range[1]) / 2
             : null;
+        // Prefer Google's own typical range; fall back to the route-local
+        // calendar discount when this search returned no price insights, so a
+        // verified deal is never ranked as if it had zero discount.
         const discount =
-          mid && mid > 0 ? Math.max(0, (mid - cheapest.price) / mid) : 0;
+          mid && mid > 0
+            ? Math.max(0, (mid - cheapest.price) / mid)
+            : scan.calendarDiscount;
 
         candidates.push({
           destination: dest.code,
           city: dest.city,
+          outboundDate: scan.outboundDate,
+          returnDate: scan.returnDate,
           option: cheapest,
           priceLevel: level,
           price: cheapest.price,
@@ -308,6 +590,17 @@ export const seedDealsForOrigin = action({
     let seeded = 0;
     const deals: DealSummary[] = [];
     for (const w of winners) {
+      // Stop with margin rather than risk the 10-minute kill, which would lose
+      // the deals already inserted from the caller's point of view.
+      if (Date.now() - startedAt > TOTAL_BUDGET_MS) {
+        timedOut = true;
+        console.warn(
+          `[radar-seed] total budget hit after ${seeded} seeded deal(s); ${
+            winners.length - seeded
+          } winner(s) left unseeded`
+        );
+        break;
+      }
       try {
         // Per-person figures so the card's strike-through anchors correctly
         // (the stored `price` is per-person; SerpApi/searchapi prices are totals
@@ -330,8 +623,10 @@ export const seedDealsForOrigin = action({
           {
             origin,
             destination: w.destination,
-            outboundDate,
-            returnDate,
+            // Per-route dates from the calendar scan — every deal now carries
+            // its own best window, so the travel-month labels are per-deal too.
+            outboundDate: w.outboundDate,
+            returnDate: w.returnDate,
             currency,
             priceLevel: w.priceLevel,
             option: w.option,
@@ -340,8 +635,8 @@ export const seedDealsForOrigin = action({
             dealTag: tag,
             persistent: true,
             originalPrice,
-            travelMonthFrom,
-            travelMonthTo,
+            travelMonthFrom: w.outboundDate.slice(0, 7),
+            travelMonthTo: w.returnDate.slice(0, 7),
           }
         );
         if (dealId) {
@@ -361,11 +656,11 @@ export const seedDealsForOrigin = action({
             price: deal?.price ?? w.price,
             currency: deal?.currency ?? currency,
             priceLevel: w.priceLevel,
-            outboundDate: deal?.outboundDate ?? outboundDate,
+            outboundDate: deal?.outboundDate ?? w.outboundDate,
             outboundDeparture: deal?.outboundDeparture ?? "",
             outboundArrival: deal?.outboundArrival ?? "",
             outboundStops: deal?.outboundStops ?? 0,
-            returnDate: deal?.returnDate ?? returnDate,
+            returnDate: deal?.returnDate ?? w.returnDate,
             returnDeparture: deal?.returnDeparture,
             returnArrival: deal?.returnArrival,
             returnStops: deal?.returnStops,
@@ -386,12 +681,16 @@ export const seedDealsForOrigin = action({
     return {
       origin,
       currency,
-      outboundDate,
-      returnDate,
+      scanFrom,
+      scanTo,
       candidatesSearched,
+      calendarCalls,
+      calendarEmpty,
+      verifySearches,
       skippedExisting: covered.size,
       qualified: candidates.length,
       seeded,
+      timedOut,
       deals,
     };
   },
