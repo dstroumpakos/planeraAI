@@ -1168,16 +1168,32 @@ export default function TripDetails() {
         }
         const stays = trip?.itinerary?.hotels;
         if (Array.isArray(stays) && stays.length > 0) {
-            let cheapestStayIdx = 0;
-            let cheapestStayPrice = Infinity;
-            stays.forEach((acc: any, idx: number) => {
-                const p = typeof acc?.pricePerNight === "number" ? acc.pricePerNight : Infinity;
-                if (p < cheapestStayPrice) {
-                    cheapestStayPrice = p;
-                    cheapestStayIdx = idx;
-                }
-            });
-            setSelectedHotelIndex(cheapestStayIdx);
+            // Cheapest, but ignoring bottom-of-market outliers — a dorm bed or a
+            // per-person listing among real hotels made the budget's Stay line
+            // read as ~€19/night for Paris, which reads as broken rather than
+            // thrifty. Anything under 40% of the median price is skipped unless
+            // that leaves nothing to pick.
+            const prices: number[] = stays
+                .map((acc: any) => (typeof acc?.pricePerNight === "number" && acc.pricePerNight > 0 ? acc.pricePerNight : null))
+                .filter((p: number | null): p is number => p !== null)
+                .sort((a: number, b: number) => a - b);
+            const median = prices.length > 0 ? prices[Math.floor(prices.length / 2)] : 0;
+            const priceFloor = median > 0 ? median * 0.4 : 0;
+
+            const cheapestAtOrAbove = (minPrice: number): number | null => {
+                let bestIdx: number | null = null;
+                let bestPrice = Infinity;
+                stays.forEach((acc: any, idx: number) => {
+                    const p = typeof acc?.pricePerNight === "number" && acc.pricePerNight > 0 ? acc.pricePerNight : Infinity;
+                    if (p >= minPrice && p < bestPrice) {
+                        bestPrice = p;
+                        bestIdx = idx;
+                    }
+                });
+                return bestIdx;
+            };
+
+            setSelectedHotelIndex(cheapestAtOrAbove(priceFloor) ?? cheapestAtOrAbove(0) ?? 0);
         }
     }, [trip?.itinerary?.flights?.options, trip?.itinerary?.hotels]);
 
@@ -1577,7 +1593,13 @@ export default function TripDetails() {
     const dailyExpensesPerPerson = itinerary?.estimatedDailyExpenses || 50; // Fallback
 
     const totalFlightCost = flightPricePerPerson * travelers;
-    const totalAccommodationCost = accommodationPricePerNight * duration;
+    // Suppliers quote a stay total that includes cleaning/service fees, so it is
+    // closer to what the traveler actually pays than nightly × nights. Only fall
+    // back to the multiplication when no total came back.
+    const supplierStayTotal = typeof selectedAccommodation?.totalPrice === 'number' && selectedAccommodation.totalPrice > 0
+        ? selectedAccommodation.totalPrice
+        : null;
+    const totalAccommodationCost = supplierStayTotal ?? accommodationPricePerNight * duration;
     const totalDailyExpenses = dailyExpensesPerPerson * travelers * duration;
 
     // Curated bookable experiences (GetYourGuide etc.): sum their ticket prices
@@ -1639,6 +1661,119 @@ export default function TripDetails() {
             web: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`
         });
         if (url) Linking.openURL(url);
+    };
+
+    // ─── Itinerary stop → the outside world ───────────────────────────────
+    // Tapping a stop used to leave the app immediately, which made renaming,
+    // moving or removing it feel impossible without a detour through Maps.
+    // The tap now opens the action sheet and this is its first row, so the
+    // map/booking hand-off is one deliberate tap instead of the only outcome.
+
+    // Pull the venue out of a phrased title: "Dinner at Can Culleretes" →
+    // "Can Culleretes", "Explore El Born" → "El Born".
+    const extractActivityVenue = (activityTitle: string): string => {
+        const patterns = [
+            /(?:at|@)\s+(.+)$/i,
+            /(?:in|around)\s+(.+)$/i,
+            /(?:to|visit)\s+(.+)$/i,
+            /^visit\s+(.+)$/i,
+            /^explore\s+(.+)$/i,
+            /^discover\s+(.+)$/i,
+            /:\s*(.+)$/i,
+        ];
+        for (const pattern of patterns) {
+            const match = activityTitle.match(pattern);
+            if (match && match[1]) return match[1].trim();
+        }
+        return activityTitle;
+    };
+
+    const activityExternalKind = (activity: any): 'affiliate' | 'booking' | 'maps' => {
+        if (!activity) return 'maps';
+        // Curated affiliate experience: our own exact booking link wins.
+        if (activity.bookingUrl && activity.affiliateProvider) return 'affiliate';
+
+        const type = activity.type?.toLowerCase() || '';
+        const combinedText = `${activity.title?.toLowerCase() || ''} ${activity.description?.toLowerCase() || ''} ${type}`;
+
+        // Keywords that indicate a PLACE/LOCATION (open Maps)
+        const locationKeywords = [
+            'neighborhood', 'district', 'quarter', 'area', 'street', 'avenue',
+            'market', 'mercado', 'marché', 'mercato', 'bazaar', 'souk',
+            'shopping', 'shop', 'store', 'boutique',
+            'bar', 'pub', 'café', 'cafe', 'coffee',
+            'walk', 'stroll', 'wander', 'explore',
+            'park', 'garden', 'beach', 'plaza', 'square', 'piazza',
+            'viewpoint', 'lookout', 'mirador',
+            'hidden gem', 'local spot', 'local favorite',
+            'free', 'gratis'
+        ];
+
+        // Keywords that indicate BOOKING NEEDED (open GetYourGuide)
+        const bookingKeywords = [
+            'museum', 'gallery', 'exhibition',
+            'class', 'workshop', 'lesson', 'course',
+            'cooking', 'culinary', 'cuisine',
+            'tour', 'guided', 'guide',
+            'ticket', 'entry', 'admission', 'skip the line',
+            'show', 'performance', 'concert', 'flamenco', 'fado',
+            'experience', 'activity', 'excursion',
+            'tasting', 'wine tasting', 'food tour',
+            'boat', 'cruise', 'sailing',
+            'bike', 'segway', 'scooter'
+        ];
+
+        const needsBooking = bookingKeywords.some((keyword) => combinedText.includes(keyword));
+        const isLocation = locationKeywords.some((keyword) => combinedText.includes(keyword));
+
+        // Museums and attractions almost always need tickets
+        if (type === 'museum' || type === 'attraction') return 'booking';
+        // Restaurants always go to maps
+        if (type === 'restaurant') return 'maps';
+
+        if (activity.isLocalExperience) {
+            if (isLocation && !needsBooking) return 'maps';
+            if (needsBooking) return 'booking';
+            // Most local experiences are places to turn up to.
+            return 'maps';
+        }
+
+        if (needsBooking && !isLocation) return 'booking';
+        return 'maps';
+    };
+
+    const activityExternalLabel = (activity: any): string => {
+        const kind = activityExternalKind(activity);
+        if (kind === 'affiliate') return t('tripDetail.bookNow');
+        if (kind === 'booking') return t('tripDetail.bookOnGetYourGuide');
+        return t('tripDetail.openInMaps');
+    };
+
+    const openActivityExternally = (activity: any) => {
+        if (!activity) return;
+        const kind = activityExternalKind(activity);
+
+        if (kind === 'affiliate') {
+            if (activity.affiliateLinkId) trackAttractionClick({ id: activity.affiliateLinkId }).catch(() => {});
+            Linking.openURL(activity.bookingUrl);
+            return;
+        }
+
+        const venue = cleanLocationTitle(extractActivityVenue(activity.title || ''));
+        const searchQuery = encodeURIComponent(`${venue} ${trip.destination}`);
+
+        if (kind === 'booking') {
+            Linking.openURL(`https://www.getyourguide.com/s/?q=${searchQuery}`);
+            return;
+        }
+
+        if (Platform.OS === 'ios') {
+            Linking.openURL(`maps://maps.apple.com/?q=${searchQuery}`).catch(() => {
+                Linking.openURL(`https://www.google.com/maps/search/${searchQuery}`);
+            });
+        } else {
+            Linking.openURL(`https://www.google.com/maps/search/${searchQuery}`);
+        }
     };
 
     const openAffiliateLink = async (type: 'flight' | 'hotel', query: string) => {
@@ -2927,130 +3062,10 @@ export default function TripDetails() {
                                         }}
                                         delayLongPress={500}
                                         onPress={() => {
-                                            // Curated affiliate attraction: tapping the card opens OUR exact
-                                            // booking link (not a generic search / Maps).
-                                            if (activity.bookingUrl && activity.affiliateProvider) {
-                                                if (activity.affiliateLinkId) trackAttractionClick({ id: activity.affiliateLinkId }).catch(() => {});
-                                                Linking.openURL(activity.bookingUrl);
-                                                return;
-                                            }
-                                            const title = activity.title?.toLowerCase() || '';
-                                            const description = activity.description?.toLowerCase() || '';
-                                            const type = activity.type?.toLowerCase() || '';
-                                            
-                                            // Extract the main venue/location from the title
-                                            // Common patterns: "Party at Razzmatazz", "Dinner at Can Culleretes", "Shopping in Gracia"
-                                            const extractVenue = (activityTitle: string): string => {
-                                                const patterns = [
-                                                    /(?:at|@)\s+(.+)$/i,           // "Party at Razzmatazz" → "Razzmatazz"
-                                                    /(?:in|around)\s+(.+)$/i,      // "Shopping in Gracia" → "Gracia"
-                                                    /(?:to|visit)\s+(.+)$/i,       // "Visit to Sagrada Familia" → "Sagrada Familia"
-                                                    /^visit\s+(.+)$/i,             // "Visit Sagrada Familia" → "Sagrada Familia"
-                                                    /^explore\s+(.+)$/i,           // "Explore El Born" → "El Born"
-                                                    /^discover\s+(.+)$/i,          // "Discover Gothic Quarter" → "Gothic Quarter"
-                                                    /:\s*(.+)$/i,                  // "Cooking Class: La Cuina" → "La Cuina"
-                                                ];
-                                                
-                                                for (const pattern of patterns) {
-                                                    const match = activityTitle.match(pattern);
-                                                    if (match && match[1]) {
-                                                        return match[1].trim();
-                                                    }
-                                                }
-                                                
-                                                // If no pattern matches, return the original title
-                                                return activityTitle;
-                                            };
-                                            
-                                            const venue = cleanLocationTitle(extractVenue(activity.title || ''));
-                                            const searchQuery = encodeURIComponent(`${venue} ${trip.destination}`);
-                                            
-                                            // Helper function to open maps
-                                            const openMaps = () => {
-                                                if (Platform.OS === 'ios') {
-                                                    const appleMapsURL = `maps://maps.apple.com/?q=${searchQuery}`;
-                                                    Linking.openURL(appleMapsURL).catch(() => {
-                                                        Linking.openURL(`https://www.google.com/maps/search/${searchQuery}`);
-                                                    });
-                                                } else {
-                                                    Linking.openURL(`https://www.google.com/maps/search/${searchQuery}`);
-                                                }
-                                            };
-                                            
-                                            // Helper function to open booking search
-                                            const openBooking = () => {
-                                                Linking.openURL(`https://www.getyourguide.com/s/?q=${searchQuery}`);
-                                            };
-                                            
-                                            // Keywords that indicate a PLACE/LOCATION (open Maps)
-                                            const locationKeywords = [
-                                                'neighborhood', 'district', 'quarter', 'area', 'street', 'avenue',
-                                                'market', 'mercado', 'marché', 'mercato', 'bazaar', 'souk',
-                                                'shopping', 'shop', 'store', 'boutique',
-                                                'bar', 'pub', 'café', 'cafe', 'coffee',
-                                                'walk', 'stroll', 'wander', 'explore',
-                                                'park', 'garden', 'beach', 'plaza', 'square', 'piazza',
-                                                'viewpoint', 'lookout', 'mirador',
-                                                'hidden gem', 'local spot', 'local favorite',
-                                                'free', 'gratis'
-                                            ];
-                                            
-                                            // Keywords that indicate BOOKING NEEDED (open GetYourGuide)
-                                            const bookingKeywords = [
-                                                'museum', 'gallery', 'exhibition',
-                                                'class', 'workshop', 'lesson', 'course',
-                                                'cooking', 'culinary', 'cuisine',
-                                                'tour', 'guided', 'guide',
-                                                'ticket', 'entry', 'admission', 'skip the line',
-                                                'show', 'performance', 'concert', 'flamenco', 'fado',
-                                                'experience', 'activity', 'excursion',
-                                                'tasting', 'wine tasting', 'food tour',
-                                                'boat', 'cruise', 'sailing',
-                                                'bike', 'segway', 'scooter'
-                                            ];
-                                            
-                                            // Check if it's a booking-type activity
-                                            const combinedText = `${title} ${description} ${type}`;
-                                            const needsBooking = bookingKeywords.some(keyword => combinedText.includes(keyword));
-                                            const isLocation = locationKeywords.some(keyword => combinedText.includes(keyword));
-                                            
-                                            // Museums and attractions almost always need tickets
-                                            if (type === 'museum' || type === 'attraction') {
-                                                openBooking();
-                                                return;
-                                            }
-                                            
-                                            // Restaurants always go to maps
-                                            if (type === 'restaurant') {
-                                                openMaps();
-                                                return;
-                                            }
-                                            
-                                            // For local experiences, check keywords
-                                            if (activity.isLocalExperience) {
-                                                // If it's clearly a location/place, use maps
-                                                if (isLocation && !needsBooking) {
-                                                    openMaps();
-                                                    return;
-                                                }
-                                                // If it needs booking (class, tour, etc.), use GetYourGuide
-                                                if (needsBooking) {
-                                                    openBooking();
-                                                    return;
-                                                }
-                                                // Default for local experiences: maps (most are places to visit)
-                                                openMaps();
-                                                return;
-                                            }
-                                            
-                                            // For other types, check keywords
-                                            if (needsBooking && !isLocation) {
-                                                openBooking();
-                                                return;
-                                            }
-                                            
-                                            // Default: open maps
-                                            openMaps();
+                                            if (replacingActivity) return;
+                                            // Open the stop's own actions (including the map / booking
+                                            // hand-off) rather than jumping straight out of the app.
+                                            setActionSheetTarget({ dayIndex: index, actIndex });
                                         }}
                                     >
                                         {replacingActivity === `${index}-${actIndex}` && (
@@ -5220,6 +5235,13 @@ export default function TripDetails() {
             <ActivityActionSheet
                 visible={!!actionSheetTarget}
                 activityTitle={activeActionActivity?.title}
+                externalLabel={activeActionActivity ? activityExternalLabel(activeActionActivity) : undefined}
+                externalIcon={
+                    activeActionActivity && activityExternalKind(activeActionActivity) !== 'maps'
+                        ? 'ticket-outline'
+                        : 'map-outline'
+                }
+                onOpenExternal={() => openActivityExternally(activeActionActivity)}
                 onClose={() => setActionSheetTarget(null)}
                 onEditTime={() => actionSheetTarget && setEditTimeTarget(actionSheetTarget)}
                 onReplaceAI={() => {

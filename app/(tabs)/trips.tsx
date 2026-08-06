@@ -128,7 +128,11 @@ export default function TripsScreen() {
                             <View style={styles.cardContent}>
                                 <View style={styles.cardHeader}>
                                     <Text style={[styles.destination, { color: colors.text }]}>{item.destination}</Text>
-                                    <StatusBadge status={item.status} />
+                                    <StatusBadge
+                                        status={item.status}
+                                        startDate={item.startDate}
+                                        endDate={item.endDate}
+                                    />
                                 </View>
                                 <Text style={[styles.dates, { color: colors.textMuted }]}>
                                     {new Date(item.startDate).toLocaleDateString(i18n.language, { day: 'numeric', month: 'short' })} - {new Date(item.endDate).toLocaleDateString(i18n.language, { day: 'numeric', month: 'short', year: 'numeric' })}
@@ -160,25 +164,44 @@ export default function TripsScreen() {
     );
 }
 
-function StatusBadge({ status }: { status: string }) {
-    const getStatusStyle = () => {
-        switch (status) {
-            case "generating":
-                return { bg: "#FFF8E1", text: "#F59E0B" };
-            case "completed":
-                return { bg: "#E8F5E9", text: "#4CAF50" };
-            case "failed":
-                return { bg: "#FFEBEE", text: "#EF4444" };
-            default:
-                return { bg: "#E8E6E1", text: "#9B9B9B" };
+/**
+ * Trip badge. `status` is the AI *generation* state — "completed" means the
+ * itinerary finished building, not that the trip has been taken. Showing it raw
+ * put a green COMPLETED on trips that Profile was simultaneously counting as
+ * upcoming, so once generation is done the badge switches to the travel phase
+ * derived from the dates (the same rule Profile uses).
+ */
+function StatusBadge({ status, startDate, endDate }: { status: string; startDate?: number; endDate?: number }) {
+    const { t } = useTranslation();
+
+    const badge = (() => {
+        if (status === "generating") {
+            return { key: "generating", bg: "#FFF8E1", text: "#F59E0B" };
         }
-    };
-    
-    const style = getStatusStyle();
-    
+        if (status === "failed") {
+            return { key: "failed", bg: "#FFEBEE", text: "#EF4444" };
+        }
+        if (status !== "completed") {
+            return { key: "planned", bg: "#E8E6E1", text: "#9B9B9B" };
+        }
+        // Generation finished — describe where the trip sits in time instead.
+        const now = Date.now();
+        if (typeof endDate === "number" && endDate < now) {
+            return { key: "past", bg: "#E8E6E1", text: "#6B6B6B" };
+        }
+        if (typeof startDate === "number" && startDate <= now) {
+            return { key: "ongoing", bg: "#E0F2FE", text: "#0369A1" };
+        }
+        if (typeof startDate === "number") {
+            return { key: "upcoming", bg: "#E8F5E9", text: "#4CAF50" };
+        }
+        // No dates to reason about: say the plan is ready, not that it's done.
+        return { key: "ready", bg: "#E8F5E9", text: "#4CAF50" };
+    })();
+
     return (
-        <View style={[styles.badge, { backgroundColor: style.bg }]}>
-            <Text style={[styles.badgeText, { color: style.text }]}>{status.toUpperCase()}</Text>
+        <View style={[styles.badge, { backgroundColor: badge.bg }]}>
+            <Text style={[styles.badgeText, { color: badge.text }]}>{t(`trips.status.${badge.key}`)}</Text>
         </View>
     );
 }

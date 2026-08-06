@@ -300,7 +300,7 @@ export const seedDealsForOrigin = action({
     maxPrice: v.optional(v.float64()),
     adults: v.optional(v.float64()),
     // Optional override for the public deal-tag badge. When omitted, each deal
-    // is tagged by grade ("HOT DEAL" for `low` fares, none for `typical`).
+    // is tagged by grade ("Great price" for `low` fares, none for `typical`).
     dealTag: v.optional(v.string()),
     // ─ Phase-0 scan controls (all optional; defaults tuned for one press) ─
     /** ~14-day calendar windows scanned per destination. 1–6. More = wider
@@ -343,8 +343,8 @@ export const seedDealsForOrigin = action({
     const count = Math.max(1, Math.min(Math.round(args.count ?? 10), 20));
     const adults = typeof args.adults === "number" && args.adults > 0 ? args.adults : 1;
     // Optional tag override applied to every seeded deal. When omitted, the tag
-    // is derived per-deal from its grade (a public "HOT DEAL" badge for genuine
-    // `low` fares, none for merely-`typical` ones).
+    // is derived per-deal from its grade (a public "Great price" badge for
+    // genuine `low` fares, none for merely-`typical` ones).
     const dealTagOverride = args.dealTag?.trim() || undefined;
 
     const windows = Math.max(
@@ -614,9 +614,9 @@ export const seedDealsForOrigin = action({
           perPersonTypical != null && perPersonTypical > perPersonPrice
             ? perPersonTypical
             : undefined;
-        // Public badge: a real "HOT DEAL" only on genuine `low` fares (unless an
-        // explicit override was passed). `typical` fares get no badge.
-        const tag = dealTagOverride || (w.priceLevel === "low" ? "HOT DEAL" : undefined);
+        // Public badge: a friendly "Great price" only on genuine `low` fares
+        // (unless an explicit override was passed). `typical` fares get no badge.
+        const tag = dealTagOverride || (w.priceLevel === "low" ? "Great price" : undefined);
 
         const dealId: string | null = await ctx.runAction(
           internal.lowFareRadarAutoAction.enrichAndSeedDeal,

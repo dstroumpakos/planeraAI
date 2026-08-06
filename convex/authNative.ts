@@ -113,10 +113,17 @@ console.log("[AuthNative] Apple token decoded (pre-verify):", {
       issuer: "https://appleid.apple.com",
     } as any);
     
-    // Custom audience validation. Only accept the production bundle ID by default.
+    // Custom audience validation. Accept the native app bundle ID by default.
+    // Sign in with Apple JS on the website issues tokens whose "aud" is the
+    // Apple *Service ID* (e.g. com.dstroump.planeraaitravelplanner.web), not the
+    // bundle ID — so accept APPLE_WEB_SERVICE_ID too when configured.
     // The Expo Go audience ("host.exp.Exponent") is permitted ONLY when
     // CONVEX_ALLOW_EXPO_GO_AUTH=1 is set (development convenience).
     const validAudiences = [appleBundleId];
+    const webServiceId = process.env.APPLE_WEB_SERVICE_ID;
+    if (webServiceId) {
+      validAudiences.push(webServiceId);
+    }
     if (process.env.CONVEX_ALLOW_EXPO_GO_AUTH === "1") {
       validAudiences.push("host.exp.Exponent");
     }

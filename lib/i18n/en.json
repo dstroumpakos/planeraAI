@@ -363,9 +363,15 @@
     "noTripsYet": "No trips yet",
     "tapToCreate": "Tap the + button to plan your first adventure!",
     "createFirstTrip": "Create Your First Trip",
-    "generating": "GENERATING",
-    "completed": "COMPLETED",
-    "failed": "FAILED"
+    "status": {
+      "generating": "GENERATING",
+      "planned": "PLANNED",
+      "ready": "READY",
+      "upcoming": "UPCOMING",
+      "ongoing": "ON TRIP",
+      "past": "PAST",
+      "failed": "FAILED"
+    }
   },
   "atlas": {
     "atlas": "Atlas",
@@ -1187,6 +1193,7 @@
     "accommodations": "Accommodations",
     "gettingAround": "Getting Around",
     "openInGoogleMaps": "Open in Google Maps",
+    "openInMaps": "Open in Maps",
     "travelerInsights": "Traveler Insights",
     "verified": "Verified",
     "noInsightsYet": "No insights yet",

@@ -7,6 +7,10 @@ import { useTranslation } from "react-i18next";
 interface ActivityActionSheetProps {
     visible: boolean;
     activityTitle?: string;
+    /** Label for the leave-the-app row ("Open in Maps", "Book on GetYourGuide"). */
+    externalLabel?: string;
+    externalIcon?: keyof typeof Ionicons.glyphMap;
+    onOpenExternal?: () => void;
     onClose: () => void;
     onEditTime: () => void;
     onReplaceAI: () => void;
@@ -24,6 +28,9 @@ interface ActivityActionSheetProps {
 export default function ActivityActionSheet({
     visible,
     activityTitle,
+    externalLabel,
+    externalIcon,
+    onOpenExternal,
     onClose,
     onEditTime,
     onReplaceAI,
@@ -75,6 +82,9 @@ export default function ActivityActionSheet({
                         </Text>
                     ) : null}
 
+                    {externalLabel && onOpenExternal ? (
+                        <Row icon={externalIcon || "map-outline"} label={externalLabel} onPress={onOpenExternal} />
+                    ) : null}
                     <Row icon="time-outline" label={t("tripDetail.editTime")} onPress={onEditTime} />
                     <Row icon="sparkles-outline" label={t("tripDetail.replaceActivity")} onPress={onReplaceAI} />
                     <Row icon="add-circle-outline" label={t("tripDetail.addActivityAI")} onPress={onAddAI} />

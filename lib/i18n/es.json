@@ -363,9 +363,15 @@
     "noTripsYet": "Aún no hay viajes",
     "tapToCreate": "¡Toca el botón + para planificar tu primera aventura!",
     "createFirstTrip": "Crea Tu Primer Viaje",
-    "generating": "GENERANDO",
-    "completed": "COMPLETADO",
-    "failed": "FALLIDO"
+    "status": {
+      "generating": "GENERANDO",
+      "planned": "PLANIFICADO",
+      "ready": "LISTO",
+      "upcoming": "PRÓXIMO",
+      "ongoing": "EN CURSO",
+      "past": "PASADO",
+      "failed": "FALLIDO"
+    }
   },
   "atlas": {
     "atlas": "Atlas",
@@ -1187,6 +1193,7 @@
     "accommodations": "Alojamiento",
     "gettingAround": "Cómo Moverse",
     "openInGoogleMaps": "Abrir en Google Maps",
+    "openInMaps": "Abrir en Mapas",
     "travelerInsights": "Experiencias de Viajeros",
     "verified": "Verificado",
     "noInsightsYet": "Aún no hay experiencias",

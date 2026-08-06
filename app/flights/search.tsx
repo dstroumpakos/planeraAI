@@ -94,6 +94,22 @@ export default function FlightsSearchScreen() {
   // (dates, route, traveler count) when the user picks a flight.
   const [lastInput, setLastInput] = useState<FlightSearchInput | null>(null);
 
+  // Results (and errors) render underneath the form, so a finished search used
+  // to look like nothing happened until you scrolled. Measure where the form
+  // ends and pull that point to the top once a search resolves.
+  const scrollRef = useRef<ScrollView>(null);
+  const resultsOffsetRef = useRef(0);
+  const scrollToResults = () => {
+    // Let the results commit first; the offset itself is already measured, so
+    // this only needs the scroll view to exist.
+    setTimeout(() => {
+      scrollRef.current?.scrollTo({
+        y: Math.max(resultsOffsetRef.current - 12, 0),
+        animated: true,
+      });
+    }, 80);
+  };
+
   const onSubmit = async (input: FlightSearchInput) => {
     setCurrentCurrency(input.currency ?? "EUR");
     setLastInput(input);
@@ -103,6 +119,8 @@ export default function FlightsSearchScreen() {
       await outbound.searchFlights(input);
     } catch {
       // error is surfaced via `error` state
+    } finally {
+      scrollToResults();
     }
   };
 
@@ -156,6 +174,8 @@ export default function FlightsSearchScreen() {
       });
     } catch {
       // error is surfaced via returnLeg.error
+    } finally {
+      scrollToResults();
     }
   };
 
@@ -334,7 +354,11 @@ export default function FlightsSearchScreen() {
         </TouchableOpacity>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+      >
         {/* Hero */}
         <View style={styles.hero}>
           <View style={styles.heroTopRow}>
@@ -378,11 +402,18 @@ export default function FlightsSearchScreen() {
           </View>
         </View>
 
-        <FlightSearchForm
-          initial={initial}
-          loading={outbound.loading}
-          onSubmit={onSubmit}
-        />
+        <View
+          onLayout={(e) => {
+            const { y, height } = e.nativeEvent.layout;
+            resultsOffsetRef.current = y + height;
+          }}
+        >
+          <FlightSearchForm
+            initial={initial}
+            loading={outbound.loading}
+            onSubmit={onSubmit}
+          />
+        </View>
 
         {outbound.loading && (
           <View style={{ gap: 10 }}>

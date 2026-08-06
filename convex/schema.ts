@@ -860,7 +860,7 @@ export default defineSchema({
         checkedBaggage: v.optional(v.string()),  // "1x 23kg"
         // Metadata
         isRecommended: v.optional(v.boolean()),
-        dealTag: v.optional(v.string()),  // "HOT DEAL", "LOWEST PRICE"
+        dealTag: v.optional(v.string()),  // "Great price", "Best price"
         bookingUrl: v.optional(v.string()),
         // SerpApi POST-based booking request (Google clk/f endpoint).
         // When present, the app resolves it server-side to the real

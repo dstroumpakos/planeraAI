@@ -2805,6 +2805,81 @@ function enrichItineraryWithAffiliateAttractions(
 }
 
 
+// Words that carry no venue identity: meal slots, connectors, and the generic
+// nouns almost every eatery name contains. A title built ONLY from these
+// ("Lunch", "Dinner at a local bistro") is a placeholder slot the TripAdvisor
+// pool is free to fill. A title with anything left over names a venue the model
+// picked on purpose — and its description, address and tips all describe THAT
+// venue, so swapping a different restaurant's name onto it produces a card
+// titled "Loulou Restaurant Paris" that sells Angelina's hot chocolate.
+const GENERIC_VENUE_WORDS = new Set([
+    "breakfast", "brunch", "lunch", "dinner", "supper", "meal", "snack", "drinks",
+    "morning", "midday", "afternoon", "evening", "night", "late", "early",
+    "restaurant", "restaurante", "ristorante", "cafe", "coffee", "bistro", "bistrot",
+    "brasserie", "trattoria", "osteria", "pizzeria", "taverna", "tavern", "taverne",
+    "taberna", "cantina", "creperie", "bakery", "boulangerie", "patisserie", "cafeteria",
+    "deli", "diner", "eatery", "kitchen", "grill", "steakhouse", "house", "bar", "pub",
+    "market", "sushi", "ramen", "pizza", "burger", "tapas", "kebab",
+    "local", "traditional", "authentic", "typical", "classic", "casual", "quick",
+    "bite", "food", "dining", "spot", "stop", "street", "nearby", "near", "some",
+    // Articles and prepositions that survive the 3-letter cut-off.
+    "the", "and", "for", "with", "from", "les", "des", "del", "della", "delle", "dei",
+    "degli", "das", "der", "die", "den", "und", "los", "las", "con", "por", "para",
+    "sur", "aux", "dans", "chez", "alla", "allo", "sto", "stin", "tou", "tis", "ton",
+]);
+
+function normalizeVenueText(raw: string | undefined | null): string {
+    return (raw || "")
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-z0-9\s]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+// The distinctive words of a venue name: everything that isn't filler, a meal
+// word, or the destination itself ("Loulou Restaurant Paris" → ["loulou"]).
+function venueTokens(raw: string | undefined | null, destination: string): string[] {
+    const destWords = new Set(normalizeVenueText(destination).split(" ").filter(Boolean));
+    return normalizeVenueText(raw)
+        .split(" ")
+        .filter((w) => w.length > 2 && !GENERIC_VENUE_WORDS.has(w) && !destWords.has(w));
+}
+
+// True when the model already named a real place rather than leaving a slot.
+function namesSpecificVenue(title: string | undefined | null, destination: string): boolean {
+    return venueTokens(title, destination).length > 0;
+}
+
+// Loose match: the activity title and the listing name share a distinctive
+// word. Catches "Dinner at Le Comptoir" ↔ "Le Comptoir du Relais", which plain
+// substring matching misses.
+function venuesMatch(activityTitle: string | undefined | null, restaurantName: string | undefined | null, destination: string): boolean {
+    const activityWords = venueTokens(activityTitle, destination);
+    if (activityWords.length === 0) return false;
+    const restaurantWords = new Set(venueTokens(restaurantName, destination));
+    if (restaurantWords.size === 0) return false;
+    return activityWords.some((w) => restaurantWords.has(w));
+}
+
+// Description written purely from the listing, for slots we filled with a venue
+// the model never mentioned — so title and body always describe one place.
+function describeRestaurant(restaurant: RestaurantInfo, destination: string): string {
+    const parts: string[] = [];
+    const cuisine = restaurant.cuisine && restaurant.cuisine !== "Various" ? restaurant.cuisine : null;
+    parts.push(cuisine ? `${cuisine} in ${destination}` : `Local dining in ${destination}`);
+    if (restaurant.rating) {
+        parts.push(
+            restaurant.reviewCount
+                ? `Rated ${restaurant.rating}/5 across ${restaurant.reviewCount.toLocaleString()} traveler reviews`
+                : `Rated ${restaurant.rating}/5 by travelers`,
+        );
+    }
+    if (restaurant.priceRange) parts.push(`Typical price ${restaurant.priceRange}`);
+    return parts.join(". ") + ".";
+}
+
 async function mergeRestaurantDataIntoItinerary(dayByDayItinerary: ItineraryDay[], restaurants: RestaurantInfo[], destination: string): Promise<ItineraryDay[]> {
     if (!restaurants || restaurants.length === 0) {
         return dayByDayItinerary;
@@ -2915,7 +2990,10 @@ async function mergeRestaurantDataIntoItinerary(dayByDayItinerary: ItineraryDay[
     }
     
     let mergedCount = 0;
-    
+    // Activities we deliberately left alone because the model had already named a
+    // venue we have no listing for.
+    let keptAiVenueCount = 0;
+
     // Helper: pick the next available restaurant that hasn't been used yet
     const pickUnusedRestaurant = (): RestaurantInfo | null => {
         for (const r of availablePool) {
@@ -2943,34 +3021,45 @@ async function mergeRestaurantDataIntoItinerary(dayByDayItinerary: ItineraryDay[
                 
                 const activityNameLower = activity.title?.toLowerCase() || "";
                 let matchedRestaurant: RestaurantInfo | undefined | null = undefined;
-                
+                // Whether the listing we merge is the SAME place the model wrote
+                // about, or a substitute we dropped into an unnamed meal slot.
+                let matchedTheAiVenue = false;
+
                 // First try exact name match (only if not already used)
                 const exactMatch = restaurantMap.get(activityNameLower);
                 if (exactMatch && !usedNames.has(exactMatch.name?.toLowerCase() || "")) {
                     matchedRestaurant = exactMatch;
                 }
-                
-                // If no exact match, try partial match (only unused)
+
+                // If no exact match, try a distinctive-word match (only unused) so
+                // "Dinner at Le Comptoir" still finds "Le Comptoir du Relais".
                 if (!matchedRestaurant) {
                     for (const [name, restaurant] of restaurantMap) {
                         if (usedNames.has(name)) continue; // Skip already used
-                        if (activityNameLower.includes(name) || name.includes(activityNameLower)) {
+                        if (venuesMatch(activity.title, restaurant.name, destination)) {
                             matchedRestaurant = restaurant;
                             break;
                         }
                     }
                 }
-                
-                // If still no match, pick the next unused restaurant from the pool
-                if (!matchedRestaurant) {
+
+                matchedTheAiVenue = !!matchedRestaurant;
+
+                // Still nothing. Only borrow an arbitrary listing when the model
+                // left a generic slot ("Lunch", "Dinner at a local bistro") — the
+                // case this fallback exists for. If it named a venue, its
+                // description, address and tips are about THAT venue, so renaming
+                // the card would leave the traveler with a title and a body
+                // pointing at two different restaurants.
+                if (!matchedRestaurant && !namesSpecificVenue(activity.title, destination)) {
                     matchedRestaurant = pickUnusedRestaurant();
                 }
-                
+
                 // Merge TripAdvisor data if we found a match
                 if (matchedRestaurant && (matchedRestaurant.tripAdvisorUrl || matchedRestaurant.rating)) {
                     const usedName = matchedRestaurant.name?.toLowerCase() || "";
                     usedNames.add(usedName);
-                    
+
                     day.activities[i] = {
                         ...activity,
                         type: "restaurant",
@@ -2983,8 +3072,14 @@ async function mergeRestaurantDataIntoItinerary(dayByDayItinerary: ItineraryDay[
                         address: matchedRestaurant.address || activity.address || null,
                         // Update title to use actual restaurant name if available
                         title: matchedRestaurant.name || activity.title,
-                        // Update description to include cuisine info
-                        description: activity.description || `${matchedRestaurant.cuisine || "Local"} cuisine - ${matchedRestaurant.priceRange || "€€"}`,
+                        // Same venue → the model's copy still describes it. Filled
+                        // slot → write the copy from the listing instead, so title
+                        // and body can never name two different places.
+                        description: matchedTheAiVenue
+                            ? (activity.description || describeRestaurant(matchedRestaurant, destination))
+                            : describeRestaurant(matchedRestaurant, destination),
+                        // Venue-specific advice only survives a same-venue match.
+                        tips: matchedTheAiVenue ? (activity.tips ?? null) : null,
                         // Preserve culinary fields from AI generation
                         culinaryMoment: activity.culinaryMoment || null,
                         culinaryType: activity.culinaryType || null,
@@ -2993,14 +3088,18 @@ async function mergeRestaurantDataIntoItinerary(dayByDayItinerary: ItineraryDay[
                         culinaryTags: activity.culinaryTags || null,
                     };
                     mergedCount++;
-                } else {
+                } else if (matchedRestaurant) {
                     console.log(`⚠️ No unused restaurant available for: ${activity.title}`);
+                } else {
+                    // Left exactly as the model wrote it — no rating badge, but the
+                    // card is internally consistent.
+                    keptAiVenueCount++;
                 }
             }
         }
     }
     
-    console.log(`✅ Merged TripAdvisor data into ${mergedCount} restaurant activities (${usedNames.size} unique restaurants used)`);
+    console.log(`✅ Merged TripAdvisor data into ${mergedCount} restaurant activities (${usedNames.size} unique restaurants used, ${keptAiVenueCount} AI-named venues left untouched)`);
     return dayByDayItinerary;
 }
 

@@ -363,9 +363,15 @@
     "noTripsYet": "لا توجد رحلات بعد",
     "tapToCreate": "اضغط على زر + لتخطيط مغامرتك الأولى!",
     "createFirstTrip": "أنشئ رحلتك الأولى",
-    "generating": "جاري الإنشاء",
-    "completed": "مكتمل",
-    "failed": "فشل"
+    "status": {
+      "generating": "جاري الإنشاء",
+      "planned": "مخطط",
+      "ready": "جاهز",
+      "upcoming": "قادمة",
+      "ongoing": "جارية",
+      "past": "سابقة",
+      "failed": "فشل"
+    }
   },
   "atlas": {
     "atlas": "أطلس",
@@ -1192,6 +1198,7 @@
     "accommodations": "أماكن الإقامة",
     "gettingAround": "التنقل",
     "openInGoogleMaps": "فتح في خرائط Google",
+    "openInMaps": "فتح في الخرائط",
     "travelerInsights": "تجارب المسافرين",
     "verified": "موثق",
     "noInsightsYet": "لا توجد تجارب بعد",

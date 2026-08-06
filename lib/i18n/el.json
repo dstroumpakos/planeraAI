@@ -363,9 +363,15 @@
     "noTripsYet": "Κανένα ταξίδι ακόμα",
     "tapToCreate": "Πατήστε το κουμπί + για να σχεδιάσετε την πρώτη σας περιπέτεια!",
     "createFirstTrip": "Δημιουργήστε το Πρώτο σας Ταξίδι",
-    "generating": "ΔΗΜΙΟΥΡΓΙΑ",
-    "completed": "ΟΛΟΚΛΗΡΩΜΕΝΟ",
-    "failed": "ΑΠΟΤΥΧΙΑ"
+    "status": {
+      "generating": "ΔΗΜΙΟΥΡΓΙΑ",
+      "planned": "ΣΕ ΣΧΕΔΙΑΣΜΟ",
+      "ready": "ΕΤΟΙΜΟ",
+      "upcoming": "ΜΕΛΛΟΝΤΙΚΟ",
+      "ongoing": "ΣΕ ΕΞΕΛΙΞΗ",
+      "past": "ΠΑΡΕΛΘΟΝ",
+      "failed": "ΑΠΟΤΥΧΙΑ"
+    }
   },
   "atlas": {
     "atlas": "Atlas",
@@ -1192,6 +1198,7 @@
     "accommodations": "Καταλύματα",
     "gettingAround": "Μετακινήσεις",
     "openInGoogleMaps": "Άνοιγμα στο Google Maps",
+    "openInMaps": "Άνοιγμα στους Χάρτες",
     "travelerInsights": "Πληροφορίες Ταξιδιωτών",
     "verified": "Επαληθευμένο",
     "noInsightsYet": "Δεν υπάρχουν πληροφορίες ακόμα",
