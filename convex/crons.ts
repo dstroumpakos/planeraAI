@@ -101,6 +101,17 @@ crons.interval(
     {},
 );
 
+// Recompute the destination aggregates singleton behind home's "Trending Now"
+// strip and the /destinations screen. Both used to aggregate completed trips
+// inline; trips carry the whole itinerary blob, so the all-time scan blew the
+// 16 MB per-transaction read limit and crashed the app on "See all".
+crons.interval(
+    "recompute-destination-stats",
+    { hours: 6 },
+    internal.destinationStats.recomputeDestinationStats,
+    {},
+);
+
 // Newsletter funnel: walk active subscribers through the drip sequence, one
 // email every few days. The per-subscriber cadence is tracked in the DB
 // (`lastEmailSentAt`), so ticking every 12h just picks up whoever is due.

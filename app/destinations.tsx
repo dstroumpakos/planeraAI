@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -19,6 +19,52 @@ import { ImageWithAttribution } from "@/components/ImageWithAttribution";
 import { LinearGradient } from "expo-linear-gradient";
 import { useTheme } from "@/lib/ThemeContext";
 import { useTranslation } from "react-i18next";
+
+/** Most destinations we'll fetch a header image for. */
+const IMAGE_LIMIT = 60;
+/** Concurrent image actions in flight. */
+const IMAGE_BATCH = 8;
+
+/**
+ * Route-scoped error boundary (expo-router picks this up by name). Without it,
+ * anything that throws while this screen renders — a Convex query error, most
+ * of all — bubbles to the root boundary and takes the whole app down. Here the
+ * user just gets a "couldn't load" card and a working back button.
+ */
+export function ErrorBoundary({ error, retry }: { error: Error; retry: () => Promise<void> }) {
+  return <DestinationsError error={error} retry={retry} />;
+}
+
+function DestinationsError({ error, retry }: { error: Error; retry: () => Promise<void> }) {
+  const router = useRouter();
+  const { colors } = useTheme();
+  const { t } = useTranslation();
+  return (
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+      <View style={styles.header}>
+        <TouchableOpacity
+          style={[styles.backButton, { backgroundColor: colors.card }]}
+          onPress={() => router.back()}
+        >
+          <Ionicons name="arrow-back" size={24} color={colors.text} />
+        </TouchableOpacity>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>{t('destinations.allDestinations')}</Text>
+        <View style={styles.headerSpacer} />
+      </View>
+      <View style={styles.emptyContainer}>
+        <Ionicons name="cloud-offline-outline" size={64} color={colors.textMuted} />
+        <Text style={[styles.emptyTitle, { color: colors.text }]}>{t('destinations.noDestinationsFound')}</Text>
+        <Text style={[styles.emptyText, { color: colors.textMuted }]}>{error.message}</Text>
+        <TouchableOpacity
+          style={[styles.retryButton, { backgroundColor: colors.primary }]}
+          onPress={() => { retry(); }}
+        >
+          <Text style={styles.retryText}>{t('common.retry')}</Text>
+        </TouchableOpacity>
+      </View>
+    </SafeAreaView>
+  );
+}
 
 export default function DestinationsScreen() {
   const router = useRouter();
@@ -54,37 +100,6 @@ export default function DestinationsScreen() {
     }
   };
 
-  const fetchImages = useCallback(async () => {
-    const imageMap: Record<string, any> = {};
-    if (!allDestinations) return;
-    // Fetch images in parallel for better performance
-    const results = await Promise.allSettled(
-      allDestinations.map(async (destination) => {
-        try {
-          const images = await getImages({ destination: destination.destination });
-          if (images && images.length > 0) {
-            return { key: destination.destination, image: images[0] };
-          }
-        } catch (error) {
-          console.error(`Failed to fetch images for ${destination.destination}:`, error);
-        }
-        return null;
-      })
-    );
-    for (const result of results) {
-      if (result.status === 'fulfilled' && result.value) {
-        imageMap[result.value.key] = result.value.image;
-      }
-    }
-    setDestinationImages(imageMap);
-  }, [allDestinations, getImages]);
-
-  useEffect(() => {
-    if (allDestinations && allDestinations.length > 0) {
-      fetchImages();
-    }
-  }, [allDestinations, fetchImages]);
-
   // Filter destinations based on search and active tab
   const filteredDestinations = allDestinations?.filter((dest) => {
     const matchesSearch = dest.destination.toLowerCase().includes(searchQuery.toLowerCase());
@@ -93,6 +108,58 @@ export default function DestinationsScreen() {
     }
     return matchesSearch;
   }) || [];
+
+  // Image fetching is bounded: one Unsplash-backed action per destination, and
+  // the list can now be hundreds of destinations long. Fire at most IMAGE_BATCH
+  // at a time, for at most IMAGE_LIMIT destinations, and never re-request one
+  // we've already asked for (the ref survives the search-query re-renders).
+  const requestedImages = useRef<Set<string>>(new Set());
+  const imageTargets = filteredDestinations.slice(0, IMAGE_LIMIT).map((d) => d.destination);
+  const imageTargetsKey = imageTargets.join("|");
+
+  useEffect(() => {
+    const pending = imageTargets.filter((name) => !requestedImages.current.has(name));
+    if (pending.length === 0) return;
+    for (const name of pending) requestedImages.current.add(name);
+
+    let cancelled = false;
+    (async () => {
+      for (let i = 0; i < pending.length; i += IMAGE_BATCH) {
+        if (cancelled) return;
+        const batch = pending.slice(i, i + IMAGE_BATCH);
+        const results = await Promise.allSettled(
+          batch.map(async (name) => {
+            try {
+              const images = await getImages({ destination: name });
+              if (images && images.length > 0) {
+                return { key: name, image: images[0] };
+              }
+            } catch (error) {
+              // Allow a retry on the next pass rather than caching the failure.
+              requestedImages.current.delete(name);
+              console.error(`Failed to fetch images for ${name}:`, error);
+            }
+            return null;
+          })
+        );
+        if (cancelled) return;
+        const additions: Record<string, any> = {};
+        for (const result of results) {
+          if (result.status === "fulfilled" && result.value) {
+            additions[result.value.key] = result.value.image;
+          }
+        }
+        if (Object.keys(additions).length > 0) {
+          setDestinationImages((prev) => ({ ...prev, ...additions }));
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [imageTargetsKey, getImages]);
 
   if (tokenLoading) {
     return (
@@ -411,6 +478,17 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 14,
     textAlign: "center",
+  },
+  retryButton: {
+    marginTop: 20,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 24,
+  },
+  retryText: {
+    fontSize: 15,
+    fontWeight: "700",
+    color: "#000000",
   },
   destinationCard: {
     borderRadius: 20,

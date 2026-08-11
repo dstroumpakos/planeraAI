@@ -581,11 +581,56 @@ async function toolMyTrips(ctx: any, tc: AtlasToolContext): Promise<ToolOutcome>
     }
 }
 
+/** Earliest departure the fare calendar will scan (mirrors OUT_START there). */
+const FARE_MIN_LEAD_DAYS = 8;
+/** Google prices roughly 11 months out; past that the scan comes back empty. */
+const FARE_MAX_LEAD_DAYS = 330;
+
+/**
+ * Resolve a caller-supplied month into a scan window.
+ *
+ * Accepts "2026-11" or any "2026-11-04" the model happens to send. Returns the
+ * day offset to start scanning from plus the YYYY-MM the answer must stay
+ * inside, so a November question never gets answered with August fares.
+ */
+function resolveFareMonth(
+    month: string
+): { startOffsetDays: number; monthKey: string; error?: string } | null {
+    const m = month.trim().match(/^(\d{4})-(\d{2})/);
+    if (!m) return null;
+
+    const year = Number(m[1]);
+    const monthIndex = Number(m[2]) - 1;
+    if (monthIndex < 0 || monthIndex > 11) return null;
+
+    const monthKey = `${m[1]}-${m[2]}`;
+    const firstOfMonth = Date.UTC(year, monthIndex, 1);
+    const todayUtc = new Date().setUTCHours(0, 0, 0, 0);
+    const offset = Math.round((firstOfMonth - todayUtc) / 86400000);
+
+    // The month may have already started, or be the current one — begin at the
+    // earliest date the engine will quote rather than in the past.
+    const startOffsetDays = Math.max(offset, FARE_MIN_LEAD_DAYS);
+
+    // Its last day still has to be inside the horizon we can price.
+    const lastOfMonth = Date.UTC(year, monthIndex + 1, 0);
+    const endOffset = Math.round((lastOfMonth - todayUtc) / 86400000);
+    if (endOffset < FARE_MIN_LEAD_DAYS) {
+        return { startOffsetDays, monthKey, error: "past" };
+    }
+    if (offset > FARE_MAX_LEAD_DAYS) {
+        return { startOffsetDays, monthKey, error: "too_far" };
+    }
+
+    return { startOffsetDays, monthKey };
+}
+
 async function toolFlightPrices(
     ctx: any,
     tc: AtlasToolContext,
     destinationIata: string,
-    originIata?: string
+    originIata?: string,
+    month?: string
 ): Promise<ToolOutcome> {
     const departureId = (originIata || tc.homeIata || "").toUpperCase();
     const arrivalId = (destinationIata || "").toUpperCase();
@@ -600,18 +645,64 @@ async function toolFlightPrices(
         return { result: "No destination airport code was provided." };
     }
 
+    // A named month widens the scan to cover it; without one we keep the cheap
+    // single-window teaser over the next couple of weeks.
+    let window: { startOffsetDays: number; monthKey: string } | null = null;
+    if (month) {
+        const resolved = resolveFareMonth(month);
+        if (!resolved) {
+            return {
+                result: `Could not read "${month}" as a month. Ask the tool again with a YYYY-MM month such as 2026-11.`,
+            };
+        }
+        if (resolved.error === "past") {
+            return {
+                result: `${resolved.monthKey} is in the past (or too close to departure to quote). Fares can only be looked up from about ${FARE_MIN_LEAD_DAYS} days ahead. Tell the user that and offer a later month.`,
+            };
+        }
+        if (resolved.error === "too_far") {
+            return {
+                result: `${resolved.monthKey} is further out than airlines have published fares for (roughly 11 months). Tell the user to check back closer to the date.`,
+            };
+        }
+        window = { startOffsetDays: resolved.startOffsetDays, monthKey: resolved.monthKey };
+    }
+
     try {
         const calendar = await ctx.runAction(api.flightCalendar.flightCalendar, {
             token: tc.token,
             input: { departureId, arrivalId, currency: tc.currency },
+            // 3 stacked ~14-day windows (~6 weeks) covers a whole month from its
+            // first day; 60 dates is well past a month's worth of departures.
+            ...(window
+                ? { startOffsetDays: window.startOffsetDays, windows: 3, maxDates: 60 }
+                : {}),
         });
 
         if (!calendar || !Array.isArray(calendar.dates) || calendar.dates.length === 0) {
-            return { result: `No fare calendar available for ${departureId}→${arrivalId}.` };
+            return {
+                result: window
+                    ? `No fares available for ${departureId}→${arrivalId} in ${window.monthKey}.`
+                    : `No fare calendar available for ${departureId}→${arrivalId}.`,
+            };
         }
 
-        const cheapest = [...calendar.dates]
-            .filter((d: any) => typeof d.price === "number")
+        let dates = calendar.dates.filter((d: any) => typeof d.price === "number");
+        if (window) {
+            // The scan overshoots the month at both ends — keep only what was asked
+            // for, so "November" can never be answered with a December fare.
+            const inMonth = dates.filter((d: any) =>
+                String(d.date ?? "").startsWith(window!.monthKey)
+            );
+            if (inMonth.length === 0) {
+                return {
+                    result: `No fares came back for ${departureId}→${arrivalId} in ${window.monthKey}. Say so plainly and suggest a nearby month.`,
+                };
+            }
+            dates = inMonth;
+        }
+
+        const cheapest = [...dates]
             .sort((a: any, b: any) => a.price - b.price)
             .slice(0, 6);
 
@@ -622,12 +713,13 @@ async function toolFlightPrices(
                 destination: arrivalId,
                 currency: calendar.currency ?? tc.currency,
                 dates: cheapest,
+                month: window?.monthKey ?? null,
             },
         };
 
         return {
             result:
-                `Cheapest upcoming round-trip dates ${departureId}→${arrivalId} (${calendar.currency ?? tc.currency}): ` +
+                `Cheapest ${window ? `${window.monthKey} ` : "upcoming "}round-trip dates ${departureId}→${arrivalId} (${calendar.currency ?? tc.currency}): ` +
                 cheapest
                     .map((d: any) => `${d.date}${d.returnDate ? `→${d.returnDate}` : ""} ${d.price}`)
                     .join("; ") +
@@ -1013,12 +1105,17 @@ export const ATLAS_TOOLS = [
         function: {
             name: "get_flight_prices",
             description:
-                "Cheapest upcoming round-trip dates between two airports, as indicative (non-bookable) teaser fares. Origin defaults to the user's home airport.",
+                "Cheapest round-trip dates between two airports, as indicative (non-bookable) teaser fares. Origin defaults to the user's home airport. Omit `month` for the next couple of weeks; pass it whenever the user names a month or season, and the scan covers that whole month instead.",
             parameters: {
                 type: "object",
                 properties: {
                     destinationIata: { type: "string", description: "Destination IATA code, e.g. FCO" },
                     originIata: { type: "string", description: "Origin IATA code. Omit to use the home airport." },
+                    month: {
+                        type: "string",
+                        description:
+                            "Target month as YYYY-MM, e.g. 2026-11 for November. Resolve the year from today's date: a month already past this year means next year. Fares exist from about a week ahead to roughly 11 months out.",
+                    },
                 },
                 required: ["destinationIata"],
             },
@@ -1192,7 +1289,8 @@ export async function executeAtlasTool(
                 ctx,
                 tc,
                 String(args?.destinationIata ?? ""),
-                args?.originIata ? String(args.originIata) : undefined
+                args?.originIata ? String(args.originIata) : undefined,
+                args?.month ? String(args.month) : undefined
             );
             break;
         case "get_deals":

@@ -1,5 +1,7 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+// Planera for Travel Agencies — additive, agency-scoped tenant tables.
+import { agencyTables } from "./agency/schema";
 
 export default defineSchema({
     trips: defineTable({
@@ -1557,6 +1559,42 @@ export default defineSchema({
         .index("by_account", ["accountId"])
         .index("by_status_created", ["status", "createdAt"]),
 
+    // Cron-computed singleton holding the destination aggregates behind the
+    // home "Trending Now" strip and the /destinations screen. Trip documents
+    // carry the whole generated `itinerary` blob (~57 KB each), so scanning
+    // every completed trip inside a client-facing query blew the 16 MB
+    // per-transaction read limit and crashed the app. See destinationStats.ts.
+    destinationStats: defineTable({
+        computedAt: v.float64(),
+        durationMs: v.optional(v.float64()),
+        // How many completed trips fed the aggregate, and whether the scan was
+        // cut short by the page cap (partial = numbers are a lower bound).
+        tripsScanned: v.optional(v.float64()),
+        partial: v.optional(v.boolean()),
+        // All-time, city-normalised — powers /destinations.
+        all: v.array(v.object({
+            destination: v.string(),
+            count: v.float64(),
+            avgBudget: v.float64(),
+            avgTripSpend: v.union(v.number(), v.null()),
+            spendCurrency: v.string(),
+            spendLevel: v.union(v.literal("city"), v.literal("country"), v.null()),
+            spendSource: v.union(v.literal("unwto"), v.literal("estimate"), v.null()),
+            interests: v.array(v.string()),
+        })),
+        // Last 30 days, raw destination strings — powers "Trending Now".
+        trending: v.array(v.object({
+            destination: v.string(),
+            count: v.float64(),
+            avgBudget: v.float64(),
+            avgTripSpend: v.union(v.number(), v.null()),
+            spendCurrency: v.string(),
+            spendLevel: v.union(v.literal("city"), v.literal("country"), v.null()),
+            spendSource: v.union(v.literal("unwto"), v.literal("estimate"), v.null()),
+            interests: v.array(v.string()),
+        })),
+    }),
+
     // Cached singleton for site-wide trip aggregates. Recomputed by a cron so
     // the public landing query and the admin dashboard never scan the (large)
     // trips table on every request.
@@ -2038,5 +2076,8 @@ export default defineSchema({
         metrics: v.any(),
     })
         .index("by_period_sentAt", ["period", "sentAt"]),
+
+    // ── Planera for Travel Agencies (agency portal) — additive tenant tables ──
+    ...agencyTables,
 });
 

@@ -18,7 +18,7 @@ import { toEnglishName } from "../lib/destinationTranslations";
  * deriving a per-trip figure from the per-day estimate × typical stay.
  * `spendSource` records which was used ("unwto" | "estimate").
  */
-function resolveSpendStay(destination: string): {
+export function resolveSpendStay(destination: string): {
     avgTripSpend: number | null;
     spendCurrency: string;
     spendLevel: "city" | "country" | null;
@@ -1979,6 +1979,22 @@ export const deleteTrip = authMutation({
     },
 });
 
+/**
+ * One row of the destination aggregates. Spelled out (rather than inferred)
+ * because both queries now read them off the `destinationStats` singleton
+ * through an `any`-typed ctx, and the clients rely on this shape.
+ */
+export type DestinationAggregate = {
+    destination: string;
+    count: number;
+    avgBudget: number;
+    avgTripSpend: number | null;
+    spendCurrency: string;
+    spendLevel: "city" | "country" | null;
+    spendSource: "unwto" | "estimate" | null;
+    interests: string[];
+};
+
 export const getTrendingDestinations = query({
     args: {},
     returns: v.array(v.object({
@@ -1993,17 +2009,26 @@ export const getTrendingDestinations = query({
         spendSource: v.union(v.literal("unwto"), v.literal("estimate"), v.null()),
         interests: v.array(v.string()),
     })),
-    handler: async (ctx: any) => {
-        // Only read completed trips from the last 30 days. _creationTime is the
-        // implicit final column of every index, so we can range on it here and
-        // avoid reading the entire (large) completed-trips history.
+    handler: async (ctx: any): Promise<DestinationAggregate[]> => {
+        // Served from the cron-computed singleton (see destinationStats.ts) so
+        // this never scans the fat trips table on a client request.
+        const stats = await ctx.db.query("destinationStats").first();
+        if (stats) {
+            return stats.trending as DestinationAggregate[];
+        }
+
+        // Fallback for the window between deploying this and the first cron run.
+        // Only reads completed trips from the last 30 days, and `paginate` with
+        // a byte ceiling bounds the read so this can't blow the transaction
+        // limit the way an unbounded `.collect()` would.
         const thirtyDaysAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
-        const recentTrips = await ctx.db
+        const recent = await ctx.db
             .query("trips")
             .withIndex("by_status", (q: any) =>
                 q.eq("status", "completed").gte("_creationTime", thirtyDaysAgo),
             )
-            .collect();
+            .paginate({ cursor: null, numItems: 60, maximumBytesRead: 4 * 1024 * 1024 });
+        const recentTrips = recent.page;
 
         // If no recent trips, return empty array
         if (recentTrips.length === 0) {
@@ -2037,8 +2062,10 @@ export const getTrendingDestinations = query({
                 destinationMap[trip.destination].budgets.push(budgetNum);
             }
 
-            // Collect interests
-            destinationMap[trip.destination].allInterests.push(...trip.interests);
+            // Collect interests (older rows predate the required field)
+            if (Array.isArray(trip.interests)) {
+                destinationMap[trip.destination].allInterests.push(...trip.interests);
+            }
         });
 
         // Convert to array and sort by count
@@ -2109,95 +2136,19 @@ export const getAllDestinations = query({
         spendSource: v.union(v.literal("unwto"), v.literal("estimate"), v.null()),
         interests: v.array(v.string()),
     })),
-    handler: async (ctx: any) => {
-        // Get completed trips only
-        const completedTrips = await ctx.db
-            .query("trips")
-            .withIndex("by_status", (q: any) => q.eq("status", "completed"))
-            .collect();
-
-        // If no trips, return empty array
-        if (completedTrips.length === 0) {
-            return [];
-        }
-
-        // Helper function to normalize destination names
-        // Extracts city name and formats it properly
-        const normalizeDestination = (dest: string): string => {
-            // Remove extra whitespace and trim
-            let normalized = dest.trim();
-            
-            // Extract city name (before comma if present)
-            if (normalized.includes(",")) {
-                normalized = normalized.split(",")[0].trim();
-            }
-            
-            // Capitalize first letter of each word
-            normalized = normalized
-                .toLowerCase()
-                .split(" ")
-                .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-                .join(" ");
-            
-            return normalized;
-        };
-
-        // Group by normalized destination and aggregate data
-        const destinationMap: Record<string, {
-            displayName: string;
-            count: number;
-            budgets: number[];
-            allInterests: string[];
-        }> = {};
-
-        completedTrips.forEach((trip: any) => {
-            const normalizedDest = normalizeDestination(trip.destination);
-
-            if (!destinationMap[normalizedDest]) {
-                destinationMap[normalizedDest] = {
-                    displayName: normalizedDest,
-                    count: 0,
-                    budgets: [],
-                    allInterests: [],
-                };
-            }
-
-            destinationMap[normalizedDest].count += 1;
-
-        // Get budget value - prefer budgetTotal, then budget
-            const budgetValue = trip.budgetTotal ?? trip.budget;
-            const budgetNum = typeof budgetValue === "string"
-                ? parseFloat(budgetValue)
-                : budgetValue;
-            if (budgetNum !== undefined && !isNaN(budgetNum)) {
-                destinationMap[normalizedDest].budgets.push(budgetNum);
-            }
-
-            // Collect interests
-            destinationMap[normalizedDest].allInterests.push(...trip.interests);
-        });
-
-        // Convert to array and sort by count (most popular first)
-        // Note: display names here are city-only (country stripped), so UNWTO
+    handler: async (ctx: any): Promise<DestinationAggregate[]> => {
+        // Served from the cron-computed singleton (see destinationStats.ts).
+        //
+        // This used to aggregate EVERY completed trip inline with `.collect()`.
+        // Trip documents carry the whole generated `itinerary` blob (~57 KB
+        // each), so once the table grew the scan exceeded Convex's 16 MB
+        // per-transaction read limit; the query threw, `useQuery` rethrew during
+        // render, and the root ErrorBoundary took the app down as soon as
+        // someone tapped "See all" on Trending Now.
+        //
+        // Display names here are city-only (country stripped), so UNWTO
         // (country-keyed) rarely matches — most resolve to curated estimates.
-        const allDestinations = Object.values(destinationMap)
-            .map((data) => {
-                const s = resolveSpendStay(data.displayName);
-                return {
-                    destination: data.displayName,
-                    count: data.count,
-                    avgBudget: data.budgets.length > 0
-                        ? data.budgets.reduce((a, b) => a + b, 0) / data.budgets.length
-                        : 0,
-                    avgTripSpend: s.avgTripSpend,
-                    spendCurrency: s.spendCurrency,
-                    spendLevel: s.spendLevel,
-                    spendSource: s.spendSource,
-                    interests: [...new Set(data.allInterests)].slice(0, 3),
-                };
-            })
-            .sort((a, b) => b.count - a.count);
-
-        return allDestinations;
+        const stats = await ctx.db.query("destinationStats").first();
+        return stats ? (stats.all as DestinationAggregate[]) : [];
     },
 });

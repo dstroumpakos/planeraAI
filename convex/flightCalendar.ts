@@ -38,6 +38,19 @@ export const flightCalendar = action({
       arrivalId: v.string(),
       currency: v.optional(v.string()),
     }),
+    /**
+     * Days from today where the scan starts, so a caller can target a month
+     * months out (Atlas: "flights in November") instead of the default rolling
+     * two-week teaser. Omit for the existing near-term behaviour.
+     */
+    startOffsetDays: v.optional(v.float64()),
+    /**
+     * Stacked ~14-day windows to scan. Each is one searchapi call on a cache
+     * miss, so a whole month costs 3. Omit for the single-window teaser.
+     */
+    windows: v.optional(v.float64()),
+    /** Max departure dates to return. Omit for the teaser's default (12). */
+    maxDates: v.optional(v.float64()),
   },
   handler: async (ctx, args): Promise<FlightCalendar | null> => {
     if (!args.token) throw new Error("Authentication required");
@@ -66,7 +79,16 @@ export const flightCalendar = action({
     }
 
     try {
-      const cacheKey = buildCacheKey(input);
+      // A month-targeted scan must never share the near-term teaser's entry —
+      // an October scan served as August (or vice versa) is a wrong answer, not
+      // a stale one. Default calls keep the original key, so the strip and the
+      // rest of the app go on sharing one cached lookup.
+      const startOffset = Math.round(args.startOffsetDays ?? 0);
+      const windows = Math.max(1, Math.min(Math.round(args.windows ?? 1), 6));
+      const cacheKey =
+        startOffset > 0 || windows > 1
+          ? `${buildCacheKey(input)}|off${startOffset}|w${windows}`
+          : buildCacheKey(input);
       const cached: FlightCalendar | null = await ctx.runQuery(
         internal.flightSearchCache.readCache,
         { cacheKey }
@@ -78,7 +100,11 @@ export const flightCalendar = action({
         return cached;
       }
 
-      const result = await fetchFlightCalendar(input);
+      const result = await fetchFlightCalendar(input, {
+        startOffsetDays: args.startOffsetDays,
+        windows: args.windows,
+        maxDates: args.maxDates,
+      });
 
       console.log(
         `[calendar] ${input.departureId}->${input.arrivalId} -> ${

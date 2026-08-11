@@ -80,14 +80,29 @@ const Row = ({ label, value }: { label: string; value: string }) => {
 
 const FlightPricesCard = ({ data }: { data: any }) => {
     const { colors, isDarkMode } = useTheme();
-    const { t } = useTranslation();
+    const { t, i18n } = useTranslation();
     const dates: any[] = data?.dates ?? [];
+
+    // A month-scoped lookup ("fares in November") has to say which month, or it
+    // reads as the default next-two-weeks teaser.
+    let monthLabel = "";
+    if (typeof data?.month === "string" && /^\d{4}-\d{2}$/.test(data.month)) {
+        const [y, m] = data.month.split("-").map(Number);
+        try {
+            monthLabel = new Intl.DateTimeFormat(i18n.language, {
+                month: "long",
+                year: "numeric",
+            }).format(new Date(Date.UTC(y, m - 1, 1)));
+        } catch {
+            monthLabel = data.month;
+        }
+    }
 
     return (
         <CardShell
             icon="airplane"
             title={t("atlas.cards.cheapestDates")}
-            subtitle={`${data.origin} → ${data.destination}`}
+            subtitle={`${data.origin} → ${data.destination}${monthLabel ? ` · ${monthLabel}` : ""}`}
         >
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 4 }}>
                 {dates.map((d, i) => (
