@@ -470,6 +470,8 @@ export const listSubscribers = query({
         v.literal("active"),
         v.literal("pending"),
         v.literal("unsubscribed"),
+        v.literal("bounced"),
+        v.literal("complained"),
         v.literal("all"),
       ),
     ),
@@ -483,14 +485,30 @@ export const listSubscribers = query({
   handler: async (ctx, args) => {
     await requireAdmin(ctx, args.token);
 
-    const statuses =
-      !args.status || args.status === "all"
-        ? (["active", "pending", "unsubscribed"] as const)
-        : ([args.status] as const);
+    // "bounced" and "complained" are deliverability outcomes, not opt-outs.
+    // They're listed alongside the funnel statuses so the panel can show the
+    // whole picture — a list that is 30% bounced looks healthy until you can
+    // see that number.
+    const ALL_STATUSES = [
+      "active",
+      "pending",
+      "unsubscribed",
+      "bounced",
+      "complained",
+    ] as const;
 
-    const counts = { active: 0, pending: 0, unsubscribed: 0 };
+    const statuses =
+      !args.status || args.status === "all" ? ALL_STATUSES : ([args.status] as const);
+
+    const counts: Record<string, number> = {
+      active: 0,
+      pending: 0,
+      unsubscribed: 0,
+      bounced: 0,
+      complained: 0,
+    };
     let rows: any[] = [];
-    for (const status of ["active", "pending", "unsubscribed"] as const) {
+    for (const status of ALL_STATUSES) {
       const batch = await ctx.db
         .query("newsletterSubscribers")
         .withIndex("by_status", (q) => q.eq("status", status))
@@ -519,6 +537,7 @@ export const listSubscribers = query({
         email: s.email,
         status: s.status,
         source: s.source,
+        tags: s.tags,
         language: s.language,
         country: s.country,
         // Whether the row came from a logged-in app user (vs. a website form).
@@ -528,6 +547,16 @@ export const listSubscribers = query({
         confirmedAt: s.confirmedAt,
         unsubscribedAt: s.unsubscribedAt,
         lastEmailSentAt: s.lastEmailSentAt,
+        // Deliverability / engagement, so the table can explain WHY an address
+        // stopped receiving mail without a second query per row.
+        bounceCount: s.bounceCount ?? 0,
+        lastBounceType: s.lastBounceType,
+        lastBounceDetail: s.lastBounceDetail,
+        suppressedAt: s.suppressedAt,
+        lastDeliveredAt: s.lastDeliveredAt,
+        lastOpenedAt: s.lastOpenedAt,
+        openCount: s.openCount ?? 0,
+        clickCount: s.clickCount ?? 0,
       })),
     };
   },
@@ -590,7 +619,7 @@ export const backfillCountryFromLanguage = mutation({
 });
 
 function matchesFilter(
-  s: { language?: string; source?: string; country?: string },
+  s: { language?: string; source?: string; tags?: string[]; country?: string },
   languageFilter?: string,
   sourceFilter?: string,
   countryFilter?: string,
@@ -598,7 +627,16 @@ function matchesFilter(
   if (languageFilter && normalizeLang(s.language) !== normalizeLang(languageFilter)) {
     return false;
   }
-  if (sourceFilter && (s.source ?? "") !== sourceFilter) return false;
+  // A source filter matches the signup source OR any later-added tag, so
+  // targeting e.g. "chatgpt-waitlist" reaches people who joined that waitlist
+  // after they were already subscribed through some other surface.
+  if (
+    sourceFilter &&
+    (s.source ?? "") !== sourceFilter &&
+    !(s.tags ?? []).includes(sourceFilter)
+  ) {
+    return false;
+  }
   if (countryFilter && (s.country ?? "") !== countryFilter) return false;
   return true;
 }
@@ -1083,6 +1121,12 @@ export const sendTestEmail = action({
         from: MARKETING_FROM,
         replyTo: MARKETING_EMAIL,
         messageStream: NEWSLETTER_STREAM,
+        tag: "newsletter-test",
+        // A test send is an explicit admin action against an address they
+        // typed. If that address is suppressed the admin needs to SEE the
+        // reason, not have the send silently blocked — hence the bypass, with
+        // the outcome reported back through `error` below.
+        ignoreSuppression: true,
       },
     );
     return { success: res.success, error: res.error };
@@ -1276,41 +1320,88 @@ export const filterUnsent = internalQuery({
 });
 
 /**
- * Persist a batch's results: write ledger rows for the delivered subscribers
+ * Persist a batch's results: write ledger rows for the accepted sends
  * (double-guarded by the unique index) and bump the campaign counters.
+ *
+ * Two things the ledger records beyond "we sent it":
+ *  - `messageId`, which is the ONLY join key a Postmark webhook carries. A row
+ *    without it can never be told that its mail bounced.
+ *  - failures, as ledger rows with `status: "failed"`. Writing them means a
+ *    resumed batch won't re-attempt an address that just hard-failed, and the
+ *    admin table can show who didn't get the email and why.
+ *
+ * Suppressed recipients are counted separately from failures: nothing went
+ * wrong, we deliberately skipped a known-dead address.
  */
 export const recordCampaignSends = internalMutation({
   args: {
     campaignId: v.id("newsletterCampaigns"),
-    sentSubscriberIds: v.array(v.id("newsletterSubscribers")),
-    failedCount: v.float64(),
+    sent: v.array(
+      v.object({
+        subscriberId: v.id("newsletterSubscribers"),
+        email: v.string(),
+        messageId: v.optional(v.string()),
+      }),
+    ),
+    failures: v.array(
+      v.object({
+        subscriberId: v.id("newsletterSubscribers"),
+        email: v.string(),
+        error: v.optional(v.string()),
+        suppressed: v.boolean(),
+      }),
+    ),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
     const now = Date.now();
-    let inserted = 0;
-    for (const subscriberId of args.sentSubscriberIds) {
-      const existing = await ctx.db
+
+    /** Insert-once guard shared by both loops. */
+    const alreadyLogged = async (subscriberId: Id<"newsletterSubscribers">) =>
+      await ctx.db
         .query("newsletterCampaignSends")
         .withIndex("by_campaign_subscriber", (q) =>
           q.eq("campaignId", args.campaignId).eq("subscriberId", subscriberId),
         )
         .first();
-      if (existing) continue;
+
+    let inserted = 0;
+    for (const s of args.sent) {
+      if (await alreadyLogged(s.subscriberId)) continue;
       await ctx.db.insert("newsletterCampaignSends", {
         campaignId: args.campaignId,
-        subscriberId,
+        subscriberId: s.subscriberId,
+        email: s.email,
+        messageId: s.messageId,
+        status: "sent",
         sentAt: now,
       });
       inserted += 1;
     }
 
+    let failedCount = 0;
+    let suppressedCount = 0;
+    for (const f of args.failures) {
+      if (f.suppressed) suppressedCount += 1;
+      else failedCount += 1;
+      if (await alreadyLogged(f.subscriberId)) continue;
+      await ctx.db.insert("newsletterCampaignSends", {
+        campaignId: args.campaignId,
+        subscriberId: f.subscriberId,
+        email: f.email,
+        status: "failed",
+        error: f.error?.slice(0, 300),
+        sentAt: now,
+      });
+    }
+
     const campaign = await ctx.db.get(args.campaignId);
     if (campaign) {
-      const attempted = args.sentSubscriberIds.length + args.failedCount;
+      const attempted = args.sent.length + args.failures.length;
       await ctx.db.patch(args.campaignId, {
         sent: (campaign.sent ?? 0) + inserted,
-        failed: (campaign.failed ?? 0) + args.failedCount,
+        failed: (campaign.failed ?? 0) + failedCount,
+        suppressed: (campaign.suppressed ?? 0) + suppressedCount,
         targeted: (campaign.targeted ?? 0) + attempted,
       });
     }
@@ -1384,8 +1475,17 @@ export const processCampaignSend = internalAction({
       : [];
     const unsentSet = new Set(unsent.map((id) => String(id)));
 
-    const sentIds: Id<"newsletterSubscribers">[] = [];
-    let failedCount = 0;
+    const sent: Array<{
+      subscriberId: Id<"newsletterSubscribers">;
+      email: string;
+      messageId?: string;
+    }> = [];
+    const failures: Array<{
+      subscriberId: Id<"newsletterSubscribers">;
+      email: string;
+      error?: string;
+      suppressed: boolean;
+    }> = [];
 
     for (const sub of pageResult.page) {
       if (!unsentSet.has(String(sub._id))) continue;
@@ -1396,27 +1496,50 @@ export const processCampaignSend = internalAction({
           ? pickTopDeals(allDeals, sub.country, clampCount(campaign.dealCount, 3, 5), focus)
           : [],
       });
-      const res: { success: boolean; error?: string } = await ctx.runAction(
-        internal.postmark.sendRawEmail,
-        {
-          to: sub.email,
-          subject: mail.subject,
-          html: mail.html,
-          text: mail.text,
-          from: MARKETING_FROM,
-          replyTo: MARKETING_EMAIL,
-          messageStream: NEWSLETTER_STREAM,
+      const res: {
+        success: boolean;
+        messageId?: string;
+        error?: string;
+        suppressed?: boolean;
+      } = await ctx.runAction(internal.postmark.sendRawEmail, {
+        to: sub.email,
+        subject: mail.subject,
+        html: mail.html,
+        text: mail.text,
+        from: MARKETING_FROM,
+        replyTo: MARKETING_EMAIL,
+        messageStream: NEWSLETTER_STREAM,
+        // Tag + metadata are what let a bounce or open arriving hours later be
+        // attributed back to THIS campaign and THIS subscriber. Without them
+        // the webhook only knows an address, not which mail caused the event.
+        tag: "newsletter-campaign",
+        metadata: {
+          campaignId: String(args.campaignId),
+          subscriberId: String(sub._id),
         },
-      );
-      if (res.success) sentIds.push(sub._id);
-      else failedCount += 1;
+        // Engagement tracking is on for marketing mail only; transactional
+        // sends keep their defaults so receipts aren't pixel-tracked.
+        trackOpens: true,
+        trackLinks: "HtmlAndText",
+      });
+
+      if (res.success) {
+        sent.push({ subscriberId: sub._id, email: sub.email, messageId: res.messageId });
+      } else {
+        failures.push({
+          subscriberId: sub._id,
+          email: sub.email,
+          error: res.error,
+          suppressed: res.suppressed === true,
+        });
+      }
     }
 
-    if (sentIds.length || failedCount) {
+    if (sent.length || failures.length) {
       await ctx.runMutation(internal.newsletterCampaigns.recordCampaignSends, {
         campaignId: args.campaignId,
-        sentSubscriberIds: sentIds,
-        failedCount,
+        sent,
+        failures,
       });
     }
 

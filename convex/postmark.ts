@@ -69,6 +69,39 @@ const sendTemplateEmailRef = makeFunctionReference<
   { success: boolean; messageId?: string; errorCode?: number; error?: string }
 >("postmark:sendTemplateEmail");
 
+// Deliverability hooks in `emailEvents.ts`. Declared as function references for
+// the same reason as the booking refs above: this module is `"use node"`, and
+// importing the V8 module directly would drag it into the Node bundle.
+const isSuppressedRef = makeFunctionReference<
+  "query",
+  { email: string },
+  { suppressed: boolean; reason?: string; detail?: string }
+>("emailEvents:isSuppressed");
+
+const recordSendFailureRef = makeFunctionReference<
+  "mutation",
+  {
+    email: string;
+    type: "send_failed" | "suppressed";
+    detail?: string;
+    tag?: string;
+    stream?: string;
+  },
+  null
+>("emailEvents:recordSendFailure");
+
+const suppressFromSendErrorRef = makeFunctionReference<
+  "mutation",
+  { email: string; reason: "hard_bounce" | "invalid"; detail?: string },
+  null
+>("emailEvents:suppressFromSendError");
+
+const importSuppressionsRef = makeFunctionReference<
+  "mutation",
+  { stream: string; rows: Array<{ email: string; reason: string }> },
+  { imported: number }
+>("emailEvents:importSuppressions");
+
 // Postmark API constants
 const POSTMARK_API_URL = "https://api.postmarkapp.com/email/withTemplate";
 const SENDER_EMAIL = "Planera <support@planeraai.app>";
@@ -246,7 +279,25 @@ export const sendTemplateEmail = internalAction({
 
 /**
  * Send a raw (non-template) email via Postmark with arbitrary HTML/text.
- * Used for one-off transactional emails like partner invites.
+ * Used for the newsletter (drip + campaigns) and one-off transactional mail
+ * like partner invites.
+ *
+ * This is the single choke point for outbound mail, so it is also where
+ * deliverability is enforced:
+ *
+ *   BEFORE the send — the local suppression list is consulted. Posting to an
+ *   address Postmark has already deactivated buys nothing: it costs a request,
+ *   comes back 406, and lands in our numbers as a generic error with no reason
+ *   attached. Checking first turns that into a counted, explained skip.
+ *
+ *   AFTER the send — the Postmark `ErrorCode` is inspected rather than
+ *   flattened into a string. 406 (inactive recipient) and 300 (invalid email)
+ *   are permanent facts about the address, so they add it to the suppression
+ *   list instead of being re-attempted on every future send.
+ *
+ * `metadata` and `tag` are what make the asynchronous webhook events
+ * attributable: without them a bounce that arrives an hour later is just "some
+ * address bounced", with no way back to the campaign that caused it.
  */
 export const sendRawEmail = internalAction({
   args: {
@@ -261,20 +312,63 @@ export const sendRawEmail = internalAction({
     replyTo: v.optional(v.string()),
     // Override the Postmark message stream. Defaults to the transactional
     // "outbound" stream; bulk newsletter broadcasts should pass a dedicated
-    // broadcast stream (e.g. "broadcast") for separate deliverability,
+    // broadcast stream (e.g. "newsletters") for separate deliverability,
     // bounce, and complaint handling.
     messageStream: v.optional(v.string()),
+    // Postmark Tag — the coarse bucket an event belongs to
+    // ("newsletter-campaign", "newsletter-drip", "transactional"). Comes back
+    // on every webhook event and drives Postmark's own per-tag stats.
+    tag: v.optional(v.string()),
+    // Round-tripped verbatim by Postmark on every event for this message.
+    // Used to attribute bounces/opens back to a campaign + subscriber.
+    metadata: v.optional(v.record(v.string(), v.string())),
+    trackOpens: v.optional(v.boolean()),
+    // "HtmlAndText" | "HtmlOnly" | "TextOnly" | "None"
+    trackLinks: v.optional(v.string()),
+    // Escape hatch for mail that MUST go out regardless of prior bounces —
+    // password resets, account-deletion confirmations, booking receipts. A
+    // suppressed marketing address should still be able to reset a password.
+    ignoreSuppression: v.optional(v.boolean()),
   },
   returns: v.object({
     success: v.boolean(),
     messageId: v.optional(v.string()),
     error: v.optional(v.string()),
+    errorCode: v.optional(v.float64()),
+    // True when we deliberately did not send (address on the suppression
+    // list). Callers count these apart from real failures.
+    suppressed: v.optional(v.boolean()),
+    suppressionReason: v.optional(v.string()),
   }),
   handler: async (ctx, args) => {
     const apiToken = process.env.POSTMARK_SERVER_TOKEN;
     if (!apiToken) {
       return { success: false, error: "POSTMARK_SERVER_TOKEN is not set" };
     }
+
+    const to = args.to.trim().toLowerCase();
+    const stream = args.messageStream ?? MESSAGE_STREAM;
+
+    // --- Pre-send suppression gate ---------------------------------------
+    if (!args.ignoreSuppression) {
+      const check = await ctx.runQuery(isSuppressedRef, { email: to });
+      if (check.suppressed) {
+        await ctx.runMutation(recordSendFailureRef, {
+          email: to,
+          type: "suppressed",
+          detail: check.detail ?? check.reason,
+          tag: args.tag,
+          stream,
+        });
+        return {
+          success: false,
+          suppressed: true,
+          suppressionReason: check.reason,
+          error: `Address suppressed (${check.reason ?? "unknown"})`,
+        };
+      }
+    }
+
     try {
       const response = await fetch("https://api.postmarkapp.com/email", {
         method: "POST",
@@ -290,23 +384,198 @@ export const sendRawEmail = internalAction({
           HtmlBody: args.html,
           TextBody: args.text ?? undefined,
           ReplyTo: args.replyTo ?? undefined,
-          MessageStream: args.messageStream ?? MESSAGE_STREAM,
+          MessageStream: stream,
+          Tag: args.tag ?? undefined,
+          Metadata: args.metadata ?? undefined,
+          TrackOpens: args.trackOpens ?? undefined,
+          TrackLinks: args.trackLinks ?? undefined,
         }),
       });
       const result = await response.json();
       if (!response.ok) {
-        return {
-          success: false,
-          error: result.Message || `HTTP ${response.status}`,
-        };
+        const errorCode: number | undefined =
+          typeof result.ErrorCode === "number" ? result.ErrorCode : undefined;
+        const message: string = result.Message || `HTTP ${response.status}`;
+
+        // 406 = inactive recipient (Postmark already deactivated it after a
+        // hard bounce or a complaint). 300 = the address itself is invalid.
+        // Both are permanent, so record them and stop trying.
+        if (errorCode === 406 || errorCode === 300) {
+          await ctx.runMutation(suppressFromSendErrorRef, {
+            email: to,
+            reason: errorCode === 300 ? "invalid" : "hard_bounce",
+            detail: message,
+          });
+        }
+
+        await ctx.runMutation(recordSendFailureRef, {
+          email: to,
+          type: "send_failed",
+          detail: `${errorCode ?? response.status}: ${message}`,
+          tag: args.tag,
+          stream,
+        });
+
+        return { success: false, error: message, errorCode };
       }
       return { success: true, messageId: result.MessageID };
     } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : "Unknown error",
-      };
+      const message = error instanceof Error ? error.message : "Unknown error";
+      // A network/runtime failure is worth logging, but it is NOT a fact about
+      // the address, so it must never suppress.
+      try {
+        await ctx.runMutation(recordSendFailureRef, {
+          email: to,
+          type: "send_failed",
+          detail: message,
+          tag: args.tag,
+          stream,
+        });
+      } catch {
+        // Logging the failure must not mask the failure itself.
+      }
+      return { success: false, error: message };
     }
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Postmark suppression-list API
+//
+// Postmark keeps its OWN suppression list per message stream, and that is the
+// list which actually blocks delivery. Our local table mirrors it so we can
+// show reasons and skip sends cheaply — but the two have to be kept in step,
+// or a released address stays blocked on Postmark's side and every send to it
+// returns 406.
+// ---------------------------------------------------------------------------
+
+/** Stream used for newsletter broadcasts; mirrors newsletterCampaigns.ts. */
+const NEWSLETTER_STREAM_DEFAULT =
+  process.env.NEWSLETTER_MESSAGE_STREAM || "newsletters";
+
+/**
+ * Delete an address from Postmark's suppression list, so mail to it resumes.
+ *
+ * Scheduled by `emailEvents.releaseSuppression`. A hard bounce can be recorded
+ * against either stream, so both are attempted — a release that only cleared
+ * one would look like it worked and still bounce.
+ *
+ * Postmark refuses to delete spam-complaint suppressions by design; we block
+ * releasing those upstream, so a rejection here is not retried.
+ */
+export const deletePostmarkSuppression = internalAction({
+  args: { email: v.string(), stream: v.optional(v.string()) },
+  returns: v.object({ success: v.boolean(), error: v.optional(v.string()) }),
+  handler: async (_ctx, args) => {
+    const apiToken = process.env.POSTMARK_SERVER_TOKEN;
+    if (!apiToken) return { success: false, error: "POSTMARK_SERVER_TOKEN is not set" };
+
+    const streams = Array.from(
+      new Set([
+        args.stream ?? NEWSLETTER_STREAM_DEFAULT,
+        MESSAGE_STREAM,
+        NEWSLETTER_STREAM_DEFAULT,
+      ]),
+    );
+
+    let lastError: string | undefined;
+    for (const stream of streams) {
+      try {
+        const res = await fetch(
+          `https://api.postmarkapp.com/message-streams/${encodeURIComponent(
+            stream,
+          )}/suppressions/delete`,
+          {
+            method: "POST",
+            headers: {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+              "X-Postmark-Server-Token": apiToken,
+            },
+            body: JSON.stringify({ Suppressions: [{ EmailAddress: args.email }] }),
+          },
+        );
+        const body = await res.json();
+        if (res.ok) {
+          console.log(
+            `📧 [POSTMARK] Suppression delete on "${stream}" for ${args.email}:`,
+            JSON.stringify(body?.Suppressions ?? body),
+          );
+        } else {
+          lastError = body?.Message || `HTTP ${res.status}`;
+        }
+      } catch (e) {
+        lastError = e instanceof Error ? e.message : "Unknown error";
+      }
+    }
+
+    return lastError ? { success: false, error: lastError } : { success: true };
+  },
+});
+
+/**
+ * Pull Postmark's suppression dump into the local list (cron, daily).
+ *
+ * Catches everything the webhook cannot: addresses deactivated before the
+ * webhook was configured, events dropped while the endpoint was down, and
+ * suppressions an admin added inside Postmark's own UI. Import-only — it never
+ * un-suppresses, and never overrides a local release.
+ */
+export const syncPostmarkSuppressions = internalAction({
+  args: { streams: v.optional(v.array(v.string())) },
+  returns: v.object({ imported: v.float64(), scanned: v.float64() }),
+  handler: async (ctx, args): Promise<{ imported: number; scanned: number }> => {
+    const apiToken = process.env.POSTMARK_SERVER_TOKEN;
+    if (!apiToken) {
+      console.warn("[POSTMARK] Suppression sync skipped: POSTMARK_SERVER_TOKEN is not set");
+      return { imported: 0, scanned: 0 };
+    }
+
+    const streams = args.streams ?? [MESSAGE_STREAM, NEWSLETTER_STREAM_DEFAULT];
+    let imported = 0;
+    let scanned = 0;
+
+    for (const stream of Array.from(new Set(streams))) {
+      try {
+        const res = await fetch(
+          `https://api.postmarkapp.com/message-streams/${encodeURIComponent(
+            stream,
+          )}/suppressions/dump`,
+          {
+            headers: {
+              Accept: "application/json",
+              "X-Postmark-Server-Token": apiToken,
+            },
+          },
+        );
+        if (!res.ok) {
+          console.warn(
+            `[POSTMARK] Suppression dump for "${stream}" failed: HTTP ${res.status}`,
+          );
+          continue;
+        }
+        const body = await res.json();
+        const rows: Array<{ EmailAddress: string; SuppressionReason: string }> =
+          body?.Suppressions ?? [];
+        scanned += rows.length;
+
+        // Chunked: a mature account's dump runs to thousands of rows, and each
+        // imported row does its own indexed lookup plus a write.
+        for (let i = 0; i < rows.length; i += 200) {
+          const chunk = rows.slice(i, i + 200).map((r) => ({
+            email: r.EmailAddress,
+            reason: r.SuppressionReason,
+          }));
+          const out = await ctx.runMutation(importSuppressionsRef, { stream, rows: chunk });
+          imported += out.imported;
+        }
+      } catch (e) {
+        console.error(`[POSTMARK] Suppression sync error on "${stream}":`, e);
+      }
+    }
+
+    console.log(`📧 [POSTMARK] Suppression sync: ${imported} imported of ${scanned} scanned`);
+    return { imported, scanned };
   },
 });
 

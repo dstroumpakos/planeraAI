@@ -643,6 +643,10 @@ export function renderEmail(opts: {
   // Marketing emails show a small invite-your-travel-buddies nudge above the
   // footer; transactional emails (confirm) leave it off.
   invite?: boolean;
+  // Overrides the "you signed up for travel tips and deals" footer line. Set it
+  // when the email is not a newsletter email (e.g. the ChatGPT beta waitlist),
+  // so the stated reason for receiving it is the true one.
+  footerNote?: string;
 }): string {
   const year = new Date().getFullYear();
   const rtl = opts.lang === "ar";
@@ -726,7 +730,7 @@ ${opts.preheader}
       </td></tr>${opts.dealsBlock ?? ""}${inviteRow}${bannerRow}
       <tr><td style="padding:24px 40px 32px;border-top:1px solid #F0EEE9;direction:${dir};text-align:${align};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
         <p style="margin:0 0 10px;font-size:13px;line-height:1.6;color:#4A4A4A;">${footer.contact} <a href="mailto:${MARKETING_EMAIL}" style="color:#1A1A1A;font-weight:600;text-decoration:underline;">${MARKETING_EMAIL}</a></p>
-        <p style="margin:0 0 6px;font-size:12px;line-height:1.6;color:#9A9A9A;">${footer.note}</p>
+        <p style="margin:0 0 6px;font-size:12px;line-height:1.6;color:#9A9A9A;">${opts.footerNote ?? footer.note}</p>
         <p style="margin:0;font-size:12px;line-height:1.6;color:#9A9A9A;">© ${year} Planera · <a href="${opts.unsubscribeUrl}" style="color:#9A9A9A;text-decoration:underline;">${footer.unsubscribe}</a></p>
       </td></tr>
     </table>
@@ -764,6 +768,180 @@ function confirmEmail(
     text:
       `${c.heading}\n\n${c.para1}\n\n${c.para2}\n\n` +
       `${c.cta}: ${confirmUrl}\n\n` +
+      `${FOOTER_COPY[lang].contact} ${MARKETING_EMAIL}\n\n` +
+      `${FOOTER_COPY[lang].unsubscribe}: ${unsubscribeUrl}`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// ChatGPT beta waitlist
+//
+// The /chatgpt page's signup form writes into the SAME subscriber table through
+// `subscribe` (tagged `chatgpt-waitlist`) so beta invites can be blasted to
+// exactly this group — but the person asked for beta access, not for a
+// newsletter. So the two automated emails they receive are about the beta, the
+// footer states the real reason they're getting mail, and they're held out of
+// the marketing drip until they're invited.
+// ---------------------------------------------------------------------------
+
+/** `source` values that mean "beta waitlist", not "newsletter signup". */
+const WAITLIST_SOURCES = new Set(["chatgpt-waitlist"]);
+
+export function isWaitlistSource(source?: string): boolean {
+  return !!source && WAITLIST_SOURCES.has(source);
+}
+
+const WAITLIST_COPY: Record<"confirm" | "welcome", Record<Lang, EmailCopy>> = {
+  confirm: {
+    en: {
+      subject: "Confirm your spot on the Planera × ChatGPT waitlist",
+      preheader: "One tap to confirm — then we'll send your invite and passphrase.",
+      heading: "Confirm your spot on the waitlist",
+      para1: "Thanks for asking for early access to Planera inside ChatGPT. Tap the button below to confirm your email — it's the only step you need to take.",
+      para2: "Once you've confirmed, you're on the list. Invites go out in small batches, each with a passphrase and the connector URL. If you didn't request this, you can safely ignore this email.",
+      cta: "Confirm my email",
+    },
+    el: {
+      subject: "Επιβεβαιώστε τη θέση σας στη λίστα για το Planera στο ChatGPT",
+      preheader: "Ένα πάτημα για επιβεβαίωση — μετά στέλνουμε πρόσκληση και passphrase.",
+      heading: "Επιβεβαιώστε τη θέση σας στη λίστα",
+      para1: "Ευχαριστούμε που ζητήσατε πρόωρη πρόσβαση στο Planera μέσα στο ChatGPT. Πατήστε το κουμπί παρακάτω για να επιβεβαιώσετε το email σας — είναι το μόνο βήμα που χρειάζεται από εσάς.",
+      para2: "Μόλις επιβεβαιώσετε, μπαίνετε στη λίστα. Οι προσκλήσεις φεύγουν σε μικρές παρτίδες, καθεμία με ένα passphrase και το URL σύνδεσης. Αν δεν το ζητήσατε εσείς, μπορείτε να αγνοήσετε αυτό το email.",
+      cta: "Επιβεβαίωση email",
+    },
+    es: {
+      subject: "Confirma tu plaza en la lista de espera de Planera × ChatGPT",
+      preheader: "Un toque para confirmar — luego te enviamos la invitación y la contraseña de acceso.",
+      heading: "Confirma tu plaza en la lista",
+      para1: "Gracias por pedir acceso anticipado a Planera dentro de ChatGPT. Toca el botón de abajo para confirmar tu correo — es el único paso que tienes que dar.",
+      para2: "En cuanto confirmes, estarás en la lista. Las invitaciones salen en tandas pequeñas, cada una con una contraseña de acceso y la URL del conector. Si no lo solicitaste, puedes ignorar este correo con tranquilidad.",
+      cta: "Confirmar mi correo",
+    },
+    fr: {
+      subject: "Confirmez votre place sur la liste d'attente Planera × ChatGPT",
+      preheader: "Un clic pour confirmer — ensuite nous vous envoyons l'invitation et la phrase d'accès.",
+      heading: "Confirmez votre place sur la liste",
+      para1: "Merci d'avoir demandé un accès anticipé à Planera dans ChatGPT. Cliquez sur le bouton ci-dessous pour confirmer votre e-mail — c'est la seule étape à faire.",
+      para2: "Une fois confirmé, vous êtes sur la liste. Les invitations partent par petits lots, chacune avec une phrase d'accès et l'URL du connecteur. Si vous n'êtes pas à l'origine de cette demande, vous pouvez ignorer cet e-mail.",
+      cta: "Confirmer mon e-mail",
+    },
+    de: {
+      subject: "Bestätige deinen Platz auf der Planera-×-ChatGPT-Warteliste",
+      preheader: "Ein Tipp zum Bestätigen — danach schicken wir Einladung und Passphrase.",
+      heading: "Bestätige deinen Platz auf der Warteliste",
+      para1: "Danke, dass du früh Zugang zu Planera in ChatGPT haben möchtest. Tippe auf den Button unten, um deine E-Mail zu bestätigen — mehr musst du nicht tun.",
+      para2: "Sobald du bestätigt hast, stehst du auf der Liste. Einladungen gehen in kleinen Chargen raus, jeweils mit einer Passphrase und der Connector-URL. Wenn du das nicht angefordert hast, kannst du diese E-Mail einfach ignorieren.",
+      cta: "E-Mail bestätigen",
+    },
+    ar: {
+      subject: "أكّد مقعدك في قائمة انتظار Planera × ChatGPT",
+      preheader: "نقرة واحدة للتأكيد — ثم نرسل لك الدعوة وعبارة الدخول.",
+      heading: "أكّد مقعدك في قائمة الانتظار",
+      para1: "شكرًا لطلبك الوصول المبكر إلى Planera داخل ChatGPT. اضغط على الزر أدناه لتأكيد بريدك الإلكتروني — هذه هي الخطوة الوحيدة المطلوبة منك.",
+      para2: "بمجرد التأكيد تصبح على القائمة. تُرسل الدعوات على دفعات صغيرة، مع عبارة دخول ورابط الموصّل في كل دفعة. إذا لم تطلب هذا، يمكنك تجاهل هذه الرسالة بأمان.",
+      cta: "تأكيد بريدي الإلكتروني",
+    },
+  },
+  welcome: {
+    en: {
+      subject: "You're on the Planera × ChatGPT waitlist",
+      preheader: "Confirmed. We'll email your passphrase when your batch opens.",
+      heading: "You're on the list",
+      para1: "Your spot is confirmed. When your batch opens we'll email you a passphrase and the connector URL — everything you need to add Planera to ChatGPT. It's free for the whole beta.",
+      para2: "It works on ChatGPT web, desktop and mobile, and answers in the language you're chatting in. Here's what you'll be able to ask it.",
+      cta: "See what it does",
+    },
+    el: {
+      subject: "Είστε στη λίστα για το Planera στο ChatGPT",
+      preheader: "Επιβεβαιώθηκε. Θα σας στείλουμε το passphrase μόλις ανοίξει η παρτίδα σας.",
+      heading: "Είστε στη λίστα",
+      para1: "Η θέση σας επιβεβαιώθηκε. Μόλις ανοίξει η παρτίδα σας, θα σας στείλουμε ένα passphrase και το URL σύνδεσης — ό,τι χρειάζεται για να προσθέσετε το Planera στο ChatGPT. Είναι δωρεάν για όλη τη διάρκεια του beta.",
+      para2: "Λειτουργεί σε ChatGPT web, desktop και κινητό, και απαντά στη γλώσσα στην οποία συνομιλείτε. Δείτε τι θα μπορείτε να του ζητάτε.",
+      cta: "Δείτε τι κάνει",
+    },
+    es: {
+      subject: "Ya estás en la lista de espera de Planera × ChatGPT",
+      preheader: "Confirmado. Te enviaremos tu contraseña de acceso cuando se abra tu tanda.",
+      heading: "Ya estás en la lista",
+      para1: "Tu plaza está confirmada. Cuando se abra tu tanda te enviaremos una contraseña de acceso y la URL del conector — todo lo que necesitas para añadir Planera a ChatGPT. Es gratis durante toda la beta.",
+      para2: "Funciona en ChatGPT web, escritorio y móvil, y responde en el idioma en el que estés chateando. Mira lo que podrás pedirle.",
+      cta: "Ver qué hace",
+    },
+    fr: {
+      subject: "Vous êtes sur la liste d'attente Planera × ChatGPT",
+      preheader: "C'est confirmé. Nous vous enverrons votre phrase d'accès à l'ouverture de votre lot.",
+      heading: "Vous êtes sur la liste",
+      para1: "Votre place est confirmée. À l'ouverture de votre lot, nous vous enverrons une phrase d'accès et l'URL du connecteur — tout ce qu'il faut pour ajouter Planera à ChatGPT. C'est gratuit pendant toute la bêta.",
+      para2: "Ça fonctionne sur ChatGPT web, ordinateur et mobile, et répond dans la langue de votre conversation. Découvrez ce que vous pourrez lui demander.",
+      cta: "Voir ce que ça fait",
+    },
+    de: {
+      subject: "Du stehst auf der Planera-×-ChatGPT-Warteliste",
+      preheader: "Bestätigt. Deine Passphrase kommt, sobald deine Charge dran ist.",
+      heading: "Du stehst auf der Liste",
+      para1: "Dein Platz ist bestätigt. Sobald deine Charge dran ist, schicken wir dir eine Passphrase und die Connector-URL — alles, was du brauchst, um Planera zu ChatGPT hinzuzufügen. Während der gesamten Beta kostenlos.",
+      para2: "Es läuft auf ChatGPT im Web, auf dem Desktop und mobil und antwortet in der Sprache, in der du chattest. Sieh dir an, was du fragen kannst.",
+      cta: "Ansehen, was es kann",
+    },
+    ar: {
+      subject: "أنت الآن على قائمة انتظار Planera × ChatGPT",
+      preheader: "تم التأكيد. سنرسل عبارة الدخول عند فتح دفعتك.",
+      heading: "أنت على القائمة",
+      para1: "تم تأكيد مقعدك. عند فتح دفعتك سنرسل إليك عبارة دخول ورابط الموصّل — وهو كل ما تحتاجه لإضافة Planera إلى ChatGPT. مجاني طوال فترة النسخة التجريبية.",
+      para2: "يعمل على ChatGPT عبر الويب وسطح المكتب والهاتف، ويجيب بلغة محادثتك. ألقِ نظرة على ما يمكنك سؤاله عنه.",
+      cta: "شاهد ما يفعله",
+    },
+  },
+};
+
+/** Footer line stating the real reason this email arrived. */
+const WAITLIST_FOOTER_NOTE: Record<Lang, string> = {
+  en: "You're receiving this because you joined the waitlist for Planera in ChatGPT.",
+  el: "Λαμβάνετε αυτό το email επειδή μπήκατε στη λίστα αναμονής για το Planera στο ChatGPT.",
+  es: "Recibes este correo porque te apuntaste a la lista de espera de Planera en ChatGPT.",
+  fr: "Vous recevez cet e-mail car vous vous êtes inscrit sur la liste d'attente de Planera dans ChatGPT.",
+  de: "Du erhältst diese E-Mail, weil du dich für die Warteliste von Planera in ChatGPT eingetragen hast.",
+  ar: "تتلقى هذه الرسالة لأنك انضممت إلى قائمة انتظار Planera في ChatGPT.",
+};
+
+const CHATGPT_PAGE_URL = `${BASE_URL}/chatgpt`;
+
+/**
+ * The two waitlist emails. `stage: "confirm"` keeps the same double opt-in
+ * token flow as the newsletter (the /chatgpt page tells people to expect it) —
+ * only the copy changes. `stage: "welcome"` replaces the deals-led newsletter
+ * welcome and carries no hero, no deal cards and no partner banner: it is a
+ * transactional "you're on the list" note, not a marketing send.
+ */
+export function waitlistEmail(
+  stage: "confirm" | "welcome",
+  language: string | undefined,
+  unsubscribeToken: string,
+  confirmToken?: string,
+): { subject: string; html: string; text: string } {
+  const lang = normalizeLang(language);
+  const c = WAITLIST_COPY[stage][lang];
+  const ctaUrl =
+    stage === "confirm"
+      ? `${BASE_URL}/newsletter/confirm?token=${confirmToken}`
+      : CHATGPT_PAGE_URL;
+  const unsubscribeUrl = `${BASE_URL}/newsletter/unsubscribe?token=${unsubscribeToken}`;
+  return {
+    subject: c.subject,
+    html: renderEmail({
+      lang,
+      preheader: c.preheader,
+      heading: c.heading,
+      para1: c.para1,
+      para2: c.para2,
+      ctaText: c.cta,
+      ctaUrl,
+      unsubscribeUrl,
+      footerNote: WAITLIST_FOOTER_NOTE[lang],
+    }),
+    text:
+      `${c.heading}\n\n${c.para1}\n\n${c.para2}\n\n` +
+      `${c.cta}: ${ctaUrl}\n\n` +
       `${FOOTER_COPY[lang].contact} ${MARKETING_EMAIL}\n\n` +
       `${FOOTER_COPY[lang].unsubscribe}: ${unsubscribeUrl}`,
   };
@@ -894,13 +1072,78 @@ export const subscribe = mutation({
       throw new ConvexError("Please enter a valid email address.");
     }
 
+    // A suppression must not outlive the reason for it. Someone typing their
+    // address into the signup form IS the re-validation a bounce suppression
+    // was waiting for — and the double opt-in that follows proves the mailbox
+    // is alive before any marketing mail resumes. So clear a bounce block here,
+    // or the confirmation email would be swallowed and signup would silently
+    // do nothing.
+    //
+    // A spam complaint is the one case that never clears this way: mailing
+    // someone who reported us, on the strength of a form anyone can fill in
+    // with anyone's address, is exactly how a sending domain gets blacklisted.
+    const suppression = await ctx.db
+      .query("emailSuppressions")
+      .withIndex("by_email", (q) => q.eq("email", email))
+      .first();
+    if (suppression?.active) {
+      if (suppression.reason === "spam_complaint") {
+        throw new ConvexError(
+          "We can't email this address — it was marked as spam. Contact marketing@planeraai.app and we'll sort it out.",
+        );
+      }
+      await ctx.db.patch(suppression._id, {
+        active: false,
+        releasedAt: Date.now(),
+        releasedBy: "self-signup",
+      });
+      // Postmark holds its own copy; clearing only ours would still 406.
+      await ctx.scheduler.runAfter(0, internal.postmark.deletePostmarkSuppression, {
+        email,
+        stream: suppression.stream,
+      });
+    }
+
     const existing = await ctx.db
       .query("newsletterSubscribers")
       .withIndex("by_email", (q) => q.eq("email", email))
       .unique();
 
-    // Already subscribed & confirmed — nothing to do (don't leak status, just succeed).
+    const waitlistTag = isWaitlistSource(args.source) ? args.source! : undefined;
+
+    // Already subscribed & confirmed — nothing to do (don't leak status, just
+    // succeed).
+    //
+    // Exception: a waitlist signup still has to be RECORDED, or the invite
+    // blast (which targets by source) would silently skip everyone who was
+    // already on the newsletter — and since app users are auto-enrolled at
+    // signup, that's most of them. Tagged rather than overwriting `source`, so
+    // their original attribution and drip position survive.
     if (existing && existing.status === "active") {
+      if (waitlistTag && !(existing.tags ?? []).includes(waitlistTag)) {
+        await ctx.db.patch(existing._id, {
+          tags: [...(existing.tags ?? []), waitlistTag],
+        });
+        // Their address is already confirmed, so there's nothing to double
+        // opt in to — send the "you're on the list" note directly. The tag
+        // check above makes this once-per-address: a repeat submit is silent.
+        const mail = waitlistEmail(
+          "welcome",
+          args.language ?? existing.language,
+          existing.unsubscribeToken,
+        );
+        await ctx.scheduler.runAfter(0, internal.postmark.sendRawEmail, {
+          to: email,
+          subject: mail.subject,
+          html: mail.html,
+          text: mail.text,
+          from: MARKETING_FROM,
+          replyTo: MARKETING_EMAIL,
+          tag: "newsletter-waitlist",
+          trackOpens: true,
+          trackLinks: "HtmlAndText",
+        });
+      }
       return { success: true, status: "already_active" as const };
     }
 
@@ -908,12 +1151,17 @@ export const subscribe = mutation({
     const confirmToken = randomToken();
     const unsubscribeToken = existing?.unsubscribeToken ?? randomToken();
     const country = normalizeCountry(args.country);
+    const tags =
+      waitlistTag && !(existing?.tags ?? []).includes(waitlistTag)
+        ? [...(existing?.tags ?? []), waitlistTag]
+        : existing?.tags;
 
     if (existing) {
       // Re-arm a pending / previously-unsubscribed row.
       await ctx.db.patch(existing._id, {
         status: "pending",
         source: args.source ?? existing.source,
+        tags,
         language: args.language ?? existing.language,
         country: country ?? existing.country,
         userId: args.userId ?? existing.userId,
@@ -928,6 +1176,7 @@ export const subscribe = mutation({
         email,
         status: "pending",
         source: args.source,
+        tags,
         language: args.language,
         country,
         userId: args.userId,
@@ -938,12 +1187,14 @@ export const subscribe = mutation({
       });
     }
 
-    // Send the double opt-in confirmation email.
-    const mail = confirmEmail(
-      args.language ?? existing?.language,
-      confirmToken,
-      unsubscribeToken,
-    );
+    // Send the double opt-in confirmation email. Same token flow either way —
+    // the ChatGPT beta waitlist just asks people to confirm a waitlist spot
+    // rather than a newsletter subscription.
+    const language = args.language ?? existing?.language;
+    const source = args.source ?? existing?.source;
+    const mail = isWaitlistSource(source)
+      ? waitlistEmail("confirm", language, unsubscribeToken, confirmToken)
+      : confirmEmail(language, confirmToken, unsubscribeToken);
     await ctx.scheduler.runAfter(0, internal.postmark.sendRawEmail, {
       to: email,
       subject: mail.subject,
@@ -951,6 +1202,10 @@ export const subscribe = mutation({
       text: mail.text,
       from: MARKETING_FROM,
       replyTo: MARKETING_EMAIL,
+      tag: "newsletter-confirm",
+      // Opt-in confirmation carries no tracking pixel: someone who has not yet
+      // consented shouldn't be measured, and this mail exists to be clicked,
+      // not to be reported on.
     });
 
     return { success: true, status: "pending" as const };
@@ -992,9 +1247,17 @@ export const confirm = mutation({
     // Send the welcome email (drip stage 0) with this week's featured deals —
     // the "lead magnet" promised on the signup form. Prefer deals departing
     // from the subscriber's own country.
-    const allDeals = await queryFeaturedDeals(ctx.db);
-    const featuredDeals = pickTopDeals(allDeals, sub.country);
-    const mail = dripEmail(0, sub.language, sub.unsubscribeToken, featuredDeals);
+    //
+    // Beta waitlist signups never asked for deals: they get a "you're on the
+    // list, the passphrase is coming" note instead, and no deal cards.
+    let mail: { subject: string; html: string; text: string };
+    if (isWaitlistSource(sub.source)) {
+      mail = waitlistEmail("welcome", sub.language, sub.unsubscribeToken);
+    } else {
+      const allDeals = await queryFeaturedDeals(ctx.db);
+      const featuredDeals = pickTopDeals(allDeals, sub.country);
+      mail = dripEmail(0, sub.language, sub.unsubscribeToken, featuredDeals);
+    }
     await ctx.scheduler.runAfter(0, internal.postmark.sendRawEmail, {
       to: sub.email,
       subject: mail.subject,
@@ -1002,6 +1265,10 @@ export const confirm = mutation({
       text: mail.text,
       from: MARKETING_FROM,
       replyTo: MARKETING_EMAIL,
+      tag: "newsletter-welcome",
+      metadata: { subscriberId: String(sub._id) },
+      trackOpens: true,
+      trackLinks: "HtmlAndText",
     });
 
     return { success: true, alreadyConfirmed: false };
@@ -1022,7 +1289,7 @@ export const confirm = mutation({
 //                        who signed up before auto-enrolment existed).
 // ---------------------------------------------------------------------------
 
-type EnrollResult = "active" | "already_active" | "unsubscribed" | "invalid";
+type EnrollResult = "active" | "already_active" | "unsubscribed" | "invalid" | "suppressed";
 
 /**
  * Enrol an authenticated user as an ACTIVE subscriber and send the welcome
@@ -1053,6 +1320,16 @@ async function enrollActiveSubscriber(
   // who explicitly unsubscribed.
   if (existing && existing.status === "unsubscribed") return "unsubscribed";
   if (existing && existing.status === "active") return "already_active";
+
+  // Nor may it re-enrol an address we already know is undeliverable or that
+  // reported us. This path is automatic (it fires on every signup), so unlike
+  // the double opt-in form below there is no human asserting the address is
+  // good — a mailbox that hard-bounced yesterday would just bounce again.
+  const suppression = await ctx.db
+    .query("emailSuppressions")
+    .withIndex("by_email", (q: any) => q.eq("email", email))
+    .first();
+  if (suppression?.active) return "suppressed";
 
   const now = Date.now();
   const country = normalizeCountry(args.country);
@@ -1102,6 +1379,9 @@ async function enrollActiveSubscriber(
     text: mail.text,
     from: MARKETING_FROM,
     replyTo: MARKETING_EMAIL,
+    tag: "newsletter-welcome",
+    trackOpens: true,
+    trackLinks: "HtmlAndText",
   });
 
   return "active";
@@ -1221,6 +1501,10 @@ export const unsubscribe = mutation({
 
 /**
  * Active subscribers due for their next drip email.
+ *
+ * Beta waitlist signups are excluded: they asked for access to Planera in
+ * ChatGPT, not for the marketing sequence. They stay on the list so invite
+ * broadcasts can still reach them.
  */
 export const getDueDripSubscribers = internalQuery({
   args: {},
@@ -1235,6 +1519,7 @@ export const getDueDripSubscribers = internalQuery({
       .filter(
         (s) =>
           s.dripStage < MAX_DRIP_STAGE &&
+          !isWaitlistSource(s.source) &&
           (s.lastEmailSentAt ?? 0) <= cutoff,
       )
       .slice(0, DRIP_BATCH_SIZE)
@@ -2545,8 +2830,8 @@ export const getFeaturedPackages = internalQuery({
  */
 export const processNewsletterDrip = internalAction({
   args: {},
-  returns: v.object({ processed: v.float64() }),
-  handler: async (ctx): Promise<{ processed: number }> => {
+  returns: v.object({ processed: v.float64(), skipped: v.float64() }),
+  handler: async (ctx): Promise<{ processed: number; skipped: number }> => {
     const due = await ctx.runQuery(internal.newsletter.getDueDripSubscribers, {});
     // Fetch the full active-deal list once per tick; only the drip2 email
     // renders deals, and each subscriber gets the top picks for their country.
@@ -2555,6 +2840,8 @@ export const processNewsletterDrip = internalAction({
       {},
     );
     let processed = 0;
+    // Suppressed addresses we advanced past rather than mailed.
+    let skipped = 0;
 
     for (const sub of due) {
       const nextStage = sub.dripStage + 1;
@@ -2566,14 +2853,21 @@ export const processNewsletterDrip = internalAction({
         sub.unsubscribeToken,
         pickTopDeals(allDeals, sub.country),
       );
-      const result = await ctx.runAction(internal.postmark.sendRawEmail, {
-        to: sub.email,
-        subject: mail.subject,
-        html: mail.html,
-        text: mail.text,
-        from: MARKETING_FROM,
-        replyTo: MARKETING_EMAIL,
-      });
+      const result: { success: boolean; suppressed?: boolean } = await ctx.runAction(
+        internal.postmark.sendRawEmail,
+        {
+          to: sub.email,
+          subject: mail.subject,
+          html: mail.html,
+          text: mail.text,
+          from: MARKETING_FROM,
+          replyTo: MARKETING_EMAIL,
+          tag: "newsletter-drip",
+          metadata: { subscriberId: String(sub._id), dripStage: String(nextStage) },
+          trackOpens: true,
+          trackLinks: "HtmlAndText",
+        },
+      );
 
       if (result.success) {
         await ctx.runMutation(internal.newsletter.advanceDripStage, {
@@ -2581,9 +2875,20 @@ export const processNewsletterDrip = internalAction({
           nextStage,
         });
         processed += 1;
+      } else if (result.suppressed) {
+        // The address was suppressed between the query and the send (or the
+        // subscriber row hasn't caught up yet). Advance the stage anyway:
+        // leaving it pinned means this row is re-selected on every tick from
+        // now on, burning a send attempt each time for mail that can never go
+        // out. The suppression itself is what stops delivery.
+        await ctx.runMutation(internal.newsletter.advanceDripStage, {
+          subscriberId: sub._id,
+          nextStage,
+        });
+        skipped += 1;
       }
     }
 
-    return { processed };
+    return { processed, skipped };
   },
 });

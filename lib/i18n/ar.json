@@ -136,7 +136,9 @@
     "autoApplied": "سيتم تطبيقها تلقائياً عند إنشاء رحلة جديدة",
     "defaultLocation": "الموقع الافتراضي",
     "homeAirport": "المطار الأساسي",
-    "homeAirportPlaceholder": "مثال: الرياض، RUH",
+    "homeAirportPlaceholder": "e.g. Athens, Greece ATH",
+    "homeAirportRequiredTitle": "المطار الأساسي مطلوب",
+    "homeAirportRequired": "أضف مطارك الأساسي للمتابعة — نستخدمه للعثور على رحلات من مدينتك.",
     "defaults": "الإعدادات الافتراضية",
     "budgetLabel": "الميزانية ($)",
     "defaultInterests": "الاهتمامات الافتراضية",
@@ -278,7 +280,9 @@
     "generate": "إنشاء خطة الرحلة",
     "selectInterests": "يرجى اختيار اهتمام واحد على الأقل",
     "outbound": "ذهاب",
-    "return": "عودة"
+    "return": "عودة",
+    "locked": "مثبّت",
+    "total": "الإجمالي"
   },
   "createTrip": {
     "designYour": "صمم",
@@ -354,7 +358,11 @@
     "natureOutdoor": "طبيعة وأنشطة خارجية",
     "nightlife": "حياة ليلية وبارات محلية",
     "neighborhoodWalks": "جولات في الأحياء",
-    "festivals": "مهرجانات وفعاليات موسمية"
+    "festivals": "مهرجانات وفعاليات موسمية",
+    "travelers": "المسافرون",
+    "traveler": "مسافر",
+    "interests": "الاهتمامات",
+    "perPerson": "لكل شخص"
   },
   "trips": {
     "myTrips": "رحلاتي",
@@ -611,7 +619,6 @@
     "showCheapest": "أرخص الرحلات",
     "showHidden": "إظهار المخفية",
     "hideSelfTransfer": "إخفاء النقل الذاتي",
-    "createTripWithFlight": "إنشاء رحلة بهذه الرحلة الجوية",
     "findFlights": "البحث عن رحلات",
     "searching": "جارٍ البحث…",
     "fromIata": "من (IATA)",
@@ -948,6 +955,12 @@
   },
   "destinationPreview": {
     "cheapestDays": "أرخص أيام السفر",
+    "soonest": "الأقرب",
+    "loadingFares": "جارٍ التحقق من الأسعار…",
+    "noFaresForMonth": "لا توجد أسعار في {{month}}",
+    "noFaresSoonest": "لا توجد أسعار في الأسبوعين القادمين — جرّب شهرًا بالأعلى",
+    "setHomeAirport": "حدّد مطارك الرئيسي لعرض الأسعار المباشرة",
+    "noAirportForDestination": "لا نعرف مطارًا لـ {{destination}} بعد — ابحث عن رحلات لاختيار واحد",
     "bestSeason": "أفضل موسم",
     "daysUnitShort": "ي",
     "flightsFromCity": "رحلات من {{origin}}",
@@ -1434,6 +1447,9 @@
     "bookThisDeal": "احجز هذا العرض"
   },
   "tripMap": {
+    "shareUnavailableTitle": "المسار غير جاهز",
+    "shareUnavailableBody": "يجب تحديد محطتين على الأقل على الخريطة قبل مشاركة هذا اليوم.",
+    "shareFailed": "تعذّر التقاط الخريطة. حاول مرة أخرى.",
     "locationNotFound": "الموقع غير موجود",
     "tryAgain": "حاول مرة أخرى",
     "loadingSights": "جاري تحميل المعالم...",
@@ -1804,6 +1820,22 @@
     "earnCredits": "اكسب أرصدة",
     "generateCode": "إنشاء رمز"
   },
+  "shareRoute": {
+    "title": "شارك الخريطة",
+    "routeMap": "خريطة مسارك",
+    "shareDay": "شارك هذا اليوم",
+    "totalDistance": "المسافة الإجمالية",
+    "walkingTime": "وقت المشي",
+    "calories": "السعرات (تقديري)",
+    "difficulty": "الصعوبة",
+    "easy": "سهل",
+    "moderate": "متوسط",
+    "challenging": "صعب",
+    "hrs": "ساعات",
+    "min": "دقيقة",
+    "stops": "محطات",
+    "tip": "نصيحة"
+  },
   "shareCard": {
     "shareTrip": "مشاركة بطاقة الرحلة",
     "day": "يوم",
@@ -1832,7 +1864,36 @@
     "moreDays": "أيام إضافية",
     "activities": "الأنشطة",
     "budget": "الميزانية",
-    "travelers": "المسافرون"
+    "travelers": "المسافرون",
+    "yourTripBudget": "ميزانية رحلتك",
+    "budgetOverview": "نظرة عامة على الميزانية",
+    "yourBudget": "ميزانيتك",
+    "trustTransparent": "شفافية",
+    "trustTransparentSub": "أسعار فورية يمكنك الوثوق بها",
+    "trustSmart": "ذكاء",
+    "trustSmartSub": "ذكاء اصطناعي مُحسَّن لميزانيتك",
+    "trustSecure": "أمان",
+    "trustSecureSub": "بياناتك آمنة مع Planera",
+    "trustSupport": "دعم",
+    "trustSupportSub": "نحن هنا من أجلك على مدار الساعة",
+    "posterEyebrow": "مغامرتك بانتظارك",
+    "posterDays": "{{count}} أيام",
+    "posterIn": "في",
+    "posterFor": "مقابل فقط",
+    "posterPerPerson": "للشخص!",
+    "posterTotal": "الإجمالي",
+    "posterTagline1": "خطط أقل.",
+    "posterTagline2": "سافر أكثر.",
+    "featureLandmarks": "معالم أيقونية",
+    "featureLocal": "تجارب محلية",
+    "featureRoutes": "طرق خلابة",
+    "featureMemories": "ذكريات لا تُنسى",
+    "posterSaving": "{{amount}} أقل من ميزانيتك",
+    "posterCta": "خطط رحلتك",
+    "inclFlights": "رحلات جاهزة",
+    "inclStay": "إقامة جاهزة",
+    "inclExperiences": "{{count}} تجارب",
+    "inclDays": "{{count}} أيام مخططة"
   },
   "packages": {
     "title": "باقات مختارة",
@@ -1949,5 +2010,11 @@
     "createTripGeneric": "إنشاء رحلة جديدة",
     "roundTrip": "ذهاب وعودة",
     "legCount": "{{count}} رحلات"
+  },
+  "homeAirport": {
+    "placeholder": "e.g. Athens, Greece ATH",
+    "hint": "اكتبه بالإنجليزية — هكذا نعثر على رحلات من مدينتك.",
+    "englishOnlyTitle": "اكتبه بالإنجليزية",
+    "englishOnly": "لم نتمكن من مطابقة ذلك بأي مطار. يرجى كتابة مطارك الأساسي بالإنجليزية، مثل \"Athens, Greece ATH\"."
   }
 }

@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useAuthenticatedAction } from "@/lib/useAuthenticatedMutation";
+import { resolveHomeIata } from "@/lib/homeAirport";
 import type {
   ExploreDestinationFlights,
   ExploreDestinationFlightsQuery,
@@ -9,22 +10,20 @@ import type {
 
 /**
  * Resolve the viewer's origin IATA from their saved home airport. `homeAirport`
- * is free text (e.g. "London (LHR)") so we pull the last bare 3-letter code out
- * of it — same extraction the Explore screen uses. Returns undefined when no
- * usable code is present, which is the signal for the preview module to hide
- * its flights section rather than guess an origin.
+ * is free text (e.g. "London (LHR)", "Athens, Greece ATH", or a city name in
+ * the user's own language like "Αθήνα") — `resolveHomeIata` handles all of
+ * those. Returns undefined when nothing can be resolved, which is the signal
+ * for the preview module to hide its flights section rather than guess.
  */
 export function useResolvedHomeIata(token?: string | null): string | undefined {
   const settings = useQuery(
     api.users.getSettings as any,
     token ? { token } : "skip"
   );
-  return useMemo(() => {
-    const raw = (settings as any)?.homeAirport as string | undefined;
-    if (!raw) return undefined;
-    const matches = raw.toUpperCase().match(/\b([A-Z]{3})\b/g);
-    return matches ? matches[matches.length - 1] : undefined;
-  }, [settings]);
+  return useMemo(
+    () => resolveHomeIata((settings as any)?.homeAirport as string | undefined),
+    [settings]
+  );
 }
 
 /**

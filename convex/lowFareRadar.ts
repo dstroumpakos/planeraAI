@@ -2,6 +2,7 @@ import { query, mutation, internalMutation, internalQuery, action, internalActio
 import { authQuery } from "./functions";
 import { internal as _internal } from "./_generated/api";
 import { ConvexError, v } from "convex/values";
+import { airportCityName, resolveHomeIata } from "../lib/homeAirport";
 
 // Type assertion: internal references won't exist until `npx convex dev` regenerates types
 const internal = _internal as any;
@@ -362,14 +363,10 @@ export const getDealsForUser = authQuery({
 
     const now = Date.now();
 
-    // Extract IATA code from homeAirport
-    // Possible formats: "Athens, ATH", "ATH - Athens", "ATH", "athens, ath"
-    const raw = homeAirport.toUpperCase();
-    const iataMatch = raw.match(/\b([A-Z]{3})\b/g);
-    let homeIata = "";
-    if (iataMatch) {
-      homeIata = iataMatch[iataMatch.length - 1];
-    }
+    // Extract IATA code from homeAirport.
+    // Possible formats: "Athens, ATH", "ATH - Athens", "ATH", "athens, ath",
+    // and names written in the user's own language ("Αθήνα" → ATH).
+    const homeIata = resolveHomeIata(homeAirport);
 
     if (!homeIata) return { deals: [], homeIata: null, wishlistDestinations: [] };
 
@@ -761,14 +758,19 @@ export const getHomeAirports = query({
 
     for (const s of allSettings) {
       if (!s.homeAirport) continue;
-      const raw = s.homeAirport.toUpperCase();
-      const iataMatch = raw.match(/\b([A-Z]{3})\b/g);
-      if (!iataMatch) continue;
-      const code = iataMatch[iataMatch.length - 1];
+      const code = resolveHomeIata(s.homeAirport);
+      if (!code) continue;
       if (!airportMap[code]) {
-        // Try to extract city name from "City, CODE" or "CODE - City" formats
-        const cityMatch = s.homeAirport.match(/^([^,]+),/);
-        const city = cityMatch ? cityMatch[1].trim() : s.homeAirport.replace(/\b[A-Z]{3}\b/g, '').replace(/[-,]/g, '').trim();
+        // Prefer our own English city name so users who typed the airport in
+        // another language ("Αθήνα") don't split Athens into two rows. Falls
+        // back to parsing "City, CODE" / "CODE - City" out of what they typed.
+        let city = airportCityName(code);
+        if (!city) {
+          const cityMatch = s.homeAirport.match(/^([^,]+),/);
+          city = cityMatch
+            ? cityMatch[1].trim()
+            : s.homeAirport.replace(/\b[A-Z]{3}\b/g, '').replace(/[-,]/g, '').trim();
+        }
         airportMap[code] = { code, city: city || code, count: 0 };
       }
       airportMap[code].count++;
@@ -1210,9 +1212,8 @@ export const getUsersByHomeAirport = internalQuery({
     const matches: Array<{ userId: string; language: string | undefined; homeAirport: string }> = [];
     for (const s of allSettings) {
       if (!s.homeAirport) continue;
-      const iataMatch = s.homeAirport.toUpperCase().match(/\b([A-Z]{3})\b/g);
-      if (!iataMatch) continue;
-      const code = iataMatch[iataMatch.length - 1];
+      const code = resolveHomeIata(s.homeAirport);
+      if (!code) continue;
       if (wanted.has(code)) {
         matches.push({
           userId: s.userId,
@@ -1256,11 +1257,12 @@ type BroadcastAudience = {
   wishlistMatched: number;
 };
 
-/** Extract the trailing IATA code from a free-form home airport string. */
+/**
+ * Extract the IATA code from a free-form home airport string. Handles labels
+ * written in another language ("Αθήνα" → ATH) — see lib/homeAirport.ts.
+ */
 function extractIata(homeAirport: string | undefined | null): string | null {
-  if (!homeAirport) return null;
-  const m = homeAirport.toUpperCase().match(/\b([A-Z]{3})\b/g);
-  return m ? m[m.length - 1] : null;
+  return resolveHomeIata(homeAirport) ?? null;
 }
 
 /**

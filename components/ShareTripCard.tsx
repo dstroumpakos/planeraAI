@@ -15,6 +15,7 @@ import {
 } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
+import { Ionicons } from "@expo/vector-icons";
 import ViewShot, { captureRef } from "react-native-view-shot";
 import * as Sharing from "expo-sharing";
 import { File, Paths } from "expo-file-system";
@@ -45,13 +46,147 @@ const WHITE = "#FFFFFF";
 const DARK = "#121212";
 const NAVY = "#1A1A1A";
 const NAVY_LIGHT = "#2C2C2C";
+const GREEN = "#10B981";
+const RED = "#EF4444";
+// Solid panel colour for the budget slide — also fills the donut hole, so it
+// must stay opaque (a translucent hole would double-darken the photo behind it).
+const PANEL = "#15161C";
+
+// Budget donut geometry (card points)
+const DONUT_SIZE = 100;
+const DONUT_THICKNESS = 24;
 
 // Font families
 const SERIF = Platform.select({ ios: "Georgia", default: "serif" });
 const SANS = Platform.select({ ios: "System", default: "sans-serif" });
 
 // Slide types
-type SlideKey = "cover" | "deal" | "itinerary" | "activities";
+type SlideKey = "cover" | "poster" | "deal" | "itinerary" | "activities" | "budget";
+
+/**
+ * Donut chart built from plain Views (the app has no SVG dependency).
+ *
+ * Each half of the circle is a clipped R×D window; inside it every segment is a
+ * half-disc rotated to its start angle. Because a half-disc always covers
+ * start..start+180 and the window clips anything past the 180° boundary,
+ * drawing the segments in ascending order makes each one repaint exactly its
+ * own slice over the previous one.
+ */
+const DonutChart: React.FC<{
+  size: number;
+  thickness: number;
+  holeColor: string;
+  segments: { color: string; value: number }[];
+  children?: React.ReactNode;
+}> = ({ size, thickness, holeColor, segments, children }) => {
+  const R = size / 2;
+  const total = segments.reduce((sum, s) => sum + s.value, 0);
+  if (total <= 0) return null;
+
+  let acc = 0;
+  const arcs = segments.map((s) => {
+    const start = (acc / total) * 360;
+    acc += s.value;
+    return { color: s.color, start, end: (acc / total) * 360 };
+  });
+
+  const renderHalf = (isRight: boolean) => {
+    const lo = isRight ? 0 : 180;
+    const hi = isRight ? 180 : 360;
+    return (
+      <View
+        style={{
+          position: "absolute",
+          top: 0,
+          left: isRight ? R : 0,
+          width: R,
+          height: size,
+          overflow: "hidden",
+        }}
+      >
+        <View style={{ width: size, height: size, marginLeft: isRight ? -R : 0 }}>
+          {arcs.map((a, i) => {
+            const start = Math.max(a.start, lo);
+            const end = Math.min(a.end, hi);
+            if (end - start <= 0.05) return null;
+            return (
+              <View
+                key={i}
+                style={{
+                  position: "absolute",
+                  width: size,
+                  height: size,
+                  transform: [{ rotate: `${start}deg` }],
+                }}
+              >
+                <View
+                  style={{
+                    position: "absolute",
+                    left: R,
+                    top: 0,
+                    width: R,
+                    height: size,
+                    backgroundColor: a.color,
+                    borderTopRightRadius: R,
+                    borderBottomRightRadius: R,
+                  }}
+                />
+              </View>
+            );
+          })}
+        </View>
+      </View>
+    );
+  };
+
+  const hole = size - thickness * 2;
+  return (
+    <View style={{ width: size, height: size }}>
+      {renderHalf(true)}
+      {renderHalf(false)}
+      <View
+        style={{
+          position: "absolute",
+          left: thickness,
+          top: thickness,
+          width: hole,
+          height: hole,
+          borderRadius: hole / 2,
+          backgroundColor: holeColor,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        {children}
+      </View>
+    </View>
+  );
+};
+
+/** Budget breakdown for the budget slide — computed by the trip screen so the
+ *  card always matches the numbers the traveller sees in the Budget tab. */
+export interface ShareBudgetData {
+  total: number;
+  travelers: number;
+  nights: number;
+  isLive: boolean;
+  categories: {
+    key: string;
+    label: string;
+    amount: number;
+    color: string;
+    icon: keyof typeof Ionicons.glyphMap;
+  }[];
+  perPerson: number;
+  perDay: number;
+  perPersonPerDay: number;
+  targetBudget: number;
+  /** targetBudget − total (positive = under budget) */
+  delta: number;
+  isOverBudget: boolean;
+  /** 0–100, clamped */
+  usedPct: number;
+}
 
 interface TripData {
   _id: Id<"trips">;
@@ -90,6 +225,8 @@ export interface ShareTripCardHandle {
 
 interface Props {
   trip: TripData;
+  /** Omit to hide the budget slide. */
+  budget?: ShareBudgetData;
   onShareStart?: () => void;
   onShareComplete?: () => void;
   onError?: (error: string) => void;
@@ -103,7 +240,7 @@ const PAGE_W = SCREEN_W; // width per page in carousel
 const PREVIEW_SCALE = PREVIEW_CARD_W / CARD_W;
 
 const ShareTripCard = forwardRef<ShareTripCardHandle, Props>(
-  ({ trip, onShareStart, onShareComplete, onError }, ref) => {
+  ({ trip, budget, onShareStart, onShareComplete, onError }, ref) => {
     const slideRefs = useRef<Record<string, ViewShot | null>>({});
     const [photoData, setPhotoData] = useState(trip.shareCardPhoto);
     const [tripCardId, setTripCardId] = useState(trip.tripCardId);
@@ -145,13 +282,30 @@ const ShareTripCard = forwardRef<ShareTripCardHandle, Props>(
         .slice(0, 4);
     }, [days]);
 
+    const budgetCats = useMemo(
+      () => (budget?.categories || []).filter((c) => c.amount > 0),
+      [budget]
+    );
+    const hasBudget = !!budget && budget.total > 0 && budgetCats.length > 0;
+
+    // ── Poster slide data (degrades gracefully without the budget prop) ──
+    const posterTravelers = budget?.travelers ?? trip.travelerCount ?? 1;
+    const posterTotal = budget?.targetBudget || trip.budgetTotal || budget?.total || 0;
+    const posterPerPerson =
+      budget?.perPerson ||
+      trip.perPersonBudget ||
+      (posterTotal > 0 && posterTravelers > 0 ? posterTotal / posterTravelers : 0);
+    const hasPoster = posterPerPerson > 0 && durationDays > 0;
+
     const slideKeys = useMemo(() => {
       const keys: SlideKey[] = ["cover"];
+      if (hasPoster) keys.push("poster");
       if (hasDeal && dealFlight) keys.push("deal");
+      if (hasBudget) keys.push("budget");
       if (days.length > 0) keys.push("itinerary");
       if (topActivities.length >= 2) keys.push("activities");
       return keys;
-    }, [hasDeal, dealFlight, days.length, topActivities.length]);
+    }, [hasPoster, hasDeal, dealFlight, hasBudget, days.length, topActivities.length]);
 
     // ── Handlers ──
     const ensureTripCard = useCallback(async () => {
@@ -493,6 +647,381 @@ const ShareTripCard = forwardRef<ShareTripCardHandle, Props>(
       </>
     );
 
+    // ── Poster slide ──
+    const renderPosterContent = () => {
+      if (!hasPoster) return null;
+
+      // Proof points beat slogans: when the itinerary actually contains flights,
+      // a stay, or booked experiences, say so. Only fall back to the aspirational
+      // badges when we have nothing concrete to show.
+      const activityCount = days.reduce(
+        (sum: number, day: any) => sum + (day?.activities?.length || 0),
+        0
+      );
+      const proof: { icon: keyof typeof Ionicons.glyphMap; label: string }[] = [];
+      if (dealFlight || trip.itinerary?.flights?.options?.length) {
+        proof.push({ icon: "airplane-outline", label: t("shareCard.inclFlights") });
+      }
+      if (trip.itinerary?.hotels?.length) {
+        proof.push({ icon: "bed-outline", label: t("shareCard.inclStay") });
+      }
+      if (activityCount > 0) {
+        proof.push({ icon: "ticket-outline", label: t("shareCard.inclExperiences", { count: activityCount }) });
+      }
+      if (days.length > 0) {
+        proof.push({ icon: "map-outline", label: t("shareCard.inclDays", { count: days.length }) });
+      }
+      const features: { icon: keyof typeof Ionicons.glyphMap; label: string }[] =
+        proof.length >= 3
+          ? proof.slice(0, 4)
+          : [
+              { icon: "business-outline", label: t("shareCard.featureLandmarks") },
+              { icon: "restaurant-outline", label: t("shareCard.featureLocal") },
+              { icon: "map-outline", label: t("shareCard.featureRoutes") },
+              { icon: "camera-outline", label: t("shareCard.featureMemories") },
+            ];
+
+      // Price anchor: the traveller's own budget per person, struck through next
+      // to what Planera actually planned. Only shown when it is a real saving.
+      const anchorPerPerson =
+        posterTravelers > 0 && posterTotal > 0 ? posterTotal / posterTravelers : 0;
+      const showAnchor = anchorPerPerson > posterPerPerson * 1.02;
+      const saving = budget && !budget.isOverBudget && budget.delta > 0 ? budget.delta : 0;
+
+      return (
+        <>
+          {displayPhoto ? (
+            <Image source={{ uri: displayPhoto.url }} style={StyleSheet.absoluteFillObject} contentFit="cover" cachePolicy="memory-disk" />
+          ) : (
+            <LinearGradient colors={[NAVY, NAVY_LIGHT, NAVY]} style={StyleSheet.absoluteFillObject} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} />
+          )}
+          <LinearGradient
+            colors={["rgba(0,0,0,0.80)", "rgba(0,0,0,0.55)", "rgba(0,0,0,0.88)"]}
+            locations={[0, 0.45, 1]}
+            style={StyleSheet.absoluteFillObject}
+          />
+          <View style={styles.logoContainer}>
+            <Image source={logoAsset} style={styles.logoImage} contentFit="contain" />
+          </View>
+
+          <View style={styles.posContent}>
+            {/* Eyebrow */}
+            <View style={styles.posPill}>
+              <Text style={styles.posPillText}>{upper(t("shareCard.posterEyebrow"))}</Text>
+            </View>
+
+            {/* Headline */}
+            <View style={styles.posHeadline}>
+              <Text style={styles.posDays} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5}>
+                {upper(t("shareCard.posterDays", { count: durationDays }))}
+              </Text>
+              <Text style={styles.posConnector}>{upper(t("shareCard.posterIn"))}</Text>
+              <Text style={styles.posDestination} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.45}>
+                {upper(trip.destination)}
+              </Text>
+              <Text style={styles.posConnector}>{upper(t("shareCard.posterFor"))}</Text>
+              <View style={styles.posPriceWrap}>
+                <LinearGradient
+                  colors={["rgba(255,229,0,0)", "rgba(255,229,0,0.20)", "rgba(255,229,0,0)"]}
+                  start={{ x: 0, y: 0.5 }}
+                  end={{ x: 1, y: 0.5 }}
+                  style={StyleSheet.absoluteFillObject}
+                />
+                <View style={styles.posPriceRow}>
+                  {showAnchor && (
+                    <Text style={styles.posAnchorPrice}>
+                      {`${Math.round(anchorPerPerson).toLocaleString(i18n.language || "en")}€`}
+                    </Text>
+                  )}
+                  <Text style={styles.posPrice} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5}>
+                    {`${Math.round(posterPerPerson).toLocaleString(i18n.language || "en")}€`}
+                  </Text>
+                </View>
+              </View>
+              <Text style={styles.posPerPerson}>{t("shareCard.posterPerPerson")}</Text>
+              {saving > 0 && (
+                <View style={styles.posSavingPill}>
+                  <Ionicons name="trending-down" size={22 / S} color={GREEN} />
+                  <Text style={styles.posSavingText}>
+                    {upper(t("shareCard.posterSaving", { amount: formatMoney(saving) }))}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* Info tiles */}
+            <View style={styles.posTilesRow}>
+              <View style={styles.posTile}>
+                <Ionicons name="calendar-outline" size={46 / S} color={AMBER} />
+                <Text style={styles.posTileValue} numberOfLines={2}>{upper(dateStr)}</Text>
+              </View>
+              <View style={styles.posTile}>
+                <Ionicons name="person-outline" size={46 / S} color={AMBER} />
+                <Text style={styles.posTileValue} numberOfLines={2}>
+                  {posterTravelers} {upper(t("shareCard.travelers"))}
+                </Text>
+              </View>
+              {posterTotal > 0 && (
+                <View style={styles.posTile}>
+                  <Ionicons name="wallet-outline" size={46 / S} color={AMBER} />
+                  <Text style={styles.posTileLabel} numberOfLines={1}>{upper(t("shareCard.budget"))}</Text>
+                  <Text style={styles.posTileValue} numberOfLines={1}>
+                    {`€${Math.round(posterTotal).toLocaleString(i18n.language || "en")} ${upper(t("shareCard.posterTotal"))}`}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* Feature badges */}
+            <View style={styles.posFeatureRow}>
+              {features.map((f) => (
+                <View key={f.icon} style={styles.posFeature}>
+                  <Ionicons name={f.icon} size={44 / S} color={AMBER} />
+                  <Text style={styles.posFeatureText} numberOfLines={2}>{upper(f.label)}</Text>
+                </View>
+              ))}
+            </View>
+
+            {/* Tagline + call to action */}
+            <View style={styles.posCtaBand}>
+              <View style={styles.posTaglineRow}>
+                <Text style={styles.posTagline}>{upper(t("shareCard.posterTagline1"))} </Text>
+                <Text style={[styles.posTagline, styles.posTaglineAccent]}>{upper(t("shareCard.posterTagline2"))}</Text>
+              </View>
+              <View style={styles.posCtaRow}>
+                <Text style={styles.posCtaText}>{upper(t("shareCard.posterCta"))}</Text>
+                <Ionicons name="arrow-forward" size={26 / S} color={DARK} />
+                <Text style={styles.posCtaDomain}>planeraai.app</Text>
+              </View>
+            </View>
+          </View>
+
+          {displayPhoto && (
+            <Text style={styles.creditText}>{displayPhoto.photographer} / Unsplash</Text>
+          )}
+        </>
+      );
+    };
+
+    // ── Budget slide ──
+    const formatMoney = useCallback(
+      (n: number) => `€${Math.round(n).toLocaleString(i18n.language || "en")}`,
+      [i18n.language]
+    );
+
+    // Greek drops the tonos when a word is set in all caps — plain toUpperCase()
+    // keeps it and reads as a typo on the card.
+    const upper = useCallback(
+      (s: string) => {
+        const u = s.toUpperCase();
+        return i18n.language === "el"
+          ? u.normalize("NFD").replace(/[\u0300\u0301\u0342]/g, "").normalize("NFC")
+          : u;
+      },
+      [i18n.language]
+    );
+
+    const renderBudgetContent = () => {
+      if (!budget || !hasBudget) return null;
+      const trustItems: {
+        icon: keyof typeof Ionicons.glyphMap;
+        title: string;
+        sub: string;
+      }[] = [
+        { icon: "shield-checkmark-outline", title: t("shareCard.trustTransparent"), sub: t("shareCard.trustTransparentSub") },
+        { icon: "sparkles-outline", title: t("shareCard.trustSmart"), sub: t("shareCard.trustSmartSub") },
+        { icon: "lock-closed-outline", title: t("shareCard.trustSecure"), sub: t("shareCard.trustSecureSub") },
+        { icon: "headset-outline", title: t("shareCard.trustSupport"), sub: t("shareCard.trustSupportSub") },
+      ];
+
+      return (
+        <>
+          {displayPhoto ? (
+            <Image source={{ uri: displayPhoto.url }} style={StyleSheet.absoluteFillObject} contentFit="cover" cachePolicy="memory-disk" />
+          ) : (
+            <LinearGradient colors={[NAVY, NAVY_LIGHT, NAVY]} style={StyleSheet.absoluteFillObject} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} />
+          )}
+          <LinearGradient
+            colors={["rgba(0,0,0,0.70)", "rgba(0,0,0,0.86)", "rgba(0,0,0,0.92)"]}
+            locations={[0, 0.4, 1]}
+            style={StyleSheet.absoluteFillObject}
+          />
+          <View style={styles.budContent}>
+            {/* Grouped hero header: logo → badge → title, kept as one tight unit */}
+            <View style={styles.budHeaderGroup}>
+              <Image source={logoAsset} style={styles.budLogo} contentFit="contain" />
+
+              {/* Eyebrow pill */}
+              <View style={styles.budPill}>
+                <Text style={styles.budPillText}>{upper(t("shareCard.yourTripBudget"))}</Text>
+              </View>
+
+              <Text style={styles.budDestination} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.6}>
+                {trip.destination}
+              </Text>
+
+              <View style={styles.budHeaderAccent} />
+
+              {/* Dates + travellers chips */}
+              <View style={styles.budChipsRow}>
+                <View style={styles.budChip}>
+                  <Ionicons name="calendar-outline" size={22 / S} color={AMBER} />
+                  <Text style={styles.budChipText} numberOfLines={1}>{dateStr}</Text>
+                </View>
+                <View style={styles.budChip}>
+                  <Ionicons name="people-outline" size={22 / S} color={AMBER} />
+                  <Text style={styles.budChipText} numberOfLines={1}>
+                    {budget.travelers} {t("shareCard.travelers")}
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            {/* ── Budget overview panel ── */}
+            <View style={styles.budPanel}>
+              <View style={styles.budPanelAccent} />
+              <View style={styles.budPanelHeader}>
+                <Text style={styles.budPanelTitle}>{upper(t("shareCard.budgetOverview"))}</Text>
+                <View style={[styles.budSourceTag, budget.isLive && styles.budSourceTagLive]}>
+                  <Ionicons
+                    name={budget.isLive ? "flash" : "sparkles"}
+                    size={18 / S}
+                    color={budget.isLive ? GREEN : "rgba(255,255,255,0.5)"}
+                  />
+                  <Text style={[styles.budSourceText, budget.isLive && { color: GREEN }]}>
+                    {budget.isLive ? t("tripDetail.livePrices") : t("tripDetail.estimatedLabel")}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.budTotalRow}>
+                <View style={styles.budTotalCol}>
+                  <Text style={styles.budTotalLabel}>{upper(t("tripDetail.estimatedTotal"))}</Text>
+                  <Text style={styles.budTotalAmount} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.5}>
+                    {formatMoney(budget.total)}
+                  </Text>
+                  <Text style={styles.budTotalSub} numberOfLines={1}>
+                    {t("tripDetail.forTravelersNights", { travelers: budget.travelers, nights: budget.nights })}
+                  </Text>
+                  {budget.targetBudget > 0 && (
+                    <View style={[styles.budDeltaBadge, budget.isOverBudget && styles.budDeltaBadgeOver]}>
+                      <Ionicons
+                        name={budget.isOverBudget ? "trending-up" : "checkmark-circle"}
+                        size={18 / S}
+                        color={budget.isOverBudget ? RED : GREEN}
+                      />
+                      <Text style={[styles.budDeltaText, budget.isOverBudget && { color: RED }]} numberOfLines={1}>
+                        {budget.isOverBudget
+                          ? t("tripDetail.overBudget", { amount: formatMoney(Math.abs(budget.delta)) })
+                          : t("tripDetail.underBudget", { amount: formatMoney(budget.delta) })}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                <DonutChart
+                  size={DONUT_SIZE}
+                  thickness={DONUT_THICKNESS}
+                  holeColor={PANEL}
+                  segments={budgetCats.map((c) => ({ color: c.color, value: c.amount }))}
+                >
+                  <Ionicons name="briefcase-outline" size={100 / S} color={AMBER} />
+                </DonutChart>
+              </View>
+
+              {/* Category legend */}
+              <View style={styles.budCatList}>
+                {budgetCats.map((c) => (
+                  <View key={c.key} style={styles.budCatRow}>
+                    <View style={styles.budCatLeft}>
+                      <View style={[styles.budCatDot, { backgroundColor: c.color }]} />
+                      <Ionicons name={c.icon} size={24 / S} color="rgba(255,255,255,0.55)" />
+                      <Text style={styles.budCatLabel} numberOfLines={1}>{c.label}</Text>
+                    </View>
+                    <View style={styles.budCatRight}>
+                      <Text style={styles.budCatAmount}>{formatMoney(c.amount)}</Text>
+                      <Text style={[styles.budCatPct, { color: c.color }]}>
+                        {Math.round((c.amount / budget.total) * 100)}%
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </View>
+
+            {/* ── Stat tiles ── */}
+            <View style={styles.budStatsRow}>
+              {[
+                { icon: "person" as const, value: budget.perPerson, label: t("tripDetail.perPerson") },
+                { icon: "today" as const, value: budget.perDay, label: t("tripDetail.perDay") },
+                { icon: "walk" as const, value: budget.perPersonPerDay, label: t("tripDetail.perPersonPerDay") },
+              ].map((stat) => (
+                <View key={stat.icon} style={styles.budStatCard}>
+                  <Ionicons name={stat.icon} size={26 / S} color={AMBER} />
+                  <Text style={styles.budStatValue} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>
+                    {formatMoney(stat.value)}
+                  </Text>
+                  <Text style={styles.budStatLabel} numberOfLines={1}>{stat.label}</Text>
+                </View>
+              ))}
+            </View>
+
+            {/* ── Target budget ── */}
+            {budget.targetBudget > 0 && (
+              <View style={styles.budTargetCard}>
+                <View style={styles.budTargetHeader}>
+                  <Text style={styles.budTargetTitle}>{upper(t("shareCard.yourBudget"))}</Text>
+                  <View style={[styles.budTargetBadge, budget.isOverBudget && styles.budTargetBadgeOver]}>
+                    <Text style={[styles.budTargetBadgeText, budget.isOverBudget && { color: RED }]}>
+                      {budget.isOverBudget
+                        ? upper(t("tripDetail.overBudget", { amount: formatMoney(Math.abs(budget.delta)) }))
+                        : upper(t("tripDetail.underBudget", { amount: formatMoney(budget.delta) }))}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.budTargetTrack}>
+                  <View
+                    style={{
+                      width: `${Math.max(2, Math.min(100, budget.usedPct))}%`,
+                      height: "100%",
+                      borderRadius: 8 / S,
+                      backgroundColor: budget.isOverBudget ? RED : GREEN,
+                    }}
+                  />
+                </View>
+                <Text style={styles.budTargetCaption}>
+                  {t("tripDetail.ofBudget", {
+                    used: formatMoney(budget.total),
+                    total: formatMoney(budget.targetBudget),
+                  })}
+                </Text>
+              </View>
+            )}
+
+            {/* ── Trust row ── */}
+            <View style={styles.budTrustDivider} />
+            <View style={styles.budTrustRow}>
+              {trustItems.map((item) => (
+                <View key={item.title} style={styles.budTrustItem}>
+                  <Ionicons name={item.icon} size={34 / S} color={AMBER} />
+                  <Text style={styles.budTrustTitle} numberOfLines={1}>{upper(item.title)}</Text>
+                  <Text style={styles.budTrustSub} numberOfLines={2}>{item.sub}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+
+          <View style={styles.brandRowAbsolute}>
+            <View style={styles.brandDot} />
+            <Text style={styles.brandText}>planeraai.app</Text>
+          </View>
+          {displayPhoto && (
+            <Text style={styles.creditText}>{displayPhoto.photographer} / Unsplash</Text>
+          )}
+        </>
+      );
+    };
+
     // ── Derived: total activities count & top highlight names ──
     const totalActivities = useMemo(() => {
       return days.reduce((sum: number, day: any) => sum + (day.activities?.length || 0), 0);
@@ -615,6 +1144,17 @@ const ShareTripCard = forwardRef<ShareTripCardHandle, Props>(
             {renderCoverContent()}
           </ViewShot>
 
+          {/* ── Slide: POSTER ── */}
+          {hasPoster && (
+            <ViewShot
+              ref={(r) => { slideRefs.current.poster = r; }}
+              style={styles.card}
+              options={{ format: "png", quality: 1.0, width: 1080, height: 1920 }}
+            >
+              {renderPosterContent()}
+            </ViewShot>
+          )}
+
           {/* ── Slide: FLIGHT DEAL ── */}
           {hasDeal && dealFlight && (
             <ViewShot
@@ -623,6 +1163,17 @@ const ShareTripCard = forwardRef<ShareTripCardHandle, Props>(
               options={{ format: "png", quality: 1.0, width: 1080, height: 1920 }}
             >
               {renderDealContent()}
+            </ViewShot>
+          )}
+
+          {/* ── Slide: TRIP BUDGET ── */}
+          {hasBudget && (
+            <ViewShot
+              ref={(r) => { slideRefs.current.budget = r; }}
+              style={styles.card}
+              options={{ format: "png", quality: 1.0, width: 1080, height: 1920 }}
+            >
+              {renderBudgetContent()}
             </ViewShot>
           )}
 
@@ -683,7 +1234,9 @@ const ShareTripCard = forwardRef<ShareTripCardHandle, Props>(
                     <View style={[styles.previewCard, { width: PREVIEW_CARD_W, height: PREVIEW_CARD_H }]}>
                       <View style={[styles.card, { transform: [{ scale: PREVIEW_SCALE }], transformOrigin: "0% 0%" }]}>
                         {key === "cover" && renderCoverContent()}
+                        {key === "poster" && renderPosterContent()}
                         {key === "deal" && dealFlight && renderDealContent()}
+                        {key === "budget" && renderBudgetContent()}
                         {key === "itinerary" && renderItineraryContent()}
                         {key === "activities" && renderActivitiesContent()}
                       </View>
@@ -1027,6 +1580,571 @@ const styles = StyleSheet.create({
     fontSize: 28 / S,
     color: AMBER,
     letterSpacing: 3 / S,
+  },
+
+  // ── Poster slide ──
+  posContent: {
+    position: "absolute",
+    top: 150 / S,
+    left: 30 / S,
+    right: 30 / S,
+    bottom: 56 / S,
+    zIndex: 2,
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  posPill: {
+    backgroundColor: "rgba(255,229,0,0.10)",
+    borderWidth: 1.5 / S,
+    borderColor: "rgba(255,229,0,0.5)",
+    borderRadius: 30 / S,
+    paddingHorizontal: 28 / S,
+    paddingVertical: 10 / S,
+  },
+  posPillText: {
+    fontFamily: SANS,
+    fontWeight: "700",
+    fontSize: 23 / S,
+    color: AMBER,
+    letterSpacing: 4 / S,
+  },
+  posHeadline: {
+    alignItems: "center",
+    width: "100%",
+  },
+  posDays: {
+    fontFamily: SANS,
+    fontWeight: "900",
+    fontSize: 130 / S,
+    lineHeight: 134 / S,
+    color: WHITE,
+    letterSpacing: -1 / S,
+    textAlign: "center",
+    textShadowColor: "rgba(0,0,0,0.45)",
+    textShadowOffset: { width: 0, height: 2 / S },
+    textShadowRadius: 8 / S,
+  },
+  posConnector: {
+    fontFamily: SANS,
+    fontWeight: "700",
+    fontSize: 66 / S,
+    lineHeight: 76 / S,
+    color: "rgba(255,255,255,0.85)",
+    letterSpacing: 3 / S,
+    textAlign: "center",
+  },
+  posDestination: {
+    fontFamily: SANS,
+    fontWeight: "900",
+    fontSize: 150 / S,
+    lineHeight: 154 / S,
+    color: WHITE,
+    letterSpacing: -1 / S,
+    textAlign: "center",
+    textShadowColor: "rgba(0,0,0,0.45)",
+    textShadowOffset: { width: 0, height: 2 / S },
+    textShadowRadius: 8 / S,
+  },
+  posPriceWrap: {
+    width: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 6 / S,
+  },
+  posPriceRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    justifyContent: "center",
+    gap: 16 / S,
+  },
+  posAnchorPrice: {
+    fontFamily: SANS,
+    fontWeight: "700",
+    fontSize: 62 / S,
+    color: "rgba(255,255,255,0.55)",
+    textDecorationLine: "line-through",
+    marginBottom: 28 / S,
+  },
+  posSavingPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6 / S,
+    marginTop: 12 / S,
+    backgroundColor: "rgba(16,185,129,0.18)",
+    borderWidth: 1 / S,
+    borderColor: "rgba(16,185,129,0.45)",
+    borderRadius: 24 / S,
+    paddingHorizontal: 16 / S,
+    paddingVertical: 7 / S,
+  },
+  posSavingText: {
+    fontFamily: SANS,
+    fontWeight: "700",
+    fontSize: 20 / S,
+    color: GREEN,
+    letterSpacing: 1.5 / S,
+  },
+  posCtaBand: {
+    width: "100%",
+    alignItems: "center",
+    gap: 12 / S,
+  },
+  posCtaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10 / S,
+    backgroundColor: AMBER,
+    borderRadius: 40 / S,
+    paddingHorizontal: 26 / S,
+    paddingVertical: 13 / S,
+  },
+  posCtaText: {
+    fontFamily: SANS,
+    fontWeight: "800",
+    fontSize: 22 / S,
+    color: DARK,
+    letterSpacing: 1.5 / S,
+  },
+  posCtaDomain: {
+    fontFamily: SANS,
+    fontWeight: "700",
+    fontSize: 22 / S,
+    color: "rgba(0,0,0,0.65)",
+  },
+  posPrice: {
+    fontFamily: SANS,
+    fontWeight: "900",
+    fontSize: 176 / S,
+    lineHeight: 182 / S,
+    color: AMBER,
+    letterSpacing: -2 / S,
+    textAlign: "center",
+    textShadowColor: "rgba(0,0,0,0.35)",
+    textShadowOffset: { width: 0, height: 2 / S },
+    textShadowRadius: 10 / S,
+  },
+  posPerPerson: {
+    fontFamily: SERIF,
+    fontStyle: "italic",
+    fontWeight: "600",
+    fontSize: 62 / S,
+    color: AMBER,
+    textAlign: "center",
+    marginTop: 2 / S,
+  },
+  posTilesRow: {
+    flexDirection: "row",
+    width: "100%",
+    gap: 12 / S,
+  },
+  posTile: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderWidth: 1 / S,
+    borderColor: "rgba(255,255,255,0.14)",
+    borderRadius: 20 / S,
+    paddingVertical: 16 / S,
+    paddingHorizontal: 8 / S,
+    gap: 5 / S,
+  },
+  posTileLabel: {
+    fontFamily: SANS,
+    fontWeight: "700",
+    fontSize: 19 / S,
+    color: "rgba(255,255,255,0.55)",
+    letterSpacing: 1.5 / S,
+    textAlign: "center",
+  },
+  posTileValue: {
+    fontFamily: SANS,
+    fontWeight: "700",
+    fontSize: 21 / S,
+    color: WHITE,
+    textAlign: "center",
+    lineHeight: 27 / S,
+  },
+  posFeatureRow: {
+    flexDirection: "row",
+    width: "100%",
+    justifyContent: "space-between",
+  },
+  posFeature: {
+    flex: 1,
+    alignItems: "center",
+    paddingHorizontal: 4 / S,
+  },
+  posFeatureText: {
+    fontFamily: SANS,
+    fontWeight: "700",
+    fontSize: 16 / S,
+    color: "rgba(255,255,255,0.8)",
+    letterSpacing: 1 / S,
+    textAlign: "center",
+    lineHeight: 21 / S,
+    marginTop: 6 / S,
+  },
+  posTaglineRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    flexWrap: "wrap",
+  },
+  posTagline: {
+    fontFamily: SANS,
+    fontWeight: "700",
+    fontSize: 24 / S,
+    color: WHITE,
+    letterSpacing: 2 / S,
+    textAlign: "center",
+  },
+  posTaglineAccent: {
+    color: AMBER,
+  },
+
+  // ── Budget slide ──
+  budContent: {
+    position: "absolute",
+    top: 54 / S,
+    left: 26 / S,
+    right: 26 / S,
+    bottom: 70 / S,
+    zIndex: 2,
+    alignItems: "center",
+    justifyContent: "flex-start",
+  },
+  // Logo + badge + title, grouped as one hero unit instead of a
+  // slide-wide floating logo far above the centered content block.
+  budHeaderGroup: {
+    width: "100%",
+    alignItems: "center",
+  },
+  budLogo: {
+    width: 190 / S,
+    height: 48 / S,
+    marginBottom: 22 / S,
+  },
+  budHeaderAccent: {
+    width: 70 / S,
+    height: 3 / S,
+    backgroundColor: AMBER,
+    borderRadius: 2 / S,
+    marginTop: 20 / S,
+    marginBottom: 20 / S,
+  },
+  budPill: {
+    backgroundColor: "rgba(255,229,0,0.10)",
+    borderWidth: 1.5 / S,
+    borderColor: "rgba(255,229,0,0.45)",
+    borderRadius: 30 / S,
+    paddingHorizontal: 26 / S,
+    paddingVertical: 9 / S,
+  },
+  budPillText: {
+    fontFamily: SANS,
+    fontWeight: "700",
+    fontSize: 22 / S,
+    color: AMBER,
+    letterSpacing: 3 / S,
+  },
+  budDestination: {
+    fontFamily: SERIF,
+    fontWeight: "700",
+    fontSize: 76 / S,
+    color: WHITE,
+    textAlign: "center",
+    marginTop: 18 / S,
+    lineHeight: (76 * 1.15) / S,
+    textShadowColor: "rgba(0,0,0,0.4)",
+    textShadowOffset: { width: 0, height: 1 / S },
+    textShadowRadius: 6 / S,
+  },
+  budChipsRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    gap: 14 / S,
+  },
+  budChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8 / S,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderWidth: 1 / S,
+    borderColor: "rgba(255,255,255,0.10)",
+    borderRadius: 24 / S,
+    paddingHorizontal: 18 / S,
+    paddingVertical: 9 / S,
+  },
+  budChipText: {
+    fontFamily: SANS,
+    fontWeight: "500",
+    fontSize: 22 / S,
+    color: "rgba(255,255,255,0.9)",
+  },
+
+  // Overview panel
+  budPanel: {
+    width: "100%",
+    backgroundColor: PANEL,
+    borderRadius: 28 / S,
+    borderWidth: 1 / S,
+    borderColor: "rgba(255,255,255,0.08)",
+    padding: 28 / S,
+    marginTop: 48 / S,
+    overflow: "hidden",
+  },
+  budPanelAccent: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 3 / S,
+    backgroundColor: "rgba(255,229,0,0.45)",
+  },
+  budPanelHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 18 / S,
+  },
+  budPanelTitle: {
+    fontFamily: SANS,
+    fontWeight: "700",
+    fontSize: 20 / S,
+    color: "rgba(255,255,255,0.55)",
+    letterSpacing: 3 / S,
+  },
+  budSourceTag: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5 / S,
+    backgroundColor: "rgba(255,255,255,0.08)",
+    borderRadius: 20 / S,
+    paddingHorizontal: 12 / S,
+    paddingVertical: 6 / S,
+  },
+  budSourceTagLive: {
+    backgroundColor: "rgba(16,185,129,0.15)",
+  },
+  budSourceText: {
+    fontFamily: SANS,
+    fontWeight: "700",
+    fontSize: 18 / S,
+    color: "rgba(255,255,255,0.5)",
+  },
+  budTotalRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    width: "100%",
+  },
+  budTotalCol: {
+    flex: 1,
+    paddingRight: 12 / S,
+  },
+  budTotalLabel: {
+    fontFamily: SANS,
+    fontWeight: "600",
+    fontSize: 19 / S,
+    color: "rgba(255,255,255,0.45)",
+    letterSpacing: 2.5 / S,
+  },
+  budTotalAmount: {
+    fontFamily: SERIF,
+    fontWeight: "800",
+    fontSize: 118 / S,
+    color: WHITE,
+    marginTop: 4 / S,
+  },
+  budTotalSub: {
+    fontFamily: SANS,
+    fontSize: 20 / S,
+    color: "rgba(255,255,255,0.5)",
+    marginTop: 4 / S,
+  },
+  budDeltaBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 6 / S,
+    marginTop: 12 / S,
+    backgroundColor: "rgba(16,185,129,0.15)",
+    borderRadius: 20 / S,
+    paddingHorizontal: 12 / S,
+    paddingVertical: 6 / S,
+  },
+  budDeltaBadgeOver: {
+    backgroundColor: "rgba(239,68,68,0.15)",
+  },
+  budDeltaText: {
+    fontFamily: SANS,
+    fontWeight: "700",
+    fontSize: 18 / S,
+    color: GREEN,
+  },
+  budCatList: {
+    width: "100%",
+    marginTop: 24 / S,
+    gap: 14 / S,
+  },
+  budCatRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  budCatLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10 / S,
+    flex: 1,
+  },
+  budCatDot: {
+    width: 14 / S,
+    height: 14 / S,
+    borderRadius: 7 / S,
+  },
+  budCatLabel: {
+    fontFamily: SANS,
+    fontSize: 24 / S,
+    color: "rgba(255,255,255,0.9)",
+    flex: 1,
+  },
+  budCatRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12 / S,
+  },
+  budCatAmount: {
+    fontFamily: SANS,
+    fontWeight: "700",
+    fontSize: 24 / S,
+    color: WHITE,
+  },
+  budCatPct: {
+    fontFamily: SANS,
+    fontWeight: "700",
+    fontSize: 22 / S,
+    width: 52 / S,
+    textAlign: "right",
+  },
+
+  // Stat tiles
+  budStatsRow: {
+    flexDirection: "row",
+    width: "100%",
+    gap: 14 / S,
+    marginTop: 36 / S,
+  },
+  budStatCard: {
+    flex: 1,
+    backgroundColor: PANEL,
+    borderRadius: 22 / S,
+    borderWidth: 1 / S,
+    borderColor: "rgba(255,255,255,0.08)",
+    alignItems: "center",
+    paddingVertical: 20 / S,
+    paddingHorizontal: 6 / S,
+    gap: 4 / S,
+  },
+  budStatValue: {
+    fontFamily: SERIF,
+    fontWeight: "700",
+    fontSize: 42 / S,
+    color: WHITE,
+  },
+  budStatLabel: {
+    fontFamily: SANS,
+    fontSize: 18 / S,
+    color: "rgba(255,255,255,0.45)",
+  },
+
+  // Target budget
+  budTargetCard: {
+    width: "100%",
+    backgroundColor: PANEL,
+    borderRadius: 22 / S,
+    borderWidth: 1 / S,
+    borderColor: "rgba(255,255,255,0.08)",
+    padding: 24 / S,
+    marginTop: 26 / S,
+  },
+  budTargetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12 / S,
+  },
+  budTargetTitle: {
+    fontFamily: SANS,
+    fontWeight: "700",
+    fontSize: 20 / S,
+    color: "rgba(255,255,255,0.55)",
+    letterSpacing: 3 / S,
+  },
+  budTargetBadge: {
+    backgroundColor: "rgba(16,185,129,0.15)",
+    borderRadius: 16 / S,
+    paddingHorizontal: 12 / S,
+    paddingVertical: 5 / S,
+  },
+  budTargetBadgeOver: {
+    backgroundColor: "rgba(239,68,68,0.15)",
+  },
+  budTargetBadgeText: {
+    fontFamily: SANS,
+    fontWeight: "700",
+    fontSize: 17 / S,
+    color: GREEN,
+    letterSpacing: 1 / S,
+  },
+  budTargetTrack: {
+    width: "100%",
+    height: 16 / S,
+    borderRadius: 8 / S,
+    backgroundColor: "rgba(255,255,255,0.10)",
+    overflow: "hidden",
+  },
+  budTargetCaption: {
+    fontFamily: SANS,
+    fontSize: 19 / S,
+    color: "rgba(255,255,255,0.45)",
+    marginTop: 10 / S,
+  },
+
+  // Trust row
+  budTrustDivider: {
+    width: "100%",
+    height: 1 / S,
+    backgroundColor: "rgba(255,255,255,0.10)",
+    marginTop: 32 / S,
+  },
+  budTrustRow: {
+    flexDirection: "row",
+    width: "100%",
+    justifyContent: "space-between",
+    marginTop: 20 / S,
+  },
+  budTrustItem: {
+    flex: 1,
+    alignItems: "center",
+    paddingHorizontal: 4 / S,
+  },
+  budTrustTitle: {
+    fontFamily: SANS,
+    fontWeight: "800",
+    fontSize: 17 / S,
+    color: WHITE,
+    letterSpacing: 1.5 / S,
+    marginTop: 6 / S,
+  },
+  budTrustSub: {
+    fontFamily: SANS,
+    fontSize: 15 / S,
+    color: "rgba(255,255,255,0.45)",
+    textAlign: "center",
+    lineHeight: 20 / S,
+    marginTop: 3 / S,
   },
 
   // ── Itinerary / Highlights slide ──

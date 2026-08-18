@@ -168,11 +168,39 @@ const SIMPLE: Record<string, string> = {
   "zakynthos": "ZTH",
   "kefalonia": "EFL",
   "lesvos": "MJT",
+  "lesbos": "MJT",
   "mytilene": "MJT",
+  "mitilini": "MJT",
   "samos": "SMI",
   "skiathos": "JSI",
   "kalamata": "KLX",
   "ioannina": "IOA",
+  "naxos": "JNX",
+  "paros": "PAS",
+  "antiparos": "PAS",
+  "milos": "MLO",
+  "chios": "JKH",
+  "karpathos": "AOK",
+  "kalymnos": "JKL",
+  "leros": "LRS",
+  "astypalaia": "JTY",
+  "ikaria": "JIK",
+  "syros": "JSY",
+  "skyros": "SKU",
+  "limnos": "LXS",
+  "lemnos": "LXS",
+  "kythira": "KIT",
+  "kithira": "KIT",
+  "sitia": "JSH",
+  "preveza": "PVK",
+  "patras": "GPA",
+  "araxos": "GPA",
+  "kavala": "KVA",
+  "alexandroupoli": "AXD",
+  "kastoria": "KSO",
+  "kozani": "KZI",
+  "volos": "VOL",
+  "nea anchialos": "VOL",
   // Greek-script aliases (diacritics stripped by normalize())
   "αθηνα": "ATH",
   "θεσσαλονικη": "SKG",
@@ -187,6 +215,27 @@ const SIMPLE: Record<string, string> = {
   "κως": "KGS",
   "ζακυνθος": "ZTH",
   "κεφαλονια": "EFL",
+  "ναξος": "JNX",
+  "παρος": "PAS",
+  "μηλος": "MLO",
+  "χιος": "JKH",
+  "μυτιληνη": "MJT",
+  "λεσβος": "MJT",
+  "σαμος": "SMI",
+  "βολος": "VOL",
+  "καβαλα": "KVA",
+  "πατρα": "GPA",
+  "καλαματα": "KLX",
+  "ιωαννινα": "IOA",
+  // Cyprus — Larnaca (LCA) is the main gateway, Paphos (PFO) serves the west.
+  "cyprus": "LCA",
+  "larnaca": "LCA",
+  "larnaka": "LCA",
+  "paphos": "PFO",
+  "pafos": "PFO",
+  "κυπρος": "LCA",
+  "λαρνακα": "LCA",
+  "παφος": "PFO",
   // Malta
   "malta": "MLA",
   "valletta": "MLA",
@@ -240,6 +289,9 @@ const SIMPLE: Record<string, string> = {
   "iasi": "IAS",
   "kosovo": "PRN",
   "pristina": "PRN",
+  "chisinau": "KIV",
+  "moldova": "KIV",
+  "batumi": "BUS",
   // Central / Eastern Europe
   "prague": "PRG",
   "vienna international": "VIE",
@@ -695,6 +747,32 @@ const VIA_HUB: Record<string, AirportInfo> = {
   // Malta — Gozo has no airport, accessed via ferry from Malta International (MLA)
   "gozo": { iata: "MLA", hasOwnAirport: false, nearestCity: "Malta", nearestCountry: "Malta", distanceKm: 30 },
   "comino": { iata: "MLA", hasOwnAirport: false, nearestCity: "Malta", nearestCountry: "Malta", distanceKm: 25 },
+  // Cyprus — only Larnaca (LCA) and Paphos (PFO) take commercial flights.
+  "limassol": { iata: "LCA", hasOwnAirport: false, nearestCity: "Larnaca", nearestCountry: "Cyprus", distanceKm: 70 },
+  "λεμεσος": { iata: "LCA", hasOwnAirport: false, nearestCity: "Larnaca", nearestCountry: "Cyprus", distanceKm: 70 },
+  "nicosia": { iata: "LCA", hasOwnAirport: false, nearestCity: "Larnaca", nearestCountry: "Cyprus", distanceKm: 50 },
+  "λευκωσια": { iata: "LCA", hasOwnAirport: false, nearestCity: "Larnaca", nearestCountry: "Cyprus", distanceKm: 50 },
+  "ayia napa": { iata: "LCA", hasOwnAirport: false, nearestCity: "Larnaca", nearestCountry: "Cyprus", distanceKm: 45 },
+  "agia napa": { iata: "LCA", hasOwnAirport: false, nearestCity: "Larnaca", nearestCountry: "Cyprus", distanceKm: 45 },
+  "αγια ναπα": { iata: "LCA", hasOwnAirport: false, nearestCity: "Larnaca", nearestCountry: "Cyprus", distanceKm: 45 },
+  "protaras": { iata: "LCA", hasOwnAirport: false, nearestCity: "Larnaca", nearestCountry: "Cyprus", distanceKm: 50 },
+  "kyrenia": { iata: "LCA", hasOwnAirport: false, nearestCity: "Larnaca", nearestCountry: "Cyprus", distanceKm: 90 },
+  // Greek islands / mainland towns with no airport of their own
+  "ios": { iata: "JTR", hasOwnAirport: false, nearestCity: "Santorini", nearestCountry: "Greece", distanceKm: 35 },
+  "ιος": { iata: "JTR", hasOwnAirport: false, nearestCity: "Santorini", nearestCountry: "Greece", distanceKm: 35 },
+  "folegandros": { iata: "JTR", hasOwnAirport: false, nearestCity: "Santorini", nearestCountry: "Greece", distanceKm: 45 },
+  "amorgos": { iata: "JNX", hasOwnAirport: false, nearestCity: "Naxos", nearestCountry: "Greece", distanceKm: 55 },
+  "lefkada": { iata: "PVK", hasOwnAirport: false, nearestCity: "Preveza", nearestCountry: "Greece", distanceKm: 25 },
+  "λευκαδα": { iata: "PVK", hasOwnAirport: false, nearestCity: "Preveza", nearestCountry: "Greece", distanceKm: 25 },
+  "hydra": { iata: "ATH", hasOwnAirport: false, nearestCity: "Athens", nearestCountry: "Greece", distanceKm: 75 },
+  "spetses": { iata: "ATH", hasOwnAirport: false, nearestCity: "Athens", nearestCountry: "Greece", distanceKm: 90 },
+  "aegina": { iata: "ATH", hasOwnAirport: false, nearestCity: "Athens", nearestCountry: "Greece", distanceKm: 40 },
+  "meteora": { iata: "VOL", hasOwnAirport: false, nearestCity: "Volos", nearestCountry: "Greece", distanceKm: 130 },
+  "nafplio": { iata: "ATH", hasOwnAirport: false, nearestCity: "Athens", nearestCountry: "Greece", distanceKm: 140 },
+  "delphi": { iata: "ATH", hasOwnAirport: false, nearestCity: "Athens", nearestCountry: "Greece", distanceKm: 185 },
+  // Montenegro — Kotor and Budva are served by Tivat (TIV), not Podgorica.
+  "kotor": { iata: "TIV", hasOwnAirport: false, nearestCity: "Tivat", nearestCountry: "Montenegro", distanceKm: 25 },
+  "budva": { iata: "TIV", hasOwnAirport: false, nearestCity: "Tivat", nearestCountry: "Montenegro", distanceKm: 20 },
   // Mexico — Riviera Maya area → Cancún
   "tulum": { iata: "CUN", hasOwnAirport: false, nearestCity: "Cancún", nearestCountry: "Mexico", distanceKm: 130 },
   "playa del carmen": { iata: "CUN", hasOwnAirport: false, nearestCity: "Cancún", nearestCountry: "Mexico", distanceKm: 70 },
@@ -768,6 +846,50 @@ export const DESTINATION_AIRPORTS: Record<string, AirportInfo> = (() => {
 /* -------------------------------------------------------------------------- */
 /*  Normalizer + resolver.                                                    */
 /* -------------------------------------------------------------------------- */
+
+/**
+ * Does `needle` appear inside `haystack` as a whole word (or run of words)?
+ *
+ * Plain `String.includes` is what silently mis-resolved real destinations:
+ * "limassol".includes("lima") sent Cyprus travellers to Lima, Peru (LIM), and
+ * "paros".includes("paro") sent them to Paro, Bhutan (PBH). Requiring a word
+ * boundary on both sides keeps the useful matches ("paris france" → "paris",
+ * "new york city" → "new york") and drops the accidental ones.
+ *
+ * Boundaries are checked by code point rather than `\b`, so this behaves the
+ * same for Greek/Cyrillic keys as it does for Latin ones.
+ */
+function isWordMatch(haystack: string, needle: string): boolean {
+  if (!needle || needle.length > haystack.length) return false;
+  const isLetter = (ch: string | undefined) => !!ch && /[\p{L}\p{N}]/u.test(ch);
+  let from = 0;
+  for (;;) {
+    const at = haystack.indexOf(needle, from);
+    if (at === -1) return false;
+    const before = at === 0 ? undefined : haystack[at - 1];
+    const after = haystack[at + needle.length];
+    if (!isLetter(before) && !isLetter(after)) return true;
+    from = at + 1;
+  }
+}
+
+/**
+ * Best whole-word match for `text` among `DESTINATION_AIRPORTS`, preferring the
+ * longest key. Object key order must never decide the answer: "los angeles"
+ * and "angeles" both match "los angeles, usa", and only the longer one is right.
+ */
+function bestKeyMatch(text: string): AirportInfo | null {
+  let best: AirportInfo | null = null;
+  let bestLen = 0;
+  for (const [city, info] of Object.entries(DESTINATION_AIRPORTS)) {
+    if (city.length > bestLen && isWordMatch(text, city)) {
+      best = info;
+      bestLen = city.length;
+    }
+  }
+  return best;
+}
+
 function normalize(name: string): string {
   return name
     .normalize("NFD")
@@ -791,7 +913,11 @@ export function resolveAirport(name: string | undefined | null): AirportInfo | n
   if (!raw) return null;
 
   // 1) Already an IATA code? ("ATH" or "athens (ATH)")
-  if (/^[A-Z]{3}$/.test(raw.toUpperCase())) {
+  //    Some real destinations are spelled with exactly three letters — Kos, Ios,
+  //    Goa, Hue, Rio, Nyc — and reading those as codes sent travellers to the
+  //    wrong continent (Ios → IOS = Ilhéus, Brazil). A known destination name
+  //    always wins over the bare-code reading.
+  if (/^[A-Z]{3}$/.test(raw.toUpperCase()) && !DESTINATION_AIRPORTS[raw.toLowerCase()]) {
     return { iata: raw.toUpperCase(), hasOwnAirport: true };
   }
   const parenMatch = raw.match(/\(([A-Z]{3})\)/) || raw.match(/[-–]\s*([A-Z]{3})$/);
@@ -810,26 +936,31 @@ export function resolveAirport(name: string | undefined | null): AirportInfo | n
   if (DESTINATION_AIRPORTS[cleaned]) return DESTINATION_AIRPORTS[cleaned];
   if (DESTINATION_AIRPORTS[lower]) return DESTINATION_AIRPORTS[lower];
 
-  // 3) Substring matches against keys
-  for (const [city, info] of Object.entries(DESTINATION_AIRPORTS)) {
-    if (cleaned.includes(city) || city.includes(cleaned)) return info;
-  }
-  for (const [city, info] of Object.entries(DESTINATION_AIRPORTS)) {
-    if (lower.includes(city)) return info;
-  }
+  // 3) Whole-word matches against keys, longest key wins. ("paris, france" →
+  //     "paris"; "limassol" no longer matches Lima's "lima".)
+  const keyMatch = bestKeyMatch(cleaned) ?? bestKeyMatch(lower);
+  if (keyMatch) return keyMatch;
 
-  // 4) Fallback to AIRPORTS dataset (1000+ airports by city/name)
+  // 4) Fallback to the AIRPORTS dataset (by city, then airport name).
   const byCity = AIRPORTS.find(
     (a) => a.city.toLowerCase() === cleaned || a.city.toLowerCase() === lower
   );
   if (byCity) return { iata: byCity.code, hasOwnAirport: true };
 
-  const partial = AIRPORTS.find(
-    (a) =>
-      cleaned.includes(a.city.toLowerCase()) ||
-      a.city.toLowerCase().includes(cleaned) ||
-      a.name.toLowerCase().includes(cleaned)
-  );
+  // Same whole-word rule as step 3, and again the longest match wins so a short
+  // city name that happens to sit inside a longer one can't hijack the result.
+  let partial: { code: string; len: number } | null = null;
+  for (const a of AIRPORTS) {
+    const city = a.city.toLowerCase();
+    const name = a.name.toLowerCase();
+    const len = Math.max(
+      isWordMatch(cleaned, city) || isWordMatch(city, cleaned) ? city.length : 0,
+      isWordMatch(name, cleaned) ? cleaned.length : 0
+    );
+    if (len > 0 && (!partial || len > partial.len)) {
+      partial = { code: a.code, len };
+    }
+  }
   if (partial) return { iata: partial.code, hasOwnAirport: true };
 
   return null;

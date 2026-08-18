@@ -1,16 +1,14 @@
 import React from "react";
 import { Image, StyleSheet, Text, TouchableOpacity, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "@/lib/ThemeContext";
+import { extractClockTime } from "@/lib/flightTime";
 import type { NormalizedFlightOption } from "@/types/flights";
 
 interface Props {
   option: NormalizedFlightOption;
   currency?: string;
   onPress?: () => void;
-  /** When set, shows a secondary "Create trip with this flight" button. */
-  onCreateTrip?: () => void;
   /**
    * Overrides the primary button label (e.g. "Select this flight" in the
    * outbound step of a round-trip search). When set, the button is enabled
@@ -35,10 +33,9 @@ function formatDuration(mins?: number | null): string {
 }
 
 function formatTime(iso?: string | null): string {
-  if (!iso) return "—";
-  // SerpApi format: "2024-06-10 08:00"
-  const parts = iso.split(" ");
-  return parts[1] ?? iso;
+  // Same extractor the trip handoff uses, so what the traveler compares here
+  // is exactly what gets locked into the trip.
+  return extractClockTime(iso) || "—";
 }
 
 function Badge({
@@ -73,7 +70,6 @@ export const FlightResultCard: React.FC<Props> = ({
   option,
   currency = "EUR",
   onPress,
-  onCreateTrip,
   ctaLabel,
   hideCta,
   travelers,
@@ -123,21 +119,6 @@ export const FlightResultCard: React.FC<Props> = ({
     },
     buttonText: {
       color: ctaEnabled ? "#1A1A1A" : colors.textMuted,
-      fontWeight: "700",
-      fontSize: 14,
-    },
-    createTripButton: {
-      flexDirection: "row",
-      justifyContent: "center",
-      alignItems: "center",
-      gap: 6,
-      borderRadius: 12,
-      paddingVertical: 12,
-      borderWidth: 1.5,
-      borderColor: colors.primary,
-    },
-    createTripText: {
-      color: colors.text,
       fontWeight: "700",
       fontSize: 14,
     },
@@ -254,21 +235,6 @@ export const FlightResultCard: React.FC<Props> = ({
               t("flights.viewBookingOptions", { defaultValue: "View booking options" })}
         </Text>
       </TouchableOpacity>
-      )}
-
-      {onCreateTrip && (
-        <TouchableOpacity
-          style={styles.createTripButton}
-          onPress={onCreateTrip}
-          activeOpacity={0.8}
-        >
-          <Ionicons name="sparkles" size={16} color={colors.primary} />
-          <Text style={styles.createTripText}>
-            {t("flights.createTripWithFlight", {
-              defaultValue: "Create trip with this flight",
-            })}
-          </Text>
-        </TouchableOpacity>
       )}
     </View>
   );

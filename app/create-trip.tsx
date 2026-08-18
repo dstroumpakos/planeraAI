@@ -15,6 +15,7 @@ import AIConsentModal from "@/components/AIConsentModal";
 import { useTranslation } from "react-i18next";
 import { TripGuideTooltip, GuideStep } from "@/components/FirstTripGuide";
 import { CITY_TRANSLATIONS, COUNTRY_TRANSLATIONS } from "@/lib/destinationTranslations";
+import { canonicalHomeAirport } from "@/lib/homeAirport";
 
 import logoImage from "@/assets/images/appicon-1024x1024-01-1vb1vx.png";
 
@@ -586,7 +587,13 @@ export default function CreateTripScreen() {
         if (userSettings) {
             setFormData(prev => ({
                 ...prev,
-                origin: userSettings.homeAirport || prev.origin,
+                // Older accounts saved the base airport in their own language
+                // ("Αθήνα"). Prefill the canonical English label so the field
+                // reads "Athens, Greece ATH" and flight search can use it.
+                origin:
+                    canonicalHomeAirport(userSettings.homeAirport)?.label ||
+                    userSettings.homeAirport ||
+                    prev.origin,
                 budgetTotal: userSettings.defaultBudget || prev.budgetTotal,
                 travelerCount: userSettings.defaultTravelers || prev.travelerCount,
                 interests: userSettings.interests && userSettings.interests.length > 0 ? userSettings.interests : prev.interests,

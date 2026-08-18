@@ -19,6 +19,8 @@ import { useTheme } from "@/lib/ThemeContext";
 import { useFlightSearch } from "@/hooks/useFlightSearch";
 import { resolveAirport } from "@/lib/destinationAirports";
 import { AIRPORTS } from "@/lib/airports";
+import { resolveHomeIata } from "@/lib/homeAirport";
+import { extractClockTime } from "@/lib/flightTime";
 import { FlightSearchForm } from "@/components/flights/FlightSearchForm";
 import { AirportsSummaryCard } from "@/components/flights/AirportsSummaryCard";
 import { PriceInsightsCard } from "@/components/flights/PriceInsightsCard";
@@ -60,11 +62,19 @@ export default function FlightsSearchScreen() {
   // was passed in (e.g. when opened from the home screen button).
   const { token } = useToken();
   const userSettings = useQuery(api.users.getSettings as any, { token: token || "skip" });
-  const homeIata = useMemo(() => {
-    const raw = (userSettings as any)?.homeAirport as string | undefined;
-    if (!raw) return undefined;
-    const matches = raw.toUpperCase().match(/\b([A-Z]{3})\b/g);
-    return matches ? matches[matches.length - 1] : undefined;
+  // `homeAirport` is free text — a code, a label, or a city name in the user's
+  // own language ("Αθήνα"). resolveHomeIata handles all three.
+  const homeIata = useMemo(
+    () => resolveHomeIata((userSettings as any)?.homeAirport as string | undefined),
+    [userSettings]
+  );
+  // Party size, same idea as the home airport: callers that know it pass it,
+  // everyone else inherits the traveler's saved default instead of silently
+  // pricing for one. A fare quoted for the wrong party size is the difference
+  // between a usable trip budget and a misleading one.
+  const defaultAdults = useMemo(() => {
+    const saved = Number((userSettings as any)?.defaultTravelers);
+    return Number.isFinite(saved) && saved >= 1 ? Math.min(Math.round(saved), 9) : undefined;
   }, [userSettings]);
 
   const initial: Partial<FlightSearchInput> = useMemo(
@@ -73,11 +83,11 @@ export default function FlightsSearchScreen() {
       arrivalId: params.arrivalId,
       outboundDate: params.outboundDate,
       returnDate: params.returnDate,
-      adults: params.adults ? Number(params.adults) : undefined,
+      adults: params.adults ? Number(params.adults) : defaultAdults,
       currency: params.currency ?? "EUR",
       type: "round_trip",
     }),
-    [params.departureId, params.arrivalId, params.outboundDate, params.returnDate, params.adults, params.currency, homeIata]
+    [params.departureId, params.arrivalId, params.outboundDate, params.returnDate, params.adults, params.currency, homeIata, defaultAdults]
   );
 
   // Two-step round-trip flow: search returns outbound options; picking one
@@ -133,6 +143,10 @@ export default function FlightsSearchScreen() {
     if (autoSearchedRef.current) return;
     if (params.autoSearch !== "1") return;
     if (!token) return;
+    // Settings carry the fallback party size. Firing before they resolve would
+    // lock the one-shot search to 1 adult, so wait for the query to settle
+    // (`undefined` = still loading; `null` = loaded, no settings row).
+    if (!params.adults && userSettings === undefined) return;
     if (!initial.departureId || !initial.arrivalId) return;
     autoSearchedRef.current = true;
 
@@ -154,7 +168,7 @@ export default function FlightsSearchScreen() {
       stops: "any",
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, initial.departureId, initial.arrivalId, params.autoSearch]);
+  }, [token, userSettings, initial.departureId, initial.arrivalId, params.autoSearch]);
 
   const selectOutbound = async (option: NormalizedFlightOption) => {
     if (!lastInput) return;
@@ -184,7 +198,11 @@ export default function FlightsSearchScreen() {
     returnLeg.reset();
   };
 
-  const timeOf = (iso?: string | null) => iso?.split(" ")[1] ?? "";
+  // Providers return segment times as "2026-10-08 06:15", "06:15", or an ISO
+  // string depending on the response. Anything that only handles the first
+  // shape hands the trip screen an empty time — and an empty return time makes
+  // the whole return leg render as a bare date.
+  const timeOf = (iso?: string | null) => extractClockTime(iso);
   const minsToLabel = (mins?: number | null) =>
     mins != null ? `${Math.floor(mins / 60)}h ${mins % 60}m` : "";
 
@@ -220,6 +238,11 @@ export default function FlightsSearchScreen() {
 
   // Navigate to the deal-trip screen (flight-search mode) with both legs
   // locked in and dates/destination/travelers prefilled.
+  //
+  // Reached only from the booking-options sheet, i.e. after the traveler has
+  // actually settled on a return flight. The results cards deliberately do NOT
+  // offer this — a "create trip" shortcut sitting on every return option let
+  // people skip out of the search mid-comparison.
   const onCreateTrip = (returnOption: NormalizedFlightOption) => {
     if (!lastInput || !selectedOutbound) return;
     const out = mapLeg(selectedOutbound);
@@ -227,6 +250,14 @@ export default function FlightsSearchScreen() {
 
     const originAirport = AIRPORTS.find((a) => a.code === lastInput.departureId);
     const destAirport = AIRPORTS.find((a) => a.code === lastInput.arrivalId);
+    // `arrivalCityName` is a route param from the caller (explore / destination
+    // preview). It only describes the arrival we were *opened* with — if the
+    // traveler edited the destination in the form it now names a different
+    // city than `lastInput.arrivalId`, and the trip would be generated for the
+    // wrong place. Trust it only while the two still agree.
+    const paramCityMatchesSearch =
+      !!params.arrivalCityName &&
+      (!params.arrivalId || params.arrivalId === lastInput.arrivalId);
     const adults = lastInput.adults || 1;
     // SerpApi's option price is the TOTAL round-trip fare for ALL searched
     // travelers, so derive per-person from it — don't multiply again.
@@ -241,7 +272,10 @@ export default function FlightsSearchScreen() {
         originCity: originAirport?.city || out.firstSeg?.departureAirport.name || lastInput.departureId,
         destination: lastInput.arrivalId,
         destinationCity:
-          params.arrivalCityName || destAirport?.city || out.lastSeg?.arrivalAirport.name || lastInput.arrivalId,
+          (paramCityMatchesSearch ? params.arrivalCityName : undefined) ||
+          destAirport?.city ||
+          out.lastSeg?.arrivalAirport.name ||
+          lastInput.arrivalId,
         airline: out.airline,
         flightNumber: out.flightNumber,
         outboundDate: lastInput.outboundDate,
@@ -527,7 +561,6 @@ export default function FlightsSearchScreen() {
                   setSelected(o);
                   setSheetOpen(true);
                 }}
-                onCreateTrip={onCreateTrip}
                 travelers={lastInput?.adults}
               />
             )}

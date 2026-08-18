@@ -136,7 +136,9 @@
     "autoApplied": "These will be automatically applied when you create a new trip",
     "defaultLocation": "DEFAULT LOCATION",
     "homeAirport": "Home Airport",
-    "homeAirportPlaceholder": "e.g. Athens, ATH",
+    "homeAirportPlaceholder": "e.g. Athens, Greece ATH",
+    "homeAirportRequiredTitle": "Base airport required",
+    "homeAirportRequired": "Add your base airport to continue — we use it to find flights from your city.",
     "defaults": "DEFAULTS",
     "budgetLabel": "Budget ($)",
     "defaultInterests": "DEFAULT INTERESTS",
@@ -278,7 +280,9 @@
     "generate": "Generate Itinerary",
     "selectInterests": "Please select at least one interest",
     "outbound": "Outbound",
-    "return": "Return"
+    "return": "Return",
+    "locked": "Locked",
+    "total": "total"
   },
   "createTrip": {
     "designYour": "Design your",
@@ -354,7 +358,11 @@
     "natureOutdoor": "Nature & outdoor spots",
     "nightlife": "Nightlife & local bars",
     "neighborhoodWalks": "Neighborhood walks",
-    "festivals": "Festivals & seasonal events"
+    "festivals": "Festivals & seasonal events",
+    "travelers": "Travelers",
+    "traveler": "traveler",
+    "interests": "Interests",
+    "perPerson": "per person"
   },
   "trips": {
     "myTrips": "My Trips",
@@ -611,7 +619,6 @@
     "showCheapest": "Cheapest flights",
     "showHidden": "Show hidden",
     "hideSelfTransfer": "Hide self-transfer",
-    "createTripWithFlight": "Create trip with this flight",
     "findFlights": "Find flights",
     "searching": "Searching…",
     "fromIata": "From (IATA)",
@@ -943,6 +950,12 @@
   },
   "destinationPreview": {
     "cheapestDays": "Cheapest days to fly",
+    "soonest": "Soonest",
+    "loadingFares": "Checking fares…",
+    "noFaresForMonth": "No fares found for {{month}}",
+    "noFaresSoonest": "No fares in the next two weeks — try a month above",
+    "setHomeAirport": "Set your home airport to see live fares",
+    "noAirportForDestination": "We don't know an airport for {{destination}} yet — search flights to pick one",
     "bestSeason": "best season",
     "daysUnitShort": "d",
     "flightsFromCity": "Flights from {{origin}}",
@@ -1434,6 +1447,9 @@
     "bookThisDeal": "Book This Deal"
   },
   "tripMap": {
+    "shareUnavailableTitle": "Route not ready",
+    "shareUnavailableBody": "At least two stops need to be placed on the map before you can share this day.",
+    "shareFailed": "Could not capture the map. Please try again.",
     "locationNotFound": "Location not found",
     "tryAgain": "Try again",
     "loadingSights": "Loading sights...",
@@ -1804,6 +1820,22 @@
     "earnCredits": "Earn Credits",
     "generateCode": "Generate Code"
   },
+  "shareRoute": {
+    "title": "Share route map",
+    "routeMap": "Your route map",
+    "shareDay": "Share this day",
+    "totalDistance": "Total distance",
+    "walkingTime": "Walking time",
+    "calories": "Calories (est.)",
+    "difficulty": "Difficulty",
+    "easy": "Easy",
+    "moderate": "Moderate",
+    "challenging": "Challenging",
+    "hrs": "hrs",
+    "min": "min",
+    "stops": "stops",
+    "tip": "Tip"
+  },
   "shareCard": {
     "shareTrip": "Share Trip Card",
     "day": "Day",
@@ -1832,7 +1864,36 @@
     "moreDays": "more days",
     "activities": "Activities",
     "budget": "Budget",
-    "travelers": "Travelers"
+    "travelers": "Travelers",
+    "yourTripBudget": "Your Trip Budget",
+    "budgetOverview": "Budget Overview",
+    "yourBudget": "Your Budget",
+    "trustTransparent": "Transparent",
+    "trustTransparentSub": "Real-time prices you can trust",
+    "trustSmart": "Smart",
+    "trustSmartSub": "AI optimized for your budget",
+    "trustSecure": "Secure",
+    "trustSecureSub": "Your data is safe with Planera",
+    "trustSupport": "Support",
+    "trustSupportSub": "We're here for you 24/7",
+    "posterEyebrow": "Your adventure awaits",
+    "posterDays": "{{count}} Days",
+    "posterIn": "in",
+    "posterFor": "for only",
+    "posterPerPerson": "per person!",
+    "posterTotal": "total",
+    "posterTagline1": "Plan less.",
+    "posterTagline2": "Travel more.",
+    "featureLandmarks": "Iconic landmarks",
+    "featureLocal": "Local experiences",
+    "featureRoutes": "Scenic routes",
+    "featureMemories": "Unforgettable memories",
+    "posterSaving": "{{amount}} under your budget",
+    "posterCta": "Plan yours",
+    "inclFlights": "Flights found",
+    "inclStay": "Stay found",
+    "inclExperiences": "{{count}} experiences",
+    "inclDays": "{{count}} days planned"
   },
   "packages": {
     "title": "Curated Packages",
@@ -1949,5 +2010,11 @@
     "createTripGeneric": "Create a new trip",
     "roundTrip": "Round trip",
     "legCount": "{{count}} flights"
+  },
+  "homeAirport": {
+    "placeholder": "e.g. Athens, Greece ATH",
+    "hint": "Enter it in English — that's how we match flights from your city.",
+    "englishOnlyTitle": "Enter it in English",
+    "englishOnly": "We couldn’t match that to an airport. Please write your base airport in English, for example \"Athens, Greece ATH\"."
   }
 }

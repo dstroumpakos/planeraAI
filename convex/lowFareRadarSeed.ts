@@ -98,12 +98,37 @@ const POPULAR_DESTINATIONS: Array<{ code: string; city: string }> = [
  * Phase-0 scan geometry. `google_flights_calendar` caps a request at 200
  * (outbound × return) date combinations, which the lib turns into ~14-day
  * windows — so breadth is bought one API call at a time.
- *
- * 3 windows starting 21 days out covers departures ~3 to ~9 weeks ahead, which
- * brackets the old fixed +45/+52 pair on both sides.
  */
-const DEFAULT_CALENDAR_WINDOWS = 3;
 const DEFAULT_SCAN_START_OFFSET_DAYS = 21;
+
+/** The lib never prices a departure sooner than this; mirrored for the maths. */
+const CALENDAR_MIN_LEAD_DAYS = 8;
+/** One `google_flights_calendar` request spans this many outbound days. */
+const CALENDAR_WINDOW_DAYS = 14;
+
+/**
+ * How far ahead the scan must be able to price a departure — the product
+ * requirement, in the one place that decides it.
+ *
+ * Deals two months out are the point of the feature: a curated deal is
+ * re-priced by the refresh cron and has no `expiresAt`, so a scan that only
+ * reaches ~6 weeks can never surface the cheap shoulder-season dates that make
+ * the radar worth opening. Expressed as a horizon rather than a window count
+ * because the two are only equivalent at one particular start offset — the
+ * previous hardcoded `windows` silently shortened the horizon to ~7 weeks when
+ * it was tuned down for speed, which is the regression this constant prevents.
+ */
+const MIN_HORIZON_DAYS = 60;
+
+/**
+ * Windows needed to reach `MIN_HORIZON_DAYS` from a given start offset. Clamped
+ * to the same 1–6 range the `calendarWindows` arg accepts.
+ */
+function windowsForHorizon(startOffsetDays: number): number {
+  const start = Math.max(startOffsetDays, CALENDAR_MIN_LEAD_DAYS);
+  const span = MIN_HORIZON_DAYS - start + 1;
+  return Math.max(1, Math.min(Math.ceil(span / CALENDAR_WINDOW_DAYS), 6));
+}
 
 /** How many top-ranked routes get a real (bookable, graded) verify search. */
 const VERIFY_HEADROOM = 6;
@@ -114,21 +139,39 @@ const VERIFY_HEADROOM = 6;
  * lifetime on network latency alone. Phases 1 and 2 stay sequential (they write
  * and they burn the heavier endpoints).
  */
-const DEFAULT_SCAN_CONCURRENCY = 4;
+const DEFAULT_SCAN_CONCURRENCY = 8;
 
 /**
  * Wall-clock budgets. Convex kills an action at 10 minutes, and the admin
  * widget calls this over a plain synchronous fetch — so a run that approaches
  * the limit is lost work AND a hung button. Phases 0+1 stop discovering at
  * SCAN_BUDGET_MS, leaving room for phase 2 to actually seed what qualified;
- * TOTAL_BUDGET_MS then stops seeding with margin to spare. Either cut sets
+ * TOTAL_BUDGET_MS then stops seeding with margin to spare. Any cut sets
  * `timedOut` in the result so the admin knows to press again.
  *
- * Expected shape of a full run at the defaults: ~72 calendar calls at
- * concurrency 4 (~1.5 min), ~16 verify searches (~1 min), ~10 winners × 2–3
- * enrich calls (~2 min) ≈ 4.5 min.
+ * CALENDAR_BUDGET_MS is the phase-0 share, and it is load-bearing rather than a
+ * nicety: phase 0 alone cannot produce a deal. A calendar fare is indicative and
+ * carries no `price_level`, so a route only becomes seedable after phase 1 spends
+ * a real search on it. When both phases shared one deadline, a slow scan ate the
+ * whole thing and phase 1 ran ZERO searches — the run then reported success
+ * having seeded nothing (observed live: SVO, 3m52s, "time budget hit after 0
+ * verify search(es)"). Reserving the tail for phase 1 makes a slow scan degrade
+ * (later destinations fall back to the fixed date pair) instead of starving the
+ * only phase that can qualify anything.
+ *
+ * Measured shape of a run at the defaults. A wave of 8 concurrent calendar
+ * calls completes in ~11.8s, and the lib walks a destination's `windows`
+ * sequentially — so phase 0 costs ceil(24/8)=3 waves × `windows` × 11.8s. At the
+ * 3 windows MIN_HORIZON_DAYS requires that is ~106s. The 17/8 SVO run then
+ * measured phase 1 + phase 2 at ~140s combined (16 verify searches + ~25 enrich
+ * calls), for ~4.1 min end to end.
+ *
+ * Each budget therefore sits ~40% above its measured phase, and the worst case
+ * where every phase runs to its deadline is 7 min — still 3 min inside the
+ * 10-minute limit at which Convex kills the action.
  */
-const SCAN_BUDGET_MS = 3.5 * 60 * 1000;
+const CALENDAR_BUDGET_MS = 2.5 * 60 * 1000;
+const SCAN_BUDGET_MS = 4 * 60 * 1000;
 const TOTAL_BUDGET_MS = 7 * 60 * 1000;
 
 /** Fallback trip length when a calendar date has no paired return. */
@@ -347,13 +390,18 @@ export const seedDealsForOrigin = action({
     // genuine `low` fares, none for merely-`typical` ones).
     const dealTagOverride = args.dealTag?.trim() || undefined;
 
-    const windows = Math.max(
-      1,
-      Math.min(Math.round(args.calendarWindows ?? DEFAULT_CALENDAR_WINDOWS), 6)
-    );
+    // Offset first: the default window count is derived from it, so that moving
+    // the start offset can never silently shorten the horizon.
     const startOffsetDays = Math.max(
       0,
       Math.round(args.startOffsetDays ?? DEFAULT_SCAN_START_OFFSET_DAYS)
+    );
+    const windows = Math.max(
+      1,
+      Math.min(
+        Math.round(args.calendarWindows ?? windowsForHorizon(startOffsetDays)),
+        6
+      )
     );
     const concurrency = Math.max(
       1,
@@ -402,6 +450,10 @@ export const seedDealsForOrigin = action({
     // the network. Quota is identical either way.
     let calendarCalls = 0;
     let calendarEmpty = 0;
+    // Destinations the phase-0 cut skipped. Counted (and logged once, not once
+    // per skipped route) because a silent truncation is indistinguishable from a
+    // thin candidate pool when reading the logs afterwards.
+    let calendarSkipped = 0;
 
     const scans: ScanResult[] = await mapWithConcurrency(
       candidatePool,
@@ -418,9 +470,13 @@ export const seedDealsForOrigin = action({
           fellBack: true,
         };
 
-        // Out of time — take the fixed pair rather than start a fresh scan.
-        if (Date.now() - startedAt > SCAN_BUDGET_MS) {
+        // Out of phase-0 time — take the fixed pair rather than start a fresh
+        // scan. Deliberately NOT the shared SCAN_BUDGET_MS: the remainder of
+        // that budget belongs to phase 1, which is the only phase that can turn
+        // any of these scans into a seedable deal.
+        if (Date.now() - startedAt > CALENDAR_BUDGET_MS) {
           timedOut = true;
+          calendarSkipped++;
           return fallback;
         }
 
@@ -474,6 +530,12 @@ export const seedDealsForOrigin = action({
       }
     );
 
+    if (calendarSkipped > 0) {
+      console.warn(
+        `[radar-seed] calendar budget hit ${origin}: ${calendarSkipped}/${candidatePool.length} destination(s) fell back to the fixed date pair; phase 1 keeps the remaining budget`
+      );
+    }
+
     // Rank by the route-local discount, then by indicative price, and verify
     // only the head of that list. Ranking on the calendar's own signal (rather
     // than absolute cheapness) keeps a genuinely-discounted long-haul ahead of
@@ -504,7 +566,13 @@ export const seedDealsForOrigin = action({
     // (with the tokens phase 2 needs) and Google's low/typical/high grade.
     // Sequential — these are the heavier endpoint.
     for (const scan of ranked) {
-      if (Date.now() - startedAt > SCAN_BUDGET_MS) {
+      // Always spend the FIRST verify search, even past the deadline. The phase-0
+      // cap above should keep us well inside it, but a raised `calendarWindows`
+      // can still overrun — and breaking here at zero is the one outcome with no
+      // upside: the ~48 calendar calls already spent are wasted unless at least
+      // one route gets graded. One extra search (~10s, well inside
+      // TOTAL_BUDGET_MS) buys the run a chance of seeding something.
+      if (verifySearches > 0 && Date.now() - startedAt > SCAN_BUDGET_MS) {
         timedOut = true;
         console.warn(
           `[radar-seed] time budget hit after ${verifySearches} verify search(es); seeding what qualified so far`

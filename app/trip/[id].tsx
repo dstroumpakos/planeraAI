@@ -21,6 +21,7 @@ import { useAuthenticatedMutation, useToken } from "@/lib/useAuthenticatedMutati
 import { useCachedQuery, useIsOffline } from "@/lib/useCachedQuery";
 import { tripCacheKey, sightsCacheKey } from "@/lib/offlineTripCache";
 import { optimizeUnsplashUrl, IMAGE_SIZES } from "@/lib/imageUtils";
+import { formatFare } from "@/lib/currency";
 import * as Haptics from "expo-haptics";
 import * as WebBrowser from "expo-web-browser";
 import * as Location from "expo-location";
@@ -1602,12 +1603,17 @@ export default function TripDetails() {
     const totalAccommodationCost = supplierStayTotal ?? accommodationPricePerNight * duration;
     const totalDailyExpenses = dailyExpensesPerPerson * travelers * duration;
 
-    // Curated bookable experiences (GetYourGuide etc.): sum their ticket prices
-    // across the itinerary (per person × travelers) so they show in the budget.
+    // Experiences: every priced item in the itinerary — curated bookable
+    // experiences (GetYourGuide etc.) AND the entry tickets the AI prices for
+    // museums/attractions — summed per person × travelers.
+    // Restaurants are excluded on purpose: they carry a "€/€€/€€€" priceRange
+    // rather than a fare, and meals are already covered by daily spending.
     const totalExperiencesCost = (itinerary?.dayByDayItinerary || []).reduce((sum: number, day: any) => {
         const acts = day?.activities || [];
         return sum + acts.reduce((s: number, a: any) => {
-            if (a?.affiliateProvider && typeof a?.price === 'number' && a.price > 0) {
+            const isFood = a?.type === 'restaurant' || a?.type === 'meal' || !!a?.culinaryMoment || !!a?.culinaryType;
+            if (isFood) return s;
+            if (typeof a?.price === 'number' && a.price > 0) {
                 return s + a.price * travelers;
             }
             return s;
@@ -1620,7 +1626,9 @@ export default function TripDetails() {
     // ─── Budget breakdown (marketing view) ───
     // Whether flight prices come from a live search vs an estimate
     const flightDataSource = itinerary?.flights?.dataSource;
-    const isLiveFlightData = flightDataSource === 'serpapi' || flightDataSource === 'duffel' || flightDataSource === 'low-fare-radar';
+    // 'flight-search' = a fare the traveler picked themselves in the flight
+    // search screen — as live as it gets, so it must not read as an estimate.
+    const isLiveFlightData = flightDataSource === 'serpapi' || flightDataSource === 'duffel' || flightDataSource === 'low-fare-radar' || flightDataSource === 'flight-search';
     // Real supplier deal on the selected stay (only when supplier returned an original price)
     const stayOriginalPrice = typeof selectedAccommodation?.originalPrice === 'number' ? selectedAccommodation.originalPrice : null;
     const stayDealLabel = selectedAccommodation?.dealLabel || null;
@@ -3459,10 +3467,11 @@ export default function TripDetails() {
                                             </View>
                                         )}
 
-                                        {/* Price */}
+                                        {/* Price — in the currency the fare was
+                                            searched in, not assumed euros. */}
                                         <View style={{ marginBottom: 12 }}>
                                             <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-                                                <Text style={{ fontSize: 22, fontWeight: '800', color: colors.text }}>€{Math.round(selected.pricePerPerson)}</Text>
+                                                <Text style={{ fontSize: 22, fontWeight: '800', color: colors.text }}>{formatFare(selected.pricePerPerson, selected.currency)}</Text>
                                                 <Text style={{ fontSize: 13, color: colors.textMuted, marginLeft: 4 }}>{t('tripDetail.perPerson')}</Text>
                                                 {selected.luggage && (
                                                     <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 'auto', backgroundColor: isDarkMode ? colors.secondary : '#F0FDFA', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 }}>
@@ -3471,8 +3480,8 @@ export default function TripDetails() {
                                                     </View>
                                                 )}
                                             </View>
-                                            {selected.totalPrice && (
-                                                <Text style={{ fontSize: 13, color: colors.textMuted, marginTop: 2 }}>€{Math.round(selected.totalPrice)} {t('tripDetail.totalFor2', { defaultValue: 'total for 2' })}</Text>
+                                            {selected.totalPrice && travelers > 1 && (
+                                                <Text style={{ fontSize: 13, color: colors.textMuted, marginTop: 2 }}>{t('flights.totalForTravelers', { count: travelers, defaultValue: `Total · ${travelers} travelers` })} · {formatFare(selected.totalPrice, selected.currency)}</Text>
                                             )}
                                         </View>
 
@@ -3590,6 +3599,7 @@ export default function TripDetails() {
                                     <TripFlightProviders
                                         providers={trip.itinerary.flights.options[0].bookingProviders}
                                         travelers={trip.travelerCount ?? trip.travelers ?? 1}
+                                        currency={trip.itinerary.flights.options[0].currency}
                                     />
                                 )}
 
@@ -5221,6 +5231,26 @@ export default function TripDetails() {
             <ShareTripCard
                 ref={shareCardRef}
                 trip={trip}
+                budget={{
+                    total: grandTotal,
+                    travelers,
+                    nights: duration,
+                    isLive: isLiveFlightData,
+                    categories: budgetCategories.map((c) => ({
+                        key: c.key,
+                        label: c.label,
+                        amount: c.amount,
+                        color: c.color,
+                        icon: c.icon,
+                    })),
+                    perPerson: pricePerPerson,
+                    perDay,
+                    perPersonPerDay,
+                    targetBudget,
+                    delta: budgetDelta,
+                    isOverBudget,
+                    usedPct: budgetUsedPct,
+                }}
             />
 
             {/* OTA Package inquiry modal */}

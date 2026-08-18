@@ -346,7 +346,11 @@ export const createFromDeal = authMutation({
                     segments: deal.returnSegments || undefined,
                 } : undefined,
                 pricePerPerson: deal.price,
-                totalPrice: deal.totalPrice || deal.price * 2,
+                // `deal.totalPrice` is the fare total for however many adults
+                // the radar search ran with — not for this trip's travelers.
+                // Scale the per-person figure instead so the flight card and
+                // the trip's budget breakdown agree.
+                totalPrice: deal.price * args.travelerCount,
                 currency: deal.currency,
                 isBestPrice: true,
                 checkedBaggageIncluded: !!deal.checkedBaggage,
@@ -588,7 +592,14 @@ export const createFromFlight = authMutation({
                     segments: args.returnSegments || undefined,
                 } : undefined,
                 pricePerPerson: args.pricePerPerson,
-                totalPrice: args.totalPrice || args.pricePerPerson * args.travelerCount,
+                // `args.totalPrice` is the searched fare total, priced for
+                // `searchAdults`. The user can change the traveler count on
+                // the deal-trip screen afterwards, so it's only usable when
+                // the two still match; otherwise scale the per-person fare.
+                totalPrice:
+                    args.totalPrice && (args.searchAdults ?? args.travelerCount) === args.travelerCount
+                        ? args.totalPrice
+                        : args.pricePerPerson * args.travelerCount,
                 currency: args.currency,
                 isBestPrice: true,
                 checkedBaggageIncluded: false,
@@ -696,6 +707,55 @@ export const createFromFlight = authMutation({
         return tripId;
     },
 });
+
+// Fields written onto a locked flight option by the post-creation booking
+// enrichment. Kept in one place so both writers below stay in sync.
+const FLIGHT_BOOKING_FIELDS = [
+    "bookingUrl",
+    "bookingRequest",
+    "outboundBookingUrl",
+    "outboundBookingRequest",
+    "returnBookingUrl",
+    "returnBookingRequest",
+    "bookingProviders",
+] as const;
+
+/**
+ * Carry booking links from the trip's live `dealFlightData` onto the flights
+ * block about to be written into the itinerary.
+ *
+ * Deal / flight-search trips schedule `enrichTripBooking` and `tripsActions
+ * .generate` together at creation time. `generate` snapshots the trip up
+ * front, so the flights block it hands back is the pre-enrichment copy — and
+ * the trip screen only ever renders `itinerary.flights`. Without this merge a
+ * trip created from the flight search lands with no Book button and no
+ * provider list, even though the links exist on `dealFlightData`.
+ * (The reverse ordering — enrichment finishing after the itinerary is written
+ * — is handled by `setFlightBookingData` patching the itinerary directly.)
+ */
+function mergeLockedFlightBooking(trip: any, itineraryExtras: any): any {
+    const liveOption = trip?.dealFlightData?.options?.[0];
+    const options = itineraryExtras?.flights?.options;
+    if (!liveOption || !Array.isArray(options) || options.length === 0) {
+        return itineraryExtras;
+    }
+
+    const booking: Record<string, any> = {};
+    for (const field of FLIGHT_BOOKING_FIELDS) {
+        if (liveOption[field]) booking[field] = liveOption[field];
+    }
+    if (Object.keys(booking).length === 0) return itineraryExtras;
+
+    return {
+        ...itineraryExtras,
+        flights: {
+            ...itineraryExtras.flights,
+            options: options.map((o: any, i: number) =>
+                i === 0 ? { ...o, ...booking } : o
+            ),
+        },
+    };
+}
 
 // Store booking link(s) on a flight-search trip's locked flight data.
 // Called by flightsSerpApi.enrichTripBooking right after trip creation.
@@ -1058,8 +1118,10 @@ export const writeBaseItinerary = internalMutation({
             console.log(`writeBaseItinerary: deduped ${removedCount} repeated venue(s)`);
         }
 
+        const itineraryExtras = mergeLockedFlightBooking(trip, args.itineraryExtras);
+
         await ctx.db.patch(args.tripId, {
-            itinerary: { ...args.itineraryExtras, dayByDayItinerary: days },
+            itinerary: { ...itineraryExtras, dayByDayItinerary: days },
             status: "completed",
             generationProgress: {
                 phase: days.length > 0 ? "enriching" : "done",

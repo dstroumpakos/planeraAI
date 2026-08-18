@@ -136,7 +136,9 @@
     "autoApplied": "Celles-ci seront automatiquement appliquées lorsque vous créez un nouveau voyage",
     "defaultLocation": "EMPLACEMENT PAR DÉFAUT",
     "homeAirport": "Aéroport de Base",
-    "homeAirportPlaceholder": "ex. Paris, CDG",
+    "homeAirportPlaceholder": "e.g. Athens, Greece ATH",
+    "homeAirportRequiredTitle": "Aéroport de base requis",
+    "homeAirportRequired": "Ajoutez votre aéroport de base pour continuer — il nous sert à trouver les vols au départ de votre ville.",
     "defaults": "PARAMÈTRES PAR DÉFAUT",
     "budgetLabel": "Budget ($)",
     "defaultInterests": "INTÉRÊTS PAR DÉFAUT",
@@ -278,7 +280,9 @@
     "generate": "Générer l'Itinéraire",
     "selectInterests": "Veuillez sélectionner au moins un intérêt",
     "outbound": "Aller",
-    "return": "Retour"
+    "return": "Retour",
+    "locked": "Verrouillé",
+    "total": "total"
   },
   "createTrip": {
     "designYour": "Concevez votre",
@@ -354,7 +358,11 @@
     "natureOutdoor": "Nature et plein air",
     "nightlife": "Vie nocturne et bars locaux",
     "neighborhoodWalks": "Promenades de quartier",
-    "festivals": "Festivals et événements saisonniers"
+    "festivals": "Festivals et événements saisonniers",
+    "travelers": "Voyageurs",
+    "traveler": "voyageur",
+    "interests": "Centres d'intérêt",
+    "perPerson": "par personne"
   },
   "trips": {
     "myTrips": "Mes Voyages",
@@ -611,7 +619,6 @@
     "showCheapest": "Vols les moins chers",
     "showHidden": "Afficher masqués",
     "hideSelfTransfer": "Masquer auto-correspondance",
-    "createTripWithFlight": "Créer un voyage avec ce vol",
     "findFlights": "Rechercher des vols",
     "searching": "Recherche…",
     "fromIata": "De (IATA)",
@@ -948,6 +955,12 @@
   },
   "destinationPreview": {
     "cheapestDays": "Jours les moins chers",
+    "soonest": "Au plus tôt",
+    "loadingFares": "Recherche des tarifs…",
+    "noFaresForMonth": "Aucun tarif trouvé pour {{month}}",
+    "noFaresSoonest": "Aucun tarif dans les deux prochaines semaines — essayez un mois ci-dessus",
+    "setHomeAirport": "Définissez votre aéroport de départ pour voir les tarifs en direct",
+    "noAirportForDestination": "Nous ne connaissons pas encore d’aéroport pour {{destination}} — recherchez des vols pour en choisir un",
     "bestSeason": "meilleure saison",
     "daysUnitShort": "j",
     "flightsFromCity": "Vols depuis {{origin}}",
@@ -1434,6 +1447,9 @@
     "bookThisDeal": "Réserver cette Offre"
   },
   "tripMap": {
+    "shareUnavailableTitle": "Itinéraire pas prêt",
+    "shareUnavailableBody": "Il faut au moins deux étapes placées sur la carte pour partager cette journée.",
+    "shareFailed": "Impossible de capturer la carte. Réessaie.",
     "locationNotFound": "Lieu non trouvé",
     "tryAgain": "Réessayer",
     "loadingSights": "Chargement des sites...",
@@ -1804,6 +1820,22 @@
     "earnCredits": "Gagner des Crédits",
     "generateCode": "Générer un Code"
   },
+  "shareRoute": {
+    "title": "Partager la carte",
+    "routeMap": "Ta carte d'itinéraire",
+    "shareDay": "Partager cette journée",
+    "totalDistance": "Distance totale",
+    "walkingTime": "Temps de marche",
+    "calories": "Calories (est.)",
+    "difficulty": "Difficulté",
+    "easy": "Facile",
+    "moderate": "Modérée",
+    "challenging": "Exigeante",
+    "hrs": "h",
+    "min": "min",
+    "stops": "étapes",
+    "tip": "Astuce"
+  },
   "shareCard": {
     "shareTrip": "Partager la Carte de Voyage",
     "day": "Jour",
@@ -1832,7 +1864,36 @@
     "moreDays": "jours de plus",
     "activities": "Activités",
     "budget": "Budget",
-    "travelers": "Voyageurs"
+    "travelers": "Voyageurs",
+    "yourTripBudget": "Le budget de ton voyage",
+    "budgetOverview": "Aperçu du budget",
+    "yourBudget": "Ton budget",
+    "trustTransparent": "Transparent",
+    "trustTransparentSub": "Des prix en temps réel fiables",
+    "trustSmart": "Intelligent",
+    "trustSmartSub": "IA optimisée pour ton budget",
+    "trustSecure": "Sécurisé",
+    "trustSecureSub": "Tes données sont en sécurité avec Planera",
+    "trustSupport": "Support",
+    "trustSupportSub": "Nous sommes là pour toi 24/7",
+    "posterEyebrow": "Ton aventure t'attend",
+    "posterDays": "{{count}} Jours",
+    "posterIn": "à",
+    "posterFor": "pour seulement",
+    "posterPerPerson": "par personne !",
+    "posterTotal": "au total",
+    "posterTagline1": "Planifie moins.",
+    "posterTagline2": "Voyage plus.",
+    "featureLandmarks": "Sites emblématiques",
+    "featureLocal": "Expériences locales",
+    "featureRoutes": "Routes panoramiques",
+    "featureMemories": "Souvenirs inoubliables",
+    "posterSaving": "{{amount}} sous ton budget",
+    "posterCta": "Crée le tien",
+    "inclFlights": "Vols trouvés",
+    "inclStay": "Hébergement trouvé",
+    "inclExperiences": "{{count}} expériences",
+    "inclDays": "{{count}} jours planifiés"
   },
   "packages": {
     "title": "Forfaits sélectionnés",
@@ -1949,5 +2010,11 @@
     "createTripGeneric": "Créer un nouveau voyage",
     "roundTrip": "Aller-retour",
     "legCount": "{{count}} vols"
+  },
+  "homeAirport": {
+    "placeholder": "e.g. Athens, Greece ATH",
+    "hint": "Saisissez-le en anglais — c’est ainsi que nous trouvons les vols au départ de votre ville.",
+    "englishOnlyTitle": "Saisissez-le en anglais",
+    "englishOnly": "Nous n’avons pas pu identifier cet aéroport. Saisissez votre aéroport de départ en anglais, par exemple « Athens, Greece ATH »."
   }
 }

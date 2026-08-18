@@ -18,6 +18,7 @@
 import { v } from "convex/values";
 import { internalMutation } from "./_generated/server";
 import { AIRPORTS } from "../lib/airports";
+import { extractHm } from "./lib/searchApiFlights";
 
 const AUTO_DEAL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -28,10 +29,9 @@ function cityForIata(code: string): string {
 }
 
 function timeOnly(iso?: string | null): string {
-  // SerpApi format: "2024-06-10 08:00". Fall back to the raw string.
-  if (!iso) return "";
-  const parts = iso.split(" ");
-  return parts[1] ?? iso;
+  // Providers return "2024-06-10 08:00", a bare "08:00", or an ISO string —
+  // extractHm covers all three; splitting on a space only covers the first.
+  return extractHm(iso) ?? "";
 }
 
 function minutesToHm(mins?: number | null): string | undefined {

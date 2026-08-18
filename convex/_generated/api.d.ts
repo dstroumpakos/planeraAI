@@ -38,6 +38,7 @@ import type * as crons from "../crons.js";
 import type * as dealExtractor from "../dealExtractor.js";
 import type * as destinationSpend from "../destinationSpend.js";
 import type * as destinationStats from "../destinationStats.js";
+import type * as emailEvents from "../emailEvents.js";
 import type * as emailHelpers from "../emailHelpers.js";
 import type * as emails from "../emails.js";
 import type * as errorReporter from "../errorReporter.js";
@@ -173,6 +174,7 @@ declare const fullApi: ApiFromModules<{
   dealExtractor: typeof dealExtractor;
   destinationSpend: typeof destinationSpend;
   destinationStats: typeof destinationStats;
+  emailEvents: typeof emailEvents;
   emailHelpers: typeof emailHelpers;
   emails: typeof emails;
   errorReporter: typeof errorReporter;

@@ -17,6 +17,7 @@
 import { action } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { v } from "convex/values";
+import { resolveHomeIata } from "../lib/homeAirport";
 import type {
   DealScore,
   FlightSearchInput,
@@ -88,6 +89,10 @@ export const searchLowFareRadarDeals = action({
     if (!homeAirport.trim()) throw new Error("homeAirport is required.");
     if (destinationAirports.length === 0) return [];
 
+    // Callers may pass a bare code ("ATH"), a label ("Athens, Greece ATH") or a
+    // city name in the user's own language ("Αθήνα"). SerpApi only takes codes.
+    const departureId = resolveHomeIata(homeAirport) ?? homeAirport.trim().toUpperCase();
+
     // Pick a small set of dates to bound API usage. We never iterate every
     // date in [dateFrom, dateTo] — that explodes SerpApi quota.
     const datesToTry =
@@ -103,7 +108,7 @@ export const searchLowFareRadarDeals = action({
 
       for (const outboundDate of datesToTry) {
         const searchInput: FlightSearchInput = {
-          departureId: homeAirport.toUpperCase(),
+          departureId,
           arrivalId: dest.toUpperCase(),
           outboundDate,
           type: "one_way",
@@ -135,7 +140,7 @@ export const searchLowFareRadarDeals = action({
           }
         } catch (err) {
           console.error(
-            `[LowFareRadar] failed ${homeAirport}->${dest} ${outboundDate}`
+            `[LowFareRadar] failed ${departureId}->${dest} ${outboundDate}`
           );
         }
       }

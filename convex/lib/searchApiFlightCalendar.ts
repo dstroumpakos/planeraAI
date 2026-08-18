@@ -73,6 +73,15 @@ async function callSearchApi(
   params: URLSearchParams,
   key: string
 ): Promise<any | null> {
+  // Route + scanned window, for logs only. Built BEFORE the key is appended and
+  // assembled field by field — never `params.toString()`, which would put the
+  // api_key in the log. Without this, a batch scan (the admin radar seeder fires
+  // ~72 calls per press) reports "no results for route" with no way to tell
+  // WHICH routes came back empty.
+  const route =
+    `${params.get("departure_id") ?? "?"}->${params.get("arrival_id") ?? "?"}` +
+    ` ${params.get("outbound_date_start") ?? "?"}..${params.get("outbound_date_end") ?? "?"}`;
+
   params.append("api_key", key);
   let res: Response;
   try {
@@ -81,7 +90,7 @@ async function callSearchApi(
       headers: { Accept: "application/json" },
     });
   } catch {
-    console.error("[searchapi-calendar] Network error");
+    console.error(`[searchapi-calendar] Network error ${route}`);
     return null;
   }
   if (!res.ok) {
@@ -91,7 +100,7 @@ async function callSearchApi(
     } catch {
       /* ignore */
     }
-    console.error(`[searchapi-calendar] HTTP ${res.status} ${detail}`);
+    console.error(`[searchapi-calendar] HTTP ${res.status} ${route} ${detail}`);
     return null;
   }
   try {
@@ -102,15 +111,15 @@ async function callSearchApi(
       // operational failure — the caller just hides the "cheapest days" strip.
       // Keep it out of the error logs (mirrors searchApiExploreDestination).
       if (/didn't return any results|no results/i.test(msg)) {
-        console.log("[searchapi-calendar] no results for route");
+        console.log(`[searchapi-calendar] no results for route ${route}`);
       } else {
-        console.error("[searchapi-calendar] API error:", msg);
+        console.error(`[searchapi-calendar] API error ${route}:`, msg);
       }
       return null;
     }
     return json;
   } catch {
-    console.error("[searchapi-calendar] Invalid JSON response");
+    console.error(`[searchapi-calendar] Invalid JSON response ${route}`);
     return null;
   }
 }

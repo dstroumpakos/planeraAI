@@ -136,7 +136,9 @@
     "autoApplied": "Diese werden automatisch angewendet, wenn Sie eine neue Reise erstellen",
     "defaultLocation": "STANDARDSTANDORT",
     "homeAirport": "Heimatflughafen",
-    "homeAirportPlaceholder": "z.B. Berlin, BER",
+    "homeAirportPlaceholder": "e.g. Athens, Greece ATH",
+    "homeAirportRequiredTitle": "Heimatflughafen erforderlich",
+    "homeAirportRequired": "Gib deinen Heimatflughafen ein, um fortzufahren — damit finden wir Flüge ab deiner Stadt.",
     "defaults": "STANDARDWERTE",
     "budgetLabel": "Budget ($)",
     "defaultInterests": "STANDARDINTERESSEN",
@@ -278,7 +280,9 @@
     "generate": "Reiseplan erstellen",
     "selectInterests": "Bitte wählen Sie mindestens ein Interesse",
     "outbound": "Hinflug",
-    "return": "Rückflug"
+    "return": "Rückflug",
+    "locked": "Fixiert",
+    "total": "gesamt"
   },
   "createTrip": {
     "designYour": "Gestalten Sie Ihren",
@@ -354,7 +358,11 @@
     "natureOutdoor": "Natur & Outdoor",
     "nightlife": "Nachtleben & lokale Bars",
     "neighborhoodWalks": "Stadtteil-Spaziergänge",
-    "festivals": "Festivals & saisonale Veranstaltungen"
+    "festivals": "Festivals & saisonale Veranstaltungen",
+    "travelers": "Reisende",
+    "traveler": "Reisender",
+    "interests": "Interessen",
+    "perPerson": "pro Person"
   },
   "trips": {
     "myTrips": "Meine Reisen",
@@ -611,7 +619,6 @@
     "showCheapest": "Günstigste Flüge",
     "showHidden": "Ausgeblendete anzeigen",
     "hideSelfTransfer": "Selbst-Umstieg ausblenden",
-    "createTripWithFlight": "Reise mit diesem Flug erstellen",
     "findFlights": "Flüge finden",
     "searching": "Suche läuft…",
     "fromIata": "Von (IATA)",
@@ -948,6 +955,12 @@
   },
   "destinationPreview": {
     "cheapestDays": "Günstigste Reisetage",
+    "soonest": "Demnächst",
+    "loadingFares": "Preise werden geprüft…",
+    "noFaresForMonth": "Keine Preise für {{month}} gefunden",
+    "noFaresSoonest": "Keine Preise in den nächsten zwei Wochen — probieren Sie einen Monat oben",
+    "setHomeAirport": "Heimatflughafen festlegen, um aktuelle Preise zu sehen",
+    "noAirportForDestination": "Wir kennen noch keinen Flughafen für {{destination}} — suchen Sie Flüge, um einen zu wählen",
     "bestSeason": "beste Zeit",
     "daysUnitShort": "T",
     "flightsFromCity": "Flüge ab {{origin}}",
@@ -1434,6 +1447,9 @@
     "bookThisDeal": "Dieses Angebot Buchen"
   },
   "tripMap": {
+    "shareUnavailableTitle": "Route noch nicht bereit",
+    "shareUnavailableBody": "Mindestens zwei Stopps müssen auf der Karte liegen, bevor du diesen Tag teilen kannst.",
+    "shareFailed": "Die Karte konnte nicht aufgenommen werden. Bitte erneut versuchen.",
     "locationNotFound": "Standort nicht gefunden",
     "tryAgain": "Erneut versuchen",
     "loadingSights": "Sehenswürdigkeiten werden geladen...",
@@ -1804,6 +1820,22 @@
     "earnCredits": "Guthaben verdienen",
     "generateCode": "Code generieren"
   },
+  "shareRoute": {
+    "title": "Karte teilen",
+    "routeMap": "Deine Routenkarte",
+    "shareDay": "Diesen Tag teilen",
+    "totalDistance": "Gesamtstrecke",
+    "walkingTime": "Gehzeit",
+    "calories": "Kalorien (geschätzt)",
+    "difficulty": "Schwierigkeit",
+    "easy": "Leicht",
+    "moderate": "Mittel",
+    "challenging": "Anspruchsvoll",
+    "hrs": "Std.",
+    "min": "Min.",
+    "stops": "Stopps",
+    "tip": "Tipp"
+  },
   "shareCard": {
     "shareTrip": "Reisekarte teilen",
     "day": "Tag",
@@ -1832,7 +1864,36 @@
     "moreDays": "weitere Tage",
     "activities": "Aktivitäten",
     "budget": "Budget",
-    "travelers": "Reisende"
+    "travelers": "Reisende",
+    "yourTripBudget": "Dein Reisebudget",
+    "budgetOverview": "Budget-Überblick",
+    "yourBudget": "Dein Budget",
+    "trustTransparent": "Transparent",
+    "trustTransparentSub": "Echtzeitpreise, denen du vertrauen kannst",
+    "trustSmart": "Smart",
+    "trustSmartSub": "KI-optimiert für dein Budget",
+    "trustSecure": "Sicher",
+    "trustSecureSub": "Deine Daten sind bei Planera sicher",
+    "trustSupport": "Support",
+    "trustSupportSub": "Wir sind rund um die Uhr für dich da",
+    "posterEyebrow": "Dein Abenteuer wartet",
+    "posterDays": "{{count}} Tage",
+    "posterIn": "in",
+    "posterFor": "für nur",
+    "posterPerPerson": "pro Person!",
+    "posterTotal": "gesamt",
+    "posterTagline1": "Weniger planen.",
+    "posterTagline2": "Mehr reisen.",
+    "featureLandmarks": "Ikonische Wahrzeichen",
+    "featureLocal": "Lokale Erlebnisse",
+    "featureRoutes": "Malerische Routen",
+    "featureMemories": "Unvergessliche Momente",
+    "posterSaving": "{{amount}} unter deinem Budget",
+    "posterCta": "Plane deine Reise",
+    "inclFlights": "Flüge gefunden",
+    "inclStay": "Unterkunft gefunden",
+    "inclExperiences": "{{count}} Erlebnisse",
+    "inclDays": "{{count}} Tage geplant"
   },
   "packages": {
     "title": "Kuratierte Pakete",
@@ -1949,5 +2010,11 @@
     "createTripGeneric": "Neue Reise erstellen",
     "roundTrip": "Hin- und Rückflug",
     "legCount": "{{count}} Flüge"
+  },
+  "homeAirport": {
+    "placeholder": "e.g. Athens, Greece ATH",
+    "hint": "Bitte auf Englisch eingeben — so finden wir Flüge ab deiner Stadt.",
+    "englishOnlyTitle": "Bitte auf Englisch eingeben",
+    "englishOnly": "Wir konnten dazu keinen Flughafen finden. Gib deinen Heimatflughafen auf Englisch ein, zum Beispiel „Athens, Greece ATH“."
   }
 }

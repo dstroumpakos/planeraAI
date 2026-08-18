@@ -4,6 +4,24 @@ import { internal } from "./_generated/api";
 import { authMutation, authQuery } from "./functions";
 import { internalMutation, internalQuery } from "./_generated/server";
 import { isSubscriptionActiveWithGrace, BILLING_GRACE_PERIOD_MS } from "./helpers/subscription";
+import { canonicalHomeAirport } from "../lib/homeAirport";
+
+/**
+ * Store the base airport in canonical English ("Αθήνα" → "Athens, Greece ATH").
+ *
+ * Every downstream consumer — low-fare radar targeting, Explore, flight search,
+ * trip generation — needs an IATA code, and the clients enforce English input,
+ * but this is the last write barrier: it also covers older app builds and the
+ * website, which share this Convex deployment. Values we can't resolve are
+ * stored untouched rather than rejected, so a user with an airport outside our
+ * dataset never loses their setting.
+ */
+function canonicalizeHomeAirport(raw: string | undefined | null): string | undefined {
+    if (raw === undefined || raw === null) return undefined;
+    const trimmed = String(raw).trim();
+    if (!trimmed) return trimmed;
+    return canonicalHomeAirport(trimmed)?.label ?? trimmed;
+}
 
 // Simple token validation query for actions
 export const validateToken = query({
@@ -374,7 +392,7 @@ export const saveTravelPreferences = authMutation({
         .unique();
 
     const updateData = {
-      homeAirport: args.homeAirport,
+      homeAirport: canonicalizeHomeAirport(args.homeAirport),
       defaultTravelers: args.defaultTravelers,
       defaultInterests: args.interests,
       defaultPreferredFlightTime: args.flightTimePreference,
@@ -444,6 +462,9 @@ export const updateTravelPreferences = authMutation({
     returns: v.null(),
     handler: async (ctx: any, args: any) => {
         const { token, ...updates } = args;
+        if ("homeAirport" in updates) {
+            updates.homeAirport = canonicalizeHomeAirport(updates.homeAirport);
+        }
         const settings = await ctx.db
             .query("userSettings")
             .withIndex("by_user", (q: any) => q.eq("userId", ctx.user.userId))

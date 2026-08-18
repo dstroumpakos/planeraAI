@@ -125,6 +125,113 @@ http.route({
 });
 
 /**
+ * Postmark delivery-event webhook — the feedback half of the mail system.
+ *
+ * Setup (one-time, outside the code):
+ *   1. Set POSTMARK_WEBHOOK_SECRET in the Convex environment.
+ *   2. Postmark → Servers → <server> → each message stream ("outbound" AND the
+ *      "newsletters" broadcast stream) → Webhooks → add:
+ *        https://<deployment>.convex.site/postmark/webhook?key=<POSTMARK_WEBHOOK_SECRET>
+ *      Enable: Bounce, Spam complaint, Delivery, Open, Link click,
+ *      Subscription change. (Open/click also need the tracking toggles on the
+ *      stream; we set TrackOpens/TrackLinks per-message for marketing mail.)
+ *
+ * Contract with Postmark:
+ *   200 — accepted (including payloads we chose to ignore). Postmark stops.
+ *   401 — bad/missing secret.
+ *   500 — we failed to process a well-formed event, so Postmark RETRIES. That
+ *         retry is the whole point: dropping a bounce means we keep mailing a
+ *         dead address, so a transient write failure must not be swallowed.
+ *
+ * Everything downstream is idempotent (`emailEvents.ingestPostmarkEvent`), so a
+ * retried event is safe to re-apply.
+ */
+http.route({
+  path: "/postmark/webhook",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const expected = process.env.POSTMARK_WEBHOOK_SECRET;
+    if (!expected) {
+      console.error("[PostmarkWebhook] POSTMARK_WEBHOOK_SECRET not configured");
+      return new Response("Not configured", { status: 503 });
+    }
+
+    const url = new URL(request.url);
+    const provided =
+      url.searchParams.get("key") ?? request.headers.get("X-Postmark-Secret") ?? "";
+    if (!timingSafeEqual(provided, expected)) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+
+    let payload: any;
+    try {
+      payload = await request.json();
+    } catch {
+      return new Response("Bad request", { status: 400 });
+    }
+
+    // Postmark posts one event per request, but the batch shape shows up when
+    // replaying history from their dashboard — accept both.
+    const events: any[] = Array.isArray(payload) ? payload : [payload];
+
+    for (const ev of events) {
+      const recordType: string | undefined = ev?.RecordType;
+      if (!recordType) continue;
+
+      // The recipient field is named differently per record type: bounces and
+      // complaints use `Email`, engagement events use `Recipient`.
+      const email: string | undefined = ev.Email ?? ev.Recipient;
+      if (!email) continue;
+
+      // Postmark timestamps are ISO-8601 and per-record-type. Falling back to
+      // "now" is deliberate: a retried event that we can't date is still worth
+      // recording, just with slightly late ordering.
+      const rawTime: string | undefined =
+        ev.BouncedAt ?? ev.DeliveredAt ?? ev.ReceivedAt ?? ev.ChangedAt;
+      const parsed = rawTime ? Date.parse(rawTime) : NaN;
+      const occurredAt = Number.isFinite(parsed) ? parsed : Date.now();
+
+      // Metadata round-trips as arbitrary JSON; coerce to the string map the
+      // mutation validator expects rather than trusting the wire shape.
+      let metadata: Record<string, string> | undefined;
+      if (ev.Metadata && typeof ev.Metadata === "object") {
+        metadata = {};
+        for (const [k, val] of Object.entries(ev.Metadata)) {
+          if (typeof val === "string") metadata[k] = val;
+          else if (val != null) metadata[k] = String(val);
+        }
+      }
+
+      // `emailEvents` isn't in the generated api types until the next codegen
+      // run, so this uses the same `as any` escape hatch as crons.ts.
+      // Throws → 500 → Postmark retries. See the contract above.
+      await ctx.runMutation((internal as any).emailEvents.ingestPostmarkEvent, {
+        recordType,
+        email,
+        messageId: typeof ev.MessageID === "string" ? ev.MessageID : undefined,
+        stream: typeof ev.MessageStream === "string" ? ev.MessageStream : undefined,
+        tag: typeof ev.Tag === "string" && ev.Tag ? ev.Tag : undefined,
+        bounceType: typeof ev.Type === "string" ? ev.Type : undefined,
+        typeCode: typeof ev.TypeCode === "number" ? ev.TypeCode : undefined,
+        description: typeof ev.Description === "string" ? ev.Description : undefined,
+        detail: typeof ev.Details === "string" ? ev.Details : undefined,
+        inactive: typeof ev.Inactive === "boolean" ? ev.Inactive : undefined,
+        link: typeof ev.OriginalLink === "string" ? ev.OriginalLink : undefined,
+        platform: typeof ev.Platform === "string" ? ev.Platform : undefined,
+        suppressSending:
+          typeof ev.SuppressSending === "boolean" ? ev.SuppressSending : undefined,
+        suppressionReason:
+          typeof ev.SuppressionReason === "string" ? ev.SuppressionReason : undefined,
+        metadata,
+        occurredAt,
+      });
+    }
+
+    return new Response("OK", { status: 200 });
+  }),
+});
+
+/**
  * Constant-time string compare, so a wrong secret can't be discovered by
  * timing the 401. Lengths are compared first (they are not secret).
  */

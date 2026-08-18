@@ -136,7 +136,9 @@
     "autoApplied": "Αυτές θα εφαρμοστούν αυτόματα όταν δημιουργείτε νέο ταξίδι",
     "defaultLocation": "ΠΡΟΕΠΙΛΕΓΜΕΝΗ ΤΟΠΟΘΕΣΙΑ",
     "homeAirport": "Αεροδρόμιο Βάσης",
-    "homeAirportPlaceholder": "π.χ. Αθήνα, ATH",
+    "homeAirportPlaceholder": "e.g. Athens, Greece ATH",
+    "homeAirportRequiredTitle": "Απαιτείται αεροδρόμιο βάσης",
+    "homeAirportRequired": "Προσθέστε το αεροδρόμιο βάσης σας για να συνεχίσετε — το χρησιμοποιούμε για να βρίσκουμε πτήσεις από την πόλη σας.",
     "defaults": "ΠΡΟΕΠΙΛΟΓΕΣ",
     "budgetLabel": "Προϋπολογισμός ($)",
     "defaultInterests": "ΠΡΟΕΠΙΛΕΓΜΕΝΑ ΕΝΔΙΑΦΕΡΟΝΤΑ",
@@ -278,7 +280,9 @@
     "generate": "Δημιουργία Προγράμματος",
     "selectInterests": "Παρακαλώ επιλέξτε τουλάχιστον ένα ενδιαφέρον",
     "outbound": "Μετάβαση",
-    "return": "Επιστροφή"
+    "return": "Επιστροφή",
+    "locked": "Κλειδωμένο",
+    "total": "σύνολο"
   },
   "createTrip": {
     "designYour": "Σχεδιάστε την",
@@ -354,7 +358,11 @@
     "natureOutdoor": "Φύση & υπαίθριοι χώροι",
     "nightlife": "Νυχτερινή ζωή & τοπικά μπαρ",
     "neighborhoodWalks": "Περίπατοι στις γειτονιές",
-    "festivals": "Φεστιβάλ & εποχιακές εκδηλώσεις"
+    "festivals": "Φεστιβάλ & εποχιακές εκδηλώσεις",
+    "travelers": "Ταξιδιώτες",
+    "traveler": "ταξιδιώτης",
+    "interests": "Ενδιαφέροντα",
+    "perPerson": "ανά άτομο"
   },
   "trips": {
     "myTrips": "Τα Ταξίδια μου",
@@ -611,7 +619,6 @@
     "showCheapest": "Φθηνότερες πτήσεις",
     "showHidden": "Εμφάνιση κρυφών",
     "hideSelfTransfer": "Απόκρυψη αυτο-μεταφοράς",
-    "createTripWithFlight": "Δημιουργία ταξιδιού με αυτή την πτήση",
     "findFlights": "Εύρεση πτήσεων",
     "searching": "Αναζήτηση…",
     "fromIata": "Από (IATA)",
@@ -948,6 +955,12 @@
   },
   "destinationPreview": {
     "cheapestDays": "Φθηνότερες μέρες πτήσης",
+    "soonest": "Άμεσα",
+    "loadingFares": "Έλεγχος τιμών…",
+    "noFaresForMonth": "Δεν βρέθηκαν τιμές για {{month}}",
+    "noFaresSoonest": "Καμία τιμή τις επόμενες δύο εβδομάδες — δοκιμάστε έναν μήνα πιο πάνω",
+    "setHomeAirport": "Ορίστε το αεροδρόμιο βάσης σας για ζωντανές τιμές",
+    "noAirportForDestination": "Δεν γνωρίζουμε ακόμη αεροδρόμιο για {{destination}} — αναζητήστε πτήσεις για να επιλέξετε",
     "bestSeason": "καλύτερη εποχή",
     "daysUnitShort": "ημ",
     "flightsFromCity": "Πτήσεις από {{origin}}",
@@ -1434,6 +1447,9 @@
     "bookThisDeal": "Κράτηση Αυτής της Προσφοράς"
   },
   "tripMap": {
+    "shareUnavailableTitle": "Η διαδρομή δεν είναι έτοιμη",
+    "shareUnavailableBody": "Χρειάζονται τουλάχιστον δύο στάσεις στον χάρτη για να μοιραστείς αυτή τη μέρα.",
+    "shareFailed": "Δεν ήταν δυνατή η λήψη του χάρτη. Δοκίμασε ξανά.",
     "locationNotFound": "Η τοποθεσία δεν βρέθηκε",
     "tryAgain": "Δοκιμάστε ξανά",
     "loadingSights": "Φόρτωση αξιοθέατων...",
@@ -1804,6 +1820,22 @@
     "earnCredits": "Κερδίστε Πιστώσεις",
     "generateCode": "Δημιουργία Κωδικού"
   },
+  "shareRoute": {
+    "title": "Μοιράσου τον χάρτη",
+    "routeMap": "Ο χάρτης της διαδρομής σου",
+    "shareDay": "Μοιράσου τη μέρα",
+    "totalDistance": "Συνολική απόσταση",
+    "walkingTime": "Χρόνος περπατήματος",
+    "calories": "Θερμίδες (εκτ.)",
+    "difficulty": "Δυσκολία",
+    "easy": "Εύκολη",
+    "moderate": "Μέτρια",
+    "challenging": "Απαιτητική",
+    "hrs": "ώρες",
+    "min": "λεπτά",
+    "stops": "στάσεις",
+    "tip": "Συμβουλή"
+  },
   "shareCard": {
     "shareTrip": "Κοινοποίηση Κάρτας Ταξιδιού",
     "day": "Ημέρα",
@@ -1832,7 +1864,36 @@
     "moreDays": "ακόμα ημέρες",
     "activities": "Δραστηριότητες",
     "budget": "Προϋπολογισμός",
-    "travelers": "Ταξιδιώτες"
+    "travelers": "Ταξιδιώτες",
+    "yourTripBudget": "Ο προϋπολογισμός σου",
+    "budgetOverview": "Επισκόπηση προϋπολογισμού",
+    "yourBudget": "Ο στόχος σου",
+    "trustTransparent": "Διαφάνεια",
+    "trustTransparentSub": "Τιμές πραγματικού χρόνου που εμπιστεύεσαι",
+    "trustSmart": "Έξυπνο",
+    "trustSmartSub": "AI προσαρμοσμένο στον προϋπολογισμό σου",
+    "trustSecure": "Ασφάλεια",
+    "trustSecureSub": "Τα δεδομένα σου είναι ασφαλή με την Planera",
+    "trustSupport": "Υποστήριξη",
+    "trustSupportSub": "Είμαστε εδώ για σένα 24/7",
+    "posterEyebrow": "Η περιπέτειά σου ξεκινά",
+    "posterDays": "{{count}} Μέρες",
+    "posterIn": "με προορισμό",
+    "posterFor": "μόνο",
+    "posterPerPerson": "το άτομο!",
+    "posterTotal": "συνολικά",
+    "posterTagline1": "Λιγότερος σχεδιασμός.",
+    "posterTagline2": "Περισσότερα ταξίδια.",
+    "featureLandmarks": "Εμβληματικά αξιοθέατα",
+    "featureLocal": "Τοπικές εμπειρίες",
+    "featureRoutes": "Πανέμορφες διαδρομές",
+    "featureMemories": "Αξέχαστες αναμνήσεις",
+    "posterSaving": "{{amount}} κάτω από τον στόχο σου",
+    "posterCta": "Φτιάξε το δικό σου",
+    "inclFlights": "Πτήσεις έτοιμες",
+    "inclStay": "Διαμονή έτοιμη",
+    "inclExperiences": "{{count}} εμπειρίες",
+    "inclDays": "{{count}} μέρες έτοιμες"
   },
   "packages": {
     "title": "Επιλεγμένα Πακέτα",
@@ -1949,5 +2010,11 @@
     "createTripGeneric": "Δημιουργία νέου ταξιδιού",
     "roundTrip": "Με επιστροφή",
     "legCount": "{{count}} πτήσεις"
+  },
+  "homeAirport": {
+    "placeholder": "e.g. Athens, Greece ATH",
+    "hint": "Γράψτε το στα Αγγλικά — έτσι βρίσκουμε πτήσεις από την πόλη σας.",
+    "englishOnlyTitle": "Γράψτε το στα Αγγλικά",
+    "englishOnly": "Δεν μπορέσαμε να βρούμε αεροδρόμιο για αυτό. Γράψτε το αεροδρόμιο βάσης στα Αγγλικά, π.χ. «Athens, Greece ATH»."
   }
 }

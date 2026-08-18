@@ -1829,9 +1829,23 @@ export default defineSchema({
         status: v.union(
             v.literal("pending"),      // awaiting double opt-in confirmation
             v.literal("active"),       // confirmed, receiving emails
-            v.literal("unsubscribed")  // opted out
+            v.literal("unsubscribed"), // opted out
+            // Mail we sent came back undeliverable (hard bounce, or enough
+            // consecutive soft bounces). Terminal for sending, but distinct
+            // from "unsubscribed": the person never asked to leave, the
+            // mailbox just stopped existing. Kept separate so the funnel
+            // numbers don't blame churn for a deliverability problem.
+            v.literal("bounced"),
+            // The recipient hit "report spam". Hardest stop we have — never
+            // email again, never auto-resubscribe, not even on a new signup.
+            v.literal("complained")
         ),
         source: v.optional(v.string()),   // "web" | "app" | etc.
+        // Additional signup surfaces this address later came through, e.g.
+        // "chatgpt-waitlist". Recorded alongside `source` rather than replacing
+        // it so the original attribution survives — campaign targeting matches
+        // either. Only set when someone signs up again through a tagged form.
+        tags: v.optional(v.array(v.string())),
         language: v.optional(v.string()),
         // ISO-3166-1 alpha-2, lowercase (e.g. "fr", "gr"). Captured at signup
         // from IP geolocation so newsletter deals & targeting are geo-relevant
@@ -1847,6 +1861,24 @@ export default defineSchema({
         confirmedAt: v.optional(v.float64()),
         unsubscribedAt: v.optional(v.float64()),
         createdAt: v.float64(),
+
+        // --- Deliverability (fed by the Postmark webhook, see emailEvents.ts) ---
+        // Hard bounces / spam complaints flip `status` above; these fields are
+        // the evidence trail behind that decision and the engagement signal we
+        // use to decide who is actually reading.
+        bounceCount: v.optional(v.float64()),      // hard bounces seen
+        softBounceCount: v.optional(v.float64()),  // transient failures since the last delivery
+        lastBounceAt: v.optional(v.float64()),
+        lastBounceType: v.optional(v.string()),    // Postmark `Type`, e.g. "HardBounce"
+        lastBounceDetail: v.optional(v.string()),  // human-readable reason, truncated
+        // When sending to this address was stopped (bounce or complaint).
+        suppressedAt: v.optional(v.float64()),
+        complainedAt: v.optional(v.float64()),
+        lastDeliveredAt: v.optional(v.float64()),
+        lastOpenedAt: v.optional(v.float64()),
+        lastClickedAt: v.optional(v.float64()),
+        openCount: v.optional(v.float64()),
+        clickCount: v.optional(v.float64()),
     })
         .index("by_email", ["email"])
         .index("by_confirm_token", ["confirmToken"])
@@ -1917,8 +1949,19 @@ export default defineSchema({
             v.literal("rejected"),
         ),
         targeted: v.optional(v.float64()), // recipients matched at send time
-        sent: v.optional(v.float64()),
-        failed: v.optional(v.float64()),
+        sent: v.optional(v.float64()),        // accepted by Postmark
+        failed: v.optional(v.float64()),      // rejected at send time (API error)
+        // Skipped because the address is on the suppression list. Counted apart
+        // from `failed`: nothing went wrong, we deliberately didn't send.
+        suppressed: v.optional(v.float64()),
+        // --- Post-send outcomes, updated asynchronously by the Postmark
+        // webhook. `sent` is "handed to Postmark"; these are what actually
+        // happened to the mail afterwards.
+        delivered: v.optional(v.float64()),
+        bounced: v.optional(v.float64()),
+        complained: v.optional(v.float64()),
+        opened: v.optional(v.float64()),      // unique recipients who opened
+        clicked: v.optional(v.float64()),     // unique recipients who clicked
         createdBy: v.string(),             // admin userId, or "ai" for generated drafts
         createdAt: v.float64(),
         sentAt: v.optional(v.float64()),   // when the send completed
@@ -1941,9 +1984,124 @@ export default defineSchema({
         campaignId: v.id("newsletterCampaigns"),
         subscriberId: v.id("newsletterSubscribers"),
         sentAt: v.float64(),
+        // Postmark MessageID. The join key for every webhook event that comes
+        // back later — without it a bounce is just "some address bounced" and
+        // can't be attributed to the campaign that caused it.
+        messageId: v.optional(v.string()),
+        email: v.optional(v.string()),        // denormalized for the admin table
+        // Per-recipient lifecycle. Absent on rows written before this shipped,
+        // which the readers treat as "sent".
+        status: v.optional(v.union(
+            v.literal("sent"),
+            v.literal("delivered"),
+            v.literal("bounced"),
+            v.literal("complained"),
+            v.literal("failed")
+        )),
+        deliveredAt: v.optional(v.float64()),
+        bouncedAt: v.optional(v.float64()),
+        complainedAt: v.optional(v.float64()),
+        openedAt: v.optional(v.float64()),    // first open
+        clickedAt: v.optional(v.float64()),   // first click
+        openCount: v.optional(v.float64()),
+        clickCount: v.optional(v.float64()),
+        bounceType: v.optional(v.string()),
+        error: v.optional(v.string()),        // send-time API error, truncated
     })
         .index("by_campaign", ["campaignId"])
-        .index("by_campaign_subscriber", ["campaignId", "subscriberId"]),
+        .index("by_campaign_subscriber", ["campaignId", "subscriberId"])
+        // Webhook lookup: MessageID -> the send it belongs to.
+        .index("by_message_id", ["messageId"]),
+
+    // ---------------------------------------------------------------------
+    // Email deliverability
+    // ---------------------------------------------------------------------
+
+    // The do-not-send list. One row per address that mail must not go to, for
+    // ANY stream — marketing or transactional.
+    //
+    // This is our own copy, deliberately: Postmark keeps a per-message-stream
+    // suppression list, but (a) it only stops the stream it belongs to, (b) we
+    // are billed for and rate-limited by the attempt either way, and (c) a
+    // "406 inactive recipient" rejection is invisible in our own numbers. A
+    // local list means we never post a send we already know will fail, and the
+    // reason survives where the admin dashboard can show it.
+    //
+    // Rows are kept after release (`active: false`) so a released address that
+    // bounces again reads as a repeat offender rather than a first offence.
+    emailSuppressions: defineTable({
+        email: v.string(),                 // normalized: trimmed, lowercased
+        reason: v.union(
+            v.literal("hard_bounce"),      // mailbox does not exist
+            v.literal("soft_bounce"),      // transient, but it kept happening
+            v.literal("spam_complaint"),   // recipient pressed "report spam"
+            v.literal("manual"),           // an admin suppressed it by hand
+            v.literal("invalid"),          // Postmark rejected the address itself
+            v.literal("unsubscribe")       // Postmark-side unsubscribe / manual list
+        ),
+        detail: v.optional(v.string()),    // provider description, truncated
+        bounceType: v.optional(v.string()),// Postmark `Type` verbatim
+        stream: v.optional(v.string()),    // message stream the event came from
+        source: v.union(
+            v.literal("webhook"),          // Postmark posted an event
+            v.literal("send_error"),       // the send API rejected the address
+            v.literal("sync"),             // pulled from Postmark's own dump
+            v.literal("admin")             // suppressed from the dashboard
+        ),
+        // false once an admin releases the address; the row stays for history.
+        active: v.boolean(),
+        eventCount: v.float64(),           // how many times we've suppressed it
+        createdAt: v.float64(),
+        lastEventAt: v.float64(),
+        releasedAt: v.optional(v.float64()),
+        releasedBy: v.optional(v.string()),// admin userId
+    })
+        .index("by_email", ["email"])
+        // Dashboard listing: newest suppressions still in force.
+        .index("by_active_and_lastEventAt", ["active", "lastEventAt"])
+        .index("by_reason_and_lastEventAt", ["reason", "lastEventAt"]),
+
+    // Append-only event log behind every deliverability number we show.
+    //
+    // Aggregate counters (on the subscriber and the campaign) answer "how many";
+    // this answers "which address, when, and why" — the only thing that makes a
+    // sudden bounce spike diagnosable. Pruned by a cron (see crons.ts): opens
+    // and clicks are high-volume and only interesting in aggregate after a few
+    // weeks, while bounces and complaints are kept far longer.
+    emailEvents: defineTable({
+        email: v.string(),                 // normalized
+        type: v.union(
+            v.literal("sent"),
+            v.literal("delivered"),
+            v.literal("bounce"),
+            v.literal("complaint"),
+            v.literal("open"),
+            v.literal("click"),
+            v.literal("send_failed"),      // Postmark's API refused the send
+            v.literal("suppressed"),       // we declined to send (local list)
+            v.literal("subscription_change")
+        ),
+        messageId: v.optional(v.string()),
+        stream: v.optional(v.string()),
+        // Attribution, when the event can be tied back to something we sent.
+        campaignId: v.optional(v.id("newsletterCampaigns")),
+        subscriberId: v.optional(v.id("newsletterSubscribers")),
+        // What kind of mail it was ("newsletter-campaign", "newsletter-drip",
+        // "transactional", ...). Set from the Postmark Tag / send call site.
+        tag: v.optional(v.string()),
+        bounceType: v.optional(v.string()),
+        // Postmark bounce TypeCode — stable across description wording changes.
+        typeCode: v.optional(v.float64()),
+        description: v.optional(v.string()),
+        detail: v.optional(v.string()),
+        link: v.optional(v.string()),      // click events
+        platform: v.optional(v.string()),  // open/click client platform
+        createdAt: v.float64(),
+    })
+        .index("by_email_and_createdAt", ["email", "createdAt"])
+        .index("by_type_and_createdAt", ["type", "createdAt"])
+        .index("by_campaign", ["campaignId"])
+        .index("by_createdAt", ["createdAt"]),
 
     // Reservation Inbox — real bookings the user forwarded to their personal
     // inbound address, parsed into structured rows.

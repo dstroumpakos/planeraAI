@@ -225,6 +225,7 @@ export const sendConfirmEmail = internalAction({
         SITE +
         "/alerts/confirm?token=" +
         row.confirmToken,
+      tag: "route-alert-confirm",
     });
   },
 });
@@ -270,6 +271,9 @@ export const sendDropEmail = internalAction({
         fill(L.dropBody, vars) +
         "\n\n" +
         searchLink(row, "fare_drop"),
+      tag: "route-alert-drop",
+      trackOpens: true,
+      trackLinks: "HtmlAndText",
     });
   },
 });

@@ -910,7 +910,17 @@ async function runReport(
   } else {
     const res: { success: boolean; error?: string } = await ctx.runAction(
       internal.postmark.sendRawEmail,
-      { to, subject, html, text },
+      {
+        to,
+        subject,
+        html,
+        text,
+        tag: "ops-stats-report",
+        // Internal operator mail to a fixed address. A bounce here means our
+        // own inbox had a bad day, not that the founder opted out of their own
+        // stats — the report must still go out once it recovers.
+        ignoreSuppression: true,
+      },
     );
     sent = res.success;
     error = res.error;

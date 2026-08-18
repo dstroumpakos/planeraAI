@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useAction } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useTheme } from "@/lib/ThemeContext";
+import { currencySymbol } from "@/lib/currency";
 import type { NormalizedBookingOption } from "@/types/flights";
 
 interface Props {
@@ -14,9 +15,11 @@ interface Props {
    * show the ×N total so the two are directly comparable.
    */
   travelers?: number;
+  /** ISO 4217 the provider quoted in. Defaults to EUR, the app-wide default. */
+  currency?: string;
 }
 
-export const BookingOptionCard: React.FC<Props> = ({ option, travelers }) => {
+export const BookingOptionCard: React.FC<Props> = ({ option, travelers, currency }) => {
   const { colors } = useTheme();
   const { t } = useTranslation();
   const resolveBookingUrl = useAction(api.flightsResolve.resolveBookingUrl);
@@ -88,6 +91,7 @@ export const BookingOptionCard: React.FC<Props> = ({ option, travelers }) => {
 
   const localEur = option.localPrices?.find((p) => p.currency === "EUR");
   const multiTraveler = Boolean(travelers && travelers > 1);
+  const sym = currencySymbol(currency);
 
   return (
     <View style={styles.card}>
@@ -103,14 +107,14 @@ export const BookingOptionCard: React.FC<Props> = ({ option, travelers }) => {
         </Text>
         <View style={styles.priceCol}>
           <Text style={styles.price}>
-            {option.price != null ? `€ ${Math.round(option.price).toLocaleString()}` : "—"}
+            {option.price != null ? `${sym} ${Math.round(option.price).toLocaleString()}` : "—"}
           </Text>
           {multiTraveler && option.price != null && (
             <Text style={styles.priceCaption} numberOfLines={2}>
               {t("flights.perPersonAndTotal", {
-                total: `€ ${Math.round(option.price * (travelers as number)).toLocaleString()}`,
+                total: `${sym} ${Math.round(option.price * (travelers as number)).toLocaleString()}`,
                 count: travelers,
-                defaultValue: `per person · € ${Math.round(
+                defaultValue: `per person · ${sym} ${Math.round(
                   option.price * (travelers as number)
                 ).toLocaleString()} for ${travelers}`,
               })}

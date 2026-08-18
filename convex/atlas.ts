@@ -28,6 +28,7 @@ import {
     type AtlasCard,
     type AtlasToolContext,
 } from "./atlasTools";
+import { resolveHomeIata } from "../lib/homeAirport";
 
 // ───────────────────────────────── Tuning ───────────────────────────────────
 
@@ -145,13 +146,13 @@ function extractSuggestions(text: string): { clean: string; suggestions: string[
     return { clean, suggestions };
 }
 
-/** Best-effort IATA extraction from a stored home-airport string. */
+/**
+ * Best-effort IATA extraction from a stored home-airport string.
+ * Accepts "Athens, ATH", "ATH - Athens", "ATH", and names written in another
+ * language ("Αθήνα" → ATH). See lib/homeAirport.ts.
+ */
 function extractIata(homeAirport?: string): string | undefined {
-    if (!homeAirport) return undefined;
-    // Accepts "Athens, ATH", "ATH - Athens", "ATH". Takes the last 3-letter
-    // token so the city name never wins.
-    const matches = homeAirport.toUpperCase().match(/\b([A-Z]{3})\b/g);
-    return matches ? matches[matches.length - 1] : undefined;
+    return resolveHomeIata(homeAirport);
 }
 
 const LANGUAGE_NAMES: Record<string, string> = {

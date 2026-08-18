@@ -13,6 +13,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "@/lib/ThemeContext";
 import { AIRPORTS } from "@/lib/airports";
+import { resolveHomeIata, searchAirportOptions } from "@/lib/homeAirport";
 import type {
   FlightSearchInput,
   SortBy,
@@ -59,7 +60,11 @@ function displayForCode(code?: string): string {
   return a ? `${a.city} (${a.code})` : code.toUpperCase();
 }
 
-/** Extract an IATA code from free text: "Athens (ATH)" → "ATH", "ath" → "ATH". */
+/**
+ * Extract an IATA code from free text: "Athens (ATH)" → "ATH", "ath" → "ATH".
+ * Falls back to the shared resolver, which also handles city names written in
+ * another language ("Αθήνα" → "ATH").
+ */
 function codeFromText(text: string): string | null {
   const paren = text.toUpperCase().match(/\(([A-Z]{3})\)/);
   if (paren) return paren[1];
@@ -68,7 +73,7 @@ function codeFromText(text: string): string | null {
   const match = AIRPORTS.find(
     (a) => a.city.toLowerCase() === text.trim().toLowerCase()
   );
-  return match?.code ?? null;
+  return match?.code ?? resolveHomeIata(text) ?? null;
 }
 
 function filterAirports(query: string): Airport[] {
@@ -85,7 +90,10 @@ function filterAirports(query: string): Airport[] {
     else if (city.includes(q) || name.includes(q) || country.includes(q)) contains.push(a);
     if (starts.length >= 6) break;
   }
-  return [...starts, ...contains].slice(0, 6);
+  const results = [...starts, ...contains].slice(0, 6);
+  // The loop above only matches English fields, so a query typed in another
+  // script ("Αθήνα") finds nothing. searchAirportOptions translates first.
+  return results.length > 0 ? results : searchAirportOptions(query, 6);
 }
 
 function toDateString(d: Date): string {
@@ -155,6 +163,16 @@ export const FlightSearchForm: React.FC<Props> = ({ initial, loading, onSubmit }
       setFromText(displayForCode(initial.departureId));
     }
   }, [initial?.departureId]);
+
+  // Same story for the party size: it can come from the traveler's saved
+  // `defaultTravelers`, which lands after the first render. Only adopt it while
+  // the stepper is untouched, so an explicit choice is never overwritten.
+  const adultsTouched = useRef(false);
+  useEffect(() => {
+    if (initial?.adults != null && !adultsTouched.current) {
+      setAdults(initial.adults);
+    }
+  }, [initial?.adults]);
 
   const suggestions = useMemo(() => {
     if (activeField === "from") return filterAirports(fromText);
@@ -605,7 +623,10 @@ export const FlightSearchForm: React.FC<Props> = ({ initial, loading, onSubmit }
         <View style={styles.stepperRow}>
           <TouchableOpacity
             style={[styles.stepperBtn, adults <= 1 && { opacity: 0.4 }]}
-            onPress={() => setAdults(Math.max(1, adults - 1))}
+            onPress={() => {
+              adultsTouched.current = true;
+              setAdults(Math.max(1, adults - 1));
+            }}
             disabled={adults <= 1}
           >
             <Ionicons name="remove" size={18} color={colors.text} />
@@ -619,7 +640,10 @@ export const FlightSearchForm: React.FC<Props> = ({ initial, loading, onSubmit }
               styles.stepperBtn,
               (adults >= 9 || !canAddPassenger) && { opacity: 0.4 },
             ]}
-            onPress={() => setAdults(Math.min(9, adults + 1))}
+            onPress={() => {
+              adultsTouched.current = true;
+              setAdults(Math.min(9, adults + 1));
+            }}
             disabled={adults >= 9 || !canAddPassenger}
           >
             <Ionicons name="add" size={18} color={colors.text} />

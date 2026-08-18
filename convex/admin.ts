@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { query, mutation, internalQuery } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
+import { canonicalHomeAirport, resolveHomeIata } from "../lib/homeAirport";
 
 // Admin identifiers from environment variable (comma-separated)
 // Can be emails OR userIds (e.g., "apple:001386...")
@@ -454,13 +455,63 @@ export const deleteInsight = mutation({
 // ===========================================
 
 // The saved base airport is a free-text label ("Athens, Greece (ATH)"), so pull
-// the IATA code out for the compact list row. Falls back to null when the label
-// has no 3-letter code in it.
+// the IATA code out for the compact list row. Also resolves labels written in
+// another language ("Αθήνα" → ATH). Null when nothing can be resolved.
 function extractIata(homeAirport?: string | null): string | null {
-    if (!homeAirport) return null;
-    const matches = homeAirport.toUpperCase().match(/\b([A-Z]{3})\b/g);
-    return matches?.[matches.length - 1] || null;
+    return resolveHomeIata(homeAirport) ?? null;
 }
+
+/**
+ * One-off backfill: rewrite base airports saved in another language to their
+ * canonical English label ("Αθήνα" → "Athens, Greece ATH").
+ *
+ * Every read path resolves these on the fly now, so this isn't required for
+ * flights to work — it exists so the stored data, the admin user list and the
+ * airport aggregation all agree, and so a user who opens their preferences
+ * sees a value they can edit rather than one we're silently reinterpreting.
+ *
+ * Defaults to a dry run; pass `apply: true` to actually write. Rows we can't
+ * resolve are reported and left untouched.
+ */
+export const normalizeHomeAirports = mutation({
+    args: {
+        token: v.string(),
+        apply: v.optional(v.boolean()),
+    },
+    handler: async (ctx, args) => {
+        const userId = await getUserIdFromToken(ctx, args.token);
+        if (!userId) throw new Error("Unauthorized");
+        await assertAdmin(ctx, userId);
+
+        const allSettings = await ctx.db.query("userSettings").collect();
+        const changed: Array<{ userId: string; from: string; to: string }> = [];
+        const unresolved: Array<{ userId: string; value: string }> = [];
+
+        for (const s of allSettings) {
+            const raw = s.homeAirport?.trim();
+            if (!raw) continue;
+
+            const canonical = canonicalHomeAirport(raw);
+            if (!canonical) {
+                unresolved.push({ userId: s.userId, value: raw });
+                continue;
+            }
+            if (canonical.label === raw) continue;
+
+            changed.push({ userId: s.userId, from: raw, to: canonical.label });
+            if (args.apply) {
+                await ctx.db.patch(s._id, { homeAirport: canonical.label });
+            }
+        }
+
+        return {
+            applied: args.apply === true,
+            scanned: allSettings.length,
+            changed,
+            unresolved,
+        };
+    },
+});
 
 // Newsletter membership is keyed off the account email (see newsletter.myStatus),
 // not userId — web signups predate any account. `.first()` rather than `.unique()`

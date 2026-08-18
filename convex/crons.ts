@@ -162,4 +162,28 @@ crons.monthly(
     {},
 );
 
+// Deliverability safety net. The Postmark webhook is the primary feed for
+// bounces and complaints, but a webhook that was misconfigured, rate-limited,
+// or down while we were sending leaves addresses suppressed on Postmark's side
+// and still "active" on ours — every send to them then returns 406. Pulling
+// Postmark's own suppression dump nightly reconciles the two. Import-only: it
+// never un-suppresses and never overrides an address an admin released.
+crons.interval(
+    "sync-postmark-suppressions",
+    { hours: 24 },
+    internal.postmark.syncPostmarkSuppressions,
+    {},
+);
+
+// The email event log is append-only and open/click events dominate it. Trim
+// nightly: engagement events past 90 days (their per-send aggregates survive),
+// bounces and complaints past a year. Bounded per run, so a backlog is worked
+// off over several nights rather than in one oversized transaction.
+crons.interval(
+    "prune-email-events",
+    { hours: 24 },
+    internal.emailEvents.pruneEmailEvents,
+    {},
+);
+
 export default crons;

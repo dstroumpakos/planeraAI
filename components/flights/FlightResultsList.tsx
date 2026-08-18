@@ -10,7 +10,6 @@ interface Props {
   otherFlights: NormalizedFlightOption[];
   currency?: string;
   onSelect: (option: NormalizedFlightOption) => void;
-  onCreateTrip?: (option: NormalizedFlightOption) => void;
   ctaLabel?: string;
   travelers?: number;
 }
@@ -20,7 +19,6 @@ export const FlightResultsList: React.FC<Props> = ({
   otherFlights,
   currency = "EUR",
   onSelect,
-  onCreateTrip,
   ctaLabel,
   travelers,
 }) => {
@@ -85,7 +83,6 @@ export const FlightResultsList: React.FC<Props> = ({
             option={item.option}
             currency={currency}
             onPress={() => onSelect(item.option)}
-            onCreateTrip={onCreateTrip ? () => onCreateTrip(item.option) : undefined}
             ctaLabel={ctaLabel}
             travelers={travelers}
           />

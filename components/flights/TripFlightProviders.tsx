@@ -18,6 +18,8 @@ export interface StoredBookingProvider {
 interface Props {
   providers?: StoredBookingProvider[] | null;
   travelers?: number;
+  /** ISO 4217 the fare was searched in — stored on the trip's flight option. */
+  currency?: string;
 }
 
 /**
@@ -25,7 +27,7 @@ interface Props {
  * provider cards (resolve-on-tap, per-person/total labels) shown in the flight
  * search booking sheet, for trips created from a flight search.
  */
-export const TripFlightProviders: React.FC<Props> = ({ providers, travelers }) => {
+export const TripFlightProviders: React.FC<Props> = ({ providers, travelers, currency }) => {
   const { colors } = useTheme();
   const { t } = useTranslation();
 
@@ -86,7 +88,7 @@ export const TripFlightProviders: React.FC<Props> = ({ providers, travelers }) =
         </View>
       )}
       {options.map((o) => (
-        <BookingOptionCard key={o.id} option={o} travelers={travelers} />
+        <BookingOptionCard key={o.id} option={o} travelers={travelers} currency={currency} />
       ))}
     </View>
   );

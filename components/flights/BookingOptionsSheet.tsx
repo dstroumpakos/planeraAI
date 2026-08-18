@@ -265,7 +265,7 @@ export const BookingOptionsSheet: React.FC<Props> = ({
                         (b.price ?? Number.POSITIVE_INFINITY)
                     )
                     .map((o) => (
-                      <BookingOptionCard key={o.id} option={o} travelers={searchContext?.adults} />
+                      <BookingOptionCard key={o.id} option={o} travelers={searchContext?.adults} currency={currency} />
                     ))}
                 </>
               )}

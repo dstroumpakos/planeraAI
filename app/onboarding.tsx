@@ -7,6 +7,7 @@ import { api } from "@/convex/_generated/api";
 import { useState } from "react";
 import { INTERESTS } from "@/lib/data";
 import { AIRPORTS } from "@/lib/airports";
+import { canonicalHomeAirport, hasNonLatinScript, searchAirportOptions } from "@/lib/homeAirport";
 import * as Haptics from "expo-haptics";
 import { useToken } from "@/lib/useAuthenticatedMutation";
 import { useTranslation } from "react-i18next";
@@ -62,26 +63,16 @@ export default function Onboarding() {
   };
 
   const searchAirports = (query: string) => {
-    if (!query || query.length < 2) {
-      setAirportSuggestions([]);
-      setShowAirportSuggestions(false);
-      return;
-    }
-    
-    const lowerQuery = query.toLowerCase();
-    const results = AIRPORTS.filter(airport => 
-      airport.city.toLowerCase().includes(lowerQuery) ||
-      airport.country.toLowerCase().includes(lowerQuery) ||
-      airport.code.toLowerCase().includes(lowerQuery) ||
-      airport.name.toLowerCase().includes(lowerQuery)
-    ).slice(0, 10);
-    
+    // searchAirportOptions also matches localized city names, so a Greek user
+    // typing "Αθήνα" is offered "Athens (ATH)" and picks the English value
+    // instead of free-typing one we can't resolve.
+    const results = searchAirportOptions(query);
     setAirportSuggestions(results);
     setShowAirportSuggestions(results.length > 0);
   };
 
   const selectAirport = (airport: typeof AIRPORTS[0]) => {
-    setHomeAirport(`${airport.city}, ${airport.code}`);
+    setHomeAirport(`${airport.city}, ${airport.country} ${airport.code}`);
     setShowAirportSuggestions(false);
     setAirportSuggestions([]);
     hapticFeedback();
@@ -105,11 +96,44 @@ export default function Onboarding() {
   };
 
   const handleFinishOnboarding = async () => {
+    // The base airport is required: every flight feature (radar, Explore,
+    // trip generation) keys off it, so we don't let onboarding continue
+    // without one.
+    if (!homeAirport.trim()) {
+      const title = t('onboarding.homeAirportRequiredTitle');
+      const message = t('onboarding.homeAirportRequired');
+      if (Platform.OS !== "web") {
+        Alert.alert(title, message);
+      } else {
+        alert(message);
+      }
+      return;
+    }
+    // The base airport has to end up as English + IATA — that's what the
+    // low-fare radar, Explore and flight search all key off. A name we can
+    // translate is rewritten silently ("Αθήνα" → "Athens, Greece ATH"); one
+    // written in another script that we can't resolve is rejected, because
+    // storing it would silently cost the user every flight feature. Latin input
+    // we don't recognise is still accepted — it may be a small airport missing
+    // from our dataset, and the trip generator can resolve those with its AI
+    // fallback.
+    const resolvedHomeAirport = canonicalHomeAirport(homeAirport);
+    if (!resolvedHomeAirport && hasNonLatinScript(homeAirport)) {
+      const title = t('homeAirport.englishOnlyTitle');
+      const message = t('homeAirport.englishOnly');
+      if (Platform.OS !== "web") {
+        Alert.alert(title, message);
+      } else {
+        alert(message);
+      }
+      return;
+    }
+
     setSaving(true);
     try {
       await saveTravelPreferences({
         token: token || "",
-        homeAirport,
+        homeAirport: resolvedHomeAirport?.label ?? homeAirport,
         defaultBudget: parseInt(defaultBudget) || undefined,
         interests: selectedInterests,
         flightTimePreference,
@@ -297,7 +321,8 @@ export default function Onboarding() {
             <View style={[styles.formSection, { zIndex: 10 }]}>
               <Text style={styles.sectionLabel}>{t('onboarding.defaultLocation')}</Text>
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>{t('onboarding.homeAirport')}</Text>
+                <Text style={styles.inputLabel}>{t('onboarding.homeAirport')} <Text style={styles.required}>*</Text></Text>
+                <Text style={styles.inputHint}>{t('homeAirport.hint')}</Text>
                 <View style={styles.inputWithIconContainer}>
                   <Ionicons name="airplane-outline" size={20} color="#6B7280" style={styles.inputIcon} />
                   <TextInput
@@ -483,9 +508,9 @@ export default function Onboarding() {
           
           <View style={styles.footer}>
             <TouchableOpacity
-              style={[styles.primaryButton, saving && styles.primaryButtonDisabled]}
+              style={[styles.primaryButton, (saving || !homeAirport.trim()) && styles.primaryButtonDisabled]}
               onPress={handleFinishOnboarding}
-              disabled={saving}
+              disabled={saving || !homeAirport.trim()}
             >
               {saving ? (
                 <ActivityIndicator color="#FFF" />
@@ -987,6 +1012,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
     color: "#1A1A1A",
+    marginBottom: 8,
+  },
+  inputHint: {
+    fontSize: 12,
+    color: "#6B7280",
+    marginTop: -4,
     marginBottom: 8,
   },
   required: {

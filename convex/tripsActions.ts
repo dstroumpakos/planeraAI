@@ -15,6 +15,7 @@ import {
     normalizePriceInsights,
 } from "./lib/serpApiFlights";
 import { fetchAccommodations, type Accommodation } from "./lib/searchApiAccommodations";
+import { extractHm } from "./lib/searchApiFlights";
 import { reportError } from "./helpers/reportError";
 
 // Helper function to generate travel style guidance for OpenAI prompt
@@ -617,11 +618,11 @@ export const generate = internalAction({
 
                         // SerpApi returns datetimes like "2026-05-22 08:00".
                         // The UI expects clean "HH:MM" strings.
-                        const timeOnly = (s: string | undefined | null): string => {
-                            if (!s) return "";
-                            const parts = String(s).split(" ");
-                            return parts[1] ?? String(s);
-                        };
+                        // "2026-10-08 06:15", "06:15" and ISO strings all show
+                        // up here depending on the provider; extractHm handles
+                        // all three (splitting on a space does not).
+                        const timeOnly = (s: string | undefined | null): string =>
+                            extractHm(s) ?? "";
                         const minutesToHm = (mins: number | undefined | null): string | undefined => {
                             if (mins == null) return undefined;
                             const h = Math.floor(mins / 60);

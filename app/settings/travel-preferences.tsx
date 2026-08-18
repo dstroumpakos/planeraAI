@@ -8,6 +8,7 @@ import { useToken } from "@/lib/useAuthenticatedMutation";
 import { useState, useEffect } from "react";
 import { INTERESTS } from "@/lib/data";
 import { AIRPORTS } from "@/lib/airports";
+import { canonicalHomeAirport, hasNonLatinScript, searchAirportOptions } from "@/lib/homeAirport";
 import AIConsentModal from "@/components/AIConsentModal";
 import { useTranslation } from "react-i18next";
 
@@ -45,35 +46,45 @@ export default function TravelPreferences() {
     }, [settings]);
 
     const searchAirports = (query: string) => {
-        if (!query || query.length < 2) {
-            setAirportSuggestions([]);
-            setShowAirportSuggestions(false);
-            return;
-        }
-        
-        const lowerQuery = query.toLowerCase();
-        const results = AIRPORTS.filter(airport => 
-            airport.city.toLowerCase().includes(lowerQuery) ||
-            airport.country.toLowerCase().includes(lowerQuery) ||
-            airport.code.toLowerCase().includes(lowerQuery) ||
-            airport.name.toLowerCase().includes(lowerQuery)
-        ).slice(0, 10);
-        
+        // searchAirportOptions also matches localized city names, so a Greek
+        // user typing "Αθήνα" is offered "Athens (ATH)" and picks the English
+        // value instead of free-typing one we can't resolve.
+        const results = searchAirportOptions(query);
         setAirportSuggestions(results);
         setShowAirportSuggestions(results.length > 0);
     };
 
     const selectAirport = (airport: typeof AIRPORTS[0]) => {
-        setHomeAirport(`${airport.city}, ${airport.code}`);
+        setHomeAirport(`${airport.city}, ${airport.country} ${airport.code}`);
         setShowAirportSuggestions(false);
         setAirportSuggestions([]);
     };
 
     const handleSave = async () => {
+        // The base airport is required: the low-fare radar, Explore and flight
+        // search all key off it, so it can't be cleared once set.
+        if (!homeAirport.trim()) {
+            Alert.alert(t('onboarding.homeAirportRequiredTitle'), t('onboarding.homeAirportRequired'));
+            return;
+        }
+        // The base airport has to end up as English + IATA — that's what the
+        // low-fare radar, Explore and flight search all key off. A name we can
+        // translate is rewritten silently ("Αθήνα" → "Athens, Greece ATH"); one
+        // written in another script that we can't resolve is rejected, because
+        // storing it would silently cost the user every flight feature. Latin
+        // input we don't recognise is still accepted — it may be a small
+        // airport missing from our dataset, and the trip generator can resolve
+        // those with its AI fallback.
+        const resolved = canonicalHomeAirport(homeAirport);
+        if (!resolved && hasNonLatinScript(homeAirport)) {
+            Alert.alert(t('homeAirport.englishOnlyTitle'), t('homeAirport.englishOnly'));
+            return;
+        }
+
         try {
             await updatePreferences({
                 token: token || "",
-                homeAirport,
+                homeAirport: resolved?.label ?? homeAirport,
                 defaultInterests,
                 defaultSkipFlights,
                 defaultSkipHotel,
@@ -132,12 +143,13 @@ export default function TravelPreferences() {
 
                 {/* Home Airport */}
                 <View style={[styles.section, { zIndex: 10 }]}>
-                    <Text style={styles.sectionTitle}>{t('settings.travelPreferences.homeAirport')}</Text>
+                    <Text style={styles.sectionTitle}>{t('settings.travelPreferences.homeAirport')} <Text style={styles.required}>*</Text></Text>
+                    <Text style={styles.sectionHint}>{t('homeAirport.hint')}</Text>
                     <View style={styles.inputContainer}>
                         <Ionicons name="airplane-outline" size={20} color="#1A1A1A" style={styles.inputIcon} />
                         <TextInput
                             style={styles.input}
-                            placeholder="e.g. San Francisco, CA"
+                            placeholder={t('homeAirport.placeholder')}
                             value={homeAirport}
                             onChangeText={(text) => {
                                 setHomeAirport(text);
@@ -333,7 +345,11 @@ export default function TravelPreferences() {
                     </TouchableOpacity>
                 </View>
 
-                <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
+                <TouchableOpacity
+                    style={[styles.saveButton, !homeAirport.trim() && styles.saveButtonDisabled]}
+                    onPress={handleSave}
+                    disabled={!homeAirport.trim()}
+                >
                     <Text style={styles.saveButtonText}>{t('settings.travelPreferences.savePreferences')}</Text>
                 </TouchableOpacity>
                 
@@ -407,6 +423,15 @@ const styles = StyleSheet.create({
         fontWeight: "600",
         color: "#1A1A1A",
         marginBottom: 12,
+    },
+    required: {
+        color: "#DC2626",
+    },
+    sectionHint: {
+        fontSize: 12,
+        color: "#6B7280",
+        marginTop: -6,
+        marginBottom: 10,
     },
     row: {
         flexDirection: "row",
@@ -523,6 +548,9 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: "700",
         color: "#FFFFFF",
+    },
+    saveButtonDisabled: {
+        opacity: 0.5,
     },
     suggestionsContainer: {
         position: 'absolute',

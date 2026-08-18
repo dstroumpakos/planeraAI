@@ -136,7 +136,9 @@
     "autoApplied": "Estas se aplicarán automáticamente cuando crees un nuevo viaje",
     "defaultLocation": "UBICACIÓN PREDETERMINADA",
     "homeAirport": "Aeropuerto Base",
-    "homeAirportPlaceholder": "ej. Madrid, MAD",
+    "homeAirportPlaceholder": "e.g. Athens, Greece ATH",
+    "homeAirportRequiredTitle": "Aeropuerto base obligatorio",
+    "homeAirportRequired": "Añade tu aeropuerto base para continuar: lo usamos para encontrar vuelos desde tu ciudad.",
     "defaults": "PREDETERMINADOS",
     "budgetLabel": "Presupuesto ($)",
     "defaultInterests": "INTERESES PREDETERMINADOS",
@@ -278,7 +280,9 @@
     "generate": "Generar Itinerario",
     "selectInterests": "Por favor selecciona al menos un interés",
     "outbound": "Ida",
-    "return": "Vuelta"
+    "return": "Vuelta",
+    "locked": "Bloqueado",
+    "total": "total"
   },
   "createTrip": {
     "designYour": "Diseña tu",
@@ -354,7 +358,11 @@
     "natureOutdoor": "Naturaleza y aire libre",
     "nightlife": "Vida nocturna y bares locales",
     "neighborhoodWalks": "Paseos por el barrio",
-    "festivals": "Festivales y eventos de temporada"
+    "festivals": "Festivales y eventos de temporada",
+    "travelers": "Viajeros",
+    "traveler": "viajero",
+    "interests": "Intereses",
+    "perPerson": "por persona"
   },
   "trips": {
     "myTrips": "Mis Viajes",
@@ -611,7 +619,6 @@
     "showCheapest": "Vuelos más baratos",
     "showHidden": "Mostrar ocultos",
     "hideSelfTransfer": "Ocultar autoconexión",
-    "createTripWithFlight": "Crear viaje con este vuelo",
     "findFlights": "Buscar vuelos",
     "searching": "Buscando…",
     "fromIata": "Desde (IATA)",
@@ -943,6 +950,12 @@
   },
   "destinationPreview": {
     "cheapestDays": "Días más baratos para volar",
+    "soonest": "Próximos",
+    "loadingFares": "Buscando tarifas…",
+    "noFaresForMonth": "No se encontraron tarifas para {{month}}",
+    "noFaresSoonest": "Sin tarifas en las próximas dos semanas: prueba un mes arriba",
+    "setHomeAirport": "Configura tu aeropuerto de origen para ver tarifas en vivo",
+    "noAirportForDestination": "Aún no conocemos un aeropuerto para {{destination}}: busca vuelos para elegir uno",
     "bestSeason": "mejor época",
     "daysUnitShort": "d",
     "flightsFromCity": "Vuelos desde {{origin}}",
@@ -1434,6 +1447,9 @@
     "bookThisDeal": "Reservar Esta Oferta"
   },
   "tripMap": {
+    "shareUnavailableTitle": "Ruta no lista",
+    "shareUnavailableBody": "Se necesitan al menos dos paradas en el mapa para compartir este día.",
+    "shareFailed": "No se pudo capturar el mapa. Inténtalo de nuevo.",
     "locationNotFound": "Ubicación no encontrada",
     "tryAgain": "Intentar de nuevo",
     "loadingSights": "Cargando lugares...",
@@ -1804,6 +1820,22 @@
     "earnCredits": "Ganar Créditos",
     "generateCode": "Generar Código"
   },
+  "shareRoute": {
+    "title": "Comparte el mapa",
+    "routeMap": "Tu mapa de ruta",
+    "shareDay": "Comparte este día",
+    "totalDistance": "Distancia total",
+    "walkingTime": "Tiempo caminando",
+    "calories": "Calorías (est.)",
+    "difficulty": "Dificultad",
+    "easy": "Fácil",
+    "moderate": "Moderada",
+    "challenging": "Exigente",
+    "hrs": "h",
+    "min": "min",
+    "stops": "paradas",
+    "tip": "Consejo"
+  },
   "shareCard": {
     "shareTrip": "Compartir Tarjeta de Viaje",
     "day": "Día",
@@ -1832,7 +1864,36 @@
     "moreDays": "días más",
     "activities": "Actividades",
     "budget": "Presupuesto",
-    "travelers": "Viajeros"
+    "travelers": "Viajeros",
+    "yourTripBudget": "Tu presupuesto de viaje",
+    "budgetOverview": "Resumen del presupuesto",
+    "yourBudget": "Tu presupuesto",
+    "trustTransparent": "Transparente",
+    "trustTransparentSub": "Precios en tiempo real en los que confiar",
+    "trustSmart": "Inteligente",
+    "trustSmartSub": "IA optimizada para tu presupuesto",
+    "trustSecure": "Seguro",
+    "trustSecureSub": "Tus datos están seguros con Planera",
+    "trustSupport": "Soporte",
+    "trustSupportSub": "Estamos aquí para ti 24/7",
+    "posterEyebrow": "Tu aventura te espera",
+    "posterDays": "{{count}} Días",
+    "posterIn": "en",
+    "posterFor": "por solo",
+    "posterPerPerson": "¡por persona!",
+    "posterTotal": "en total",
+    "posterTagline1": "Planifica menos.",
+    "posterTagline2": "Viaja más.",
+    "featureLandmarks": "Lugares icónicos",
+    "featureLocal": "Experiencias locales",
+    "featureRoutes": "Rutas con encanto",
+    "featureMemories": "Recuerdos inolvidables",
+    "posterSaving": "{{amount}} por debajo de tu presupuesto",
+    "posterCta": "Crea el tuyo",
+    "inclFlights": "Vuelos encontrados",
+    "inclStay": "Alojamiento encontrado",
+    "inclExperiences": "{{count}} experiencias",
+    "inclDays": "{{count}} días planificados"
   },
   "packages": {
     "title": "Paquetes seleccionados",
@@ -1949,5 +2010,11 @@
     "createTripGeneric": "Crear un viaje nuevo",
     "roundTrip": "Ida y vuelta",
     "legCount": "{{count}} vuelos"
+  },
+  "homeAirport": {
+    "placeholder": "e.g. Athens, Greece ATH",
+    "hint": "Escríbelo en inglés: así encontramos vuelos desde tu ciudad.",
+    "englishOnlyTitle": "Escríbelo en inglés",
+    "englishOnly": "No pudimos identificar ese aeropuerto. Escribe tu aeropuerto base en inglés, por ejemplo «Athens, Greece ATH»."
   }
 }
