@@ -276,6 +276,27 @@ export const getTripsForAggregation = internalQuery({
     },
 });
 
+/**
+ * Every existing itinerary title (draft, published AND rejected) with its slug.
+ * Used by the aggregation action to guarantee each new draft gets a title that
+ * has never been used before — including titles still sitting in the approval
+ * queue, so two pending drafts can't share one.
+ */
+export const listTitles = internalQuery({
+    args: {},
+    returns: v.array(
+        v.object({ slug: v.string(), destination: v.string(), title: v.string() })
+    ),
+    handler: async (ctx) => {
+        const rows = await ctx.db.query("publishedItineraries").collect();
+        return rows.map((r) => ({
+            slug: r.slug,
+            destination: r.destination,
+            title: r.title || "",
+        }));
+    },
+});
+
 /** List all published itinerary slugs for a destination (for related links) */
 export const listSlugsByDestination = internalQuery({
     args: { destination: v.string() },

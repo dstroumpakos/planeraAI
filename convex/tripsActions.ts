@@ -17,6 +17,7 @@ import {
 import { fetchAccommodations, type Accommodation } from "./lib/searchApiAccommodations";
 import { extractHm } from "./lib/searchApiFlights";
 import { reportError } from "./helpers/reportError";
+import { geocodeDestinationServer, buildDayMapData, isDeadMapUrl } from "./lib/geocoding";
 
 // Helper function to generate travel style guidance for OpenAI prompt
 function generateTravelStyleGuidance(interests: string[]): string {
@@ -205,6 +206,42 @@ This is a low-budget trip. STRICTLY limit to 2 total items per day (1 activity +
     return { budgetTier, dailyBudgetPerPerson, guidance };
 }
 
+/**
+ * Longest trip we plan, in calendar days. Mirrors MAX_TRIP_DAYS in lib/tripDays.ts,
+ * which caps the date picker on the client.
+ */
+const MAX_TRIP_DAYS = 15;
+
+/**
+ * Number of calendar days a trip covers, inclusive of both the outbound and the
+ * return date. Trips store startDate/endDate as midnight of the outbound and
+ * return day, so their difference is the number of NIGHTS — using it directly as
+ * the day count silently drops the departure day from the itinerary.
+ */
+function countTripDays(startDate: number, endDate: number): number {
+    const nights = Math.round((endDate - startDate) / (24 * 60 * 60 * 1000));
+    return Math.max(1, nights + 1);
+}
+
+/**
+ * Read the wall-clock hour/minute out of an arrival/departure timestamp.
+ *
+ * These strings carry a LOCAL-to-the-destination clock time, not an instant: the
+ * app encodes the picked time with Date.UTC ("...T09:00:00.000Z") and the deal
+ * flow concatenates the flight's clock time ("...T09:00:00"). Reading the digits
+ * textually gives the same answer for both and, unlike `new Date(...).getUTCHours()`,
+ * does not silently shift if the runtime's timezone is ever not UTC.
+ * Returns null when the string carries no recognizable time.
+ */
+function parseWallClock(timestamp: string): { hour: number; minute: number } | null {
+    const m = /T(\d{2}):(\d{2})/.exec(timestamp);
+    if (!m) return null;
+    const hour = parseInt(m[1], 10);
+    const minute = parseInt(m[2], 10);
+    if (isNaN(hour) || isNaN(minute) || hour > 23 || minute > 59) return null;
+    return { hour, minute };
+}
+
 // Helper function to generate time-aware itinerary guidance based on arrival/departure times
 function generateTimeAwareGuidance(
     arrivalTime: string | undefined,
@@ -217,10 +254,10 @@ function generateTimeAwareGuidance(
     let firstDayStartTime: string | null = null;
     let lastDayEndTime: string | null = null;
     
-    if (arrivalTime) {
-        const arrival = new Date(arrivalTime);
-        const arrivalHour = arrival.getUTCHours();
-        const arrivalMinutes = arrival.getUTCMinutes();
+    const arrivalClock = arrivalTime ? parseWallClock(arrivalTime) : null;
+    if (arrivalClock) {
+        const arrivalHour = arrivalClock.hour;
+        const arrivalMinutes = arrivalClock.minute;
         const arrivalTimeDisplay = `${String(arrivalHour).padStart(2, '0')}:${String(arrivalMinutes).padStart(2, '0')}`;
         
         // Determine first day activity guidance based on arrival time
@@ -280,10 +317,10 @@ function generateTimeAwareGuidance(
         }
     }
     
-    if (departureTime) {
-        const departure = new Date(departureTime);
-        const departureHour = departure.getUTCHours();
-        const departureTimeDisplay = `${String(departureHour).padStart(2, '0')}:${String(departure.getUTCMinutes()).padStart(2, '0')}`;
+    const departureClock = departureTime ? parseWallClock(departureTime) : null;
+    if (departureClock) {
+        const departureHour = departureClock.hour;
+        const departureTimeDisplay = `${String(departureHour).padStart(2, '0')}:${String(departureClock.minute).padStart(2, '0')}`;
         
         // Calculate end time (3 hours before departure for airport transfer)
         const endHour = departureHour - 3;
@@ -361,7 +398,7 @@ function enforceFlightBuffersOnDay(
     index: number,
     firstDayStartTime: string | null,
     lastDayEndTime: string | null,
-    effectiveTripDays: number,
+    totalTripDays: number,
 ): void {
     if (!day || !Array.isArray(day.activities)) return;
 
@@ -380,7 +417,7 @@ function enforceFlightBuffersOnDay(
     }
 
     // Departure day: drop anything after the airport-transfer cutoff.
-    if (index === effectiveTripDays - 1 && lastDayEndTime) {
+    if (index === totalTripDays - 1 && lastDayEndTime) {
         const cutoffMin = parseClockToMinutes(lastDayEndTime);
         if (cutoffMin != null) {
             const before = day.activities.length;
@@ -392,6 +429,159 @@ function enforceFlightBuffersOnDay(
             if (removed > 0) console.log(`Departure buffer: removed ${removed} last-day activities after ${lastDayEndTime}`);
         }
     }
+}
+
+// Localized copy for the synthetic departure day. The itinerary itself is
+// generated in the traveler's language, so this closing stub must be too.
+const DEPARTURE_DAY_COPY: Record<string, {
+    dayTitle: string;
+    activityTitle: string;
+    description: (time: string) => string;
+    tips: string;
+}> = {
+    en: {
+        dayTitle: "Departure day — checkout & transfer",
+        activityTitle: "Checkout & airport transfer",
+        description: (time) => `Check out of your accommodation and head to the airport for your ${time} flight home.`,
+        tips: "Aim to be at the airport about 3 hours before departure. If checkout is earlier, most hotels will store your luggage for free.",
+    },
+    el: {
+        dayTitle: "Ημέρα αναχώρησης — check-out & μεταφορά",
+        activityTitle: "Check-out & μεταφορά στο αεροδρόμιο",
+        description: (time) => `Κάντε check-out από το κατάλυμά σας και κατευθυνθείτε στο αεροδρόμιο για την πτήση επιστροφής στις ${time}.`,
+        tips: "Να είστε στο αεροδρόμιο περίπου 3 ώρες πριν την αναχώρηση. Αν το check-out γίνει νωρίτερα, τα περισσότερα ξενοδοχεία φυλάσσουν δωρεάν τις αποσκευές σας.",
+    },
+    es: {
+        dayTitle: "Día de salida — check-out y traslado",
+        activityTitle: "Check-out y traslado al aeropuerto",
+        description: (time) => `Haz el check-out de tu alojamiento y dirígete al aeropuerto para tu vuelo de vuelta de las ${time}.`,
+        tips: "Procura estar en el aeropuerto unas 3 horas antes de la salida. Si el check-out es antes, la mayoría de los hoteles guardan el equipaje sin coste.",
+    },
+    fr: {
+        dayTitle: "Jour du départ — check-out et transfert",
+        activityTitle: "Check-out et transfert vers l’aéroport",
+        description: (time) => `Libérez votre hébergement et rejoignez l’aéroport pour votre vol retour de ${time}.`,
+        tips: "Prévoyez d’être à l’aéroport environ 3 heures avant le départ. Si le check-out est plus tôt, la plupart des hôtels gardent vos bagages gratuitement.",
+    },
+    de: {
+        dayTitle: "Abreisetag — Check-out & Transfer",
+        activityTitle: "Check-out & Transfer zum Flughafen",
+        description: (time) => `Checken Sie aus Ihrer Unterkunft aus und fahren Sie zum Flughafen für Ihren Rückflug um ${time} Uhr.`,
+        tips: "Seien Sie etwa 3 Stunden vor Abflug am Flughafen. Bei früherem Check-out lagern die meisten Hotels Ihr Gepäck kostenlos.",
+    },
+    ar: {
+        dayTitle: "يوم المغادرة — تسجيل الخروج والانتقال",
+        activityTitle: "تسجيل الخروج والانتقال إلى المطار",
+        description: (time) => `سجّل الخروج من مكان إقامتك وتوجّه إلى المطار للحاق برحلة العودة في الساعة ${time}.`,
+        tips: "احرص على الوصول إلى المطار قبل نحو 3 ساعات من الإقلاع. إذا كان تسجيل الخروج أبكر، فمعظم الفنادق تحفظ أمتعتك مجانًا.",
+    },
+};
+
+/**
+ * The closing "checkout & airport transfer" item for the departure day: starts
+ * three hours before take-off (clamped to midnight so it never spills into the
+ * previous day) and ends at the flight time. Returns null for an unparseable
+ * departure timestamp.
+ */
+function buildDepartureActivity(departureTime: string, language: string | undefined): any | null {
+    const clock = parseWallClock(departureTime);
+    if (!clock) return null;
+
+    const depHour = clock.hour;
+    const depMinute = clock.minute;
+    const depMinutes = depHour * 60 + depMinute;
+    const timeDisplay = `${String(depHour).padStart(2, "0")}:${String(depMinute).padStart(2, "0")}`;
+
+    const startMinutes = Math.max(0, depMinutes - 180);
+    const startTime = `${String(Math.floor(startMinutes / 60)).padStart(2, "0")}:${String(startMinutes % 60).padStart(2, "0")}`;
+    const durationMinutes = depMinutes - startMinutes;
+
+    const copy = DEPARTURE_DAY_COPY[language || "en"] || DEPARTURE_DAY_COPY.en;
+
+    return {
+        time: startTime,
+        startTime,
+        endTime: timeDisplay,
+        title: copy.activityTitle,
+        description: copy.description(timeDisplay),
+        address: null,
+        type: "departure",
+        price: 0,
+        currency: "EUR",
+        skipTheLine: false,
+        skipTheLinePrice: null,
+        durationMinutes,
+        duration: `${Math.max(1, Math.round(durationMinutes / 60))}h`,
+        tips: copy.tips,
+        isLocalExperience: false,
+        travelFromPrevious: null,
+        culinaryMoment: null,
+        culinaryType: null,
+        whyThisFits: null,
+        priceRange: null,
+        walkability: null,
+        culinaryTags: null,
+    };
+}
+
+/**
+ * Close the itinerary out with the return-flight logistics so the day list always
+ * spans every calendar day the trip header advertises. When the departure day was
+ * skipped (early flight, nothing schedulable) it is appended as a transfer-only
+ * day; when it already holds activities the transfer becomes its last item.
+ * No-ops on a one-way trip or an unexpected day count. Mutates and returns `days`.
+ *
+ * `stubOnly` restricts it to the missing-day case. The transfer deliberately sits
+ * AFTER the departure-day activity cutoff, so folding it into a day that already
+ * exists has to wait until enforceFlightBuffersOnDay has run or the buffer pass
+ * would filter it straight back out.
+ */
+function appendDepartureDay(
+    days: any[],
+    opts: {
+        departureTime?: string;
+        startDate: number;
+        totalTripDays: number;
+        language?: string;
+        stubOnly?: boolean;
+    },
+): any[] {
+    if (!opts.departureTime || !Array.isArray(days) || days.length === 0) return days;
+
+    const activity = buildDepartureActivity(opts.departureTime, opts.language);
+    if (!activity) return days;
+
+    const lastIndex = opts.totalTripDays - 1;
+    if (lastIndex < 1) return days; // single-day trip: leave it alone
+
+    if (days.length === lastIndex) {
+        // The departure day was skipped entirely - add it back as a transfer-only day.
+        const copy = DEPARTURE_DAY_COPY[opts.language || "en"] || DEPARTURE_DAY_COPY.en;
+        const dayDate = new Date(opts.startDate + lastIndex * 24 * 60 * 60 * 1000);
+        days.push({
+            day: opts.totalTripDays,
+            date: dayDate.toISOString().split("T")[0],
+            title: copy.dayTitle,
+            isDepartureDay: true,
+            activities: [activity],
+        });
+        console.log("Added departure day stub (checkout & transfer)");
+        return days;
+    }
+
+    if (opts.stubOnly) return days;
+
+    if (days.length === opts.totalTripDays) {
+        const lastDay = days[lastIndex];
+        if (!lastDay || !Array.isArray(lastDay.activities)) return days;
+        // Idempotent: never stack two transfers on the same day.
+        if (lastDay.activities.some((a: any) => a?.type === "departure")) return days;
+        lastDay.activities.push(activity);
+        lastDay.isDepartureDay = true;
+        console.log("Appended checkout & transfer to the departure day");
+    }
+
+    return days;
 }
 
 export const generate = internalAction({
@@ -1145,20 +1335,23 @@ export const generate = internalAction({
             // window. generateTimeAwareGuidance is pure, so this mirrors the inner
             // computation used for the prompt.
             const flightBufferGuidance = generateTimeAwareGuidance(arrivalTime, departureTime, trip.startDate, trip.endDate);
-            const bufferTripDays = Math.max(1, Math.ceil((trip.endDate - trip.startDate) / (24 * 60 * 60 * 1000)));
-            const bufferEffectiveTripDays = flightBufferGuidance.skipLastDay ? bufferTripDays - 1 : bufferTripDays;
+            const bufferTripDays = countTripDays(trip.startDate, trip.endDate);
 
             if (hasOpenAIKey) {
                 try {
                     const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
                     const localExperiencesGuidance = generateLocalExperiencesGuidance(trip.localExperiences);
                     
-                    // Calculate the number of days
-                    const tripDays = Math.ceil((trip.endDate - trip.startDate) / (24 * 60 * 60 * 1000));
+                    // Calculate the number of days (inclusive of the departure day)
+                    const tripDays = countTripDays(trip.startDate, trip.endDate);
                     
-                    // Enforce max 15-day limit
-                    if (tripDays > 15) {
-                        throw new Error("Trip duration cannot exceed 15 days. Please shorten your trip dates.");
+                    // Enforce the max trip length. Counted in calendar days, the same
+                    // way the client caps the date picker (see lib/tripDays.ts) and the
+                    // same way the itinerary below is laid out.
+                    if (tripDays > MAX_TRIP_DAYS) {
+                        throw new Error(
+                            `Trip duration cannot exceed ${MAX_TRIP_DAYS} days. Please shorten your trip dates.`
+                        );
                     }
                     
                     console.log(`📅 Generating itinerary for ${tripDays} days`);
@@ -1185,6 +1378,10 @@ export const generate = internalAction({
                     
                     // Adjust the effective trip days if we need to skip the last day
                     const effectiveTripDays = timeAwareGuidance.skipLastDay ? tripDays - 1 : tripDays;
+                    // A known return flight always yields a departure day (a real one, or
+                    // the checkout/transfer stub appended after generation), so progress
+                    // counts it even when the model is not asked to plan it.
+                    const plannedTotalDays = departureTime ? tripDays : effectiveTripDays;
                     const daysInstructions = timeAwareGuidance.skipLastDay 
                         ? `Generate ${effectiveTripDays} days of activities (Days 1-${effectiveTripDays}). Day ${tripDays} is departure day with no scheduled activities.`
                         : `Generate exactly ${tripDays} days of itinerary. Do not skip any days.`;
@@ -1466,7 +1663,7 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                             index,
                             timeAwareGuidance.firstDayStartTime,
                             timeAwareGuidance.lastDayEndTime,
-                            effectiveTripDays,
+                            tripDays,
                         );
                     };
 
@@ -1491,7 +1688,7 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                         dayByDayItinerary.push(day);
                         try {
                             await ctx.runMutation(internal.trips.appendItineraryDay, {
-                                tripId, day, totalDays: effectiveTripDays,
+                                tripId, day, totalDays: plannedTotalDays,
                             });
                         } catch (appendErr) {
                             console.warn("appendItineraryDay failed:", appendErr);
@@ -1501,7 +1698,7 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                     let rawCompletion = "";
                     try {
                         await ctx.runMutation(internal.trips.setGenerationProgress, {
-                            tripId, phase: "building", daysReady: 0, totalDays: effectiveTripDays,
+                            tripId, phase: "building", daysReady: 0, totalDays: plannedTotalDays,
                             resetItinerary: true,
                         });
                         const stream = await openai.chat.completions.create(
@@ -1559,10 +1756,10 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                     if (dayByDayItinerary.length > 0) {
                         console.log(`OpenAI generated ${dayByDayItinerary.length} days (requested ${tripDays})`);
                         // Supplement missing days from the basic itinerary.
-                        if (dayByDayItinerary.length < tripDays) {
-                            console.warn(`Only ${dayByDayItinerary.length}/${tripDays} days - supplementing`);
+                        if (dayByDayItinerary.length < effectiveTripDays) {
+                            console.warn(`Only ${dayByDayItinerary.length}/${effectiveTripDays} days - supplementing`);
                             const fallbackItinerary = generateBasicItinerary(trip, activities, restaurants);
-                            for (let i = dayByDayItinerary.length; i < tripDays; i++) {
+                            for (let i = dayByDayItinerary.length; i < effectiveTripDays; i++) {
                                 if (fallbackItinerary[i]) {
                                     const dayDate = new Date(trip.startDate + i * 24 * 60 * 60 * 1000);
                                     await appendDay({
@@ -1573,6 +1770,30 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                                 }
                             }
                             console.log(`Supplemented to ${dayByDayItinerary.length} days`);
+                        }
+                        // The departure day is part of `plannedTotalDays`, so add its
+                        // stub here rather than after generation - otherwise the day
+                        // counter sits one short of the total it advertised. Only the
+                        // missing-day case runs now (`stubOnly`); folding the transfer
+                        // into a day that already exists happens after the buffer pass.
+                        const daysBeforeStub = dayByDayItinerary.length;
+                        dayByDayItinerary = appendDepartureDay(dayByDayItinerary, {
+                            departureTime,
+                            startDate: trip.startDate,
+                            totalTripDays: tripDays,
+                            language: language || trip.language,
+                            stubOnly: true,
+                        });
+                        if (dayByDayItinerary.length > daysBeforeStub) {
+                            try {
+                                await ctx.runMutation(internal.trips.appendItineraryDay, {
+                                    tripId,
+                                    day: dayByDayItinerary[dayByDayItinerary.length - 1],
+                                    totalDays: plannedTotalDays,
+                                });
+                            } catch (appendErr) {
+                                console.warn("appendItineraryDay (departure day) failed:", appendErr);
+                            }
                         }
                         console.log("STEP 2/5 complete: OpenAI streamed itinerary");
                         await ctx.runMutation(internal.trips.heartbeatGeneration, { tripId });
@@ -1589,6 +1810,18 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                 dayByDayItinerary = generateBasicItinerary(trip, activities, restaurants);
             }
 
+            // The basic-itinerary fallbacks lay out every calendar day; drop the
+            // departure day when the return flight leaves too early for it to hold
+            // anything (the OpenAI path never generates it in the first place).
+            // A day we already replaced with the transfer stub is left alone.
+            if (
+                flightBufferGuidance.skipLastDay &&
+                dayByDayItinerary.length === bufferTripDays &&
+                !dayByDayItinerary[bufferTripDays - 1]?.isDepartureDay
+            ) {
+                dayByDayItinerary = dayByDayItinerary.slice(0, bufferTripDays - 1);
+            }
+
             // Final safety net: enforce flight-time buffers on every day regardless
             // of how the itinerary was produced (streaming applies this per-day, but
             // the basic-itinerary fallbacks bypass appendDay). Idempotent — safe to
@@ -1600,10 +1833,19 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                         index,
                         flightBufferGuidance.firstDayStartTime,
                         flightBufferGuidance.lastDayEndTime,
-                        bufferEffectiveTripDays,
+                        bufferTripDays,
                     ),
                 );
             }
+
+            // Close the trip out with the return-flight logistics so the itinerary
+            // covers every calendar day shown on the trip header.
+            dayByDayItinerary = appendDepartureDay(dayByDayItinerary, {
+                departureTime,
+                startDate: trip.startDate,
+                totalTripDays: bufferTripDays,
+                language: language || trip.language,
+            });
 
             // Assemble the non-day parts of the itinerary and finalize the base
             // (un-enriched) trip so it becomes viewable immediately. Per-day
@@ -1747,6 +1989,29 @@ export const enrichItinerary = internalAction({
                 console.log(`enrichItinerary: deduped ${removedCount} repeated venue(s) post-enrichment`);
             }
 
+            // 3) Geocode coordinates + a static route map, per day — powers the
+            //    map screen (skips its live geocode) and the share sheet's
+            //    per-day slides. Best-effort and isolated per day: a geocoding
+            //    failure must never block the ratings/affiliate patch below.
+            const destCenter = await geocodeDestinationServer(args.destination).catch(() => null);
+            for (const day of enrichedDays) {
+                try {
+                    const activities = Array.isArray(day.activities) ? day.activities : [];
+                    if (activities.length === 0) continue;
+                    const mapData = await buildDayMapData(activities, args.destination, destCenter, process.env.MAPBOX_TOKEN);
+                    day.activities = activities.map((a: any, i: number) => {
+                        const coord = mapData.activityCoords[i];
+                        return coord ? { ...a, lat: coord.lat, lng: coord.lng } : a;
+                    });
+                    day.mapImageUrl = mapData.mapImageUrl;
+                    day.mapTotalKm = mapData.totalKm;
+                    day.mapWalkMinutes = mapData.walkMinutes;
+                } catch (mapErr) {
+                    console.warn("Day map-data generation skipped:", mapErr instanceof Error ? mapErr.message : mapErr);
+                    day.mapImageUrl = day.mapImageUrl ?? null;
+                }
+            }
+
             // Patch each day on its own so ratings/booking buttons pop in day-by-day.
             for (let i = 0; i < enrichedDays.length; i++) {
                 await ctx.runMutation(internal.trips.patchDayEnrichment, {
@@ -1762,6 +2027,118 @@ export const enrichItinerary = internalAction({
                 tripId: args.tripId, phase: "done",
             });
         }
+    },
+});
+
+/**
+ * Backfill map data (per-activity coordinates + per-day static route map) for
+ * one trip. Idempotent and safe to re-run: days that already have
+ * `mapImageUrl` set (even to null, meaning "already attempted") are skipped,
+ * so calling this repeatedly — from the map screen's lazy trigger or the bulk
+ * migration below — only ever does work for days that still need it.
+ *
+ * Used by:
+ * - trips.scheduleBackfillDayMaps (lazy: map screen notices missing data)
+ * - backfillAllTripDayMaps below (one-time migration over existing trips)
+ */
+export const backfillDayMapsForTrip = internalAction({
+    args: { tripId: v.id("trips") },
+    returns: v.null(),
+    handler: async (ctx: any, args: any) => {
+        try {
+            const trip = await ctx.runQuery(internal.trips.getTripDetails, { tripId: args.tripId });
+            const days: any[] = trip?.itinerary?.dayByDayItinerary;
+            if (!trip || !Array.isArray(days) || days.length === 0) return null;
+
+            let destCenter: Awaited<ReturnType<typeof geocodeDestinationServer>> = null;
+            let destCenterFetched = false;
+
+            for (let i = 0; i < days.length; i++) {
+                const day = days[i];
+                const activities = Array.isArray(day?.activities) ? day.activities : [];
+                // Already attempted (mapImageUrl present, even if null) — skip,
+                // unless what's cached is a URL for the decommissioned OSM
+                // static-map host, which is a permanently broken image.
+                if (activities.length === 0) continue;
+                if (day?.mapImageUrl !== undefined && !isDeadMapUrl(day.mapImageUrl)) continue;
+
+                if (!destCenterFetched) {
+                    destCenter = await geocodeDestinationServer(trip.destination).catch(() => null);
+                    destCenterFetched = true;
+                }
+
+                try {
+                    const mapData = await buildDayMapData(activities, trip.destination, destCenter, process.env.MAPBOX_TOKEN);
+                    await ctx.runMutation(internal.trips.patchDayMapData, {
+                        tripId: args.tripId,
+                        dayIndex: i,
+                        activityCoords: mapData.activityCoords,
+                        mapImageUrl: mapData.mapImageUrl,
+                        mapTotalKm: mapData.totalKm,
+                        mapWalkMinutes: mapData.walkMinutes,
+                    });
+                } catch (dayErr) {
+                    console.warn(`backfillDayMapsForTrip: day ${i} skipped:`, dayErr instanceof Error ? dayErr.message : dayErr);
+                }
+            }
+        } catch (err) {
+            console.warn("backfillDayMapsForTrip failed:", err instanceof Error ? err.message : err);
+        }
+        return null;
+    },
+});
+
+/**
+ * One-time migration: pages through every completed trip and backfills any
+ * day still missing map data, self-rescheduling until the whole table is
+ * covered. Internal-only — run it from the CLI/dashboard, e.g.:
+ *   npx convex run tripsActions:backfillAllTripDayMaps
+ * Safe to re-run or interrupt: patchDayMapData/backfillDayMapsForTrip are
+ * both idempotent, so a partial run just picks up where it left off.
+ */
+export const backfillAllTripDayMaps = internalAction({
+    args: {
+        cursor: v.optional(v.union(v.string(), v.null())),
+        batchSize: v.optional(v.float64()),
+    },
+    returns: v.any(),
+    handler: async (ctx: any, args: any): Promise<{ backfilledInBatch: number; done: boolean }> => {
+        // Emergency stop: set via `npx convex env set STOP_DAY_MAP_BACKFILL true --prod`
+        // (no redeploy needed). Checked first so an already-scheduled next batch
+        // that fires after the flag is set does nothing instead of racing ahead.
+        // Unset the same var (or set to anything else) to resume later.
+        if (process.env.STOP_DAY_MAP_BACKFILL === "true") {
+            console.log("backfillAllTripDayMaps: STOP_DAY_MAP_BACKFILL is set — halting, not rescheduling.");
+            return { backfilledInBatch: 0, done: true };
+        }
+
+        const batchSize = args.batchSize ?? 15;
+        const result: {
+            tripIds: string[];
+            scannedCount: number;
+            isDone: boolean;
+            continueCursor: string | null;
+        } = await ctx.runQuery(internal.trips.listTripsNeedingMapBackfill, {
+            cursor: args.cursor ?? null,
+            numItems: batchSize,
+        });
+
+        for (const tripId of result.tripIds) {
+            await ctx.runAction(internal.tripsActions.backfillDayMapsForTrip, { tripId });
+        }
+
+        console.log(
+            `backfillAllTripDayMaps: scanned ${result.scannedCount}, backfilled ${result.tripIds.length} trip(s), done=${result.isDone}`
+        );
+
+        if (!result.isDone) {
+            await ctx.scheduler.runAfter(1000, internal.tripsActions.backfillAllTripDayMaps, {
+                cursor: result.continueCursor,
+                batchSize,
+            });
+        }
+
+        return { backfilledInBatch: result.tripIds.length, done: result.isDone };
     },
 });
 
@@ -3113,7 +3490,7 @@ interface TripData {
 }
 
 function generateBasicItinerary(trip: TripData, activities: Array<{ title?: string }>, restaurants: RestaurantInfo[]) {
-    const days = Math.ceil((trip.endDate - trip.startDate) / (24 * 60 * 60 * 1000));
+    const days = countTripDays(trip.startDate, trip.endDate);
     const dailyPlan = [];
     const hasCulinary = (trip.interests || []).some(i => i === 'Food' || i === 'Culinary');
     
@@ -3867,7 +4244,7 @@ export const regenerateDayAction = internalAction({
         const days = trip.itinerary.dayByDayItinerary;
         if (dayIndex < 0 || dayIndex >= days.length) throw new Error("Invalid day");
 
-        const tripDays = Math.max(1, Math.ceil((trip.endDate - trip.startDate) / (24 * 60 * 60 * 1000)));
+        const tripDays = countTripDays(trip.startDate, trip.endDate);
         const effectiveTravelerCount = trip.travelerCount ?? trip.travelers ?? 1;
         const budgetGuidance = generateBudgetGuidance(
             trip.budgetTotal ?? (typeof trip.budget === "number" ? trip.budget : undefined),
@@ -3886,13 +4263,26 @@ export const regenerateDayAction = internalAction({
 
         const interestsLine = (trip.interests || []).join(", ") || "general sightseeing";
 
+        // The closing checkout/airport-transfer block is generated by us, not by the
+        // model. Keep it out of the regeneration and hand it back afterwards, so a
+        // regenerated departure day doesn't silently lose its return-flight logistics.
+        const departureActivities = (currentDay.activities || []).filter(
+            (a: any) => a?.type === "departure",
+        );
+        const departureCutoff =
+            departureActivities[0]?.startTime || departureActivities[0]?.time || null;
+        const departureLine = departureCutoff
+            ? `
+This is the DEPARTURE day: the traveler leaves for the airport at ${departureCutoff}. Schedule NOTHING at or after that time and do NOT include the transfer itself — it is appended automatically as the day's last item.`
+            : "";
+
         const prompt = `You are a travel itinerary planner for ${trip.destination}.
 Regenerate the activities for ONE day of an existing trip. Keep it geographically logical and well-paced.
 
 ${budgetGuidance.guidance}
 
 Traveler interests: ${interestsLine}.
-This is day ${currentDay.day ?? dayIndex + 1} of a ${tripDays}-day trip.
+This is day ${currentDay.day ?? dayIndex + 1} of a ${tripDays}-day trip.${departureLine}
 
 HARD RULE — do NOT use any venue already used on the other days of this trip: ${otherDayTitles || "(none)"}.
 Generate a FRESH, different set of activities for this day, respecting the budget tier (${budgetGuidance.budgetTier}).
@@ -3977,6 +4367,15 @@ The first activity's travelFromPrevious MUST be null. Each subsequent activity s
         } catch (restErr) {
             console.warn("regenerateDayAction: restaurant enrichment skipped:", restErr instanceof Error ? restErr.message : restErr);
         }
+
+        // Restore the return-flight logistics the model was told to leave out.
+        if (departureActivities.length > 0) {
+            enrichedDay.activities = [
+                ...(enrichedDay.activities || []).filter((a: any) => a?.type !== "departure"),
+                ...departureActivities,
+            ];
+        }
+        if (currentDay.isDepartureDay) enrichedDay.isDepartureDay = true;
 
         // Write the new day back, then id-stamp + de-dup across the whole trip.
         const updatedDays = [...days];

@@ -83,6 +83,99 @@ function sanitizeCountry(raw: string | undefined): string {
 }
 
 /**
+ * Dedupe key for itinerary titles. Case-, accent- and punctuation-insensitive,
+ * and NUMBER-BLIND on purpose: "Athens in 3 Days: The Perfect Itinerary" and
+ * "Athens in 5 Days: The Perfect Itinerary" collapse to the same key, so a
+ * destination can never end up with the same phrasing repeated per duration.
+ */
+function titleKey(raw: string): string {
+    return (raw || "")
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[̀-ͯ]/g, "")
+        .replace(/\d+/g, " ")
+        .replace(/[^a-z]+/g, " ")
+        .trim();
+}
+
+/** Stable small hash so each destination starts from a different template. */
+function titleSeed(input: string): number {
+    let h = 0;
+    for (let i = 0; i < input.length; i++) h = (h * 31 + input.charCodeAt(i)) | 0;
+    return Math.abs(h);
+}
+
+/** Distinct title shapes — the deterministic fallback when the model repeats itself. */
+const TITLE_SHAPES: Array<(d: string, n: number) => string> = [
+    (d, n) => `${n} Days in ${d}: A Local-Style Route`,
+    (d, n) => `How to Spend ${n} Days in ${d}`,
+    (d, n) => `The ${n}-Day ${d} Itinerary Worth Copying`,
+    (d, n) => `${d} in ${n} Days, Planned Hour by Hour`,
+    (d, n) => `${n} Unhurried Days in ${d}`,
+    (d, n) => `Your First ${n} Days in ${d}`,
+    (d, n) => `${n} Days in ${d} Without the Tourist Traps`,
+    (d, n) => `${d}: A ${n}-Day Route Through Food, Sights and Neighbourhoods`,
+    (d, n) => `${n} Days in ${d} on a Real Budget`,
+    (d, n) => `The Walkable ${n}-Day ${d} Plan`,
+    (d, n) => `${d} in ${n} Days for First-Timers`,
+    (d, n) => `A ${n}-Day ${d} Trip You Can Actually Follow`,
+];
+
+/** Extra themes, combined with the base shape to widen the fallback pool. */
+const TITLE_THEMES = [
+    "Where to Eat, Walk and Wander",
+    "The Route Our Travellers Kept Repeating",
+    "Mornings, Markets and Long Evenings",
+    "A Route Built From Real Trips",
+    "Classics First, Crowds Last",
+    "Neighbourhood by Neighbourhood",
+    "The Version Locals Would Recognise",
+    "Sights, Sunsets and Somewhere to Sit",
+];
+
+/** 0→A, 1→B, … 25→Z, 26→AA. Letters only, so titleKey can't strip it away. */
+function letterCode(i: number): string {
+    let n = i;
+    let out = "";
+    do {
+        out = String.fromCharCode(65 + (n % 26)) + out;
+        n = Math.floor(n / 26) - 1;
+    } while (n >= 0);
+    return out;
+}
+
+/**
+ * Return a title that no other itinerary uses. Prefers the model's own title;
+ * falls back to varied deterministic shapes when it duplicates something we've
+ * already generated. `taken` holds the dedupe keys of every OTHER itinerary.
+ */
+function uniqueTitle(
+    candidate: string,
+    destination: string,
+    durationDays: number,
+    taken: Set<string>
+): string {
+    const clean = (candidate || "").trim();
+    if (clean && !taken.has(titleKey(clean))) return clean;
+
+    const pool: string[] = [
+        ...TITLE_SHAPES.map((f) => f(destination, durationDays)),
+        ...TITLE_THEMES.map((t) => `${destination} in ${durationDays} Days: ${t}`),
+    ];
+    const start = titleSeed(`${destination}-${durationDays}`) % pool.length;
+    for (let i = 0; i < pool.length; i++) {
+        const cand = pool[(start + i) % pool.length];
+        if (!taken.has(titleKey(cand))) return cand;
+    }
+    // Pool exhausted (an unusual number of itineraries for one destination) —
+    // letter-suffixed routes never repeat, and `taken` is finite so this ends.
+    for (let i = 0; ; i++) {
+        const cand = `${destination} in ${durationDays} Days: Route ${letterCode(i)}`;
+        if (!taken.has(titleKey(cand))) return cand;
+    }
+}
+
+/**
  * Aggregation action: merge multiple user-generated trip itineraries
  * into a single curated SEO itinerary for public consumption.
  */
@@ -155,6 +248,15 @@ export const aggregateAndPublish = internalAction({
             { destination: agg.destination }
         );
 
+        // 4b. Every title already in use (drafts + published + rejected), so this
+        // draft can't be born with a title we've published before.
+        const existingTitles: Array<{ slug: string; destination: string; title: string }> =
+            await ctx.runQuery(internal.publishedItineraries.listTitles, {});
+
+        const takenTitlesBlock = existingTitles.length
+            ? existingTitles.map((t) => `  - "${t.title}"`).join("\n")
+            : "  (none yet)";
+
         // 5. Call OpenAI to aggregate
         const openai = new OpenAI();
         const slug = destinationKey.replace(/\s+/g, "-").toLowerCase();
@@ -166,7 +268,7 @@ ${JSON.stringify(tripSummaries, null, 2)}
 
 Output a JSON object with EXACTLY this structure (no markdown, no explanation, just valid JSON):
 {
-  "title": "string — SEO title like '${agg.destination} in ${agg.durationDays} Days: The Perfect Itinerary'",
+  "title": "string — a DISTINCTIVE SEO title for this specific itinerary (must not match any of the already-used titles listed below)",
   "meta_description": "string — 150-160 char SEO meta description",
   "intro": "string — 2-3 engaging paragraphs introducing the trip",
   "budget_level": "budget" | "mid-range" | "luxury",
@@ -215,6 +317,10 @@ Output a JSON object with EXACTLY this structure (no markdown, no explanation, j
 }
 
 Rules:
+- The title MUST be unique across our whole library. These titles are ALREADY USED — do not reuse or lightly reword any of them:
+${takenTitlesBlock}
+- Do NOT use the generic "<City> in N Days: The Perfect Itinerary" formula; vary the angle (theme, pace, traveller type, neighbourhood, season) so each itinerary reads differently
+- Keep the title under 65 characters and mention ${agg.destination}
 - Pick the BEST activities/restaurants from all trips, don't just copy one trip
 - Each day should have 3 slots (morning, afternoon, evening)
 - Each day should have 3 meals (breakfast, lunch, dinner)
@@ -287,6 +393,27 @@ Rules:
             console.error(`affiliate enrich failed for ${finalSlug}:`, e);
         }
 
+        // 7d. Final guard: the model can still repeat itself, so enforce uniqueness
+        // here. Our own row (on re-aggregation) is excluded, keeping approved
+        // titles stable across refreshes.
+        const takenTitleKeys = new Set(
+            existingTitles
+                .filter((t) => t.slug !== finalSlug && t.title)
+                .map((t) => titleKey(t.title))
+        );
+        const title = uniqueTitle(
+            parsed.title,
+            agg.destination,
+            agg.durationDays,
+            takenTitleKeys
+        );
+        if (title !== (parsed.title || "").trim()) {
+            console.log(
+                `Title "${parsed.title}" was already in use — using "${title}" for ${finalSlug}`
+            );
+            parsed.title = title; // keep translations in sync with the final title
+        }
+
         // 8. Upsert the published itinerary
         await ctx.runMutation(internal.publishedItineraries.upsert, {
             slug: finalSlug,
@@ -294,7 +421,7 @@ Rules:
             country,
             continent,
             durationDays: agg.durationDays,
-            title: parsed.title || `${agg.destination} in ${agg.durationDays} Days`,
+            title,
             metaDescription: parsed.meta_description || "",
             intro: parsed.intro || "",
             budgetLevel: parsed.budget_level || "mid-range",

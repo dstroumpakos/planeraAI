@@ -19,6 +19,7 @@ import Animated, {
     withDelay,
     Easing,
 } from "react-native-reanimated";
+import { countTripDays } from "@/lib/tripDays";
 
 const BRAND = "#FFE500";
 
@@ -138,10 +139,8 @@ export default function TripGenerationView({ trip, backgroundUrl, onBack }: Prop
         ? trip.itinerary.dayByDayItinerary
         : [];
     const progress = trip?.generationProgress;
-    const tripDays = Math.max(
-        1,
-        Math.ceil((trip.endDate - trip.startDate) / (1000 * 60 * 60 * 24)),
-    );
+    // Fallback only — the server reports the real total via generationProgress.
+    const tripDays = countTripDays(trip.startDate, trip.endDate);
     const totalDays = Math.max(progress?.totalDays || tripDays, days.length);
     const daysReady = days.length;
     const pct = Math.round((daysReady / totalDays) * 100);

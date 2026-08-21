@@ -2,6 +2,7 @@
  * Utility functions for the shareable trip card feature.
  * Handles trip ID generation, date formatting, and destination codes.
  */
+import { countTripDays } from "@/lib/tripDays";
 
 // Common destination → 3-letter code mapping
 const DESTINATION_CODES: Record<string, string> = {
@@ -91,8 +92,7 @@ export function formatBudget(perDayAmount: number, currencySymbol: string): stri
  * Calculate trip duration in days (inclusive).
  */
 export function getTripDurationDays(startDate: number, endDate: number): number {
-  const ms = endDate - startDate;
-  return Math.max(1, Math.round(ms / (1000 * 60 * 60 * 24)) + 1);
+  return countTripDays(startDate, endDate);
 }
 
 /**

@@ -1093,6 +1093,100 @@ export const patchDayEnrichment = internalMutation({
 });
 
 /**
+ * Patch just the map data (per-activity lat/lng + the day's static route map)
+ * onto one day, without touching `_enriched`/generationProgress — this runs
+ * independently of the affiliate/TripAdvisor enrichment pass, both at
+ * generation time and from the lazy/bulk backfill, and must stay idempotent
+ * since backfill can re-run over already-patched days.
+ */
+export const patchDayMapData = internalMutation({
+    args: {
+        tripId: v.id("trips"),
+        dayIndex: v.float64(),
+        activityCoords: v.array(
+            v.union(v.null(), v.object({ lat: v.float64(), lng: v.float64() }))
+        ),
+        mapImageUrl: v.union(v.string(), v.null()),
+        mapTotalKm: v.float64(),
+        mapWalkMinutes: v.float64(),
+    },
+    returns: v.null(),
+    handler: async (ctx: any, args: any) => {
+        const trip = await ctx.db.get(args.tripId);
+        if (!trip || !trip.itinerary) return null;
+
+        const itinerary = trip.itinerary;
+        const days = Array.isArray(itinerary.dayByDayItinerary)
+            ? [...itinerary.dayByDayItinerary]
+            : [];
+        if (args.dayIndex < 0 || args.dayIndex >= days.length) return null;
+
+        const day = days[args.dayIndex];
+        const activities = Array.isArray(day?.activities) ? day.activities : [];
+        const patchedActivities = activities.map((a: any, i: number) => {
+            const coord = args.activityCoords[i];
+            if (!coord) return a;
+            return { ...a, lat: coord.lat, lng: coord.lng };
+        });
+
+        days[args.dayIndex] = {
+            ...day,
+            activities: patchedActivities,
+            mapImageUrl: args.mapImageUrl,
+            mapTotalKm: args.mapTotalKm,
+            mapWalkMinutes: args.mapWalkMinutes,
+        };
+
+        await ctx.db.patch(args.tripId, {
+            itinerary: { ...itinerary, dayByDayItinerary: days },
+        });
+        return null;
+    },
+});
+
+/** True once a day has been through map-data backfill (successfully or not) — used to skip already-processed days. */
+function dayNeedsMapBackfill(day: any): boolean {
+    if (!day || typeof day !== "object") return false;
+    const activities = Array.isArray(day.activities) ? day.activities : [];
+    if (activities.length === 0) return false;
+    // A cached URL for the decommissioned OSM static-map host is a permanently
+    // broken image, so those days need re-running even though they were already
+    // "attempted". Kept in sync with isDeadMapUrl in lib/geocoding.ts.
+    if (typeof day.mapImageUrl === "string" && day.mapImageUrl.includes("staticmap.openstreetmap.de")) return true;
+    if (day.mapImageUrl !== undefined) return false; // already attempted (url or null)
+    return true;
+}
+
+/** One page of trips whose itinerary has at least one day still missing map data. */
+export const listTripsNeedingMapBackfill = internalQuery({
+    args: {
+        cursor: v.union(v.string(), v.null()),
+        numItems: v.float64(),
+    },
+    returns: v.any(),
+    handler: async (ctx: any, args: any) => {
+        const page = await ctx.db
+            .query("trips")
+            .withIndex("by_status", (q: any) => q.eq("status", "completed"))
+            .paginate({ cursor: args.cursor, numItems: args.numItems });
+
+        const tripIds = page.page
+            .filter((trip: any) => {
+                const days = trip.itinerary?.dayByDayItinerary;
+                return Array.isArray(days) && days.some(dayNeedsMapBackfill);
+            })
+            .map((trip: any) => trip._id);
+
+        return {
+            tripIds,
+            scannedCount: page.page.length,
+            isDone: page.isDone,
+            continueCursor: page.continueCursor,
+        };
+    },
+});
+
+/**
  * Finalize the base itinerary once the full stream is in: attach the
  * non-day-list parts of the result (flights, hotels, etc.) and the authoritative
  * final day list, flip status to "completed" so the trip is viewable, and move
@@ -1664,6 +1758,52 @@ export const scheduleReplaceActivity = authMutation({
             dayIndex: args.dayIndex,
             activityIndex: args.activityIndex,
             language: args.language,
+        });
+    },
+});
+
+/**
+ * Emergency stop for the self-rescheduling backfillAllTripDayMaps migration:
+ * finds any pending scheduled re-run of it and cancels the chain. Already-
+ * completed batches stay backfilled (nothing is undone) — this only stops
+ * future batches from firing. Run once via:
+ *   npx convex run trips:cancelPendingDayMapBackfill --prod
+ */
+export const cancelPendingDayMapBackfill = internalMutation({
+    args: {},
+    returns: v.any(),
+    handler: async (ctx: any) => {
+        const pending = await ctx.db.system.query("_scheduled_functions").collect();
+        const matches = pending.filter(
+            (job: any) =>
+                job.state?.kind === "pending" &&
+                typeof job.name === "string" &&
+                job.name.includes("backfillAllTripDayMaps")
+        );
+        for (const job of matches) {
+            await ctx.scheduler.cancel(job._id);
+        }
+        return { cancelled: matches.length };
+    },
+});
+
+/**
+ * Lazy backfill trigger: the map screen calls this when it notices the trip's
+ * itinerary is missing cached coordinates/map images (e.g. the trip predates
+ * this feature, or generation-time enrichment failed for some other reason).
+ * Fire-and-forget — the map screen keeps working off its own live geocode in
+ * the meantime; this just ensures the data gets cached for next time (and for
+ * the share sheet's per-day slides).
+ */
+export const scheduleBackfillDayMaps = authMutation({
+    args: { token: v.string(), tripId: v.id("trips") },
+    handler: async (ctx: any, args: any) => {
+        const trip = await ctx.db.get(args.tripId);
+        if (!trip) throw new Error("Trip not found");
+        if (trip.userId !== ctx.user.userId) throw new Error("Unauthorized");
+
+        await (ctx as any).scheduler.runAfter(0, (internal as any).tripsActions.backfillDayMapsForTrip, {
+            tripId: args.tripId,
         });
     },
 });

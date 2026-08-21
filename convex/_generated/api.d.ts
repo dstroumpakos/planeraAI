@@ -75,6 +75,7 @@ import type * as insights from "../insights.js";
 import type * as lib_airportCountry from "../lib/airportCountry.js";
 import type * as lib_appleRootCerts from "../lib/appleRootCerts.js";
 import type * as lib_countryFacts from "../lib/countryFacts.js";
+import type * as lib_geocoding from "../lib/geocoding.js";
 import type * as lib_searchApiAccommodations from "../lib/searchApiAccommodations.js";
 import type * as lib_searchApiExplore from "../lib/searchApiExplore.js";
 import type * as lib_searchApiExploreDestination from "../lib/searchApiExploreDestination.js";
@@ -211,6 +212,7 @@ declare const fullApi: ApiFromModules<{
   "lib/airportCountry": typeof lib_airportCountry;
   "lib/appleRootCerts": typeof lib_appleRootCerts;
   "lib/countryFacts": typeof lib_countryFacts;
+  "lib/geocoding": typeof lib_geocoding;
   "lib/searchApiAccommodations": typeof lib_searchApiAccommodations;
   "lib/searchApiExplore": typeof lib_searchApiExplore;
   "lib/searchApiExploreDestination": typeof lib_searchApiExploreDestination;

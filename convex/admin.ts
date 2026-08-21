@@ -588,22 +588,78 @@ export const listUsers = query({
                 // Newsletter opt-in state
                 const newsletter = await getNewsletterSub(ctx, settings.email);
 
+                // Sessions → last sign-in + how many are still valid
+                const sessions = await ctx.db
+                    .query("sessions")
+                    .withIndex("by_user", (q: any) => q.eq("userId", settings.userId))
+                    .collect();
+                const lastActiveAt = sessions.reduce(
+                    (max: number, s: any) => Math.max(max, s._creationTime || 0),
+                    0
+                );
+
+                // Push tokens double as the device record. Users who signed up
+                // before `settings.platform` existed only have this to go on.
+                const pushTokens = await ctx.db
+                    .query("pushTokens")
+                    .withIndex("by_user", (q: any) => q.eq("userId", settings.userId))
+                    .collect();
+                const devicePlatforms = Array.from(
+                    new Set(pushTokens.map((t: any) => t.platform).filter(Boolean))
+                );
+
+                const now = Date.now();
+                const upcomingTripsCount = trips.filter((t: any) => (t.endDate || 0) >= now).length;
+                const lastTripAt = trips.reduce(
+                    (max: number, t: any) => Math.max(max, t._creationTime || 0),
+                    0
+                );
+
                 return {
                     _id: user?._id,
                     settingsId: settings._id,
                     userId: settings.userId,
                     name: settings.name || "Unknown",
                     email: settings.email || "Unknown",
+                    phone: settings.phone || null,
+                    dateOfBirth: settings.dateOfBirth || null,
+                    hasProfilePicture: !!settings.profilePicture,
+                    authProvider: settings.authProvider || "unknown",
+                    platform: settings.platform || devicePlatforms[0] || null,
+                    devicePlatforms,
+                    devicesCount: pushTokens.length,
+                    language: settings.language || null,
+                    currency: settings.currency || null,
+                    onboardingCompleted: settings.onboardingCompleted ?? null,
                     isAdmin: user?.isAdmin || false,
                     isBanned: user?.isBanned || false,
                     isShadowBanned: user?.isShadowBanned || false,
                     tripsCount: trips.length,
+                    upcomingTripsCount,
+                    pastTripsCount: trips.length - upcomingTripsCount,
+                    lastTripAt: lastTripAt || null,
                     insightsCount: insights.length,
                     approvedInsightsCount: insights.filter((i: any) => i.moderationStatus === "approved").length,
                     totalLikes: insights.reduce((sum: number, i: any) => sum + (i.likes || 0), 0),
                     plan: userPlan?.plan || "free",
+                    subscriptionType: userPlan?.subscriptionType || null,
+                    subscriptionExpiresAt: userPlan?.subscriptionExpiresAt || null,
+                    tripCredits: userPlan?.tripCredits ?? 0,
+                    tripsGenerated: userPlan?.tripsGenerated ?? 0,
                     homeAirport: settings.homeAirport || null,
                     homeIata: extractIata(settings.homeAirport),
+                    defaultTravelers: settings.defaultTravelers ?? null,
+                    defaultInterests: settings.defaultInterests || [],
+                    travelStyle: settings.travelStyle || null,
+                    budgetRange: settings.budgetRange || null,
+                    pushNotifications: settings.pushNotifications ?? null,
+                    emailNotifications: settings.emailNotifications ?? null,
+                    dealAlerts: settings.dealAlerts ?? null,
+                    tripReminders: settings.tripReminders ?? null,
+                    aiDataConsent: settings.aiDataConsent ?? null,
+                    referralCode: settings.referralCode || null,
+                    activeSessionsCount: sessions.filter((s: any) => s.expiresAt > now).length,
+                    lastActiveAt: lastActiveAt || null,
                     newsletterStatus: newsletter?.status || "none",
                     createdAt: settings._creationTime,
                 };
@@ -669,13 +725,24 @@ export const getUser = query({
 
         // Newsletter opt-in state
         const newsletter = await getNewsletterSub(ctx, userEmail);
-        
+
+        // Registered devices (push tokens double as the device record)
+        const pushTokens = await ctx.db
+            .query("pushTokens")
+            .withIndex("by_user", (q: any) => q.eq("userId", args.targetUserId))
+            .collect();
+        const devicePlatforms = Array.from(
+            new Set(pushTokens.map((t: any) => t.platform).filter(Boolean))
+        );
+
         // Get trip destinations
         const tripDestinations = trips.map((t: any) => ({
+            _id: t._id,
             destination: t.destination,
             startDate: t.startDate,
             endDate: t.endDate,
             status: t.status,
+            createdAt: t._creationTime,
         }));
         
         // Past vs upcoming trips
@@ -689,7 +756,22 @@ export const getUser = query({
             userId: args.targetUserId,
             name: settings.name || "Unknown",
             email: settings.email || "Unknown",
+            phone: settings.phone || null,
+            dateOfBirth: settings.dateOfBirth || null,
+            hasProfilePicture: !!settings.profilePicture,
             authProvider: settings.authProvider || "unknown",
+            platform: settings.platform || devicePlatforms[0] || null,
+            devicePlatforms,
+            devices: pushTokens.map((t: any) => ({
+                platform: t.platform,
+                deviceName: t.deviceName || null,
+                createdAt: t.createdAt || t._creationTime,
+                updatedAt: t.updatedAt || null,
+            })),
+            language: settings.language || null,
+            currency: settings.currency || null,
+            darkMode: settings.darkMode ?? null,
+            onboardingCompleted: settings.onboardingCompleted ?? null,
             isAdmin: user?.isAdmin || false,
             isBanned: user?.isBanned || false,
             isShadowBanned: user?.isShadowBanned || false,
@@ -722,6 +804,24 @@ export const getUser = query({
             lastActiveAt: lastSession?._creationTime || null,
             homeAirport: settings.homeAirport || null,
             homeIata: extractIata(settings.homeAirport),
+            defaultTravelers: settings.defaultTravelers ?? null,
+            defaultInterests: settings.defaultInterests || [],
+            defaultSkipFlights: settings.defaultSkipFlights ?? null,
+            defaultSkipHotel: settings.defaultSkipHotel ?? null,
+            defaultPreferredFlightTime: settings.defaultPreferredFlightTime || null,
+            preferredAirlines: settings.preferredAirlines || [],
+            seatPreference: settings.seatPreference || null,
+            mealPreference: settings.mealPreference || null,
+            hotelStarRating: settings.hotelStarRating ?? null,
+            budgetRange: settings.budgetRange || null,
+            travelStyle: settings.travelStyle || null,
+            pushNotifications: settings.pushNotifications ?? null,
+            emailNotifications: settings.emailNotifications ?? null,
+            dealAlerts: settings.dealAlerts ?? null,
+            tripReminders: settings.tripReminders ?? null,
+            aiDataConsent: settings.aiDataConsent ?? null,
+            aiDataConsentDate: settings.aiDataConsentDate || null,
+            referralCode: settings.referralCode || null,
             newsletterStatus: newsletter?.status || "none",
             newsletterSource: newsletter?.source || null,
             newsletterCountry: newsletter?.country || null,

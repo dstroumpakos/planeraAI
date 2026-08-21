@@ -47,7 +47,14 @@ export default defineSchema({
             photographer: v.string(),
             attribution: v.string(),
         })),
-        // Backward compatibility: keep raw itinerary
+        // Backward compatibility: keep raw itinerary.
+        // itinerary.dayByDayItinerary[].activities[] carries optional `lat`/`lng`
+        // (server-geocoded once, via convex/lib/geocoding.ts — null if geocoding
+        // found nothing). itinerary.dayByDayItinerary[] itself carries optional
+        // `mapImageUrl` (static day-route map URL, null if generation failed),
+        // `mapTotalKm`/`mapWalkMinutes` (route totals from the same pass). All
+        // four are best-effort and may be absent on trips predating this field
+        // or still awaiting backfill — never assume they're present.
         itinerary: v.optional(v.any()),
         // Live generation progress for the streaming day-by-day reveal.
         // Drives the "watch your trip build" UI (real progress, not a fake bar).

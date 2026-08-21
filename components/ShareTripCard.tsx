@@ -30,7 +30,9 @@ import {
   getTripDurationDays,
   getTravelStyle,
 } from "../lib/tripCardUtils";
+import { haversineKm } from "../lib/geo";
 import { useTranslation } from "react-i18next";
+import { ShareRouteCardBody, type ShareRouteData } from "./ShareRouteCardBody";
 
 // Logo asset (white text on transparent — works on dark backgrounds)
 const logoAsset = require("@/assets/images/logo-a-stapr6.png");
@@ -60,8 +62,9 @@ const DONUT_THICKNESS = 24;
 const SERIF = Platform.select({ ios: "Georgia", default: "serif" });
 const SANS = Platform.select({ ios: "System", default: "sans-serif" });
 
-// Slide types
-type SlideKey = "cover" | "poster" | "deal" | "itinerary" | "activities" | "budget";
+// Slide types — `day-${n}` is generated dynamically, one per itinerary day
+// that has cached map data (see dayRouteSlides below).
+type SlideKey = "cover" | "poster" | "deal" | "itinerary" | `day-${number}` | "activities" | "budget";
 
 /**
  * Donut chart built from plain Views (the app has no SVG dependency).
@@ -282,6 +285,58 @@ const ShareTripCard = forwardRef<ShareTripCardHandle, Props>(
         .slice(0, 4);
     }, [days]);
 
+    // ── Per-day route slides — one per itinerary day, reusing ShareRouteCard's
+    // layout. Requires the day to already have its static map cached (server
+    // geocoding + map generation, see convex/lib/geocoding.ts); a day that
+    // hasn't been backfilled yet (predates this feature, or backfill hasn't
+    // run) simply doesn't get a slide rather than showing a broken/empty map.
+    const dayRouteSlides = useMemo(() => {
+      const travelers = trip.travelerCount || 1;
+      return days
+        .map((day: any, idx: number): { key: SlideKey; data: ShareRouteData } | null => {
+          const activities: any[] = Array.isArray(day.activities) ? day.activities : [];
+          const geocoded = activities.filter((a) => typeof a.lat === "number" && typeof a.lng === "number");
+          // Two stops is the minimum that makes a *route* worth showing.
+          if (geocoded.length < 2) return null;
+
+          const stops = geocoded.slice(0, 5).map((a, i) => {
+            const prev = i > 0 ? geocoded[i - 1] : null;
+            return {
+              title: a.title,
+              time: a.time || a.startTime,
+              image: a.image,
+              lat: a.lat,
+              lng: a.lng,
+              legKm: prev ? haversineKm({ lat: prev.lat, lng: prev.lng }, { lat: a.lat, lng: a.lng }) : undefined,
+            };
+          });
+
+          const dayDate = trip.startDate ? trip.startDate + idx * 24 * 60 * 60 * 1000 : undefined;
+          const firstTip = activities.find((a) => typeof a?.tips === "string")?.tips;
+
+          return {
+            key: `day-${idx + 1}`,
+            data: {
+              destination: trip.destination,
+              dayNumber: idx + 1,
+              dayCount: days.length,
+              dayTitle: day.title || "",
+              date: dayDate,
+              travelers,
+              stops,
+              mapUri: day.mapImageUrl || undefined,
+              totalKm: day.mapTotalKm || 0,
+              walkMinutes: day.mapWalkMinutes || 0,
+              tip: typeof firstTip === "string" ? firstTip : undefined,
+              // Same photo as the cover/poster/itinerary slides, so the day
+              // slides read as part of the same set instead of bare panels.
+              backgroundUri: displayPhoto?.url,
+            },
+          };
+        })
+        .filter((s): s is { key: SlideKey; data: ShareRouteData } => s !== null);
+    }, [days, trip.destination, trip.startDate, trip.travelerCount, displayPhoto?.url]);
+
     const budgetCats = useMemo(
       () => (budget?.categories || []).filter((c) => c.amount > 0),
       [budget]
@@ -303,9 +358,10 @@ const ShareTripCard = forwardRef<ShareTripCardHandle, Props>(
       if (hasDeal && dealFlight) keys.push("deal");
       if (hasBudget) keys.push("budget");
       if (days.length > 0) keys.push("itinerary");
+      dayRouteSlides.forEach((s) => keys.push(s.key));
       if (topActivities.length >= 2) keys.push("activities");
       return keys;
-    }, [hasPoster, hasDeal, dealFlight, hasBudget, days.length, topActivities.length]);
+    }, [hasPoster, hasDeal, dealFlight, hasBudget, days.length, dayRouteSlides, topActivities.length]);
 
     // ── Handlers ──
     const ensureTripCard = useCallback(async () => {
@@ -1188,6 +1244,18 @@ const ShareTripCard = forwardRef<ShareTripCardHandle, Props>(
             </ViewShot>
           )}
 
+          {/* ── Slides: PER-DAY ROUTE ── */}
+          {dayRouteSlides.map((s) => (
+            <ViewShot
+              key={s.key}
+              ref={(r) => { slideRefs.current[s.key] = r; }}
+              style={styles.card}
+              options={{ format: "png", quality: 1.0, width: 1080, height: 1920 }}
+            >
+              <ShareRouteCardBody data={s.data} />
+            </ViewShot>
+          ))}
+
           {/* ── Slide: TOP ACTIVITIES ── */}
           {topActivities.length >= 2 && (
             <ViewShot
@@ -1229,20 +1297,26 @@ const ShareTripCard = forwardRef<ShareTripCardHandle, Props>(
                   const idx = Math.round(e.nativeEvent.contentOffset.x / PAGE_W);
                   setActiveSlide(Math.max(0, Math.min(idx, slideKeys.length - 1)));
                 }}
-                renderItem={({ item: key }) => (
-                  <View style={{ width: PAGE_W, alignItems: "center", justifyContent: "center" }}>
-                    <View style={[styles.previewCard, { width: PREVIEW_CARD_W, height: PREVIEW_CARD_H }]}>
-                      <View style={[styles.card, { transform: [{ scale: PREVIEW_SCALE }], transformOrigin: "0% 0%" }]}>
-                        {key === "cover" && renderCoverContent()}
-                        {key === "poster" && renderPosterContent()}
-                        {key === "deal" && dealFlight && renderDealContent()}
-                        {key === "budget" && renderBudgetContent()}
-                        {key === "itinerary" && renderItineraryContent()}
-                        {key === "activities" && renderActivitiesContent()}
+                renderItem={({ item: key }) => {
+                  const daySlide = key.startsWith("day-")
+                    ? dayRouteSlides.find((s) => s.key === key)
+                    : null;
+                  return (
+                    <View style={{ width: PAGE_W, alignItems: "center", justifyContent: "center" }}>
+                      <View style={[styles.previewCard, { width: PREVIEW_CARD_W, height: PREVIEW_CARD_H }]}>
+                        <View style={[styles.card, { transform: [{ scale: PREVIEW_SCALE }], transformOrigin: "0% 0%" }]}>
+                          {key === "cover" && renderCoverContent()}
+                          {key === "poster" && renderPosterContent()}
+                          {key === "deal" && dealFlight && renderDealContent()}
+                          {key === "budget" && renderBudgetContent()}
+                          {key === "itinerary" && renderItineraryContent()}
+                          {daySlide && <ShareRouteCardBody data={daySlide.data} />}
+                          {key === "activities" && renderActivitiesContent()}
+                        </View>
                       </View>
                     </View>
-                  </View>
-                )}
+                  );
+                }}
               />
 
               {/* Page dots */}

@@ -64,6 +64,7 @@ const cleanLocationTitle = (title: string): string => {
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Calendar } from 'react-native-calendars';
 import { INTERESTS } from "@/lib/data";
+import { countTripDays, maxEndDate, MAX_TRIP_DAYS } from "@/lib/tripDays";
 
 // Local Experiences categories (same as create-trip)
 const LOCAL_EXPERIENCES = [
@@ -1283,16 +1284,14 @@ export default function TripDetails() {
     const handleDayPress = (day: any) => {
         const newDate = new Date(day.dateString);
         const timestamp = newDate.getTime();
-        const MAX_TRIP_DAYS = 15;
-        
         if (selectingDate === 'start') {
-            // If new start makes trip > 15 days, auto-cap end date
-            const daysDiff = Math.ceil((editForm.endDate - timestamp) / (24 * 60 * 60 * 1000));
+            // If the new start pushes the trip past the max length, auto-cap the end
+            const daysDiff = countTripDays(timestamp, editForm.endDate);
             if (daysDiff > MAX_TRIP_DAYS) {
                 setEditForm(prev => ({
                     ...prev,
                     startDate: timestamp,
-                    endDate: timestamp + MAX_TRIP_DAYS * 24 * 60 * 60 * 1000,
+                    endDate: maxEndDate(timestamp),
                 }));
             } else {
                 setEditForm(prev => ({
@@ -1301,7 +1300,7 @@ export default function TripDetails() {
                 }));
             }
         } else {
-            const daysDiff = Math.ceil((timestamp - editForm.startDate) / (24 * 60 * 60 * 1000));
+            const daysDiff = countTripDays(editForm.startDate, timestamp);
             if (daysDiff > MAX_TRIP_DAYS) {
                 Alert.alert(t('tripDetail.tripTooLong'), t('tripDetail.tripTooLongMsg'));
                 return;
@@ -3042,6 +3041,7 @@ export default function TripDetails() {
                                                     ) :
                                                     activity.type === 'museum' ? 'easel' :
                                                     activity.type === 'attraction' ? 'ticket' :
+                                                    activity.type === 'departure' ? 'airplane' :
                                                     'location'
                                                 } 
                                                 size={20} 

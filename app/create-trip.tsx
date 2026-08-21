@@ -16,6 +16,7 @@ import { useTranslation } from "react-i18next";
 import { TripGuideTooltip, GuideStep } from "@/components/FirstTripGuide";
 import { CITY_TRANSLATIONS, COUNTRY_TRANSLATIONS } from "@/lib/destinationTranslations";
 import { canonicalHomeAirport } from "@/lib/homeAirport";
+import { countTripDays, maxEndDate, MAX_TRIP_DAYS } from "@/lib/tripDays";
 
 import logoImage from "@/assets/images/appicon-1024x1024-01-1vb1vx.png";
 
@@ -571,7 +572,7 @@ export default function CreateTripScreen() {
     const perPersonBudget = Math.round(formData.budgetTotal / formData.travelerCount);
 
     // Compute trip days and budget tier for display
-    const tripDays = Math.max(1, Math.ceil((formData.endDate - formData.startDate) / (24 * 60 * 60 * 1000)));
+    const tripDays = countTripDays(formData.startDate, formData.endDate);
     const dailyBudgetPerPerson = Math.round(perPersonBudget / tripDays);
     const budgetTier = dailyBudgetPerPerson > 300
         ? { label: t('createTrip.premium'), icon: 'diamond' as const, color: '#9B59B6', description: t('createTrip.premiumDesc') }
@@ -768,8 +769,6 @@ export default function CreateTripScreen() {
         return marked;
     };
 
-    const MAX_TRIP_DAYS = 15;
-
     const handleDayPress = (day: DateData) => {
         const selectedTimestamp = new Date(day.dateString).getTime();
         
@@ -783,13 +782,13 @@ export default function CreateTripScreen() {
                     endDate: autoEnd,
                 });
             } else {
-                // Check if existing end date would exceed 15 days from new start
-                const daysDiff = Math.ceil((formData.endDate - selectedTimestamp) / (24 * 60 * 60 * 1000));
+                // Check if existing end date would exceed the max trip length
+                const daysDiff = countTripDays(selectedTimestamp, formData.endDate);
                 if (daysDiff > MAX_TRIP_DAYS) {
                     setFormData({
                         ...formData,
                         startDate: selectedTimestamp,
-                        endDate: selectedTimestamp + MAX_TRIP_DAYS * 24 * 60 * 60 * 1000,
+                        endDate: maxEndDate(selectedTimestamp),
                     });
                 } else {
                     setFormData({ ...formData, startDate: selectedTimestamp });
@@ -800,7 +799,7 @@ export default function CreateTripScreen() {
                 Alert.alert(t('createTrip.invalidDate'), t('createTrip.endAfterStart'));
                 return;
             }
-            const daysDiff = Math.ceil((selectedTimestamp - formData.startDate) / (24 * 60 * 60 * 1000));
+            const daysDiff = countTripDays(formData.startDate, selectedTimestamp);
             if (daysDiff > MAX_TRIP_DAYS) {
                 Alert.alert(t('createTrip.tripTooLong'), t('createTrip.tripTooLongReturn'));
                 return;
@@ -835,9 +834,9 @@ export default function CreateTripScreen() {
             return;
         }
 
-        // Validate trip duration (max 15 days)
-        const submitTripDays = Math.ceil((formData.endDate - formData.startDate) / (24 * 60 * 60 * 1000));
-        if (submitTripDays > 15) {
+        // Validate trip duration
+        const submitTripDays = countTripDays(formData.startDate, formData.endDate);
+        if (submitTripDays > MAX_TRIP_DAYS) {
             Alert.alert(t('createTrip.tripTooLong'), t('createTrip.tripTooLongMsg'));
             return;
         }
@@ -1467,7 +1466,7 @@ export default function CreateTripScreen() {
                             <Calendar
                                 initialDate={formatDateForCalendar(selectingDate === 'start' ? formData.startDate : formData.endDate)}
                                 minDate={selectingDate === 'start' ? formatDateForCalendar(Date.now()) : formatDateForCalendar(formData.startDate + 24 * 60 * 60 * 1000)}
-                                maxDate={selectingDate === 'end' ? formatDateForCalendar(formData.startDate + MAX_TRIP_DAYS * 24 * 60 * 60 * 1000) : formatDateForCalendar(Date.now() + 18 * 30 * 24 * 60 * 60 * 1000)}
+                                maxDate={selectingDate === 'end' ? formatDateForCalendar(maxEndDate(formData.startDate)) : formatDateForCalendar(Date.now() + 18 * 30 * 24 * 60 * 60 * 1000)}
                                 onDayPress={handleDayPress}
                                 markingType={'period'}
                                 markedDates={getMarkedDates()}
