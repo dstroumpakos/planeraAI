@@ -1389,7 +1389,15 @@
     "moveCurrentDay": "Aktuell",
     "reorderDay": "Tag neu anordnen",
     "reorderDayTitle": "Tag {{number}} neu anordnen",
-    "reorderHint": "Ziehe den Griff zum Neuordnen. Änderungen werden automatisch gespeichert."
+    "reorderHint": "Ziehe den Griff zum Neuordnen. Änderungen werden automatisch gespeichert.",
+    "optimizeDay": "Route optimieren",
+    "optimizeConfirm": "Die Neuanordnung dieses Tages spart {{km}} km und rund {{minutes}} Min. Fußweg, auf insgesamt {{total}} km. Erster und letzter Stopp bleiben, die Uhrzeiten ebenso.",
+    "optimizeApply": "Neu anordnen",
+    "optimizeAlreadyOptimal": "Dieser Tag folgt bereits der kürzesten Route zwischen seinen Stopps.",
+    "optimizeNotEnoughStops": "Nicht genügend verortete Stopps an diesem Tag, um eine kürzere Route zu berechnen.",
+    "optimizeTooManyStops": "Dieser Tag hat zu viele Stopps für eine Optimierung. Probieren Sie es an einem leichteren Tag.",
+    "optimizeUnavailable": "Es konnte gerade keine kürzere Route berechnet werden. Bitte später erneut versuchen.",
+    "walkableStops": "{{count}} von {{total}} Stopps in {{minutes}} Min. zu Fuß"
   },
   "interests": {
     "Adventure": "Abenteuer",

@@ -14,9 +14,17 @@
  * can force a run early via `triggerRefreshNow` (which also resets the 4-day
  * countdown, since a completed run pushes `nextRefreshAt` out again).
  *
+ * A run that can't reach every eligible deal (per-run cap or wall-clock budget)
+ * asks for a short-gap retry, and the whole span counts as one refresh CYCLE:
+ * the follow-up run inherits `cycleStartedAt` and prices only the leftovers.
+ * Without that, every run re-listed the full table, always reported leftovers,
+ * and kept requesting retries — which pinned the radar to a ~2-hourly cadence
+ * (four runs, four report emails, ~840 API calls a day) instead of the intended
+ * 4 days. `RADAR_MAX_CONSECUTIVE_RETRIES` caps the chain regardless.
+ *
  * Quota-conscious:
  *   - only curated deals (AUTO deals refresh via the search-seeding path)
- *   - one searchapi.io call per deal, run sequentially
+ *   - one searchapi.io call per deal, priced DEAL_CONCURRENCY at a time
  *   - capped per run so a large table can't blow the API budget in one go
  */
 
@@ -32,9 +40,16 @@ import {
   type RadarFlightOptionsResult,
 } from "./lib/searchApiFlights";
 
-// Upper bound on searchapi.io calls per run. Curated deal count is small in
-// practice; this is a backstop against runaway quota use.
-const MAX_DEALS_PER_RUN = 100;
+// Upper bound on searchapi.io calls per run — a backstop against runaway quota
+// use, not a pacing device: the whole curated table should fit in one run, or
+// the leftovers force a short-gap retry (see the cycle logic in lowFareRadar).
+const MAX_DEALS_PER_RUN = 200;
+
+// Deals priced concurrently. Sequential pricing put ~5s of latency between
+// deals, so a table of ~120 blew the wall-clock budget after ~70 of them and
+// every single run ended up asking for a retry. Small enough to stay polite to
+// searchapi.io, large enough that the whole table finishes in ~2 minutes.
+const DEAL_CONCURRENCY = 5;
 
 // Wall-clock budget for the deal loop. Convex kills an action at 10 minutes,
 // and a killed run never reaches `markRadarRefreshCompleted` — leaving the
@@ -194,6 +209,15 @@ function criteriaForDeal(deal: any): RadarDealCriteria {
   };
 }
 
+/** What pricing a single deal did, aggregated into the run counters. */
+type DealOutcome =
+  | "failed"
+  | "notFound"
+  | "unchanged"
+  | "updated"
+  | "expired"
+  | "expiredAndChanged";
+
 type RefreshResult = {
   checked: number;
   updated: number;
@@ -213,7 +237,12 @@ type RefreshResult = {
 export const refreshManualDealPrices = internalAction({
   args: {},
   handler: async (ctx): Promise<RefreshResult> => {
-    await ctx.runMutation(internal.lowFareRadar.markRadarRefreshStarted, {});
+    // A run continuing a retried cycle inherits its start mark, so it only
+    // prices what that cycle hasn't reached yet.
+    const { cycleStartedAt }: { cycleStartedAt: number } = await ctx.runMutation(
+      internal.lowFareRadar.markRadarRefreshStarted,
+      {}
+    );
 
     let checked = 0;
     let updated = 0;
@@ -226,25 +255,21 @@ export const refreshManualDealPrices = internalAction({
     const startedAt = Date.now();
 
     try {
+      // Deals this cycle has already priced are excluded, so a run that
+      // follows a short-gap retry works only on the leftovers instead of
+      // starting the whole table over.
       const deals: any[] = await ctx.runQuery(
         internal.lowFareRadar.listRefreshableDeals,
-        {}
+        { pricedSince: cycleStartedAt }
       );
 
       const batch = deals.slice(0, MAX_DEALS_PER_RUN);
       skipped = deals.length - batch.length;
 
-      for (const [i, deal] of batch.entries()) {
-        // Out of time — leave the rest for the next tick (the completion
-        // mutation shortens the countdown when anything is skipped).
-        if (Date.now() - startedAt > RUN_BUDGET_MS) {
-          skipped += batch.length - i;
-          console.warn(
-            `[radar-refresh] time budget hit after ${checked} deal(s); ${skipped} left for the next tick`
-          );
-          break;
-        }
-
+      /** Price one deal. Returns what happened; never throws. */
+      const priceDeal = async (
+        deal: any
+      ): Promise<{ checked: boolean; kind: DealOutcome; change?: PriceChange }> => {
         try {
           // Query with adults=1 so the returned fare is per-person, matching
           // how radar deals store `price` (labelled "/pp" in the UI).
@@ -257,12 +282,9 @@ export const refreshManualDealPrices = internalAction({
             adults: 1,
           });
 
-          checked++;
-
           if (!result || result.options.length === 0) {
             // API failure / no results — leave the deal alone.
-            failed++;
-            continue;
+            return { checked: true, kind: "failed" };
           }
 
           // Match the fresh options back to THIS deal's specific flight.
@@ -270,8 +292,7 @@ export const refreshManualDealPrices = internalAction({
           if (!match || !(match.option.price > 0)) {
             // The exact curated flight is no longer offered — don't substitute
             // a different flight's price.
-            notFound++;
-            continue;
+            return { checked: true, kind: "notFound" };
           }
 
           const matchedFlight =
@@ -313,20 +334,67 @@ export const refreshManualDealPrices = internalAction({
           });
 
           if (res?.expired) {
-            expired++;
-            changes.push({ ...changeRow(), expired: true, ceiling: res.ceiling });
-            if (res.changed) updated++;
-          } else if (res?.changed) {
-            updated++;
-            changes.push(changeRow());
-          } else {
-            unchanged++;
+            return {
+              checked: true,
+              kind: res.changed ? "expiredAndChanged" : "expired",
+              change: { ...changeRow(), expired: true, ceiling: res.ceiling },
+            };
           }
+          if (res?.changed) {
+            return { checked: true, kind: "updated", change: changeRow() };
+          }
+          return { checked: true, kind: "unchanged" };
         } catch (err) {
-          failed++;
           console.error(
             `[radar-refresh] failed ${deal.origin}->${deal.destination} ${deal.outboundDate}`
           );
+          return { checked: false, kind: "failed" };
+        }
+      };
+
+      // Price in small concurrent batches: the per-deal cost is almost entirely
+      // searchapi.io latency, so this is what keeps the whole table inside the
+      // wall-clock budget. The time check sits between batches, so an in-flight
+      // batch always finishes and is counted.
+      for (let i = 0; i < batch.length; i += DEAL_CONCURRENCY) {
+        // Out of time — leave the rest for the next tick (the completion
+        // mutation shortens the countdown when anything is skipped).
+        if (Date.now() - startedAt > RUN_BUDGET_MS) {
+          skipped += batch.length - i;
+          console.warn(
+            `[radar-refresh] time budget hit after ${checked} deal(s); ${skipped} left for the next tick`
+          );
+          break;
+        }
+
+        const outcomes = await Promise.all(
+          batch.slice(i, i + DEAL_CONCURRENCY).map(priceDeal)
+        );
+
+        for (const outcome of outcomes) {
+          if (outcome.checked) checked++;
+          if (outcome.change) changes.push(outcome.change);
+          switch (outcome.kind) {
+            case "failed":
+              failed++;
+              break;
+            case "notFound":
+              notFound++;
+              break;
+            case "unchanged":
+              unchanged++;
+              break;
+            case "updated":
+              updated++;
+              break;
+            case "expiredAndChanged":
+              updated++;
+              expired++;
+              break;
+            case "expired":
+              expired++;
+              break;
+          }
         }
       }
 

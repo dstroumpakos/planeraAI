@@ -2006,6 +2006,9 @@ export const enrichItinerary = internalAction({
                     day.mapImageUrl = mapData.mapImageUrl;
                     day.mapTotalKm = mapData.totalKm;
                     day.mapWalkMinutes = mapData.walkMinutes;
+                    day.mapRouteGeometry = mapData.routeGeometry;
+                    day.mapWalkableStops = mapData.walkability?.walkableStops ?? null;
+                    day.mapWalkableMinutes = mapData.walkability?.minutes ?? null;
                 } catch (mapErr) {
                     console.warn("Day map-data generation skipped:", mapErr instanceof Error ? mapErr.message : mapErr);
                     day.mapImageUrl = day.mapImageUrl ?? null;
@@ -2042,7 +2045,11 @@ export const enrichItinerary = internalAction({
  * - backfillAllTripDayMaps below (one-time migration over existing trips)
  */
 export const backfillDayMapsForTrip = internalAction({
-    args: { tripId: v.id("trips") },
+    args: {
+        tripId: v.id("trips"),
+        /** Re-run every day even if already attempted — used after a geocoding change. */
+        force: v.optional(v.boolean()),
+    },
     returns: v.null(),
     handler: async (ctx: any, args: any) => {
         try {
@@ -2056,11 +2063,16 @@ export const backfillDayMapsForTrip = internalAction({
             for (let i = 0; i < days.length; i++) {
                 const day = days[i];
                 const activities = Array.isArray(day?.activities) ? day.activities : [];
-                // Already attempted (mapImageUrl present, even if null) — skip,
-                // unless what's cached is a URL for the decommissioned OSM
-                // static-map host, which is a permanently broken image.
                 if (activities.length === 0) continue;
-                if (day?.mapImageUrl !== undefined && !isDeadMapUrl(day.mapImageUrl)) continue;
+                // Skip days already attempted (mapImageUrl present, even if
+                // null) — except when forced, when the cached URL points at the
+                // decommissioned OSM static-map host, or when nothing geocoded
+                // and so there is no usable map to keep.
+                const geocodedCount = activities.filter(
+                    (a: any) => typeof a?.lat === "number" && typeof a?.lng === "number"
+                ).length;
+                const retry = args.force === true || isDeadMapUrl(day?.mapImageUrl) || geocodedCount === 0;
+                if (day?.mapImageUrl !== undefined && !retry) continue;
 
                 if (!destCenterFetched) {
                     destCenter = await geocodeDestinationServer(trip.destination).catch(() => null);
@@ -2076,6 +2088,9 @@ export const backfillDayMapsForTrip = internalAction({
                         mapImageUrl: mapData.mapImageUrl,
                         mapTotalKm: mapData.totalKm,
                         mapWalkMinutes: mapData.walkMinutes,
+                        mapRouteGeometry: mapData.routeGeometry,
+                        mapWalkableStops: mapData.walkability?.walkableStops ?? null,
+                        mapWalkableMinutes: mapData.walkability?.minutes ?? null,
                     });
                 } catch (dayErr) {
                     console.warn(`backfillDayMapsForTrip: day ${i} skipped:`, dayErr instanceof Error ? dayErr.message : dayErr);

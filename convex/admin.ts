@@ -524,8 +524,17 @@ async function getNewsletterSub(ctx: any, email?: string | null) {
         .first();
 }
 
+/**
+ * Flat (cursorless) user list kept for the mobile admin screen, which expects a
+ * plain array back. The website uses `listUsersPage` instead — same rows, plus
+ * a cursor, server-side filters and a much higher ceiling.
+ *
+ * Shares the scan below, so it no longer collects trips/insights per user: the
+ * counts come from the cron-maintained `userActivityStats` rows. That is what
+ * keeps a large `limit` under the per-transaction read limit.
+ */
 export const listUsers = query({
-    args: { 
+    args: {
         token: v.string(),
         search: v.optional(v.string()),
         limit: v.optional(v.number()),
@@ -534,139 +543,351 @@ export const listUsers = query({
         const userId = await getUserIdFromToken(ctx, args.token);
         if (!userId) throw new Error("Unauthorized");
         await assertAdmin(ctx, userId);
-        
-        // Get userSettings, newest first. Without an explicit order, `.take()`
-        // returns the OLDEST rows, so new signups never appear once there are
-        // more than `limit` users. When searching we scan a wider window so
-        // recent-but-not-newest matches are still found.
-        const settingsQuery = ctx.db.query("userSettings").order("desc");
-        const allSettings = args.search
-            ? await settingsQuery.take(1000)
-            : await settingsQuery.take(args.limit || 50);
 
-        // Filter by search if provided
-        let filteredSettings = allSettings;
-        if (args.search) {
-            const searchLower = args.search.toLowerCase();
-            filteredSettings = allSettings
-                .filter((s: any) =>
-                    s.name?.toLowerCase().includes(searchLower) ||
-                    s.email?.toLowerCase().includes(searchLower)
-                )
-                .slice(0, args.limit || 50);
+        const res = await scanUsers(ctx, {
+            search: args.search,
+            limit: args.limit ?? 50,
+        });
+        return res.users;
+    },
+});
+
+// ===========================================================================
+// USERS LIST — cursor-paginated, server-side search + filter.
+//
+// Replaces the "take(limit) and enrich everything" shape `listUsers` still has
+// for the mobile admin screen. Two things made that one fall over:
+//
+//   1. `take(limit)` has no cursor, so the list could only ever show the newest
+//      N accounts. There was no way to reach user N+1.
+//   2. It `.collect()`ed every trip for every row. `trips` documents average
+//      ~57 KB (they carry the whole generated itinerary), so ~280 of them
+//      exhaust the 16 MB per-transaction read limit — which is why picking
+//      "500 users" threw instead of loading.
+//
+// So this query reads nothing fat. Identity, plan, newsletter and session state
+// are all small indexed point lookups, and the trips/insights/likes counts come
+// from `userActivityStats`, a ~200-byte row per user maintained hourly by the
+// admin-KPI cron (see adminKpis.ts). A 500-row page costs a few MB instead of
+// hundreds.
+// ===========================================================================
+
+/** Hard ceiling on one page, regardless of what the client asks for. */
+const USER_PAGE_MAX = 500;
+/** Rows of `userSettings` one call will walk looking for filter/search hits. */
+const USER_SCAN_MAX = 4000;
+/** Rows pulled per underlying index read while scanning. */
+const USER_SCAN_CHUNK = 200;
+/**
+ * How many rows one call will run the joins on. This is the real read budget:
+ * `buildUserRow` costs ~15 documents, so a rare filter (say "admins" on a big
+ * table) would otherwise enrich every row it walks and blow past the 16384
+ * document per-transaction limit long before the scan cap saved it. Stopping
+ * here instead returns a short page with a cursor, and the caller pages on.
+ */
+const USER_ENRICH_MAX = 600;
+/** Newest sessions sampled per user for "last sign-in" + active-session count. */
+const SESSION_SAMPLE = 10;
+/** Push-token rows sampled per user to infer the device platform. */
+const DEVICE_SAMPLE = 10;
+/**
+ * Caps for the single-user detail read (`getUser`). Trips are the fat ones:
+ * 150 x ~57 KB stays comfortably under the 16 MB per-transaction read limit,
+ * which an unbounded `.collect()` on a prolific account would blow.
+ */
+const USER_DETAIL_TRIP_CAP = 150;
+const USER_DETAIL_INSIGHT_CAP = 300;
+const USER_DETAIL_SESSION_CAP = 200;
+
+const ZERO_ACTIVITY = {
+    tripsCount: 0,
+    upcomingTripsCount: 0,
+    pastTripsCount: 0,
+    completedTripsCount: 0,
+    lastTripAt: null as number | null,
+    insightsCount: 0,
+    approvedInsightsCount: 0,
+    totalLikes: 0,
+};
+
+/**
+ * Everything one row of the admin user list needs, using only small documents.
+ * Deliberately does NOT touch `trips` or `insights` — see the header comment.
+ */
+async function buildUserRow(ctx: any, settings: any, now: number) {
+    const email = settings.email ? settings.email.trim().toLowerCase() : null;
+
+    const user = email
+        ? await ctx.db
+            .query("users")
+            .withIndex("by_email", (q: any) => q.eq("email", email))
+            .first()
+        : null;
+
+    const userPlan = await ctx.db
+        .query("userPlans")
+        .withIndex("by_user", (q: any) => q.eq("userId", settings.userId))
+        .first();
+
+    const newsletter = await getNewsletterSub(ctx, settings.email);
+
+    // by_user is (userId, _creationTime), so ordering desc gives the newest
+    // sessions first — sampling the top few is enough for "last sign-in" and
+    // avoids collecting a long-lived account's whole session history.
+    const sessions = await ctx.db
+        .query("sessions")
+        .withIndex("by_user", (q: any) => q.eq("userId", settings.userId))
+        .order("desc")
+        .take(SESSION_SAMPLE);
+
+    // Push tokens double as the device record. Users who signed up before
+    // `settings.platform` existed only have this to go on.
+    const pushTokens = await ctx.db
+        .query("pushTokens")
+        .withIndex("by_user", (q: any) => q.eq("userId", settings.userId))
+        .take(DEVICE_SAMPLE);
+    const devicePlatforms = Array.from(
+        new Set(pushTokens.map((t: any) => t.platform).filter(Boolean))
+    );
+
+    const stats = await ctx.db
+        .query("userActivityStats")
+        .withIndex("by_user", (q: any) => q.eq("userId", settings.userId))
+        .first();
+    const activity = stats
+        ? {
+            tripsCount: stats.tripsCount,
+            upcomingTripsCount: stats.upcomingTripsCount,
+            pastTripsCount: stats.pastTripsCount,
+            completedTripsCount: stats.completedTripsCount,
+            lastTripAt: stats.lastTripAt ?? null,
+            insightsCount: stats.insightsCount,
+            approvedInsightsCount: stats.approvedInsightsCount,
+            totalLikes: stats.totalLikes,
         }
-        
-        // Enrich with user flags and stats
-        const enrichedUsers = await Promise.all(
-            filteredSettings.map(async (settings: any) => {
-                // Get user record for admin flags
-                const user = settings.email 
-                    ? await ctx.db
-                        .query("users")
-                        .withIndex("by_email", (q: any) => q.eq("email", settings.email.toLowerCase()))
-                        .first()
-                    : null;
-                
-                // Get trip count
-                const trips = await ctx.db
-                    .query("trips")
-                    .withIndex("by_user", (q: any) => q.eq("userId", settings.userId))
-                    .collect();
-                
-                // Get insights count
-                const insights = await ctx.db
-                    .query("insights")
-                    .withIndex("by_user", (q: any) => q.eq("userId", settings.userId))
-                    .collect();
-                
-                // Get user plan
-                const userPlan = await ctx.db
-                    .query("userPlans")
-                    .withIndex("by_user", (q: any) => q.eq("userId", settings.userId))
-                    .first();
+        : ZERO_ACTIVITY;
 
-                // Newsletter opt-in state
-                const newsletter = await getNewsletterSub(ctx, settings.email);
+    return {
+        _id: user?._id,
+        settingsId: settings._id,
+        userId: settings.userId,
+        name: settings.name || "Unknown",
+        email: settings.email || "Unknown",
+        phone: settings.phone || null,
+        dateOfBirth: settings.dateOfBirth || null,
+        hasProfilePicture: !!settings.profilePicture,
+        authProvider: settings.authProvider || "unknown",
+        platform: settings.platform || devicePlatforms[0] || null,
+        devicePlatforms,
+        devicesCount: pushTokens.length,
+        language: settings.language || null,
+        currency: settings.currency || null,
+        onboardingCompleted: settings.onboardingCompleted ?? null,
+        isAdmin: user?.isAdmin || false,
+        isBanned: user?.isBanned || false,
+        isShadowBanned: user?.isShadowBanned || false,
+        ...activity,
+        // When the counters above were last recomputed — null means this user
+        // has no activity row at all (no trips, no insights).
+        activityAsOf: stats?.generation ?? null,
+        plan: userPlan?.plan || "free",
+        subscriptionType: userPlan?.subscriptionType || null,
+        subscriptionExpiresAt: userPlan?.subscriptionExpiresAt || null,
+        tripCredits: userPlan?.tripCredits ?? 0,
+        tripsGenerated: userPlan?.tripsGenerated ?? 0,
+        homeAirport: settings.homeAirport || null,
+        homeIata: extractIata(settings.homeAirport),
+        defaultTravelers: settings.defaultTravelers ?? null,
+        defaultInterests: settings.defaultInterests || [],
+        travelStyle: settings.travelStyle || null,
+        budgetRange: settings.budgetRange || null,
+        pushNotifications: settings.pushNotifications ?? null,
+        emailNotifications: settings.emailNotifications ?? null,
+        dealAlerts: settings.dealAlerts ?? null,
+        tripReminders: settings.tripReminders ?? null,
+        aiDataConsent: settings.aiDataConsent ?? null,
+        referralCode: settings.referralCode || null,
+        activeSessionsCount: sessions.filter((s: any) => s.expiresAt > now).length,
+        // Capped by SESSION_SAMPLE, so the UI can say "10+" rather than imply
+        // the sample is the true total.
+        activeSessionsCapped: sessions.length >= SESSION_SAMPLE,
+        lastActiveAt: sessions[0]?._creationTime ?? null,
+        newsletterStatus: newsletter?.status || "none",
+        createdAt: settings._creationTime,
+    };
+}
 
-                // Sessions → last sign-in + how many are still valid
-                const sessions = await ctx.db
-                    .query("sessions")
-                    .withIndex("by_user", (q: any) => q.eq("userId", settings.userId))
-                    .collect();
-                const lastActiveAt = sessions.reduce(
-                    (max: number, s: any) => Math.max(max, s._creationTime || 0),
-                    0
-                );
+/**
+ * Search runs against the raw settings row, BEFORE the joins in buildUserRow,
+ * so a non-matching account costs exactly one document. That is what lets a
+ * single call sweep thousands of rows looking for one email.
+ */
+function userMatchesSearch(settings: any, needle: string): boolean {
+    if (!needle) return true;
+    return (
+        (settings.name || "").toLowerCase().includes(needle) ||
+        (settings.email || "").toLowerCase().includes(needle) ||
+        (settings.phone || "").toLowerCase().includes(needle) ||
+        (settings.userId || "").toLowerCase().includes(needle) ||
+        (settings.referralCode || "").toLowerCase().includes(needle)
+    );
+}
 
-                // Push tokens double as the device record. Users who signed up
-                // before `settings.platform` existed only have this to go on.
-                const pushTokens = await ctx.db
-                    .query("pushTokens")
-                    .withIndex("by_user", (q: any) => q.eq("userId", settings.userId))
-                    .collect();
-                const devicePlatforms = Array.from(
-                    new Set(pushTokens.map((t: any) => t.platform).filter(Boolean))
-                );
+/**
+ * Filter checks that can be answered from the raw settings row alone, before
+ * paying for the joins. Returning false here skips a row for one document
+ * instead of fifteen; returning true only means "cannot rule it out yet".
+ */
+function settingsCouldMatchFilter(settings: any, filter: string): boolean {
+    switch (filter) {
+        case "incomplete":
+            return settings.onboardingCompleted === false;
+        case "ios":
+        case "android":
+        case "web":
+            // An unset platform still has to be enriched — it gets backfilled
+            // from the user's push tokens in buildUserRow.
+            return !settings.platform || settings.platform === filter;
+        default:
+            return true;
+    }
+}
 
-                const now = Date.now();
-                const upcomingTripsCount = trips.filter((t: any) => (t.endDate || 0) >= now).length;
-                const lastTripAt = trips.reduce(
-                    (max: number, t: any) => Math.max(max, t._creationTime || 0),
-                    0
-                );
+function userMatchesFilter(row: any, filter: string): boolean {
+    switch (filter) {
+        case "premium": return row.plan === "premium";
+        case "free": return row.plan !== "premium";
+        case "admins": return row.isAdmin === true;
+        case "banned": return row.isBanned === true || row.isShadowBanned === true;
+        // newsletterSubscribers.status uses "active" for a confirmed opt-in;
+        // there is no "subscribed" literal in the schema.
+        case "newsletter": return row.newsletterStatus === "active";
+        case "ios":
+        case "android":
+        case "web": return row.platform === filter;
+        case "incomplete": return row.onboardingCompleted === false;
+        case "inactive": return row.tripsCount === 0;
+        case "all":
+        default: return true;
+    }
+}
 
-                return {
-                    _id: user?._id,
-                    settingsId: settings._id,
-                    userId: settings.userId,
-                    name: settings.name || "Unknown",
-                    email: settings.email || "Unknown",
-                    phone: settings.phone || null,
-                    dateOfBirth: settings.dateOfBirth || null,
-                    hasProfilePicture: !!settings.profilePicture,
-                    authProvider: settings.authProvider || "unknown",
-                    platform: settings.platform || devicePlatforms[0] || null,
-                    devicePlatforms,
-                    devicesCount: pushTokens.length,
-                    language: settings.language || null,
-                    currency: settings.currency || null,
-                    onboardingCompleted: settings.onboardingCompleted ?? null,
-                    isAdmin: user?.isAdmin || false,
-                    isBanned: user?.isBanned || false,
-                    isShadowBanned: user?.isShadowBanned || false,
-                    tripsCount: trips.length,
-                    upcomingTripsCount,
-                    pastTripsCount: trips.length - upcomingTripsCount,
-                    lastTripAt: lastTripAt || null,
-                    insightsCount: insights.length,
-                    approvedInsightsCount: insights.filter((i: any) => i.moderationStatus === "approved").length,
-                    totalLikes: insights.reduce((sum: number, i: any) => sum + (i.likes || 0), 0),
-                    plan: userPlan?.plan || "free",
-                    subscriptionType: userPlan?.subscriptionType || null,
-                    subscriptionExpiresAt: userPlan?.subscriptionExpiresAt || null,
-                    tripCredits: userPlan?.tripCredits ?? 0,
-                    tripsGenerated: userPlan?.tripsGenerated ?? 0,
-                    homeAirport: settings.homeAirport || null,
-                    homeIata: extractIata(settings.homeAirport),
-                    defaultTravelers: settings.defaultTravelers ?? null,
-                    defaultInterests: settings.defaultInterests || [],
-                    travelStyle: settings.travelStyle || null,
-                    budgetRange: settings.budgetRange || null,
-                    pushNotifications: settings.pushNotifications ?? null,
-                    emailNotifications: settings.emailNotifications ?? null,
-                    dealAlerts: settings.dealAlerts ?? null,
-                    tripReminders: settings.tripReminders ?? null,
-                    aiDataConsent: settings.aiDataConsent ?? null,
-                    referralCode: settings.referralCode || null,
-                    activeSessionsCount: sessions.filter((s: any) => s.expiresAt > now).length,
-                    lastActiveAt: lastActiveAt || null,
-                    newsletterStatus: newsletter?.status || "none",
-                    createdAt: settings._creationTime,
-                };
-            })
-        );
-        
-        return enrichedUsers;
+/**
+ * The scan itself, shared by `listUsersPage` and the legacy `listUsers`.
+ * Callers are responsible for the admin check before getting here.
+ */
+async function scanUsers(
+    ctx: any,
+    args: { search?: string; filter?: string; limit?: number; cursor?: string | null },
+) {
+    const wanted = Math.min(Math.max(Math.floor(args.limit ?? 50), 1), USER_PAGE_MAX);
+    const needle = (args.search || "").trim().toLowerCase();
+    const filter = args.filter || "all";
+    const now = Date.now();
+
+    let before: number | null = args.cursor != null ? Number(args.cursor) : null;
+    if (before !== null && !Number.isFinite(before)) before = null;
+
+    const rows: any[] = [];
+    let scanned = 0;
+    let enriched = 0;
+    let reachedEnd = false;
+    let stopped = false;
+
+    while (!stopped && rows.length < wanted && scanned < USER_SCAN_MAX) {
+        const cursorAt = before;
+        const base = ctx.db.query("userSettings");
+        // `by_creation_time` is the built-in index; with no range it walks the
+        // whole table, and `lt` resumes just past the previous call's last row.
+        const scan = cursorAt === null
+            ? base.withIndex("by_creation_time")
+            : base.withIndex("by_creation_time", (ix: any) => ix.lt("_creationTime", cursorAt));
+        const chunk = await scan.order("desc").take(USER_SCAN_CHUNK);
+
+        if (chunk.length === 0) { reachedEnd = true; break; }
+
+        for (const settings of chunk) {
+            // Both of these run on the settings row alone — a miss costs one
+            // document, which is what lets a single call sweep thousands.
+            const candidate =
+                userMatchesSearch(settings, needle) &&
+                settingsCouldMatchFilter(settings, filter);
+
+            // Out of read budget: stop BEFORE consuming this row, so the cursor
+            // still points at it and the next call picks it up.
+            if (candidate && enriched >= USER_ENRICH_MAX) { stopped = true; break; }
+
+            scanned++;
+            // Advance the cursor per row, not per chunk, so breaking out
+            // mid-chunk can never skip rows we did not reach.
+            before = settings._creationTime;
+            if (!candidate) continue;
+
+            enriched++;
+            const row = await buildUserRow(ctx, settings, now);
+            if (!userMatchesFilter(row, filter)) continue;
+
+            rows.push(row);
+            if (rows.length >= wanted) { stopped = true; break; }
+        }
+
+        if (!stopped && chunk.length < USER_SCAN_CHUNK) { reachedEnd = true; break; }
+    }
+
+    return {
+        users: rows,
+        // null once there is nothing left to walk.
+        cursor: reachedEnd || before === null ? null : String(before),
+        isDone: reachedEnd,
+        scanned,
+        // True when a budget ran out before `wanted` matches were found: there
+        // may well be more hits further back, so keep paging.
+        scanCapped: !reachedEnd && rows.length < wanted,
+    };
+}
+
+// TEMPORARY verification probe — internal only, removed after testing.
+export const _scanUsersProbe = internalQuery({
+    args: {
+        search: v.optional(v.string()),
+        filter: v.optional(v.string()),
+        limit: v.optional(v.number()),
+        cursor: v.optional(v.union(v.string(), v.null())),
+    },
+    handler: async (ctx, args) => {
+        const res = await scanUsers(ctx, args);
+        return {
+            count: res.users.length,
+            scanned: res.scanned,
+            isDone: res.isDone,
+            scanCapped: res.scanCapped,
+            cursor: res.cursor,
+            first: res.users[0]
+                ? { email: res.users[0].email, trips: res.users[0].tripsCount, createdAt: res.users[0].createdAt }
+                : null,
+            last: res.users[res.users.length - 1]
+                ? { email: res.users[res.users.length - 1].email, createdAt: res.users[res.users.length - 1].createdAt }
+                : null,
+            emails: res.users.map((u: any) => u.email),
+        };
+    },
+});
+
+export const listUsersPage = query({
+    args: {
+        token: v.string(),
+        search: v.optional(v.string()),
+        filter: v.optional(v.string()),
+        limit: v.optional(v.number()),
+        // `_creationTime` of the last row the previous call walked past. Opaque
+        // to the client; pass `cursor` straight back to continue.
+        cursor: v.optional(v.union(v.string(), v.null())),
+    },
+    handler: async (ctx, args) => {
+        const userId = await getUserIdFromToken(ctx, args.token);
+        if (!userId) throw new Error("Unauthorized");
+        await assertAdmin(ctx, userId);
+        return await scanUsers(ctx, args);
     },
 });
 
@@ -697,17 +918,23 @@ export const getUser = query({
                 .first()
             : null;
         
-        // Get trips
+        // Trips are the one fat read here (~57 KB a row, they carry the whole
+        // itinerary), so the newest USER_DETAIL_TRIP_CAP are enough — a
+        // prolific account would otherwise exhaust the 16 MB per-transaction
+        // read limit on its own and the whole detail panel would just error.
         const trips = await ctx.db
             .query("trips")
             .withIndex("by_user", (q: any) => q.eq("userId", args.targetUserId))
-            .collect();
-        
-        // Get insights
+            .order("desc")
+            .take(USER_DETAIL_TRIP_CAP);
+        const tripsCapped = trips.length >= USER_DETAIL_TRIP_CAP;
+
         const insights = await ctx.db
             .query("insights")
             .withIndex("by_user", (q: any) => q.eq("userId", args.targetUserId))
-            .collect();
+            .order("desc")
+            .take(USER_DETAIL_INSIGHT_CAP);
+        const insightsCapped = insights.length >= USER_DETAIL_INSIGHT_CAP;
         
         // Get userPlan
         const userPlan = await ctx.db
@@ -715,11 +942,13 @@ export const getUser = query({
             .withIndex("by_user", (q: any) => q.eq("userId", args.targetUserId))
             .first();
         
-        // Get last active session
+        // Get last active session. Bounded: a long-lived account accumulates a
+        // session row per sign-in and none of them are needed beyond the count.
         const sessions = await ctx.db
             .query("sessions")
             .withIndex("by_user", (q: any) => q.eq("userId", args.targetUserId))
-            .collect();
+            .order("desc")
+            .take(USER_DETAIL_SESSION_CAP);
         const activeSessions = sessions.filter((s: any) => s.expiresAt > Date.now());
         const lastSession = sessions.sort((a: any, b: any) => (b._creationTime || 0) - (a._creationTime || 0))[0];
 
@@ -776,6 +1005,8 @@ export const getUser = query({
             isBanned: user?.isBanned || false,
             isShadowBanned: user?.isShadowBanned || false,
             tripsCount: trips.length,
+            tripsCapped,
+            insightsCapped,
             pastTripsCount,
             upcomingTripsCount,
             completedTripsCount: trips.filter((t: any) => t.status === "completed").length,

@@ -499,6 +499,9 @@ const BELOW_TYPICAL_MIN_PCT = 8;
 // the low-fare ceiling (ratio 1.0 in lowFareRadarRefresh.ts) auto-expiring
 // them — flag them as unlikely to last. Genuine scarcity, never invented.
 const ENDING_SOON_RATIO = 0.92;
+// Below this the "you save X" line is noise — and worse, it undercuts the fare
+// it is supposed to sell.
+const MIN_SAVING_TO_SHOW = 10;
 
 /**
  * Honest price context for a deal card: percentage below the route's typical
@@ -521,14 +524,17 @@ const DEALS_LABELS: Record<
     heading: string; viewAll: string; perPerson: string; roundTrip: string; oneWay: string;
     // "{pct}" is replaced with the rounded percentage.
     belowTypical: string; endingSoon: string;
+    // "{amount}" is replaced with the formatted difference from the original
+    // fare — the saving stated as money, which reads harder than a percentage.
+    save: string;
   }
 > = {
-  en: { heading: "Live fares right now", viewAll: "See all deals", perPerson: "per person", roundTrip: "Round trip", oneWay: "One way", belowTypical: "{pct}% below typical", endingSoon: "May not last" },
-  el: { heading: "Ζωντανές τιμές τώρα", viewAll: "Δείτε όλες τις προσφορές", perPerson: "ανά άτομο", roundTrip: "Μετ' επιστροφής", oneWay: "Απλή μετάβαση", belowTypical: "{pct}% κάτω από τη συνήθη τιμή", endingSoon: "Ίσως δεν κρατήσει" },
-  es: { heading: "Tarifas en directo", viewAll: "Ver todas las ofertas", perPerson: "por persona", roundTrip: "Ida y vuelta", oneWay: "Solo ida", belowTypical: "{pct}% por debajo de lo habitual", endingSoon: "Puede agotarse" },
-  fr: { heading: "Tarifs en direct", viewAll: "Voir toutes les offres", perPerson: "par personne", roundTrip: "Aller-retour", oneWay: "Aller simple", belowTypical: "{pct}% sous le prix habituel", endingSoon: "Risque de disparaître" },
-  de: { heading: "Aktuelle Preise", viewAll: "Alle Angebote ansehen", perPerson: "pro Person", roundTrip: "Hin & zurück", oneWay: "Nur Hinflug", belowTypical: "{pct}% unter dem üblichen Preis", endingSoon: "Bald wohl weg" },
-  ar: { heading: "أسعار مباشرة الآن", viewAll: "عرض كل العروض", perPerson: "للشخص", roundTrip: "ذهاب وعودة", oneWay: "ذهاب فقط", belowTypical: "أقل بنسبة {pct}% من السعر المعتاد", endingSoon: "قد لا يدوم" },
+  en: { heading: "Live fares right now", viewAll: "See all deals", perPerson: "per person", roundTrip: "Round trip", oneWay: "One way", belowTypical: "{pct}% below typical", endingSoon: "May not last", save: "Save {amount}" },
+  el: { heading: "Ζωντανές τιμές τώρα", viewAll: "Δείτε όλες τις προσφορές", perPerson: "ανά άτομο", roundTrip: "Μετ' επιστροφής", oneWay: "Απλή μετάβαση", belowTypical: "{pct}% κάτω από τη συνήθη τιμή", endingSoon: "Ίσως δεν κρατήσει", save: "Κερδίζετε {amount}" },
+  es: { heading: "Tarifas en directo", viewAll: "Ver todas las ofertas", perPerson: "por persona", roundTrip: "Ida y vuelta", oneWay: "Solo ida", belowTypical: "{pct}% por debajo de lo habitual", endingSoon: "Puede agotarse", save: "Ahorras {amount}" },
+  fr: { heading: "Tarifs en direct", viewAll: "Voir toutes les offres", perPerson: "par personne", roundTrip: "Aller-retour", oneWay: "Aller simple", belowTypical: "{pct}% sous le prix habituel", endingSoon: "Risque de disparaître", save: "Économisez {amount}" },
+  de: { heading: "Aktuelle Preise", viewAll: "Alle Angebote ansehen", perPerson: "pro Person", roundTrip: "Hin & zurück", oneWay: "Nur Hinflug", belowTypical: "{pct}% unter dem üblichen Preis", endingSoon: "Bald wohl weg", save: "Spare {amount}" },
+  ar: { heading: "أسعار مباشرة الآن", viewAll: "عرض كل العروض", perPerson: "للشخص", roundTrip: "ذهاب وعودة", oneWay: "ذهاب فقط", belowTypical: "أقل بنسبة {pct}% من السعر المعتاد", endingSoon: "قد لا يدوم", save: "وفّر {amount}" },
 };
 
 function formatDealPrice(amount: number, currency: string, lang: Lang): string {
@@ -555,6 +561,77 @@ function formatDealDate(dateStr: string, lang: Lang): string {
   } catch {
     return dateStr;
   }
+}
+
+/**
+ * Deal copy for a social card, pre-formatted in the recipient language.
+ *
+ * The Instagram/TikTok cards are rendered outside Convex (the website turns
+ * these fields into a PNG), so pricing, dates and the honest price badges are
+ * resolved HERE — reusing the exact helpers the email deal rows use. A card and
+ * an email row about the same fare therefore always say the same thing.
+ */
+export interface DealSocialCopy {
+  /** "Athens → Lisbon" — already in reading order for the language. */
+  route: string;
+  price: string;
+  /** Struck-through original, only when it is genuinely higher. */
+  priceWas?: string;
+  /** "12 Oct – 19 Oct", or the single date for a one-way. */
+  dates: string;
+  tripType: string;
+  perPerson: string;
+  /**
+   * One badge at most, in priority order: the measured price signal beats the
+   * radar's editorial tag, because it is the claim backed by data.
+   */
+  badge?: string;
+  badgeKind?: "below_typical" | "ending_soon" | "tag";
+  /**
+   * "Save €125" — the gap to the struck-through original, stated as money.
+   * Present only when `priceWas` is, so the card never brags about a discount
+   * the price block isn't already showing.
+   */
+  saving?: string;
+}
+
+export function dealSocialCopy(d: DealForEmail, lang: Lang): DealSocialCopy {
+  const L = DEALS_LABELS[lang];
+  const arrow = lang === "ar" ? "←" : "→";
+  const signal = dealPriceSignal(d);
+  const badge =
+    signal?.kind === "below_typical"
+      ? { badge: L.belowTypical.replace("{pct}", String(signal.pct)), badgeKind: "below_typical" as const }
+      : signal?.kind === "ending_soon"
+        ? { badge: L.endingSoon, badgeKind: "ending_soon" as const }
+        : d.dealTag
+          ? { badge: d.dealTag, badgeKind: "tag" as const }
+          : {};
+
+  // Rounding two formatted prices and subtracting them can disagree with the
+  // difference by a euro, so the saving is computed from the raw numbers. Under
+  // this floor it isn't worth a line on the card.
+  const savedAmount =
+    d.originalPrice && d.originalPrice > d.price ? d.originalPrice - d.price : 0;
+
+  return {
+    route: `${d.originCity} ${arrow} ${d.destinationCity}`,
+    price: formatDealPrice(d.price, d.currency, lang),
+    priceWas:
+      d.originalPrice && d.originalPrice > d.price
+        ? formatDealPrice(d.originalPrice, d.currency, lang)
+        : undefined,
+    saving:
+      savedAmount >= MIN_SAVING_TO_SHOW
+        ? L.save.replace("{amount}", formatDealPrice(savedAmount, d.currency, lang))
+        : undefined,
+    dates: d.returnDate
+      ? `${formatDealDate(d.outboundDate, lang)} – ${formatDealDate(d.returnDate, lang)}`
+      : formatDealDate(d.outboundDate, lang),
+    tripType: d.returnDate ? L.roundTrip : L.oneWay,
+    perPerson: L.perPerson,
+    ...badge,
+  };
 }
 
 /** Builds a full email row (<tr>) showcasing live Low-Fare Radar deals. */
@@ -2494,6 +2571,31 @@ export function destinationHeroCacheKey(focus: DestinationFocus): string {
   return `hero:${focus.cityToken}`;
 }
 
+/**
+ * The photo behind one `imageCache` destination key, whatever built the key.
+ *
+ * Split out because the social deck caches EXTRA frames of a destination under
+ * its own keys (`hero:lisbon:social1`, …) so a card can show a different photo
+ * from the one the email sent — those keys are still ordinary destination rows.
+ */
+export async function queryCachedHeroByKey(
+  db: any,
+  cacheKey: string,
+): Promise<DestinationHero | null> {
+  const cached = await db
+    .query("imageCache")
+    .withIndex("by_query_and_type", (q: any) =>
+      q.eq("query", cacheKey).eq("type", "destination"),
+    )
+    .first();
+  if (!cached?.url) return null;
+  return {
+    url: cached.url,
+    credit: cached.photographer || undefined,
+    creditUrl: cached.photographerUrl || cached.attribution || undefined,
+  };
+}
+
 /** Step 1 only: the Unsplash hero a previous send already cached. */
 export async function queryCachedDestinationHero(
   db: any,
@@ -2501,21 +2603,7 @@ export async function queryCachedDestinationHero(
 ): Promise<DestinationHero | null> {
   const focus = focusOf(opts);
   if (!focus) return null;
-
-  const cached = await db
-    .query("imageCache")
-    .withIndex("by_query_and_type", (q: any) =>
-      q.eq("query", destinationHeroCacheKey(focus)).eq("type", "destination"),
-    )
-    .first();
-  if (cached?.url) {
-    return {
-      url: cached.url,
-      credit: cached.photographer || undefined,
-      creditUrl: cached.photographerUrl || cached.attribution || undefined,
-    };
-  }
-  return null;
+  return queryCachedHeroByKey(db, destinationHeroCacheKey(focus));
 }
 
 /** Steps 1-2: everything reachable from the database alone. */

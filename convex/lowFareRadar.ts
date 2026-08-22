@@ -906,13 +906,20 @@ export const softDeleteExpiredDeals = internalMutation({
  *   - outbound (and return, if round-trip) date still in the future — searchapi
  *     returns nothing for past dates, so re-pricing them is wasted quota.
  *
+ * `pricedSince` (the current cycle's start) excludes deals already re-priced
+ * in this cycle. A cycle can span several runs when one stops on its cap or
+ * time budget; without this filter the leftovers never drain — every run would
+ * see the whole table again, always report `skipped > 0`, and keep asking for
+ * a short-gap retry, pinning the radar to an hourly cadence forever instead of
+ * the intended 4 days (exactly what happened through 2026-08).
+ *
  * Ordered stalest-first (oldest `updatedAt`), so when a run stops on its cap or
  * time budget the leftovers are the ones the next run starts with — coverage
  * rotates instead of the same head of the list being re-priced every time.
  */
 export const listRefreshableDeals = internalQuery({
-  args: {},
-  handler: async (ctx) => {
+  args: { pricedSince: v.optional(v.float64()) },
+  handler: async (ctx, args) => {
     // YYYY-MM-DD (UTC). Date strings compare correctly lexicographically.
     const today = new Date().toISOString().slice(0, 10);
     const deals = await ctx.db
@@ -928,7 +935,9 @@ export const listRefreshableDeals = internalQuery({
           d.dealTag !== "AUTO" &&
           !!d.outboundDate &&
           d.outboundDate >= today &&
-          (!d.returnDate || d.returnDate >= today)
+          (!d.returnDate || d.returnDate >= today) &&
+          (args.pricedSince == null ||
+            (d.updatedAt ?? d._creationTime) < args.pricedSince)
       )
       .sort(
         (a, b) =>
@@ -1080,6 +1089,15 @@ export const RADAR_RUN_LOCK_STALE_MS = 20 * 60 * 1000;
  */
 export const RADAR_REFRESH_RETRY_SOON_MS = 60 * 60 * 1000;
 
+/**
+ * How many short-gap retries a single refresh cycle may chain before it is
+ * closed out and the full 4-day interval resumes. `listRefreshableDeals` +
+ * `pricedSince` should already drain the leftovers in one or two runs; this is
+ * the backstop that guarantees no future condition can pin the radar (and its
+ * searchapi.io quota, and the report email) to an hourly cadence indefinitely.
+ */
+export const RADAR_MAX_CONSECUTIVE_RETRIES = 3;
+
 /** Admin: current refresh state for the widget countdown + "refresh now" UI. */
 export const getRefreshStatus = query({
   args: { adminKey: v.string() },
@@ -1136,22 +1154,39 @@ export const ensureRadarRefreshState = internalMutation({
   },
 });
 
-/** Internal: mark a refresh run as started (overlap guard). */
+/**
+ * Internal: mark a refresh run as started (overlap guard) and return the start
+ * of the cycle this run belongs to.
+ *
+ * A run that follows a short-gap retry (`retryCount > 0`) continues the
+ * previous cycle, so it inherits its `cycleStartedAt` and only picks up the
+ * deals that cycle hasn't priced yet. Any other run opens a fresh cycle.
+ */
 export const markRadarRefreshStarted = internalMutation({
   args: {},
+  returns: v.object({ cycleStartedAt: v.float64() }),
   handler: async (ctx) => {
     const now = Date.now();
     const state = await ctx.db.query("radarRefreshState").first();
+    const continuing = !!state && (state.retryCount ?? 0) > 0 && !!state.cycleStartedAt;
+    const cycleStartedAt = continuing ? state!.cycleStartedAt! : now;
     if (state) {
-      await ctx.db.patch(state._id, { running: true, runStartedAt: now, updatedAt: now });
+      await ctx.db.patch(state._id, {
+        running: true,
+        runStartedAt: now,
+        cycleStartedAt,
+        updatedAt: now,
+      });
     } else {
       await ctx.db.insert("radarRefreshState", {
         nextRefreshAt: now + RADAR_REFRESH_INTERVAL_MS,
         running: true,
         runStartedAt: now,
+        cycleStartedAt,
         updatedAt: now,
       });
     }
+    return { cycleStartedAt };
   },
 });
 
@@ -1167,23 +1202,38 @@ export const markRadarRefreshCompleted = internalMutation({
       expired: v.optional(v.float64()),
       skipped: v.optional(v.float64()),
     }),
-    // Set when the run stopped on its time budget with deals still to price:
-    // come back in an hour for the leftovers instead of in four days.
+    // Set when the run stopped on its cap or time budget with deals still to
+    // price: come back in an hour for the leftovers instead of in four days.
     retrySoon: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
-    const nextRefreshAt =
-      now +
-      (args.retrySoon ? RADAR_REFRESH_RETRY_SOON_MS : RADAR_REFRESH_INTERVAL_MS);
-    const lastResult = { ...args.result, at: now };
     const state = await ctx.db.query("radarRefreshState").first();
+
+    // Belt and braces on top of the `pricedSince` filter: however the leftovers
+    // arise, a cycle only ever gets RADAR_MAX_CONSECUTIVE_RETRIES short-gap
+    // extensions before it is closed out and the full interval resumes.
+    const prevRetries = state?.retryCount ?? 0;
+    const retry = !!args.retrySoon && prevRetries < RADAR_MAX_CONSECUTIVE_RETRIES;
+    if (args.retrySoon && !retry) {
+      console.warn(
+        `[radar-refresh] retry cap (${RADAR_MAX_CONSECUTIVE_RETRIES}) reached with ${args.result.skipped ?? 0} deal(s) unpriced; closing the cycle and waiting the full interval`
+      );
+    }
+    const retryCount = retry ? prevRetries + 1 : 0;
+    const nextRefreshAt =
+      now + (retry ? RADAR_REFRESH_RETRY_SOON_MS : RADAR_REFRESH_INTERVAL_MS);
+    const lastResult = { ...args.result, at: now };
     if (state) {
       await ctx.db.patch(state._id, {
         lastRefreshAt: now,
         nextRefreshAt,
         running: false,
         runStartedAt: undefined,
+        retryCount,
+        // A cycle that isn't being retried is finished; the next run opens a
+        // new one and sees the whole table again.
+        ...(retry ? {} : { cycleStartedAt: undefined }),
         lastResult,
         updatedAt: now,
       });
@@ -1192,6 +1242,7 @@ export const markRadarRefreshCompleted = internalMutation({
         lastRefreshAt: now,
         nextRefreshAt,
         running: false,
+        retryCount,
         lastResult,
         updatedAt: now,
       });

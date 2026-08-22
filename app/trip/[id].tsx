@@ -853,6 +853,7 @@ export default function TripDetails() {
     // Reports arrival status to server so cron notifications are gated on physical presence
     const updateLocationStatus = useAuthenticatedMutation(api.trips.updateLocationStatus as any);
     const verifyPresence = useAction(api.trips.verifyPresenceAtDestination as any);
+    const optimizeDayRouteAction = useAction((api as any).trips.optimizeDayRoute);
     const handleLocationStatus = useCallback((atDestination: boolean, coords?: { latitude: number; longitude: number }) => {
         if (trip?._id && token) {
             updateLocationStatus({ tripId: trip._id, atDestination }).catch((e: any) =>
@@ -938,6 +939,7 @@ export default function TripDetails() {
     const [addingActivity, setAddingActivity] = useState<number | null>(null); // dayIndex with a pending AI/manual add
     const [moveTarget, setMoveTarget] = useState<{ dayIndex: number; actIndex: number } | null>(null);
     const [reorderDayIndex, setReorderDayIndex] = useState<number | null>(null); // day open in the drag-reorder sheet
+    const [optimizingDay, setOptimizingDay] = useState<number | null>(null); // day whose route is being optimized
 
     // Clear all transient editing/loading state when the itinerary changes
     // (the server write landed and the query refreshed).
@@ -1038,6 +1040,71 @@ export default function TripDetails() {
             ]
         );
     }, [trip?._id, t]);
+
+    /**
+     * Reorder one day into the shortest walking route.
+     *
+     * Two round-trips on purpose: the first is a dry run that only measures, so
+     * the confirm dialog can quote a real saving ("1.4 km, 18 min") instead of
+     * asking the user to approve a change nobody has costed yet. Only the second
+     * call writes. `status` covers the cases where there is nothing to offer —
+     * the day is already optimal, too few stops resolved to a location, or the
+     * routing service is unavailable — each of which gets its own message rather
+     * than a generic failure.
+     */
+    const handleOptimizeDay = useCallback(async (dayIndex: number) => {
+        if (!trip?._id || !token || optimizingDay !== null) return;
+        setOptimizingDay(dayIndex);
+        try {
+            const preview: any = await optimizeDayRouteAction({ token, tripId: trip._id, dayIndex });
+
+            if (preview?.status !== 'ok') {
+                const messageKey =
+                    preview?.status === 'already-optimal' ? 'tripDetail.optimizeAlreadyOptimal'
+                    : preview?.status === 'too-many-stops' ? 'tripDetail.optimizeTooManyStops'
+                    : preview?.status === 'too-few-stops' || preview?.status === 'insufficient-data'
+                        ? 'tripDetail.optimizeNotEnoughStops'
+                    : 'tripDetail.optimizeUnavailable';
+                setOptimizingDay(null);
+                Alert.alert(t('tripDetail.optimizeDay'), t(messageKey));
+                return;
+            }
+
+            const savedKm = Math.max(0, preview.savedKm ?? 0);
+            const savedMinutes = Math.round(Math.max(0, preview.savedMinutes ?? 0));
+            setOptimizingDay(null);
+            Alert.alert(
+                t('tripDetail.optimizeDay'),
+                t('tripDetail.optimizeConfirm', {
+                    km: savedKm.toFixed(1),
+                    minutes: savedMinutes,
+                    total: (preview.optimizedKm ?? 0).toFixed(1),
+                }),
+                [
+                    { text: t('common.cancel'), style: 'cancel' },
+                    {
+                        text: t('tripDetail.optimizeApply'),
+                        onPress: async () => {
+                            setOptimizingDay(dayIndex);
+                            try {
+                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                                await optimizeDayRouteAction({ token, tripId: trip._id, dayIndex, apply: true });
+                            } catch (err) {
+                                console.error('Optimize day (apply) failed:', err);
+                                Alert.alert(t('tripDetail.optimizeDay'), t('tripDetail.optimizeUnavailable'));
+                            } finally {
+                                setOptimizingDay(null);
+                            }
+                        },
+                    },
+                ]
+            );
+        } catch (err) {
+            console.error('Optimize day failed:', err);
+            setOptimizingDay(null);
+            Alert.alert(t('tripDetail.optimizeDay'), t('tripDetail.optimizeUnavailable'));
+        }
+    }, [trip?._id, token, optimizingDay, optimizeDayRouteAction, t]);
 
     const [accommodationType, setAccommodationType] = useState<'all' | 'hotel' | 'airbnb'>('all');
     const [staysSortBy, setStaysSortBy] = useState<'recommended' | 'price' | 'rating'>('recommended');
@@ -2941,8 +3008,38 @@ export default function TripDetails() {
                                         <Text style={[styles.dayDate, { color: colors.textMuted }]}> · {formattedDate}</Text>
                                     </View>
                                     <Text style={[styles.daySubtitle, { color: colors.textMuted }]}>{day.title || t('tripDetail.exploreDest', { destination: trip.destination })}</Text>
+                                    {/* Walkability, straight from the cached day fields — no
+                                        request at render time. Absent on days generated before
+                                        the field existed, which simply show nothing. */}
+                                    {typeof day.mapWalkableStops === 'number' && typeof day.mapWalkableMinutes === 'number' && (day.activities?.length || 0) > 1 && (
+                                        <View style={styles.dayWalkRow}>
+                                            <Ionicons name="walk-outline" size={13} color={colors.textMuted} />
+                                            <Text style={[styles.dayWalkText, { color: colors.textMuted }]}>
+                                                {t('tripDetail.walkableStops', {
+                                                    count: day.mapWalkableStops,
+                                                    total: day.activities?.length || 0,
+                                                    minutes: day.mapWalkableMinutes,
+                                                })}
+                                            </Text>
+                                        </View>
+                                    )}
                                 </View>
                                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                    {/* Shortest-route reorder. Needs 3+ stops: with two there is
+                                        only one order, and the backend pins first and last anyway. */}
+                                    {(day.activities?.length || 0) >= 3 && (
+                                        <TouchableOpacity
+                                            onPress={() => handleOptimizeDay(index)}
+                                            disabled={optimizingDay !== null || regeneratingDay !== null}
+                                            style={[styles.dayRegenBtn, { borderColor: colors.border, opacity: optimizingDay !== null && optimizingDay !== index ? 0.4 : 1 }]}
+                                            activeOpacity={0.7}
+                                            accessibilityLabel={t('tripDetail.optimizeDay')}
+                                        >
+                                            {optimizingDay === index
+                                                ? <ActivityIndicator size="small" color={colors.textMuted} />
+                                                : <Ionicons name="git-branch-outline" size={16} color={colors.textMuted} />}
+                                        </TouchableOpacity>
+                                    )}
                                     {(day.activities?.length || 0) > 1 && (
                                         <TouchableOpacity
                                             onPress={() => setReorderDayIndex(index)}
@@ -5759,6 +5856,16 @@ const styles = StyleSheet.create({
         fontWeight: "500",
         color: "#64748B",
         marginTop: 2,
+    },
+    dayWalkRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+        marginTop: 4,
+    },
+    dayWalkText: {
+        fontSize: 12,
+        fontWeight: "500",
     },
     energyBadge: {
         backgroundColor: "rgba(249, 245, 6, 0.2)",

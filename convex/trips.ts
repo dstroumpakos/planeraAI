@@ -5,6 +5,14 @@ import { internal } from "./_generated/api";
 import { isSubscriptionActiveWithGrace } from "./helpers/subscription";
 import { getDistanceMeters } from "./helpers/geo";
 import { assignActivityIds, dedupeVenues, resequenceDayTimes, reassignTimeSlots } from "./helpers/itinerary";
+import {
+    buildStaticMapUrl,
+    computeWalkability,
+    geocodeActivitiesServer,
+    geocodeDestinationServer,
+    optimizeStopOrder,
+} from "./lib/geocoding";
+import { mapboxIsochrone, MAX_OPTIMIZATION_COORDS } from "./lib/mapbox";
 import { getAvgDailySpend, getAvgStay, SPEND_CURRENCY } from "./destinationSpend";
 import { normalizeDestinationKey } from "./partnerApiAuth";
 import { UNWTO_COUNTRY_STATS } from "./unwtoCountryStats";
@@ -1109,6 +1117,10 @@ export const patchDayMapData = internalMutation({
         mapImageUrl: v.union(v.string(), v.null()),
         mapTotalKm: v.float64(),
         mapWalkMinutes: v.float64(),
+        // Optional so days patched before these existed stay valid to re-patch.
+        mapRouteGeometry: v.optional(v.union(v.string(), v.null())),
+        mapWalkableStops: v.optional(v.union(v.float64(), v.null())),
+        mapWalkableMinutes: v.optional(v.union(v.float64(), v.null())),
     },
     returns: v.null(),
     handler: async (ctx: any, args: any) => {
@@ -1135,6 +1147,9 @@ export const patchDayMapData = internalMutation({
             mapImageUrl: args.mapImageUrl,
             mapTotalKm: args.mapTotalKm,
             mapWalkMinutes: args.mapWalkMinutes,
+            mapRouteGeometry: args.mapRouteGeometry ?? null,
+            mapWalkableStops: args.mapWalkableStops ?? null,
+            mapWalkableMinutes: args.mapWalkableMinutes ?? null,
         };
 
         await ctx.db.patch(args.tripId, {
@@ -1149,6 +1164,13 @@ function dayNeedsMapBackfill(day: any): boolean {
     if (!day || typeof day !== "object") return false;
     const activities = Array.isArray(day.activities) ? day.activities : [];
     if (activities.length === 0) return false;
+    // A day where nothing resolved has no usable map, so it is worth retrying
+    // after a geocoding improvement. Self-limiting: once a day gets coordinates
+    // it stops qualifying. (Backfill is a manual migration, not a cron.)
+    const geocoded = activities.filter(
+        (a: any) => typeof a?.lat === "number" && typeof a?.lng === "number"
+    ).length;
+    if (geocoded === 0) return true;
     // A cached URL for the decommissioned OSM static-map host is a permanently
     // broken image, so those days need re-running even though they were already
     // "attempted". Kept in sync with isDeadMapUrl in lib/geocoding.ts.
@@ -1885,6 +1907,212 @@ export const moveActivity = authMutation({
         await ctx.db.patch(args.tripId, {
             itinerary: { ...trip.itinerary, dayByDayItinerary: dedupedDays },
         });
+    },
+});
+
+/**
+ * Rewrite one day's activity order. Internal-only: `order` is trusted to be a
+ * permutation of the day's activity indices, which optimizeDayRoute guarantees.
+ *
+ * Times belong to POSITIONS, not activities (same rule as moveActivity) - the
+ * chronological column stays put and the activities move between its slots, so
+ * a day that ran 09:00/11:00/14:00/20:00 still runs 09:00/11:00/14:00/20:00
+ * after the shuffle. Combined with the first/last stops being pinned during
+ * optimization, that keeps breakfast in the morning and dinner in the evening.
+ */
+export const applyDayActivityOrder = internalMutation({
+    args: {
+        tripId: v.id("trips"),
+        userId: v.string(),
+        dayIndex: v.float64(),
+        order: v.array(v.float64()),
+    },
+    returns: v.boolean(),
+    handler: async (ctx: any, args: any) => {
+        const trip = await ctx.db.get(args.tripId);
+        if (!trip || trip.userId !== args.userId) return false;
+        const days = trip.itinerary?.dayByDayItinerary;
+        if (!Array.isArray(days) || args.dayIndex < 0 || args.dayIndex >= days.length) return false;
+
+        const original = days[args.dayIndex]?.activities;
+        if (!Array.isArray(original) || original.length !== args.order.length) return false;
+
+        // Re-verify the permutation here rather than trusting the caller: a
+        // malformed order would silently drop or duplicate activities.
+        const seen = new Set<number>();
+        for (const i of args.order) {
+            if (!Number.isInteger(i) || i < 0 || i >= original.length || seen.has(i)) return false;
+            seen.add(i);
+        }
+
+        const reordered = reassignTimeSlots(original, args.order.map((i: number) => original[i]));
+        const nextDays = [...days];
+        nextDays[args.dayIndex] = clearFirstTravel({ ...nextDays[args.dayIndex], activities: reordered });
+
+        await ctx.db.patch(args.tripId, {
+            itinerary: { ...trip.itinerary, dayByDayItinerary: nextDays },
+        });
+        return true;
+    },
+});
+
+/** Negligible savings - not worth showing the user a "reorder your day" prompt. */
+const OPTIMIZE_MIN_SAVED_KM = 0.1;
+const OPTIMIZE_MIN_SAVED_MINUTES = 2;
+
+/**
+ * Work out the shortest walking order for one day's stops, and optionally
+ * apply it.
+ *
+ * Called twice by the UI in the normal flow: once to preview (`apply` unset),
+ * then again with `apply: true` once the user accepts. Calling it once with
+ * `apply: true` also works.
+ *
+ * Activities that never geocoded stay exactly where they are - only stops with
+ * real coordinates get reordered, and they are permuted among the positions
+ * they already occupy. `status` says what happened; "already-optimal" still
+ * carries the distance figures so the UI can say "your day is already the
+ * shortest route" with numbers behind it.
+ */
+export const optimizeDayRoute = authAction({
+    args: {
+        token: v.string(),
+        tripId: v.id("trips"),
+        dayIndex: v.float64(),
+        apply: v.optional(v.boolean()),
+    },
+    returns: v.any(),
+    handler: async (ctx: any, args: any) => {
+        const trip = await ctx.runQuery((internal as any).trips.getTripDetails, { tripId: args.tripId });
+        if (!trip) throw new Error("Trip not found");
+        if (trip.userId !== ctx.user.userId) throw new Error("Unauthorized");
+
+        const days = trip.itinerary?.dayByDayItinerary;
+        if (!Array.isArray(days) || args.dayIndex < 0 || args.dayIndex >= days.length) {
+            throw new Error("Invalid day");
+        }
+        const activities = days[args.dayIndex]?.activities;
+        if (!Array.isArray(activities) || activities.length < 3) {
+            return { status: "too-few-stops", applied: false };
+        }
+
+        // Prefer cached coordinates; geocode only what the enrichment pass missed.
+        const destCenter = await geocodeDestinationServer(trip.destination).catch(() => null);
+        const coords = await geocodeActivitiesServer(
+            activities,
+            trip.destination,
+            destCenter,
+            trip.language
+        );
+
+        // Indices of the stops we can actually route between, in current order.
+        const routable = coords
+            .map((c, i) => (c ? i : -1))
+            .filter((i) => i !== -1);
+        if (routable.length < 3) return { status: "insufficient-data", applied: false };
+        if (routable.length > MAX_OPTIMIZATION_COORDS) {
+            return { status: "too-many-stops", limit: MAX_OPTIMIZATION_COORDS, applied: false };
+        }
+
+        const optimized = await optimizeStopOrder(routable.map((i) => coords[i]!));
+        if (!optimized) return { status: "unavailable", applied: false };
+
+        // optimized.order indexes into `routable`; lift it back to activity
+        // indices, then drop those into the slots the routable stops occupied,
+        // leaving un-geocoded activities pinned at their own positions.
+        const optimizedActivityOrder = optimized.order.map((r) => routable[r]);
+        const fullOrder = coords.map((_, i) => i);
+        routable.forEach((slot, n) => {
+            fullOrder[slot] = optimizedActivityOrder[n];
+        });
+
+        const savedKm = optimized.currentKm - optimized.optimizedKm;
+        const savedMinutes = optimized.currentMinutes - optimized.optimizedMinutes;
+        const unchanged = fullOrder.every((activityIndex, i) => activityIndex === i);
+        const worthwhile =
+            !unchanged && (savedKm >= OPTIMIZE_MIN_SAVED_KM || savedMinutes >= OPTIMIZE_MIN_SAVED_MINUTES);
+
+        const result = {
+            status: worthwhile ? "ok" : "already-optimal",
+            order: fullOrder,
+            currentKm: optimized.currentKm,
+            currentMinutes: optimized.currentMinutes,
+            optimizedKm: optimized.optimizedKm,
+            optimizedMinutes: optimized.optimizedMinutes,
+            savedKm: Math.max(0, savedKm),
+            savedMinutes: Math.max(0, savedMinutes),
+            applied: false,
+        };
+        if (args.apply !== true || !worthwhile) return result;
+
+        const written = await ctx.runMutation((internal as any).trips.applyDayActivityOrder, {
+            tripId: args.tripId,
+            userId: ctx.user.userId,
+            dayIndex: args.dayIndex,
+            order: fullOrder,
+        });
+        if (!written) return result;
+
+        // Refresh the cached map for the new order. The optimization response
+        // already carries the reordered route's geometry and totals, so this
+        // needs no second Directions call - only the walkability contour, whose
+        // anchor can move if the day's first stop changed.
+        const reorderedCoords = fullOrder.map((activityIndex) => coords[activityIndex]);
+        const points = reorderedCoords.filter((p): p is NonNullable<typeof p> => p !== null);
+        const walkability = await computeWalkability(points).catch(() => null);
+        await ctx.runMutation((internal as any).trips.patchDayMapData, {
+            tripId: args.tripId,
+            dayIndex: args.dayIndex,
+            activityCoords: reorderedCoords,
+            mapImageUrl: buildStaticMapUrl(points, process.env.MAPBOX_TOKEN, 640, 400, optimized.geometry),
+            mapTotalKm: optimized.optimizedKm,
+            mapWalkMinutes: optimized.optimizedMinutes,
+            mapRouteGeometry: optimized.geometry,
+            mapWalkableStops: walkability?.walkableStops ?? null,
+            mapWalkableMinutes: walkability?.minutes ?? null,
+        });
+
+        return { ...result, applied: true };
+    },
+});
+
+/** UI offers a fixed set of contours; anything else is a client bug, not a request. */
+const ISOCHRONE_MINUTES = [5, 10, 15, 20, 30, 45, 60];
+
+/**
+ * "How far can I get from here on foot in N minutes", as polygon rings the map
+ * screen can draw as an overlay.
+ *
+ * Authenticated and clamped to a fixed set of contours because every call bills
+ * against the Mapbox account - this must not become an open proxy. Returns null
+ * when Mapbox is unconfigured or the request failed, which the client should
+ * treat as "no overlay available" rather than an error.
+ */
+export const getWalkIsochrone = authAction({
+    args: {
+        token: v.string(),
+        lat: v.float64(),
+        lng: v.float64(),
+        minutes: v.optional(v.float64()),
+        profile: v.optional(
+            v.union(v.literal("walking"), v.literal("cycling"), v.literal("driving"))
+        ),
+    },
+    returns: v.any(),
+    handler: async (_ctx: any, args: any) => {
+        if (!Number.isFinite(args.lat) || !Number.isFinite(args.lng)) throw new Error("Invalid point");
+        if (Math.abs(args.lat) > 90 || Math.abs(args.lng) > 180) throw new Error("Invalid point");
+
+        const requested = args.minutes ?? 15;
+        const minutes = ISOCHRONE_MINUTES.includes(requested) ? requested : 15;
+
+        const contours = await mapboxIsochrone(
+            { lat: args.lat, lng: args.lng },
+            [minutes],
+            args.profile || "walking"
+        ).catch(() => null);
+        const contour = contours?.[0];
+        return contour ? { minutes: contour.minutes, rings: contour.rings } : null;
     },
 });
 

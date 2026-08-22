@@ -440,6 +440,96 @@ export const getNewsletterHeroImage = action({
   },
 });
 
+/**
+ * Several DISTINCT photos of one destination, from a single Unsplash search.
+ *
+ * A social deck shows the same place more than once — the cover, its deal
+ * card, the end card — and repeating the identical hero on consecutive slides
+ * reads as a rendering bug rather than as a set. Asking for a bigger page
+ * costs exactly the same one API request as `getNewsletterHeroImage` and hands
+ * back enough frames to give every slide its own.
+ *
+ * `orientation: "portrait"` is worth asking for on vertical cards: a portrait
+ * frame fills 9:16 on its own, instead of an entropy crop throwing away two
+ * thirds of a landscape shot.
+ */
+export const getDestinationPhotoSet = action({
+  args: {
+    destination: v.string(),
+    count: v.optional(v.number()),
+    width: v.optional(v.number()),
+    orientation: v.optional(
+      v.union(v.literal("landscape"), v.literal("portrait"), v.literal("squarish"))
+    ),
+  },
+  returns: v.array(
+    v.object({
+      url: v.string(),
+      photographer: v.string(),
+      photographerUrl: v.optional(v.string()),
+      attribution: v.string(),
+      downloadLocation: v.optional(v.string()),
+      unsplashId: v.string(),
+    })
+  ),
+  handler: async (ctx, args) => {
+    const accessKey = process.env.UNSPLASH_ACCESS_KEY;
+    if (!accessKey) {
+      console.error("UNSPLASH_ACCESS_KEY not set");
+      return [];
+    }
+    // Unsplash caps `per_page` at 30; a deck never needs more than a handful.
+    const count = Math.max(1, Math.min(10, Math.round(args.count ?? 4)));
+    const query = resolveIataInQuery(
+      normalizeDestinationToEnglish(args.destination)
+    );
+    try {
+      const response = await fetch(
+        `https://api.unsplash.com/search/photos?query=${encodeURIComponent(query)}` +
+          `&per_page=${count}&orientation=${args.orientation ?? "landscape"}` +
+          `&content_filter=high`,
+        { headers: { Authorization: `Client-ID ${accessKey}` } }
+      );
+      if (!response.ok) {
+        console.error("Unsplash API error:", response.status);
+        return [];
+      }
+      const data = (await response.json()) as {
+        results?: Array<UnsplashPhoto & { id?: string }>;
+      };
+      const seen = new Set<string>();
+      const photos: Array<{
+        url: string;
+        photographer: string;
+        photographerUrl?: string;
+        attribution: string;
+        downloadLocation?: string;
+        unsplashId: string;
+      }> = [];
+      for (const photo of data.results ?? []) {
+        if (!photo?.urls?.regular) continue;
+        // A broad query occasionally returns the same asset twice; a duplicate
+        // here would defeat the whole point of the call.
+        const key = photo.id || photo.urls.regular;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        photos.push({
+          url: optimizeUnsplashUrl(photo.urls.regular, args.width ?? 1080, 80),
+          photographer: photo.user.name,
+          photographerUrl: photo.user.links.html,
+          attribution: photo.links.html,
+          downloadLocation: photo.links.download_location,
+          unsplashId: photo.id ?? "",
+        });
+      }
+      return photos;
+    } catch (error) {
+      console.error("Error fetching Unsplash photo set:", error);
+      return [];
+    }
+  },
+});
+
 export const trackUnsplashDownload = action({
   args: { downloadLocation: v.string() },
   returns: v.null(),

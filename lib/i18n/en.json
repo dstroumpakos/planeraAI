@@ -1384,7 +1384,15 @@
     "moveCurrentDay": "Current",
     "reorderDay": "Reorder day",
     "reorderDayTitle": "Reorder Day {{number}}",
-    "reorderHint": "Drag the handle to reorder. Changes save automatically."
+    "reorderHint": "Drag the handle to reorder. Changes save automatically.",
+    "optimizeDay": "Optimize route",
+    "optimizeConfirm": "Reordering this day cuts {{km}} km and about {{minutes}} min of walking, down to {{total}} km total. Your start and end stops stay put, and the times stay where they are.",
+    "optimizeApply": "Reorder",
+    "optimizeAlreadyOptimal": "This day is already the shortest route between its stops.",
+    "optimizeNotEnoughStops": "Not enough located stops on this day to work out a shorter route.",
+    "optimizeTooManyStops": "This day has too many stops to optimize. Try it on a lighter day.",
+    "optimizeUnavailable": "Couldn't work out a shorter route right now. Please try again later.",
+    "walkableStops": "{{count}} of {{total}} stops within a {{minutes}}-min walk"
   },
   "interests": {
     "Adventure": "Adventure",

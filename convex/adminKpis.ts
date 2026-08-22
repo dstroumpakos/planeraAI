@@ -177,6 +177,10 @@ export const _plansPage = internalQuery({
 interface InsightRow {
   status: string;
   reported: boolean;
+  // Carried so the same scan can accumulate the per-user counters behind the
+  // admin user list (see userActivityStats in schema.ts).
+  userId: string;
+  likes: number;
 }
 
 export const _insightsPage = internalQuery({
@@ -186,6 +190,8 @@ export const _insightsPage = internalQuery({
     const rows: InsightRow[] = res.page.map((i: any) => ({
       status: i.moderationStatus || "pending",
       reported: (i.reportsCount || 0) > 0,
+      userId: i.userId,
+      likes: typeof i.likes === "number" ? i.likes : 0,
     }));
     return { rows, isDone: res.isDone, continueCursor: res.continueCursor };
   },
@@ -353,6 +359,66 @@ export const _writeAdminKpis = internalMutation({
 });
 
 // ===========================================================================
+// WRITE the per-user activity counters.
+//
+// One mutation per chunk of users: each is its own transaction with its own
+// write budget, and a chunk that fails only costs that chunk. Rows are matched
+// on `userId` via the by_user index, so re-runs patch in place rather than
+// duplicating.
+// ===========================================================================
+export const _writeUserActivity = internalMutation({
+  args: {
+    generation: v.float64(),
+    rows: v.array(
+      v.object({
+        userId: v.string(),
+        tripsCount: v.float64(),
+        upcomingTripsCount: v.float64(),
+        pastTripsCount: v.float64(),
+        completedTripsCount: v.float64(),
+        lastTripAt: v.optional(v.float64()),
+        insightsCount: v.float64(),
+        approvedInsightsCount: v.float64(),
+        totalLikes: v.float64(),
+      }),
+    ),
+  },
+  handler: async (ctx, { generation, rows }) => {
+    for (const row of rows) {
+      const existing = await ctx.db
+        .query("userActivityStats")
+        .withIndex("by_user", (q) => q.eq("userId", row.userId))
+        .first();
+      const doc = { ...row, generation };
+      if (existing) {
+        await ctx.db.replace(existing._id, doc);
+      } else {
+        await ctx.db.insert("userActivityStats", doc);
+      }
+    }
+    return null;
+  },
+});
+
+/**
+ * Drop counter rows left behind by an earlier run — a user whose last trip and
+ * insight were both deleted stops being written, and without this their stale
+ * counts would show forever. Paginated over the `by_generation` index so the
+ * caller can drive it to completion in bounded transactions.
+ */
+export const _pruneUserActivity = internalMutation({
+  args: { generation: v.float64(), limit: v.float64() },
+  handler: async (ctx, { generation, limit }) => {
+    const stale = await ctx.db
+      .query("userActivityStats")
+      .withIndex("by_generation", (q) => q.lt("generation", generation))
+      .take(limit);
+    for (const row of stale) await ctx.db.delete(row._id);
+    return { deleted: stale.length };
+  },
+});
+
+// ===========================================================================
 // RECOMPUTE — the cron entrypoint. Orchestrates the paginated scans + small
 // aggregates and writes the singleton. Safe to invoke manually.
 // ===========================================================================
@@ -411,6 +477,29 @@ export const recomputeAdminKpis = internalAction({
     const owners = new Set<string>();
     const completedOwners = new Set<string>();
 
+    // Per-user counters for the admin user list (see userActivityStats in
+    // schema.ts). Filled from the trips and insights scans below — both already
+    // walk every row, so this rides along for free rather than paying for a
+    // second pass over the fat `trips` table.
+    interface ActivityAcc {
+      tripsCount: number; upcomingTripsCount: number; pastTripsCount: number;
+      completedTripsCount: number; lastTripAt: number;
+      insightsCount: number; approvedInsightsCount: number; totalLikes: number;
+    }
+    const perUser = new Map<string, ActivityAcc>();
+    const activityFor = (uid: string): ActivityAcc => {
+      let acc = perUser.get(uid);
+      if (!acc) {
+        acc = {
+          tripsCount: 0, upcomingTripsCount: 0, pastTripsCount: 0,
+          completedTripsCount: 0, lastTripAt: 0,
+          insightsCount: 0, approvedInsightsCount: 0, totalLikes: 0,
+        };
+        perUser.set(uid, acc);
+      }
+      return acc;
+    };
+
     await scanAll<TripRow>(
       (cursor) =>
         // 15 rows/page (not 500 like the thin tables): trips are the fat rows,
@@ -436,6 +525,14 @@ export const recomputeAdminKpis = internalAction({
           if (t.destination) destCounts.set(t.destination, (destCounts.get(t.destination) || 0) + 1);
           owners.add(t.userId);
           if (t.status === "completed") completedOwners.add(t.userId);
+          if (t.userId) {
+            const acc = activityFor(t.userId);
+            acc.tripsCount++;
+            if (typeof t.endDate === "number" && t.endDate >= now) acc.upcomingTripsCount++;
+            else acc.pastTripsCount++;
+            if (t.status === "completed") acc.completedTripsCount++;
+            if (t.creationTime > acc.lastTripAt) acc.lastTripAt = t.creationTime;
+          }
           const di = dayIndex(t.creationTime);
           if (di >= 0) {
             dailyTrips[di]++;
@@ -517,6 +614,12 @@ export const recomputeAdminKpis = internalAction({
           insights.total++;
           if (i.status in insights) (insights as any)[i.status]++;
           if (i.reported) insights.reported++;
+          if (i.userId) {
+            const acc = activityFor(i.userId);
+            acc.insightsCount++;
+            if (i.status === "approved") acc.approvedInsightsCount++;
+            acc.totalLikes += i.likes;
+          }
         }
       },
     );
@@ -663,6 +766,50 @@ export const recomputeAdminKpis = internalAction({
     };
 
     await ctx.runMutation(internal.adminKpis._writeAdminKpis, { data });
+
+    // ---------- PER-USER ACTIVITY COUNTERS ----------
+    // Written after the singleton so a failure here still leaves fresh KPIs.
+    // `now` is the generation stamp: every row this run touches gets it, and
+    // anything still carrying an older stamp is stale and gets pruned.
+    const ACTIVITY_WRITE_CHUNK = 100;
+    const ACTIVITY_PRUNE_CHUNK = 200;
+    const ACTIVITY_PRUNE_MAX_PASSES = 200;
+    try {
+      const activityRows = Array.from(perUser.entries()).map(([userId, a]) => ({
+        userId,
+        tripsCount: a.tripsCount,
+        upcomingTripsCount: a.upcomingTripsCount,
+        pastTripsCount: a.pastTripsCount,
+        completedTripsCount: a.completedTripsCount,
+        lastTripAt: a.lastTripAt || undefined,
+        insightsCount: a.insightsCount,
+        approvedInsightsCount: a.approvedInsightsCount,
+        totalLikes: a.totalLikes,
+      }));
+      for (let i = 0; i < activityRows.length; i += ACTIVITY_WRITE_CHUNK) {
+        await ctx.runMutation(internal.adminKpis._writeUserActivity, {
+          generation: now,
+          rows: activityRows.slice(i, i + ACTIVITY_WRITE_CHUNK),
+        });
+      }
+      let pruned = 0;
+      for (let pass = 0; pass < ACTIVITY_PRUNE_MAX_PASSES; pass++) {
+        const res: { deleted: number } = await ctx.runMutation(
+          internal.adminKpis._pruneUserActivity,
+          { generation: now, limit: ACTIVITY_PRUNE_CHUNK },
+        );
+        pruned += res.deleted;
+        if (res.deleted < ACTIVITY_PRUNE_CHUNK) break;
+      }
+      console.log(
+        `[admin-kpis] user activity: wrote ${activityRows.length} rows, pruned ${pruned}`,
+      );
+    } catch (err) {
+      // Counters are a convenience on the admin user list, not a KPI input —
+      // never let them fail the whole run.
+      console.error("[admin-kpis] user activity write failed", err);
+    }
+
     return null;
   },
 });

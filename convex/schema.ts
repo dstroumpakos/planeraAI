@@ -52,9 +52,13 @@ export default defineSchema({
         // (server-geocoded once, via convex/lib/geocoding.ts — null if geocoding
         // found nothing). itinerary.dayByDayItinerary[] itself carries optional
         // `mapImageUrl` (static day-route map URL, null if generation failed),
-        // `mapTotalKm`/`mapWalkMinutes` (route totals from the same pass). All
-        // four are best-effort and may be absent on trips predating this field
-        // or still awaiting backfill — never assume they're present.
+        // `mapTotalKm`/`mapWalkMinutes` (route totals from the same pass),
+        // `mapRouteGeometry` (encoded precision-5 polyline of the walked route,
+        // for drawing the real street path instead of straight lines) and
+        // `mapWalkableStops`/`mapWalkableMinutes` (how many stops fall inside an
+        // N-minute walk of the day's first stop). All are best-effort and may be
+        // absent on trips predating the field or still awaiting backfill —
+        // never assume they're present.
         itinerary: v.optional(v.any()),
         // Live generation progress for the streaming day-by-day reveal.
         // Drives the "watch your trip build" UI (real progress, not a fake bar).
@@ -908,6 +912,8 @@ export default defineSchema({
         nextRefreshAt: v.float64(),              // when the next refresh is due
         running: v.optional(v.boolean()),        // guard against overlapping runs
         runStartedAt: v.optional(v.float64()),   // when `running` was set — lets a killed run's lock go stale
+        cycleStartedAt: v.optional(v.float64()),  // start of the current refresh CYCLE (may span several runs when one stops on its cap/time budget) — deals already priced since this mark aren't re-priced in the same cycle
+        retryCount: v.optional(v.float64()),      // consecutive short-gap retries in the current cycle, capped so a cycle can't park the radar on an hourly cadence forever
         lastResult: v.optional(v.object({
             checked: v.float64(),
             updated: v.float64(),
@@ -1616,6 +1622,36 @@ export default defineSchema({
         ),
         updatedAt: v.float64(),
     }),
+
+    // Per-user activity counters, denormalised by the `recompute-admin-kpis`
+    // cron (see adminKpis.ts). The admin user list needs trips/insights/likes
+    // counts for every row, but `trips` rows average ~57 KB (they carry the
+    // whole itinerary blob), so counting them live costs ~280 documents before
+    // the 16 MB per-transaction read limit fires — i.e. a handful of users, not
+    // a 500-row page. The KPI cron already scans every trip and insight once an
+    // hour, so it accumulates these counts on the way past and writes one tiny
+    // row per active user. `admin.listUsersPage` then joins a ~200-byte doc per
+    // user instead of megabytes of itineraries.
+    //
+    // Only users with at least one trip or insight get a row; everyone else is
+    // read as zeros. Rows whose `generation` no longer matches the newest run
+    // are pruned, so deleting all of a user's trips clears their counters.
+    userActivityStats: defineTable({
+        userId: v.string(),
+        tripsCount: v.float64(),
+        upcomingTripsCount: v.float64(),
+        pastTripsCount: v.float64(),
+        completedTripsCount: v.float64(),
+        lastTripAt: v.optional(v.float64()),
+        insightsCount: v.float64(),
+        approvedInsightsCount: v.float64(),
+        totalLikes: v.float64(),
+        // Timestamp of the cron run that produced this row. Doubles as the
+        // "as of" the admin UI shows and as the prune key for stale rows.
+        generation: v.float64(),
+    })
+        .index("by_user", ["userId"])
+        .index("by_generation", ["generation"]),
 
     // Cron-computed singleton holding the full admin-dashboard KPI set. Like
     // landingStats, this exists so the admin dashboard reads one small doc

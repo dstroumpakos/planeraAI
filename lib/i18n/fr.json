@@ -1389,7 +1389,15 @@
     "moveCurrentDay": "Actuel",
     "reorderDay": "Réorganiser la journée",
     "reorderDayTitle": "Réorganiser le jour {{number}}",
-    "reorderHint": "Faites glisser la poignée pour réorganiser. Les modifications sont enregistrées automatiquement."
+    "reorderHint": "Faites glisser la poignée pour réorganiser. Les modifications sont enregistrées automatiquement.",
+    "optimizeDay": "Optimiser l'itinéraire",
+    "optimizeConfirm": "Réorganiser cette journée économise {{km}} km et environ {{minutes}} min de marche, soit {{total}} km au total. Le premier et le dernier arrêt ne bougent pas, ni les horaires.",
+    "optimizeApply": "Réorganiser",
+    "optimizeAlreadyOptimal": "Cette journée suit déjà l'itinéraire le plus court entre ses arrêts.",
+    "optimizeNotEnoughStops": "Pas assez d'arrêts localisés ce jour-là pour calculer un itinéraire plus court.",
+    "optimizeTooManyStops": "Cette journée compte trop d'arrêts pour être optimisée. Essayez sur une journée plus légère.",
+    "optimizeUnavailable": "Impossible de calculer un itinéraire plus court pour le moment. Réessayez plus tard.",
+    "walkableStops": "{{count}} arrêts sur {{total}} à {{minutes}} min à pied"
   },
   "interests": {
     "Adventure": "Aventure",
