@@ -13,6 +13,29 @@
  * opportunistic AUTO seeds — they persist and are re-priced by the refresh
  * cron (which only touches `dealTag !== "AUTO"` rows).
  *
+ * CANDIDATE SOURCE (the `source` arg):
+ *
+ *   - `"pool"` (default) — the fixed `POPULAR_DESTINATIONS` list below.
+ *   - `"explore"` — ask Google Travel Explore (the engine behind the public
+ *     "Where can I go?" widget) what is actually cheap FROM this origin, and
+ *     keep its cheapest `exploreTop` destinations. One cached call replaces the
+ *     whole of phase 0: explore already returns a per-destination fare and a
+ *     suggested (outbound, return) pair. Cheapest and fastest — but explore
+ *     gives ONE price per route with no distribution behind it, so there is no
+ *     route-local discount signal and the shortlist is ranked on absolute
+ *     price, leaving all the qualifying to phase 1's `price_insights`.
+ *   - `"explore+calendar"` — the hybrid, and the one to reach for. Explore picks
+ *     the candidates, then phase 0 scans the calendar for those only. Restores
+ *     the route-local discount signal at a fraction of the calls, because the
+ *     scan covers ~`exploreTop` origin-relevant routes instead of all 24 pool
+ *     entries — most of which are irrelevant from anywhere the pool wasn't
+ *     written around (SVO, CPT, a South American origin).
+ *
+ * Explore fares are indicative and carry NO `price_level`, so phase 1 stays
+ * mandatory whichever source is used: it is what yields both a bookable option
+ * and Google's low/typical/high grade. An explore source that returns nothing
+ * usable degrades to the pool rather than seeding nothing.
+ *
  * THREE PHASES:
  *
  *   0. CALENDAR SCAN — for each candidate destination, scan a wide date grid
@@ -33,7 +56,9 @@
  * calls per inserted winner (~20) — roughly 110 searchapi.io calls per press,
  * versus ~44 for the old single-date-pair scan. Phase 0 runs with bounded
  * concurrency and the whole scan is wall-clock budgeted, because Convex kills
- * an action at 10 minutes.
+ * an action at 10 minutes. `source: "explore+calendar"` cuts phase 0 to
+ * `windows × exploreTop` (3 × 16 = 48 at the defaults) plus one explore call,
+ * and `source: "explore"` removes phase 0 entirely.
  */
 
 import { action } from "./_generated/server";
@@ -51,6 +76,7 @@ import {
 import { fetchFlightCalendar } from "./lib/searchApiFlightCalendar";
 import { AIRPORTS } from "../lib/airports";
 import type {
+  ExploreDestination,
   FlightCalendar,
   FlightSearchInput,
   NormalizedFlightOption,
@@ -140,6 +166,22 @@ const VERIFY_HEADROOM = 6;
  * and they burn the heavier endpoints).
  */
 const DEFAULT_SCAN_CONCURRENCY = 8;
+
+/**
+ * How many Google Travel Explore destinations become candidates on an
+ * explore-backed source. Explore returns the whole reachable grid (70+ from a
+ * hub like ATH) sorted cheapest-first; seeding has no use for the tail, and on
+ * `"explore+calendar"` this number sets the phase-0 call count directly.
+ */
+const DEFAULT_EXPLORE_TOP = 16;
+
+/**
+ * Rate-limit bucket for the seeder's explore call. `exploreDestinationsPublic`
+ * is keyed by an opaque device id — a fixed one here keeps admin presses in
+ * their own bucket, clear of real visitors, while still sharing that action's
+ * 12h response cache with the public widget.
+ */
+const EXPLORE_DEVICE_ID = "radar-seed";
 
 /**
  * Wall-clock budgets. Convex kills an action at 10 minutes, and the admin
@@ -268,6 +310,124 @@ function pickCheapest(
 }
 
 /**
+ * One route to consider, before any pricing work. The fixed pool supplies only
+ * a code + city; Google Travel Explore additionally supplies an indicative fare
+ * and its own suggested travel dates, which become that route's date fallback.
+ */
+type SeedCandidate = {
+  code: string;
+  city: string;
+  /** Indicative round-trip fare (explore only) — a discovery signal, never bookable. */
+  explorePrice?: number;
+  exploreOutbound?: string;
+  exploreReturn?: string;
+};
+
+/**
+ * Explore's suggested pair is usable only when both dates are present, ordered,
+ * and far enough out that falling back to them doesn't price a next-week
+ * departure — the same lead time the calendar lib enforces.
+ */
+function usableExploreDates(outbound?: string, ret?: string): boolean {
+  if (!outbound || !ret || ret <= outbound) return false;
+  return outbound >= dateAhead(CALENDAR_MIN_LEAD_DAYS);
+}
+
+/**
+ * Candidate generation via Google Travel Explore — the engine behind the public
+ * "Where can I go?" widget.
+ *
+ * One call returns everywhere this origin reaches, cheapest first, each with an
+ * indicative fare and a suggested (outbound, return) pair. That makes it a
+ * strictly better generator than the fixed pool for any origin the pool wasn't
+ * written around: origin-aware, not capped at 24 cities, one call.
+ *
+ * Goes through `explorePublic.exploreDestinationsPublic` rather than the lib
+ * directly, so it shares that action's 12h cache. Sends the minimal input (no
+ * interests, stops or time period): the widest grid, and the cache entry most
+ * likely to be warm already.
+ *
+ * Never throws — an explore hiccup must not cost the caller a seeding press, so
+ * failure returns an empty list and the caller falls back to the pool.
+ */
+async function exploreCandidates(
+  ctx: any,
+  opts: {
+    origin: string;
+    currency: string;
+    adults: number;
+    maxPrice?: number;
+    covered: Set<string>;
+    originCity: string;
+    top: number;
+  }
+): Promise<{ candidates: SeedCandidate[]; returned: number }> {
+  let destinations: ExploreDestination[] = [];
+  try {
+    destinations = await ctx.runAction(
+      api.explorePublic.exploreDestinationsPublic,
+      {
+        deviceId: EXPLORE_DEVICE_ID,
+        input: {
+          departureId: opts.origin,
+          currency: opts.currency,
+          // Party size changes which fares exist, so price it in here too.
+          adults: opts.adults,
+        },
+      }
+    );
+  } catch (err) {
+    console.error(
+      `[radar-seed] explore failed ${opts.origin}: ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    );
+    return { candidates: [], returned: 0 };
+  }
+
+  const returned = destinations?.length ?? 0;
+  const seen = new Set<string>();
+  const candidates: SeedCandidate[] = [];
+
+  for (const d of destinations ?? []) {
+    const code = d.iata?.trim().toUpperCase();
+    // No IATA means no route to search — explore can return region-level rows.
+    if (!code || code.length < 3) continue;
+    if (code === opts.origin || seen.has(code) || opts.covered.has(code)) {
+      continue;
+    }
+    const city = d.name?.trim() || cityForIata(code);
+    // Same-city metro codes (origin JFK vs destination NYC) are not a trip.
+    if (city.toLowerCase() === opts.originCity) continue;
+    // The engine ignores `max_price` (see searchApiExplore.ts), so the cap is
+    // applied here — on the indicative fare, which phase 1 re-prices anyway.
+    if (
+      opts.maxPrice !== undefined &&
+      d.price !== undefined &&
+      d.price > opts.maxPrice
+    ) {
+      continue;
+    }
+    seen.add(code);
+    candidates.push({
+      code,
+      city,
+      explorePrice: d.price,
+      exploreOutbound: d.outboundDate,
+      exploreReturn: d.returnDate,
+    });
+  }
+
+  // Explore already sorts cheapest-first, but re-sort after filtering so a row
+  // with no price can never outrank one with a real fare.
+  candidates.sort(
+    (a, b) => (a.explorePrice ?? Infinity) - (b.explorePrice ?? Infinity)
+  );
+
+  return { candidates: candidates.slice(0, Math.max(1, opts.top)), returned };
+}
+
+/**
  * Phase-0 output: one route's best travel dates, discovered from its own
  * calendar grid. `calendarPrice` is INDICATIVE only (the calendar engine is a
  * discovery signal, not a bookable quote) — phase 1 re-prices it for real.
@@ -356,6 +516,19 @@ export const seedDealsForOrigin = action({
     verifyTop: v.optional(v.float64()),
     /** Parallel calendar lookups in phase 0. 1–8. */
     concurrency: v.optional(v.float64()),
+    /**
+     * Where candidate destinations come from. Defaults to `"pool"`, so existing
+     * callers are unchanged. See the file header for the trade-offs.
+     */
+    source: v.optional(
+      v.union(
+        v.literal("pool"),
+        v.literal("explore"),
+        v.literal("explore+calendar")
+      )
+    ),
+    /** Explore destinations kept as candidates (explore sources only). 1–40. */
+    exploreTop: v.optional(v.float64()),
   },
   handler: async (
     ctx,
@@ -366,6 +539,10 @@ export const seedDealsForOrigin = action({
     /** Departure-date range the calendar scan covered. */
     scanFrom: string;
     scanTo: string;
+    /** Generator that actually produced the candidates (falls back to "pool"). */
+    candidateSource: "pool" | "explore" | "explore+calendar";
+    /** Destinations explore returned before filtering (0 when unused). */
+    exploreReturned: number;
     candidatesSearched: number;
     calendarCalls: number;
     /** Routes whose calendar came back empty (fixed-window fallback used). */
@@ -411,13 +588,18 @@ export const seedDealsForOrigin = action({
       1,
       Math.round(args.verifyTop ?? count + VERIFY_HEADROOM)
     );
+    const requestedSource = args.source ?? "pool";
+    const exploreTop = Math.max(
+      1,
+      Math.min(Math.round(args.exploreTop ?? DEFAULT_EXPLORE_TOP), 40)
+    );
     const startedAt = Date.now();
     let timedOut = false;
 
     // Dates the scan is expected to cover, for the summary. The lib floors the
     // start at its own minimum lead time, so mirror that here.
-    const scanFrom = dateAhead(Math.max(startOffsetDays, 8));
-    const scanTo = dateAhead(Math.max(startOffsetDays, 8) + windows * 14 - 1);
+    let scanFrom = dateAhead(Math.max(startOffsetDays, 8));
+    let scanTo = dateAhead(Math.max(startOffsetDays, 8) + windows * 14 - 1);
 
     // Fixed pair used only when a route's calendar comes back empty, so a thin
     // route degrades to the old behaviour instead of dropping out entirely.
@@ -435,12 +617,45 @@ export const seedDealsForOrigin = action({
     // Exclude the origin itself, anything already covered, and same-city metro
     // codes (e.g. origin JFK vs destination NYC, both "New York").
     const originCity = cityForIata(origin).toLowerCase();
-    const candidatePool = POPULAR_DESTINATIONS.filter(
+    const poolCandidates: SeedCandidate[] = POPULAR_DESTINATIONS.filter(
       (d) =>
         d.code !== origin &&
         !covered.has(d.code) &&
         d.city.toLowerCase() !== originCity
-    );
+    ).map((d) => ({ code: d.code, city: d.city }));
+
+    // Candidate generation. An explore source that comes back empty — API down,
+    // or an origin the engine doesn't cover — degrades to the pool, because a
+    // press that seeds nothing is strictly worse than one that seeds the
+    // generic list.
+    let candidateSource: "pool" | "explore" | "explore+calendar" =
+      requestedSource;
+    let exploreReturned = 0;
+    let candidatePool: SeedCandidate[] = poolCandidates;
+
+    if (requestedSource !== "pool") {
+      const explored = await exploreCandidates(ctx, {
+        origin,
+        currency,
+        adults,
+        maxPrice: args.maxPrice,
+        covered,
+        originCity,
+        top: exploreTop,
+      });
+      exploreReturned = explored.returned;
+      if (explored.candidates.length > 0) {
+        candidatePool = explored.candidates;
+        console.log(
+          `[radar-seed] explore ${origin}: ${explored.returned} destination(s) -> ${explored.candidates.length} candidate(s)`
+        );
+      } else {
+        candidateSource = "pool";
+        console.warn(
+          `[radar-seed] explore gave no usable candidates for ${origin}; falling back to the fixed pool`
+        );
+      }
+    }
 
     // ── Phase 0 — calendar scan: find each route's own best dates ──
     //
@@ -459,16 +674,34 @@ export const seedDealsForOrigin = action({
       candidatePool,
       concurrency,
       async (dest): Promise<ScanResult> => {
+        // A route's dates when no calendar priced it: explore's own suggested
+        // pair when it gave a usable one (route-specific and seasonally
+        // sensible), else the fixed window the pool source has always used.
+        const useExploreDates = usableExploreDates(
+          dest.exploreOutbound,
+          dest.exploreReturn
+        );
         const fallback: ScanResult = {
           destination: dest.code,
           city: dest.city,
-          outboundDate: fallbackOutbound,
-          returnDate: fallbackReturn,
-          calendarPrice: null,
+          outboundDate: useExploreDates
+            ? dest.exploreOutbound!
+            : fallbackOutbound,
+          returnDate: useExploreDates ? dest.exploreReturn! : fallbackReturn,
+          // Indicative either way — the calendar's fare and explore's are both
+          // discovery signals, and phase 1 re-prices whichever survives.
+          calendarPrice: dest.explorePrice ?? null,
           calendarDiscount: 0,
           datesScanned: 0,
           fellBack: true,
         };
+
+        // Explore-only source: no calendar phase at all. Explore already
+        // carries this route's fare and dates, and there is no distribution
+        // behind that single fare — so `calendarDiscount` stays 0 and the
+        // shortlist below ranks on absolute price, with phase 1's
+        // `price_insights` doing the qualifying.
+        if (candidateSource === "explore") return fallback;
 
         // Out of phase-0 time — take the fixed pair rather than start a fresh
         // scan. Deliberately NOT the shared SCAN_BUDGET_MS: the remainder of
@@ -534,6 +767,14 @@ export const seedDealsForOrigin = action({
       console.warn(
         `[radar-seed] calendar budget hit ${origin}: ${calendarSkipped}/${candidatePool.length} destination(s) fell back to the fixed date pair; phase 1 keeps the remaining budget`
       );
+    }
+
+    // Explore-only mode scanned nothing, so report the span of the dates explore
+    // actually suggested rather than a calendar window the run never looked at.
+    if (candidateSource === "explore" && scans.length > 0) {
+      const dates = scans.map((s) => s.outboundDate).sort();
+      scanFrom = dates[0];
+      scanTo = dates[dates.length - 1];
     }
 
     // Rank by the route-local discount, then by indicative price, and verify
@@ -751,6 +992,8 @@ export const seedDealsForOrigin = action({
       currency,
       scanFrom,
       scanTo,
+      candidateSource,
+      exploreReturned,
       candidatesSearched,
       calendarCalls,
       calendarEmpty,

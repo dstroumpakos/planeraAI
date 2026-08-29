@@ -56,6 +56,10 @@ type TripAdvisorRef = {
   url: string | null;
   rating: number | null;
   review_count: number | null;
+  // Terra location id. Partners can ignore it, but keeping it means a stored
+  // itinerary can later be enriched with photos or reviews without having to
+  // re-search for a venue we already resolved once.
+  location_id: string | null;
 };
 
 type Stop = {
@@ -352,6 +356,10 @@ function normalizeTripAdvisor(ta: any): TripAdvisorRef | null {
     rating: typeof ta?.rating === "number" ? ta.rating : null,
     review_count:
       typeof ta?.review_count === "number" ? ta.review_count : null,
+    location_id:
+      ta?.location_id != null && String(ta.location_id).trim()
+        ? String(ta.location_id).trim()
+        : null,
   };
 }
 
@@ -524,6 +532,7 @@ async function lookupRestaurant(
     url: match.webUrl ?? tripadvisorProfileUrl(id),
     rating: match.rating,
     review_count: match.reviewCount,
+    location_id: match.id,
   };
 }
 

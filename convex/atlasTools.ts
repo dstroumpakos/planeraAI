@@ -285,6 +285,10 @@ async function toolRestaurants(city: string): Promise<ToolOutcome> {
             reviewCount: p.reviewCount ?? 0,
             address: p.address || city,
             tripAdvisorUrl: p.webUrl || "https://www.tripadvisor.com",
+            // Keep the Terra id: photos, reviews and detail refreshes are all
+            // keyed by it, and re-searching to recover it later costs a call
+            // and may not resolve back to the same venue.
+            tripAdvisorLocationId: p.id,
         }));
 
         const card: AtlasCard = { type: "restaurants", data: { city, restaurants } };
