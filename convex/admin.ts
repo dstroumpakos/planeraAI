@@ -614,8 +614,17 @@ const ZERO_ACTIVITY = {
  * Everything one row of the admin user list needs, using only small documents.
  * Deliberately does NOT touch `trips` or `insights` — see the header comment.
  */
-async function buildUserRow(ctx: any, settings: any, now: number) {
+async function buildUserRow(ctx: any, settings: any, now: number, adminIds: string[]) {
     const email = settings.email ? settings.email.trim().toLowerCase() : null;
+
+    // Admin rights come from two places (see checkIsAdmin): the `users.isAdmin`
+    // flag, and the ADMIN_EMAILS env var matched on either userId or email.
+    // The list used to read only the flag, so env-granted admins — which is how
+    // the founder account itself is an admin — showed as ordinary users and the
+    // Admins filter came back empty.
+    const isEnvAdmin =
+        adminIds.includes(settings.userId.toLowerCase()) ||
+        (!!email && adminIds.includes(email));
 
     const user = email
         ? await ctx.db
@@ -683,7 +692,10 @@ async function buildUserRow(ctx: any, settings: any, now: number) {
         language: settings.language || null,
         currency: settings.currency || null,
         onboardingCompleted: settings.onboardingCompleted ?? null,
-        isAdmin: user?.isAdmin || false,
+        isAdmin: user?.isAdmin === true || isEnvAdmin,
+        // Env-granted admin rights can't be revoked from this UI — only
+        // ADMIN_EMAILS can — so the row says which kind it is.
+        isEnvAdmin,
         isBanned: user?.isBanned || false,
         isShadowBanned: user?.isShadowBanned || false,
         ...activity,
@@ -788,6 +800,9 @@ async function scanUsers(
     let before: number | null = args.cursor != null ? Number(args.cursor) : null;
     if (before !== null && !Number.isFinite(before)) before = null;
 
+    // Read once per call, not per row — it only parses an env var.
+    const adminIds = getAdminIdentifiers();
+
     const rows: any[] = [];
     let scanned = 0;
     let enriched = 0;
@@ -824,7 +839,7 @@ async function scanUsers(
             if (!candidate) continue;
 
             enriched++;
-            const row = await buildUserRow(ctx, settings, now);
+            const row = await buildUserRow(ctx, settings, now, adminIds);
             if (!userMatchesFilter(row, filter)) continue;
 
             rows.push(row);
@@ -845,33 +860,6 @@ async function scanUsers(
         scanCapped: !reachedEnd && rows.length < wanted,
     };
 }
-
-// TEMPORARY verification probe — internal only, removed after testing.
-export const _scanUsersProbe = internalQuery({
-    args: {
-        search: v.optional(v.string()),
-        filter: v.optional(v.string()),
-        limit: v.optional(v.number()),
-        cursor: v.optional(v.union(v.string(), v.null())),
-    },
-    handler: async (ctx, args) => {
-        const res = await scanUsers(ctx, args);
-        return {
-            count: res.users.length,
-            scanned: res.scanned,
-            isDone: res.isDone,
-            scanCapped: res.scanCapped,
-            cursor: res.cursor,
-            first: res.users[0]
-                ? { email: res.users[0].email, trips: res.users[0].tripsCount, createdAt: res.users[0].createdAt }
-                : null,
-            last: res.users[res.users.length - 1]
-                ? { email: res.users[res.users.length - 1].email, createdAt: res.users[res.users.length - 1].createdAt }
-                : null,
-            emails: res.users.map((u: any) => u.email),
-        };
-    },
-});
 
 export const listUsersPage = query({
     args: {
@@ -955,6 +943,12 @@ export const getUser = query({
         // Newsletter opt-in state
         const newsletter = await getNewsletterSub(ctx, userEmail);
 
+        // Same two-source admin check the list does — see buildUserRow.
+        const adminIdsDetail = getAdminIdentifiers();
+        const isEnvAdminDetail =
+            adminIdsDetail.includes(args.targetUserId.toLowerCase()) ||
+            (!!userEmail && adminIdsDetail.includes(userEmail.toLowerCase()));
+
         // Registered devices (push tokens double as the device record)
         const pushTokens = await ctx.db
             .query("pushTokens")
@@ -1001,7 +995,8 @@ export const getUser = query({
             currency: settings.currency || null,
             darkMode: settings.darkMode ?? null,
             onboardingCompleted: settings.onboardingCompleted ?? null,
-            isAdmin: user?.isAdmin || false,
+            isAdmin: user?.isAdmin === true || isEnvAdminDetail,
+            isEnvAdmin: isEnvAdminDetail,
             isBanned: user?.isBanned || false,
             isShadowBanned: user?.isShadowBanned || false,
             tripsCount: trips.length,

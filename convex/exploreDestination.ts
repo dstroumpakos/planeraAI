@@ -167,6 +167,10 @@ export const fetchTeaserForCampaign = internalAction({
     arrivalId: v.string(),
     currency: v.optional(v.string()),
     hl: v.optional(v.string()),
+    // `time_period`, so a campaign priced for a specific window (e.g.
+    // "2026-10-03..2026-10-10") is quoted for those dates rather than the
+    // engine's default six-month view.
+    timePeriod: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<ExploreDestinationFlights | null> => {
     const input: ExploreDestinationFlightsQuery = {
@@ -174,6 +178,7 @@ export const fetchTeaserForCampaign = internalAction({
       arrivalId: args.arrivalId,
       currency: args.currency,
       hl: args.hl,
+      timePeriod: args.timePeriod,
     };
     if (!input.departureId?.trim() || !input.arrivalId?.trim()) return null;
 

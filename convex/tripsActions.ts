@@ -18,6 +18,11 @@ import { fetchAccommodations, type Accommodation } from "./lib/searchApiAccommod
 import { extractHm } from "./lib/searchApiFlights";
 import { reportError } from "./helpers/reportError";
 import { geocodeDestinationServer, buildDayMapData, isDeadMapUrl } from "./lib/geocoding";
+import {
+    hasTerraApiKey,
+    terraSearchLocations,
+    tripadvisorProfileUrl,
+} from "./lib/tripadvisorTerra";
 
 // Helper function to generate travel style guidance for OpenAI prompt
 function generateTravelStyleGuidance(interests: string[]): string {
@@ -2163,7 +2168,7 @@ function checkApiKeys() {
         hasDuffelKey: !!process.env.DUFFEL_ACCESS_TOKEN,
         hasSerpApiKey: !!process.env.SERPAPI_API_KEY,
         hasOpenAIKey: !!process.env.OPENAI_API_KEY,
-        hasTripAdvisorKey: !!process.env.TRIPADVISOR_API_KEY,
+        hasTripAdvisorKey: hasTerraApiKey(),
         hasViatorKey: !!process.env.VIATOR_API_KEY,
     };
 }
@@ -2560,91 +2565,44 @@ function getFallbackActivities(destination: string) {
     ];
 }
 
-// Helper function to search for restaurants using TripAdvisor API
+// Helper function to search for restaurants using the TripAdvisor Terra API
 async function searchRestaurants(destination: string) {
-    const tripadvisorKey = process.env.TRIPADVISOR_API_KEY;
-    
-    if (!tripadvisorKey) {
+    if (!hasTerraApiKey()) {
         console.log(`🍽️ TripAdvisor API key not configured, using fallback restaurants for: ${destination}`);
         return getFallbackRestaurants(destination);
     }
 
     try {
-        console.log(`🍽️ Attempting to fetch restaurants from TripAdvisor for: ${destination}`);
-        
-        // Search directly for restaurants in the destination
-        const searchUrl = `https://api.content.tripadvisor.com/api/v1/location/search?key=${tripadvisorKey}&searchQuery=${encodeURIComponent("restaurants " + destination)}&category=restaurants&language=en`;
-        
-        console.log(`📡 Searching TripAdvisor for restaurants in: ${destination}`);
-        
-        const searchResponse = await fetch(searchUrl, {
-            method: "GET",
-            headers: {
-                "Accept": "application/json",
-            }
+        console.log(`📡 Searching TripAdvisor (Terra) for restaurants in: ${destination}`);
+
+        // Terra returns full Location objects (rating, price level, profile URL)
+        // inline, so the old per-result /details fan-out is gone. `size` is
+        // capped at 20 per page by Terra, which matches what we asked for anyway.
+        const places = await terraSearchLocations({
+            query: `restaurants ${destination}`,
+            geoName: destination,
+            category: "RESTAURANT",
+            size: 20,
         });
-        
-        console.log(`📊 TripAdvisor Response Status: ${searchResponse.status}`);
-        
-        if (!searchResponse.ok) {
-            const errorBody = await searchResponse.text();
-            console.error(`❌ TripAdvisor search failed (${searchResponse.status}):`, errorBody.substring(0, 200));
-            return getFallbackRestaurants(destination);
-        }
-        
-        const searchData = await searchResponse.json() as any;
-        
-        if (!searchData.data || searchData.data.length === 0) {
+
+        if (places.length === 0) {
             console.log(`❌ No restaurants found for: ${destination}`);
             return getFallbackRestaurants(destination);
         }
-        
-        console.log(`✅ Found ${searchData.data.length} results from TripAdvisor`);
-        
-        // Get details for each restaurant to get the web_url
-        const restaurantsWithDetails = await Promise.all(
-            searchData.data.slice(0, 20).map(async (item: any) => {
-                try {
-                    // Fetch details for each restaurant to get the web_url
-                    const detailsUrl = `https://api.content.tripadvisor.com/api/v1/location/${item.location_id}/details?key=${tripadvisorKey}&language=en`;
-                    const detailsResponse = await fetch(detailsUrl, {
-                        method: "GET",
-                        headers: { "Accept": "application/json" }
-                    });
-                    
-                    if (detailsResponse.ok) {
-                        const details = await detailsResponse.json() as any;
-                        return {
-                            name: details.name || item.name || "Restaurant",
-                            cuisine: details.cuisine?.map((c: any) => c.localized_name || c.name).join(", ") || "Various",
-                            priceRange: details.price_level || "€€",
-                            rating: parseFloat(details.rating) || 4.0,
-                            reviewCount: parseInt(details.num_reviews) || 0,
-                            address: details.address_obj?.address_string || item.address_obj?.address_string || destination,
-                            tripAdvisorUrl: details.web_url || `https://www.tripadvisor.com/Restaurant_Review-g${item.location_id}`,
-                            dataSource: "tripadvisor",
-                        };
-                    }
-                } catch (e) {
-                    console.log(`⚠️ Could not fetch details for ${item.name}`);
-                }
-                
-                // Fallback if details fetch fails - construct URL manually
-                return {
-                    name: item.name || "Restaurant",
-                    cuisine: "Various",
-                    priceRange: "€€",
-                    rating: 4.0,
-                    reviewCount: 0,
-                    address: item.address_obj?.address_string || destination,
-                    tripAdvisorUrl: `https://www.tripadvisor.com/Restaurant_Review-g${item.location_id}`,
-                    dataSource: "tripadvisor",
-                };
-            })
-        );
-        
-        console.log(`✅ Returning ${restaurantsWithDetails.length} restaurants with TripAdvisor URLs`);
-        return restaurantsWithDetails;
+
+        const restaurants = places.map((p) => ({
+            name: p.name,
+            cuisine: p.cuisine || "Various",
+            priceRange: p.priceRange || "€€",
+            rating: p.rating ?? 4.0,
+            reviewCount: p.reviewCount ?? 0,
+            address: p.address || destination,
+            tripAdvisorUrl: p.webUrl || tripadvisorProfileUrl(p.id),
+            dataSource: "tripadvisor",
+        }));
+
+        console.log(`✅ Returning ${restaurants.length} restaurants with TripAdvisor URLs`);
+        return restaurants;
     } catch (error) {
         console.error("❌ TripAdvisor API error:", error);
         console.log(`🍽️ Falling back to default restaurants for: ${destination}`);
@@ -3326,53 +3284,37 @@ async function mergeRestaurantDataIntoItinerary(dayByDayItinerary: ItineraryDay[
             `traditional cuisine ${destination}`,
         ];
         
-        const tripadvisorKey = process.env.TRIPADVISOR_API_KEY;
-        if (tripadvisorKey) {
+        if (hasTerraApiKey()) {
             for (const query of extraQueries) {
                 if (availablePool.length >= totalRestaurantSlots) break;
-                
+
                 try {
-                    const searchUrl = `https://api.content.tripadvisor.com/api/v1/location/search?key=${tripadvisorKey}&searchQuery=${encodeURIComponent(query)}&category=restaurants&language=en`;
-                    const searchResponse = await fetch(searchUrl, {
-                        method: "GET",
-                        headers: { "Accept": "application/json" },
+                    // One Terra call per query — the rows already carry rating,
+                    // price level and profile URL, so there is no detail fan-out.
+                    const places = await terraSearchLocations({
+                        query,
+                        geoName: destination,
+                        category: "RESTAURANT",
+                        size: 20,
                     });
-                    
-                    if (!searchResponse.ok) continue;
-                    const searchData = await searchResponse.json() as any;
-                    if (!searchData.data) continue;
-                    
-                    for (const item of searchData.data) {
+
+                    for (const place of places) {
                         if (availablePool.length >= totalRestaurantSlots) break;
-                        const nameLower = (item.name || "").toLowerCase();
+                        const nameLower = place.name.toLowerCase();
                         if (existingNames.has(nameLower)) continue; // Skip duplicates
-                        
-                        // Fetch details for this restaurant
-                        try {
-                            const detailsUrl = `https://api.content.tripadvisor.com/api/v1/location/${item.location_id}/details?key=${tripadvisorKey}&language=en`;
-                            const detailsResponse = await fetch(detailsUrl, {
-                                method: "GET",
-                                headers: { "Accept": "application/json" },
-                            });
-                            
-                            if (detailsResponse.ok) {
-                                const details = await detailsResponse.json() as any;
-                                const newRestaurant: RestaurantInfo = {
-                                    name: details.name || item.name || "Restaurant",
-                                    cuisine: details.cuisine?.map((c: any) => c.localized_name || c.name).join(", ") || "Various",
-                                    priceRange: details.price_level || "€€",
-                                    rating: parseFloat(details.rating) || 4.0,
-                                    reviewCount: parseInt(details.num_reviews) || 0,
-                                    address: details.address_obj?.address_string || item.address_obj?.address_string || destination,
-                                    tripAdvisorUrl: details.web_url || `https://www.tripadvisor.com/Restaurant_Review-g${item.location_id}`,
-                                };
-                                availablePool.push(newRestaurant);
-                                existingNames.add(nameLower);
-                                console.log(`  ➕ Added: ${newRestaurant.name}`);
-                            }
-                        } catch (e) {
-                            // Skip this restaurant
-                        }
+
+                        const newRestaurant: RestaurantInfo = {
+                            name: place.name,
+                            cuisine: place.cuisine || "Various",
+                            priceRange: place.priceRange || "€€",
+                            rating: place.rating ?? 4.0,
+                            reviewCount: place.reviewCount ?? 0,
+                            address: place.address || destination,
+                            tripAdvisorUrl: place.webUrl || tripadvisorProfileUrl(place.id),
+                        };
+                        availablePool.push(newRestaurant);
+                        existingNames.add(nameLower);
+                        console.log(`  ➕ Added: ${newRestaurant.name}`);
                     }
                 } catch (e) {
                     console.log(`⚠️ Extra search failed for: ${query}`);

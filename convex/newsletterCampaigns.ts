@@ -45,6 +45,7 @@ import {
   renderSpotlightBlock,
   renderCalendarBlock,
   renderTeaserBlock,
+  renderRoutesBlock,
   normalizeLang,
   pickTopDeals,
   pickGuides,
@@ -61,8 +62,15 @@ import {
   queryFeaturedSights,
   queryFeaturedAttractions,
   queryFeaturedPackages,
+  queryCampaignRouteFares,
+  routePriceWindow,
+  readSearchCacheFromDb,
+  fareFromCalendar,
+  fareFromTeaser,
+  MAX_CAMPAIGN_ROUTES,
   queryDestinationHero,
   destinationHeroCacheKey,
+  heroSearchQuery,
   isCuratedHero,
   type DealForEmail,
   type ItineraryForEmail,
@@ -70,6 +78,7 @@ import {
   type AttractionForEmail,
   type PackageForEmail,
   type RouteBlockMeta,
+  type RouteFare,
   type DestinationFocus,
   type DestinationHero,
 } from "./newsletter";
@@ -149,6 +158,21 @@ interface CampaignContent {
   routeOriginCity?: string;
   routeDestinationCity?: string;
   routeCurrency?: string;
+  routeOutboundDate?: string;
+  routeReturnDate?: string;
+  // Every route the email is about, one fare card each. Independent of the
+  // single `routeBlock` above: an admin who ticks three routes gets one email
+  // covering all three, and the AI only pins a `routeBlock` when there is
+  // exactly one destination to focus the rest of the email on.
+  routes?: Array<{
+    origin: string;
+    destination: string;
+    originCity: string;
+    destinationCity: string;
+    currency?: string;
+    outboundDate?: string;
+    returnDate?: string;
+  }>;
   bannerKey?: string;
 }
 
@@ -170,6 +194,9 @@ interface CampaignExtras {
   // Null on a fetch/cache miss, in which case the block is silently omitted.
   calendar: FlightCalendar | null;
   teaser: ExploreDestinationFlights | null;
+  // Live "from" price per campaign route (multi-route fare list). Routes with
+  // no price are kept out by the renderer.
+  routeFares: RouteFare[];
   // Photo OF the pinned destination for the header, when we have one; null
   // leaves the campaign's curated marketing photo in place.
   hero: DestinationHero | null;
@@ -210,6 +237,8 @@ function renderCampaignEmail(
   const routeMeta: RouteBlockMeta = {
     originCity: campaign.routeOriginCity || campaign.routeOrigin || "",
     destinationCity: campaign.routeDestinationCity || campaign.routeDestination || "",
+    origin: campaign.routeOrigin,
+    destination: campaign.routeDestination,
   };
 
   // Enrichment blocks concatenate into a single HTML string in a stable
@@ -233,6 +262,7 @@ function renderCampaignEmail(
       ? renderCalendarBlock(extras.calendar, routeMeta, lang) : "",
     campaign.routeBlock === "teaser" && extras.teaser
       ? renderTeaserBlock(extras.teaser, routeMeta, lang) : "",
+    extras.routeFares.length ? renderRoutesBlock(extras.routeFares, lang) : "",
     campaign.includeDeals && extras.deals.length
       ? renderDealsBlock(extras.deals, lang) : "",
   ].filter(Boolean).join("");
@@ -320,6 +350,20 @@ function renderCampaignEmail(
       );
     }
   }
+  if (extras.routeFares.length) {
+    const priced = extras.routeFares.filter((f) => f.price);
+    if (priced.length) {
+      textParts.push(
+        priced
+          .map(
+            (f) =>
+              `• ${f.originCity} → ${f.destinationCity}: from ${Math.round(f.price!)} ${f.currency}`,
+          )
+          .join("\n"),
+      );
+    }
+  }
+
   if (campaign.includeDeals && extras.deals.length) {
     textParts.push(
       extras.deals
@@ -366,12 +410,23 @@ const campaignContentArgs = {
   includeSpotlight: v.optional(v.boolean()),
   // Live-price route block: pin one route and render it as either a
   // "cheapest days to fly" calendar strip or a "flights from €X" teaser card.
+  routes: v.optional(v.array(v.object({
+    origin: v.string(),
+    destination: v.string(),
+    originCity: v.string(),
+    destinationCity: v.string(),
+    currency: v.optional(v.string()),
+    outboundDate: v.optional(v.string()),
+    returnDate: v.optional(v.string()),
+  }))),
   routeBlock: v.optional(v.union(v.literal("calendar"), v.literal("teaser"))),
   routeOrigin: v.optional(v.string()),
   routeDestination: v.optional(v.string()),
   routeOriginCity: v.optional(v.string()),
   routeDestinationCity: v.optional(v.string()),
   routeCurrency: v.optional(v.string()),
+  routeOutboundDate: v.optional(v.string()),
+  routeReturnDate: v.optional(v.string()),
   bannerKey: v.optional(v.string()),
   languageFilter: v.optional(v.string()),
   sourceFilter: v.optional(v.string()),
@@ -414,6 +469,11 @@ export const listCampaigns = query({
       theme: c.theme,
       heading: c.heading,
       para1: c.para1,
+      // The pinned route, so the approval card can show at a glance which
+      // destination a draft actually came back about.
+      routeOrigin: c.routeOrigin,
+      routeDestination: c.routeDestination,
+      routeDestinationCity: c.routeDestinationCity,
     }));
   },
 });
@@ -791,30 +851,34 @@ function focusArgs(campaign: PinnedDestination): {
 }
 
 /** The route block's pinned route, or null when not (fully) configured. */
-function routeBlockInputs(
-  campaign: CampaignContent,
-): { kind: "calendar" | "teaser"; origin: string; destination: string; currency?: string } | null {
+function routeBlockInputs(campaign: CampaignContent): {
+  kind: "calendar" | "teaser";
+  origin: string;
+  destination: string;
+  currency?: string;
+  startOffsetDays?: number;
+  returnGapDays?: number;
+  timePeriod?: string;
+} | null {
   if (!campaign.routeBlock || !campaign.routeOrigin || !campaign.routeDestination) return null;
+  // The pinned route is priced for the dates it was picked for, exactly like
+  // the multi-route fare cards.
+  const window = routePriceWindow({
+    origin: campaign.routeOrigin,
+    destination: campaign.routeDestination,
+    originCity: campaign.routeOriginCity ?? "",
+    destinationCity: campaign.routeDestinationCity ?? "",
+    currency: campaign.routeCurrency,
+    outboundDate: campaign.routeOutboundDate,
+    returnDate: campaign.routeReturnDate,
+  });
   return {
     kind: campaign.routeBlock,
     origin: campaign.routeOrigin,
     destination: campaign.routeDestination,
     currency: campaign.routeCurrency,
+    ...window,
   };
-}
-
-/**
- * Direct read of the shared searchapi cache (same rows
- * `flightSearchCache.readCache` serves), for query contexts that cannot call
- * the fetch actions. Expired rows read as misses.
- */
-async function readSearchCacheFromDb(db: any, cacheKey: string): Promise<any | null> {
-  const row = await db
-    .query("flightSearchCache")
-    .withIndex("by_cacheKey", (q: any) => q.eq("cacheKey", cacheKey))
-    .first();
-  if (!row || row.expiresAt < Date.now()) return null;
-  return row.normalizedResults;
 }
 
 /**
@@ -847,12 +911,13 @@ async function buildExtrasFromDb(
     route?.kind === "calendar"
       ? readSearchCacheFromDb(db, calendarCacheKey({
           departureId: route.origin, arrivalId: route.destination, currency: route.currency,
+          startOffsetDays: route.startOffsetDays, returnGapDays: route.returnGapDays,
         })) as Promise<FlightCalendar | null>
       : Promise.resolve<FlightCalendar | null>(null),
     route?.kind === "teaser"
       ? readSearchCacheFromDb(db, exploreDestCacheKey({
           departureId: route.origin, arrivalId: route.destination, currency: route.currency,
-          hl: campaign.languageFilter,
+          hl: campaign.languageFilter, timePeriod: route.timePeriod,
         })) as Promise<ExploreDestinationFlights | null>
       : Promise.resolve<ExploreDestinationFlights | null>(null),
     // Hero: DB sources only here. A preview before the first send can therefore
@@ -862,6 +927,11 @@ async function buildExtrasFromDb(
       ? queryDestinationHero(db, focus)
       : Promise.resolve<DestinationHero | null>(null),
   ]);
+
+  // Fare cards, cache-only like the route block above: a preview before the
+  // first fetch shows the routes it already has prices for and omits the rest.
+  const routeFares = await queryCampaignRouteFares(db, campaign);
+
   return {
     deals: campaign.includeDeals
       ? pickTopDeals(deals, country, clampCount(campaign.dealCount, 3, 5), campaignFocus(campaign))
@@ -872,6 +942,7 @@ async function buildExtrasFromDb(
     packages,
     calendar,
     teaser,
+    routeFares,
     hero,
   };
 }
@@ -909,7 +980,7 @@ async function fetchDestinationHero(
       downloadLocation?: string;
       unsplashId: string;
     } | null = await ctx.runAction(api.images.getNewsletterHeroImage, {
-      destination: focus.label,
+      destination: heroSearchQuery(focus),
     });
     if (photo?.url) {
       await ctx.runMutation(internal.newsletter.cacheDestinationHero, {
@@ -998,16 +1069,50 @@ async function fetchExtrasForCampaign(
     route?.kind === "calendar"
       ? ctx.runAction(internal.flightCalendar.fetchForCampaign, {
           departureId: route.origin, arrivalId: route.destination, currency: route.currency,
+          startOffsetDays: route.startOffsetDays, returnGapDays: route.returnGapDays,
         })
       : Promise.resolve<FlightCalendar | null>(null),
     route?.kind === "teaser"
       ? ctx.runAction(internal.exploreDestination.fetchTeaserForCampaign, {
           departureId: route.origin, arrivalId: route.destination, currency: route.currency,
-          hl: campaign.languageFilter,
+          hl: campaign.languageFilter, timePeriod: route.timePeriod,
         })
       : Promise.resolve<ExploreDestinationFlights | null>(null),
     fetchDestinationHero(ctx, campaign),
   ]);
+
+  // Live fares for every campaign route. Sequential and capped: each lookup is
+  // cache-backed, so a whole send costs at most one call per route per TTL
+  // window, and the calendar (a real route search) is tried before the
+  // city-oriented teaser because its coverage is better.
+  const routeFares: RouteFare[] = [];
+  for (const r of (campaign.routes ?? []).slice(0, MAX_CAMPAIGN_ROUTES)) {
+    const base = {
+      departureId: r.origin,
+      arrivalId: r.destination,
+      currency: r.currency,
+    };
+    // Price the dates the route was picked for, not the next fortnight.
+    const window = routePriceWindow(r);
+    const cal: FlightCalendar | null = await ctx.runAction(
+      internal.flightCalendar.fetchForCampaign,
+      {
+        ...base,
+        startOffsetDays: window.startOffsetDays,
+        returnGapDays: window.returnGapDays,
+      },
+    );
+    let fare = fareFromCalendar(r, cal);
+    if (!fare) {
+      const tsr: ExploreDestinationFlights | null = await ctx.runAction(
+        internal.exploreDestination.fetchTeaserForCampaign,
+        { ...base, hl: campaign.languageFilter, timePeriod: window.timePeriod },
+      );
+      fare = fareFromTeaser(r, tsr);
+    }
+    if (fare) routeFares.push(fare);
+  }
+
   return {
     deals: campaign.includeDeals
       ? pickTopDeals(deals, country, clampCount(campaign.dealCount, 3, 5), campaignFocus(campaign))
@@ -1018,6 +1123,7 @@ async function fetchExtrasForCampaign(
     packages,
     calendar,
     teaser,
+    routeFares,
     hero,
   };
 }

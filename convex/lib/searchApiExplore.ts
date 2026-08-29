@@ -202,8 +202,12 @@ export async function fetchExploreDestinations(
 
   if (q.timePeriod?.trim()) params.append("time_period", q.timePeriod.trim());
 
-  const maxPrice = toNumber(q.maxPrice);
-  if (maxPrice !== undefined) params.append("max_price", String(maxPrice));
+  // `max_price` is NOT sent. Verified live against the ATH grid on 2026-08-24:
+  // the identical query returns 73 destinations without it and ZERO with it, at
+  // 120, 200 and 300 EUR alike — the engine treats it as a query it cannot
+  // answer rather than a filter. Callers still express a cap; it is applied to
+  // the returned destinations instead, which also lets one cached grid serve
+  // every budget.
 
   // Only send `adults` when above the engine default of 1 — keeps the default
   // request minimal (the documented example sends departure_id + engine only).

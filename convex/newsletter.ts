@@ -25,6 +25,7 @@ import { ConvexError, v } from "convex/values";
 import { internal } from "./_generated/api";
 import { iataToCountry } from "./lib/airportCountry";
 import { lookupCountryFacts } from "./lib/countryFacts";
+import { calendarCacheKey, exploreDestCacheKey } from "./lib/searchCacheKeys";
 import { AIRPORTS } from "../lib/airports";
 import type { FlightCalendar, ExploreDestinationFlights } from "../types/flights";
 
@@ -669,8 +670,21 @@ export function renderDealsBlock(deals: DealForEmail[], lang: Lang): string {
             ? `<span style="display:inline-block;background:#FDEEDC;color:#B4610E;font-size:10px;font-weight:700;letter-spacing:0.4px;text-transform:uppercase;padding:3px 8px;border-radius:6px;${tag ? `margin-${rtl ? "right" : "left"}:6px;` : ""}">${L.endingSoon}</span>`
             : "";
       const tags = `${tag}${signalTag}`;
+      // Each card opens the search for ITS route and dates. Landing everyone
+      // on the generic radar list made the reader hunt for the fare they just
+      // clicked; the app itself opens a flight search from a deal, so this
+      // matches what tapping a deal does there.
+      const cardUrl = routeSearchUrl(
+        {
+          originCity: d.originCity,
+          destinationCity: d.destinationCity,
+          origin: d.origin,
+          destination: d.destination,
+        },
+        { outbound: d.outboundDate, returnDate: d.returnDate },
+      );
       return `
-        <a href="${dealsUrl}" target="_blank" style="text-decoration:none;display:block;">
+        <a href="${cardUrl}" target="_blank" style="text-decoration:none;display:block;">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FAF9F6;border-radius:12px;margin-bottom:10px;">
             <tr>
               <td style="padding:14px 16px;vertical-align:middle;direction:${dir};text-align:${align};">
@@ -2324,6 +2338,37 @@ export function renderSpotlightBlock(itin: ItineraryForEmail, lang: Lang): strin
 export interface RouteBlockMeta {
   originCity: string;
   destinationCity: string;
+  /** IATA codes, when known — what makes the cards link into a real search. */
+  origin?: string;
+  destination?: string;
+}
+
+/**
+ * Deep link into the flight search for a pinned route, with dates prefilled.
+ *
+ * Goes through the landing page's `?next=` handoff rather than straight to
+ * /flights: the app shell bounces signed-out visitors to `/`, and plenty of
+ * newsletter subscribers have no account — this way they land on the search
+ * they clicked once they are in, instead of on a generic homepage. A signed-in
+ * reader is forwarded immediately.
+ *
+ * Falls back to the deals page when the route has no IATA codes, so a card
+ * always leads somewhere.
+ */
+export function routeSearchUrl(
+  meta: RouteBlockMeta,
+  dates?: { outbound?: string; returnDate?: string },
+): string {
+  if (!meta.origin || !meta.destination) return `${BASE_URL}/deals`;
+  const params = new URLSearchParams({
+    departureId: meta.origin,
+    arrivalId: meta.destination,
+  });
+  if (dates?.outbound) params.set("outboundDate", dates.outbound);
+  if (dates?.returnDate) params.set("returnDate", dates.returnDate);
+  // Encoded once: the landing page decodes `next` a single time (URLSearchParams
+  // does it), then routes to the path as-is.
+  return `${BASE_URL}/?next=${encodeURIComponent(`/flights?${params.toString()}`)}`;
 }
 
 const CALENDAR_LABELS: Record<Lang, { heading: string; note: string; viewAll: string }> = {
@@ -2362,10 +2407,15 @@ export function renderCalendarBlock(
         ? `${formatDealDate(d.date, lang)} – ${formatDealDate(d.returnDate, lang)}`
         : formatDealDate(d.date, lang);
       const isCheapest = d.price === cheapest;
+      // Every row is a live search for exactly those dates — the whole point
+      // of showing a reader the cheap day is that they can act on it.
+      const href = routeSearchUrl(meta, { outbound: d.date, returnDate: d.returnDate });
+      const cell = (inner: string, color: string) =>
+        `<a href="${href}" target="_blank" style="text-decoration:none;color:${color};display:block;">${inner}</a>`;
       return `
         <tr>
-          <td style="padding:9px 14px;border-bottom:1px solid #F0EFE9;direction:${dir};text-align:${align};font-size:14px;color:#1A1A1A;${isCheapest ? "font-weight:700;" : ""}">${range}</td>
-          <td style="padding:9px 14px;border-bottom:1px solid #F0EFE9;text-align:${priceAlign};white-space:nowrap;font-size:15px;font-weight:800;color:${isCheapest ? "#1E7A3C" : "#1A1A1A"};">${formatDealPrice(d.price, cal.currency, lang)}</td>
+          <td style="padding:9px 14px;border-bottom:1px solid #F0EFE9;direction:${dir};text-align:${align};font-size:14px;color:#1A1A1A;${isCheapest ? "font-weight:700;" : ""}">${cell(range, "#1A1A1A")}</td>
+          <td style="padding:9px 14px;border-bottom:1px solid #F0EFE9;text-align:${priceAlign};white-space:nowrap;font-size:15px;font-weight:800;color:${isCheapest ? "#1E7A3C" : "#1A1A1A"};">${cell(formatDealPrice(d.price, cal.currency, lang), isCheapest ? "#1E7A3C" : "#1A1A1A")}</td>
         </tr>`;
     })
     .join("");
@@ -2375,6 +2425,254 @@ export function renderCalendarBlock(
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FAF9F6;border-radius:12px;overflow:hidden;">${rows}</table>
         <p style="margin:8px 0 0;font-size:11px;color:#9A9A9A;">${L.note}</p>
         <a href="${BASE_URL}/deals" target="_blank" style="display:inline-block;margin-top:8px;font-size:14px;font-weight:700;color:#1A1A1A;text-decoration:underline;">${L.viewAll}</a>`,
+    dir, align,
+  );
+}
+
+// Multi-route fare list — "here is what it costs to get out of Athens right
+// now", one card per route. `{city}` is the shared origin.
+const ROUTES_LABELS: Record<
+  Lang,
+  { heading: string; headingNoOrigin: string; from: string; note: string; cta: string }
+> = {
+  en: { heading: "Fares from {city}", headingNoOrigin: "Fares we're watching", from: "from", note: "Round trip, per person — indicative prices", cta: "See all deals" },
+  el: { heading: "Ναύλοι από {city}", headingNoOrigin: "Ναύλοι που παρακολουθούμε", from: "από", note: "Μετ' επιστροφής, ανά άτομο — ενδεικτικές τιμές", cta: "Δείτε όλες τις προσφορές" },
+  es: { heading: "Vuelos desde {city}", headingNoOrigin: "Tarifas que seguimos", from: "desde", note: "Ida y vuelta, por persona — precios orientativos", cta: "Ver todas las ofertas" },
+  fr: { heading: "Tarifs au départ de {city}", headingNoOrigin: "Les tarifs que nous suivons", from: "à partir de", note: "Aller-retour, par personne — prix indicatifs", cta: "Voir toutes les offres" },
+  de: { heading: "Flugpreise ab {city}", headingNoOrigin: "Preise, die wir beobachten", from: "ab", note: "Hin & zurück, pro Person — Richtpreise", cta: "Alle Angebote ansehen" },
+  ar: { heading: "أسعار الرحلات من {city}", headingNoOrigin: "أسعار نتابعها", from: "ابتداءً من", note: "ذهاب وعودة، للشخص — أسعار استرشادية", cta: "عرض كل العروض" },
+};
+
+/** A route as pinned on a campaign. */
+export interface CampaignRoute {
+  origin: string;
+  destination: string;
+  originCity: string;
+  destinationCity: string;
+  currency?: string;
+  /** Dates the route was picked for, when the search targeted a window. */
+  outboundDate?: string;
+  returnDate?: string;
+}
+
+/**
+ * Turn a route's chosen dates into the arguments both price engines need to
+ * quote THOSE dates.
+ *
+ * Without this a route picked for a week in October is priced over the default
+ * next-fortnight window, and the email shows September fares under an October
+ * headline. The outbound window opens three days before the chosen date so the
+ * strip can still show a cheaper neighbour, and the return gap carries the
+ * trip length — a weekend route priced with the default ~5-day gap can only
+ * come back as a week away.
+ */
+export function routePriceWindow(route: CampaignRoute): {
+  startOffsetDays?: number;
+  returnGapDays?: number;
+  timePeriod?: string;
+} {
+  const out = route.outboundDate ? Date.parse(route.outboundDate) : NaN;
+  if (!Number.isFinite(out)) return {};
+  const dayMs = 86400000;
+  const today = new Date().setHours(0, 0, 0, 0);
+  const startOffsetDays = Math.round((out - today) / dayMs) - 3;
+  const ret = route.returnDate ? Date.parse(route.returnDate) : NaN;
+  const returnGapDays = Number.isFinite(ret)
+    ? Math.max(1, Math.round((ret - out) / dayMs))
+    : undefined;
+  return {
+    startOffsetDays,
+    returnGapDays,
+    // The teaser engine takes a literal range rather than offsets.
+    timePeriod: route.returnDate
+      ? `${route.outboundDate}..${route.returnDate}`
+      : undefined,
+  };
+}
+
+/** One route's live "from" price, as resolved at send time. */
+export interface RouteFare {
+  origin: string;
+  destination: string;
+  originCity: string;
+  destinationCity: string;
+  currency: string;
+  /** Cheapest price found; a route with none is dropped by the renderer. */
+  price?: number;
+  outboundDate?: string;
+  returnDate?: string;
+}
+
+/** Cheapest dated entry of a price calendar, as a fare card. */
+export function fareFromCalendar(
+  route: CampaignRoute,
+  cal: FlightCalendar | null,
+): RouteFare | null {
+  const dates = (cal?.dates ?? []).filter((d) => d.price > 0);
+  if (!dates.length) return null;
+  const best = dates.reduce((min, d) => (d.price < min.price ? d : min));
+  return {
+    origin: route.origin,
+    destination: route.destination,
+    originCity: route.originCity,
+    destinationCity: route.destinationCity,
+    currency: cal?.currency || route.currency || "EUR",
+    price: best.price,
+    outboundDate: best.date,
+    returnDate: best.returnDate,
+  };
+}
+
+/** Cheapest option of a destination teaser, as a fare card. */
+export function fareFromTeaser(
+  route: CampaignRoute,
+  teaser: ExploreDestinationFlights | null,
+): RouteFare | null {
+  const flights = (teaser?.flights ?? []).filter(
+    (f) => typeof f.price === "number" && f.price > 0,
+  );
+  const best = flights.length
+    ? flights.reduce((min, f) => ((f.price ?? 0) < (min.price ?? 0) ? f : min))
+    : null;
+  const price = best?.price ?? teaser?.cheapestPrice;
+  if (!price) return null;
+  return {
+    origin: route.origin,
+    destination: route.destination,
+    originCity: route.originCity,
+    destinationCity: route.destinationCity,
+    currency: teaser?.currency || route.currency || "EUR",
+    price,
+    outboundDate: best?.outboundDate,
+    returnDate: best?.returnDate,
+  };
+}
+
+/**
+ * Read a searchapi cache row directly (the same rows
+ * `flightSearchCache.readCache` serves), for query contexts that cannot call
+ * the fetch actions. Expired rows read as misses.
+ */
+export async function readSearchCacheFromDb(db: any, cacheKey: string): Promise<any | null> {
+  const row = await db
+    .query("flightSearchCache")
+    .withIndex("by_cacheKey", (q: any) => q.eq("cacheKey", cacheKey))
+    .first();
+  if (!row || row.expiresAt < Date.now()) return null;
+  return row.normalizedResults;
+}
+
+/** Route cards one campaign may carry — a fare list, not a timetable. */
+export const MAX_CAMPAIGN_ROUTES = 5;
+
+/**
+ * Live "from" price for each of a campaign's routes, from the cache alone.
+ *
+ * Cache-only by necessity — the callers are query contexts (the email preview
+ * and the social deck) — and by design: the generator warms these exact keys
+ * when the draft is created, so by the time anyone looks there is something to
+ * read. A route with no cached price is dropped rather than rendered blank.
+ */
+export async function queryCampaignRouteFares(
+  db: any,
+  campaign: { routes?: CampaignRoute[]; languageFilter?: string },
+): Promise<RouteFare[]> {
+  const fares: RouteFare[] = [];
+  for (const r of (campaign.routes ?? []).slice(0, MAX_CAMPAIGN_ROUTES)) {
+    // Same window the generator warmed, or the keys would miss.
+    const window = routePriceWindow(r);
+    const [cal, teaser] = await Promise.all([
+      readSearchCacheFromDb(db, calendarCacheKey({
+        departureId: r.origin, arrivalId: r.destination, currency: r.currency,
+        startOffsetDays: window.startOffsetDays, returnGapDays: window.returnGapDays,
+      })) as Promise<FlightCalendar | null>,
+      readSearchCacheFromDb(db, exploreDestCacheKey({
+        departureId: r.origin, arrivalId: r.destination, currency: r.currency,
+        hl: campaign.languageFilter, timePeriod: window.timePeriod,
+      })) as Promise<ExploreDestinationFlights | null>,
+    ]);
+    const fare = fareFromCalendar(r, cal) ?? fareFromTeaser(r, teaser);
+    if (fare) fares.push(fare);
+  }
+  return fares;
+}
+
+/**
+ * A campaign route's fare as a deal card.
+ *
+ * The social deck renders `DealForEmail`s, and a campaign route with a live
+ * price is the same thing minus the curated extras — no `typicalPrice`, so no
+ * "% below typical" badge is ever claimed for a fare we only just looked up.
+ */
+export function routeFareToDeal(fare: RouteFare): DealForEmail {
+  return {
+    origin: fare.origin,
+    destination: fare.destination,
+    originCity: fare.originCity,
+    destinationCity: fare.destinationCity,
+    price: fare.price ?? 0,
+    currency: fare.currency,
+    outboundDate: fare.outboundDate ?? "",
+    returnDate: fare.returnDate,
+  };
+}
+
+/**
+ * A card per route: "Athens → Budapest · from €89", each linking into the
+ * search for that route and its dates.
+ *
+ * Routes without a live price are dropped rather than shown as "—": a fare
+ * list exists to give prices, and a blank row just makes the reader wonder
+ * what went wrong. If nothing survives, the whole block collapses to "".
+ */
+export function renderRoutesBlock(fares: RouteFare[], lang: Lang): string {
+  const priced = fares.filter((f) => typeof f.price === "number" && f.price > 0);
+  if (!priced.length) return "";
+  const rtl = lang === "ar";
+  const dir = rtl ? "rtl" : "ltr";
+  const align = rtl ? "right" : "left";
+  const priceAlign = rtl ? "left" : "right";
+  const L = ROUTES_LABELS[lang];
+
+  // Cheapest first: the strongest fare should be the first thing read.
+  const rows = [...priced].sort((a, b) => (a.price ?? 0) - (b.price ?? 0));
+  // One shared origin is the normal case (they came from one search); a mixed
+  // list falls back to a heading that doesn't name a city.
+  const origins = new Set(rows.map((r) => r.originCity));
+  const heading =
+    origins.size === 1
+      ? L.heading.replace("{city}", rows[0].originCity)
+      : L.headingNoOrigin;
+
+  const cards = rows
+    .map((r) => {
+      const href = routeSearchUrl(r, { outbound: r.outboundDate, returnDate: r.returnDate });
+      const dates = r.outboundDate
+        ? `${formatDealDate(r.outboundDate, lang)}${r.returnDate ? ` – ${formatDealDate(r.returnDate, lang)}` : ""}`
+        : "";
+      return `
+        <a href="${href}" target="_blank" style="text-decoration:none;display:block;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FAF9F6;border-radius:12px;margin-bottom:10px;">
+            <tr>
+              <td style="padding:14px 16px;vertical-align:middle;direction:${dir};text-align:${align};">
+                <p style="margin:0 0 2px;font-size:16px;font-weight:700;color:#1A1A1A;">${r.originCity} → ${r.destinationCity}</p>
+                <p style="margin:0;font-size:12px;color:#8A8A8A;">${dates || r.origin + " – " + r.destination}</p>
+              </td>
+              <td width="120" style="padding:14px 16px;vertical-align:middle;text-align:${priceAlign};white-space:nowrap;">
+                <p style="margin:0;font-size:11px;color:#8A8A8A;">${L.from}</p>
+                <p style="margin:0;font-size:20px;font-weight:800;color:#1A1A1A;">${formatDealPrice(r.price!, r.currency, lang)}</p>
+              </td>
+            </tr>
+          </table>
+        </a>`;
+    })
+    .join("");
+
+  return sectionShell(
+    `${sectionHeader(heading, dir, align)}
+        ${cards}
+        <p style="margin:2px 0 0;font-size:11px;color:#9A9A9A;">${L.note}</p>
+        <a href="${BASE_URL}/deals" target="_blank" style="display:inline-block;margin-top:8px;font-size:14px;font-weight:700;color:#1A1A1A;text-decoration:underline;">${L.cta}</a>`,
     dir, align,
   );
 }
@@ -2405,9 +2703,19 @@ export function renderTeaserBlock(
   const priceAlign = rtl ? "left" : "right";
   const L = TEASER_LABELS[lang];
 
+  // Prefill the search with the cheapest option's dates when the engine gave
+  // us any, so the card lands on the fare it just advertised.
+  const cheapestFlight = (teaser.flights ?? [])
+    .filter((f) => typeof f.price === "number" && f.price > 0)
+    .sort((a, b) => (a.price ?? 0) - (b.price ?? 0))[0];
+  const searchHref = routeSearchUrl(meta, {
+    outbound: cheapestFlight?.outboundDate,
+    returnDate: cheapestFlight?.returnDate,
+  });
+
   return sectionShell(
     `${sectionHeader(L.heading.replace("{city}", meta.destinationCity), dir, align)}
-        <a href="${BASE_URL}/deals" target="_blank" style="text-decoration:none;display:block;">
+        <a href="${searchHref}" target="_blank" style="text-decoration:none;display:block;">
           <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FAF9F6;border-radius:12px;">
             <tr>
               <td style="padding:16px 18px;vertical-align:middle;direction:${dir};text-align:${align};">
@@ -2564,11 +2872,35 @@ export interface DestinationHero {
 }
 
 /**
+ * What to ask Unsplash for when illustrating a destination.
+ *
+ * The bare city name is a bad search term for any city whose name is also an
+ * ordinary word — "Nice" returns pleasant scenery, "Split" returns split
+ * objects, "Reading" returns books. Appending the country disambiguates them
+ * and costs nothing for the unambiguous ones ("Paris France" is still Paris).
+ *
+ * A country-wide focus ("Malta") already IS its country, so it is left alone
+ * rather than searched for as "Malta Malta".
+ */
+export function heroSearchQuery(focus: DestinationFocus): string {
+  if (!focus.countryToken || focus.countryToken === focus.cityToken) return focus.label;
+  // Tokens are dash-joined ("united-states"); a search wants words.
+  return `${focus.label} ${focus.countryToken.replace(/-/g, " ")}`;
+}
+
+/**
  * Cache key for a destination hero. The city token (not the typed label) keys
  * it, so "Malta" and "malta " share one entry.
+ *
+ * `v2` retires everything cached under the bare city name: those rows were
+ * looked up with an ambiguous query (Unsplash's idea of "Nice" is pleasant
+ * scenery), and this cache has no TTL, so without a new key a wrong photo
+ * would stay wrong forever. Old rows are simply orphaned — nothing reads them
+ * — and each destination costs one fresh Unsplash lookup the next time it is
+ * used. Social keys derive from this one, so they retire with it.
  */
 export function destinationHeroCacheKey(focus: DestinationFocus): string {
-  return `hero:${focus.cityToken}`;
+  return `hero:v2:${focus.cityToken}`;
 }
 
 /**

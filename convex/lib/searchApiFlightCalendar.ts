@@ -138,6 +138,12 @@ export interface CalendarOptions {
    */
   startOffsetDays?: number;
   /**
+   * Days between the outbound and return windows — the trip length being
+   * priced (default RET_START - OUT_START). A weekend route wants ~2; without
+   * it the cheapest pair the engine can return is always a week or more.
+   */
+  returnGapDays?: number;
+  /**
    * Keep every priced return per departure, not just the cheapest one, so the
    * caller can offer a real return-leg picker. Off by default — the mobile
    * strip shows one date and does not need the extra payload.
@@ -290,8 +296,13 @@ export async function fetchFlightCalendar(
   const spacing = opts?.spacingDays ?? MIN_SPACING_DAYS;
   // Never look at departures sooner than the base lead time.
   const baseOut = Math.max(opts?.startOffsetDays ?? OUT_START, OUT_START);
-  // Keep the return window the same distance ahead of the outbound as the base.
-  const baseRet = baseOut + (RET_START - OUT_START);
+  // Keep the return window the requested trip-length ahead of the outbound,
+  // falling back to the base spacing.
+  const gap =
+    opts?.returnGapDays != null && Number.isFinite(opts.returnGapDays)
+      ? Math.max(1, Math.round(opts.returnGapDays))
+      : RET_START - OUT_START;
+  const baseRet = baseOut + gap;
 
   const perDeparture = new Map<string, DepartureInfo>();
   for (let i = 0; i < windows; i++) {

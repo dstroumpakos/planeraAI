@@ -30,6 +30,7 @@
 import { api, internal } from "./_generated/api";
 import { getAvgDailySpend, getAvgStay } from "./destinationSpend";
 import { lookupCountryFacts } from "./lib/countryFacts";
+import { hasTerraApiKey, terraSearchLocations } from "./lib/tripadvisorTerra";
 
 // ─────────────────────────────── Shared types ───────────────────────────────
 
@@ -255,8 +256,7 @@ async function toolAirQuality(city: string): Promise<ToolOutcome> {
 }
 
 async function toolRestaurants(city: string): Promise<ToolOutcome> {
-    const tripadvisorKey = process.env.TRIPADVISOR_API_KEY;
-    if (!tripadvisorKey) {
+    if (!hasTerraApiKey()) {
         return {
             result:
                 `No live restaurant data is available (TripAdvisor is not configured). ` +
@@ -265,60 +265,27 @@ async function toolRestaurants(city: string): Promise<ToolOutcome> {
     }
 
     try {
-        const searchUrl =
-            `https://api.content.tripadvisor.com/api/v1/location/search?key=${tripadvisorKey}` +
-            `&searchQuery=${encodeURIComponent("restaurants " + city)}&category=restaurants&language=en`;
-
-        const searchResponse = await fetch(searchUrl, {
-            method: "GET",
-            headers: { Accept: "application/json" },
+        // Terra returns full Location objects inline, so the old per-result
+        // /details fan-out is gone — this is one call instead of 1+N.
+        const places = await terraSearchLocations({
+            query: `restaurants ${city}`,
+            geoName: city,
+            category: "RESTAURANT",
+            size: 5,
         });
-        if (!searchResponse.ok) {
-            console.error(`[Atlas] TripAdvisor search failed: ${searchResponse.status}`);
-            return { result: `Restaurant lookup failed for ${city}.` };
-        }
-
-        const searchData = (await searchResponse.json()) as any;
-        if (!searchData.data || searchData.data.length === 0) {
+        if (places.length === 0) {
             return { result: `No restaurants found for ${city}.` };
         }
 
-        const restaurants = await Promise.all(
-            searchData.data.slice(0, 5).map(async (item: any) => {
-                try {
-                    const detailsUrl = `https://api.content.tripadvisor.com/api/v1/location/${item.location_id}/details?key=${tripadvisorKey}&language=en`;
-                    const detailsResponse = await fetch(detailsUrl, {
-                        method: "GET",
-                        headers: { Accept: "application/json" },
-                    });
-                    if (detailsResponse.ok) {
-                        const details = (await detailsResponse.json()) as any;
-                        return {
-                            name: details.name || item.name || "Restaurant",
-                            cuisine:
-                                details.cuisine?.map((c: any) => c.localized_name || c.name).join(", ") ||
-                                "Various",
-                            priceRange: details.price_level || "€€",
-                            rating: parseFloat(details.rating) || 4.0,
-                            reviewCount: parseInt(details.num_reviews) || 0,
-                            address: details.address_obj?.address_string || city,
-                            tripAdvisorUrl: details.web_url || "https://www.tripadvisor.com",
-                        };
-                    }
-                } catch {
-                    // Detail lookup is best-effort; fall through to the search row.
-                }
-                return {
-                    name: item.name || "Restaurant",
-                    cuisine: "Various",
-                    priceRange: "€€",
-                    rating: 4.0,
-                    reviewCount: 0,
-                    address: item.address_obj?.address_string || city,
-                    tripAdvisorUrl: "https://www.tripadvisor.com",
-                };
-            })
-        );
+        const restaurants = places.map((p) => ({
+            name: p.name,
+            cuisine: p.cuisine || "Various",
+            priceRange: p.priceRange || "€€",
+            rating: p.rating ?? 4.0,
+            reviewCount: p.reviewCount ?? 0,
+            address: p.address || city,
+            tripAdvisorUrl: p.webUrl || "https://www.tripadvisor.com",
+        }));
 
         const card: AtlasCard = { type: "restaurants", data: { city, restaurants } };
         const summary =

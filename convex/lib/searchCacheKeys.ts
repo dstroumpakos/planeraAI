@@ -29,6 +29,10 @@ export function calendarCacheKey(q: FlightCalendarQuery): string {
     q.departureId.trim().toUpperCase(),
     q.arrivalId.trim().toUpperCase(),
     (q.currency || "EUR").toUpperCase(),
+    // A window aimed at October is a different answer from the default one,
+    // and they must never share a cache entry.
+    q.startOffsetDays != null ? `s${Math.round(q.startOffsetDays)}` : "sbase",
+    q.returnGapDays != null ? `g${Math.round(q.returnGapDays)}` : "gbase",
   ].join("|");
 }
 

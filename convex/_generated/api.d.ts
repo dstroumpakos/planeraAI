@@ -67,6 +67,7 @@ import type * as helpers_reportError from "../helpers/reportError.js";
 import type * as helpers_subscription from "../helpers/subscription.js";
 import type * as helpers_tripMatch from "../helpers/tripMatch.js";
 import type * as helpers_unsplash from "../helpers/unsplash.js";
+import type * as homeAirportAi from "../homeAirportAi.js";
 import type * as http from "../http.js";
 import type * as iapVerify from "../iapVerify.js";
 import type * as iapVerifyGoogle from "../iapVerifyGoogle.js";
@@ -85,6 +86,7 @@ import type * as lib_searchApiFlightSearch from "../lib/searchApiFlightSearch.js
 import type * as lib_searchApiFlights from "../lib/searchApiFlights.js";
 import type * as lib_searchCacheKeys from "../lib/searchCacheKeys.js";
 import type * as lib_serpApiFlights from "../lib/serpApiFlights.js";
+import type * as lib_tripadvisorTerra from "../lib/tripadvisorTerra.js";
 import type * as lowFareRadar from "../lowFareRadar.js";
 import type * as lowFareRadarAuto from "../lowFareRadarAuto.js";
 import type * as lowFareRadarAutoAction from "../lowFareRadarAutoAction.js";
@@ -126,6 +128,7 @@ import type * as shareCards from "../shareCards.js";
 import type * as shareCardsAction from "../shareCardsAction.js";
 import type * as sights from "../sights.js";
 import type * as sightsAction from "../sightsAction.js";
+import type * as socialShareLinks from "../socialShareLinks.js";
 import type * as stats from "../stats.js";
 import type * as statsReports from "../statsReports.js";
 import type * as streaks from "../streaks.js";
@@ -207,6 +210,7 @@ declare const fullApi: ApiFromModules<{
   "helpers/subscription": typeof helpers_subscription;
   "helpers/tripMatch": typeof helpers_tripMatch;
   "helpers/unsplash": typeof helpers_unsplash;
+  homeAirportAi: typeof homeAirportAi;
   http: typeof http;
   iapVerify: typeof iapVerify;
   iapVerifyGoogle: typeof iapVerifyGoogle;
@@ -225,6 +229,7 @@ declare const fullApi: ApiFromModules<{
   "lib/searchApiFlights": typeof lib_searchApiFlights;
   "lib/searchCacheKeys": typeof lib_searchCacheKeys;
   "lib/serpApiFlights": typeof lib_serpApiFlights;
+  "lib/tripadvisorTerra": typeof lib_tripadvisorTerra;
   lowFareRadar: typeof lowFareRadar;
   lowFareRadarAuto: typeof lowFareRadarAuto;
   lowFareRadarAutoAction: typeof lowFareRadarAutoAction;
@@ -266,6 +271,7 @@ declare const fullApi: ApiFromModules<{
   shareCardsAction: typeof shareCardsAction;
   sights: typeof sights;
   sightsAction: typeof sightsAction;
+  socialShareLinks: typeof socialShareLinks;
   stats: typeof stats;
   statsReports: typeof statsReports;
   streaks: typeof streaks;

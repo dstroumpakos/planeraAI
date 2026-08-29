@@ -179,3 +179,58 @@ export function searchAirportOptions(query: string, limit = 10): AirportOption[]
 
   return results;
 }
+
+/**
+ * True when a stored base airport still needs the OpenAI lookup.
+ *
+ * Two cases qualify:
+ *   1. Nothing resolved at all — a small airport or a city missing from our
+ *      dataset ("Kalamata", "Λάρνακα", "Podgorica"). The user keeps their
+ *      typed text and every flight feature silently sees no origin.
+ *   2. We resolved a code-shaped token we don't actually know ("KLX"), so we
+ *      can't name it and the stored label is whatever the user typed — which
+ *      may still be in another language or carry junk around the code.
+ *
+ * Both are exactly the cases `convex/homeAirportAi.ts` asks OpenAI about.
+ */
+export function needsAiHomeAirportLookup(raw: string | undefined | null): boolean {
+  const trimmed = String(raw ?? "").trim();
+  if (!trimmed) return false;
+
+  const iata = resolveHomeIata(trimmed);
+  if (!iata) return true;
+  if (KNOWN_IATA.has(iata)) return false;
+
+  // A code we don't know, but the value is already in the canonical shape a
+  // previous lookup wrote ("Kalamata, Greece KLX"). Asking again would cost a
+  // call per save and hand back the same string, so treat it as resolved.
+  return !isCanonicalHomeAirportLabel(trimmed, iata);
+}
+
+/**
+ * "City, Country XXX" — the exact shape `formatHomeAirportLabel` and
+ * `canonicalHomeAirport` produce, with the trailing code matching what the
+ * string resolves to.
+ */
+function isCanonicalHomeAirportLabel(trimmed: string, iata: string): boolean {
+  const match = trimmed.match(/^([^,]+),\s*([^,]+)\s+([A-Z]{3})$/);
+  return !!match && match[3] === iata;
+}
+
+/**
+ * Build the canonical stored label from resolved parts — same shape
+ * `canonicalHomeAirport` produces, so an AI-resolved airport reads and parses
+ * identically to one from AIRPORTS ("Kalamata, Greece KLX").
+ */
+export function formatHomeAirportLabel(parts: {
+  city?: string | null;
+  country?: string | null;
+  iata: string;
+}): string {
+  const iata = String(parts.iata).trim().toUpperCase();
+  const city = String(parts.city ?? "").trim();
+  const country = String(parts.country ?? "").trim();
+  if (city && country) return `${city}, ${country} ${iata}`;
+  if (city) return `${city} ${iata}`;
+  return iata;
+}

@@ -5,6 +5,11 @@ import { internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import OpenAI from "openai";
 import { hmacSha256Hex } from "./partnerApiAuth";
+import {
+  hasTerraApiKey,
+  terraSearchLocations,
+  tripadvisorProfileUrl,
+} from "./lib/tripadvisorTerra";
 
 /**
  * Partner API — itinerary generation engine.
@@ -421,22 +426,21 @@ function minutesToHHMM(total: number): string {
 //    stay instant.
 //  - Hard total time budget (ENRICH_BUDGET_MS). If TripAdvisor is slow or down,
 //    we abort and return the itinerary unchanged (stops keep tripadvisor:null).
-//  - One search call per destination + a few parallel detail calls only for
-//    matched food stops. Never throws.
+//  - One Terra search call per food stop, all in parallel within the budget.
+//    Terra returns full Location objects, so no follow-up detail call is
+//    needed to get the rating/review count/profile URL. Never throws.
 // ---------------------------------------------------------------------------
 
 const FOOD_CATEGORIES = new Set(["restaurant", "cafe", "bar"]);
 const ENRICH_BUDGET_MS = 6000;
 const TA_SEARCH_TIMEOUT_MS = 3000;
-const TA_DETAIL_TIMEOUT_MS = 2500;
-const TA_MAX_DETAIL_CALLS = 10;
+const TA_MAX_LOOKUPS = 10;
 
 async function enrichItineraryWithTripAdvisor(
   itinerary: Itinerary,
   destination: string
 ): Promise<Itinerary> {
-  const key = process.env.TRIPADVISOR_API_KEY;
-  if (!key) return itinerary;
+  if (!hasTerraApiKey()) return itinerary;
 
   // Collect food stops that still need a link.
   const foodStops: Stop[] = [];
@@ -450,10 +454,7 @@ async function enrichItineraryWithTripAdvisor(
   if (foodStops.length === 0) return itinerary;
 
   try {
-    await raceBudget(
-      enrichFoodStops(key, destination, foodStops),
-      ENRICH_BUDGET_MS
-    );
+    await raceBudget(enrichFoodStops(destination, foodStops), ENRICH_BUDGET_MS);
   } catch (err) {
     console.warn(
       `[partnerGen] TripAdvisor enrichment skipped for ${destination}:`,
@@ -474,17 +475,16 @@ function raceBudget<T>(work: Promise<T>, ms: number): Promise<T> {
 }
 
 async function enrichFoodStops(
-  key: string,
   destination: string,
   foodStops: Stop[]
 ): Promise<void> {
   // Search TripAdvisor per restaurant name and attach the profile link.
-  // Capped at TA_MAX_DETAIL_CALLS stops; all run in parallel within the budget.
-  const targets = foodStops.slice(0, TA_MAX_DETAIL_CALLS);
+  // Capped at TA_MAX_LOOKUPS stops; all run in parallel within the budget.
+  const targets = foodStops.slice(0, TA_MAX_LOOKUPS);
   await Promise.all(
     targets.map(async (stop) => {
       try {
-        const ref = await lookupRestaurant(key, stop.name, destination);
+        const ref = await lookupRestaurant(stop.name, destination);
         if (ref) stop.tripadvisor = ref;
       } catch {
         // Leave this stop's tripadvisor as null on any per-stop failure.
@@ -495,52 +495,36 @@ async function enrichFoodStops(
 
 /** Find a single restaurant's TripAdvisor profile by name; null if no confident match. */
 async function lookupRestaurant(
-  key: string,
   name: string,
   destination: string
 ): Promise<TripAdvisorRef | null> {
-  const searchUrl =
-    `https://api.content.tripadvisor.com/api/v1/location/search?key=${key}` +
-    `&searchQuery=${encodeURIComponent(name + " " + destination)}` +
-    `&category=restaurants&language=en`;
-  const data = await fetchJson(searchUrl, TA_SEARCH_TIMEOUT_MS);
-  const items: Array<{ id: string; name: string }> = Array.isArray(data?.data)
-    ? data.data
-        .filter((it: any) => it?.location_id && it?.name)
-        .map((it: any) => ({ id: String(it.location_id), name: String(it.name) }))
-    : [];
-  if (items.length === 0) return null;
+  // Terra's search already carries the rating, review count and profile URL,
+  // so a matched stop costs one call — the old search-then-/details pair is
+  // gone, which is why TA_DETAIL_TIMEOUT_MS no longer exists.
+  const places = await terraSearchLocations({
+    query: name,
+    geoName: destination,
+    category: "RESTAURANT",
+    timeoutMs: TA_SEARCH_TIMEOUT_MS,
+  });
+  if (places.length === 0) return null;
 
   // Confident match only: exact normalized name, or strong containment.
-  const id = matchPoolEntry(name, items, new Set());
+  const id = matchPoolEntry(
+    name,
+    places.map((p) => ({ id: p.id, name: p.name })),
+    new Set()
+  );
   if (!id) return null;
 
-  // Fetch details for the real web_url + rating + review count.
-  try {
-    const detailsUrl =
-      `https://api.content.tripadvisor.com/api/v1/location/${id}/details` +
-      `?key=${key}&language=en`;
-    const details = await fetchJson(detailsUrl, TA_DETAIL_TIMEOUT_MS);
-    const url =
-      typeof details?.web_url === "string" && details.web_url.trim()
-        ? details.web_url.trim()
-        : `https://www.tripadvisor.com/Restaurant_Review-g${id}`;
-    const rating = details?.rating != null ? parseFloat(details.rating) : NaN;
-    const reviews =
-      details?.num_reviews != null ? parseInt(details.num_reviews, 10) : NaN;
-    return {
-      url,
-      rating: Number.isFinite(rating) ? rating : null,
-      review_count: Number.isFinite(reviews) ? reviews : null,
-    };
-  } catch {
-    // Details failed but we have a confident id — return a basic profile link.
-    return {
-      url: `https://www.tripadvisor.com/Restaurant_Review-g${id}`,
-      rating: null,
-      review_count: null,
-    };
-  }
+  const match = places.find((p) => p.id === id);
+  if (!match) return null;
+
+  return {
+    url: match.webUrl ?? tripadvisorProfileUrl(id),
+    rating: match.rating,
+    review_count: match.reviewCount,
+  };
 }
 
 /** Normalize a venue name for loose matching. */
@@ -576,23 +560,6 @@ function matchPoolEntry(
     }
   }
   return containsMatch;
-}
-
-/** GET JSON with an AbortController timeout. Throws on non-2xx or timeout. */
-async function fetchJson(url: string, timeoutMs: number): Promise<any> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, {
-      method: "GET",
-      headers: { Accept: "application/json" },
-      signal: controller.signal,
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return await res.json();
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 // ---------------------------------------------------------------------------

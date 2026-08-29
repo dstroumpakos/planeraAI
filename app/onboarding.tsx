@@ -2,12 +2,12 @@
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { useMutation } from "convex/react";
+import { useAction, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useState } from "react";
 import { INTERESTS } from "@/lib/data";
 import { AIRPORTS } from "@/lib/airports";
-import { canonicalHomeAirport, hasNonLatinScript, searchAirportOptions } from "@/lib/homeAirport";
+import { canonicalHomeAirport, hasNonLatinScript, needsAiHomeAirportLookup, searchAirportOptions } from "@/lib/homeAirport";
 import * as Haptics from "expo-haptics";
 import { useToken } from "@/lib/useAuthenticatedMutation";
 import { useTranslation } from "react-i18next";
@@ -41,6 +41,9 @@ export default function Onboarding() {
   const saveTravelPreferences = useMutation(api.users.saveTravelPreferences);
   const completeOnboarding = useMutation(api.users.completeOnboarding);
   const applyReferral = useMutation(api.referrals.applyReferralCode);
+  // Airports missing from lib/airports.ts are resolved server-side via OpenAI.
+  // `as any` because the generated api types lag a `npx convex codegen`.
+  const resolveBaseAirport = useAction((api as any).homeAirportAi.resolveBaseAirport);
   const { token } = useToken();
 
   const hapticFeedback = () => {
@@ -111,14 +114,32 @@ export default function Onboarding() {
     }
     // The base airport has to end up as English + IATA — that's what the
     // low-fare radar, Explore and flight search all key off. A name we can
-    // translate is rewritten silently ("Αθήνα" → "Athens, Greece ATH"); one
-    // written in another script that we can't resolve is rejected, because
-    // storing it would silently cost the user every flight feature. Latin input
-    // we don't recognise is still accepted — it may be a small airport missing
-    // from our dataset, and the trip generator can resolve those with its AI
-    // fallback.
-    const resolvedHomeAirport = canonicalHomeAirport(homeAirport);
-    if (!resolvedHomeAirport && hasNonLatinScript(homeAirport)) {
+    // translate offline is rewritten silently ("Αθήνα" → "Athens, Greece ATH");
+    // anything our dataset doesn't contain ("Καλαμάτα", "Podgorica") goes to
+    // the server, which asks OpenAI for the nearest airport and hands back the
+    // canonical label. Only when that fails too do we fall back to rejecting a
+    // non-Latin value, because storing one would silently cost the user every
+    // flight feature.
+    setSaving(true);
+    let homeAirportLabel = canonicalHomeAirport(homeAirport)?.label;
+    if (needsAiHomeAirportLookup(homeAirport)) {
+      try {
+        const aiResolved: any = await resolveBaseAirport({
+          token: token || "",
+          query: homeAirport.trim(),
+        });
+        if (aiResolved?.label) {
+          homeAirportLabel = aiResolved.label;
+          // Show the user what we're actually storing.
+          setHomeAirport(aiResolved.label);
+        }
+      } catch (error) {
+        console.warn("Base airport AI lookup failed:", error);
+      }
+    }
+
+    if (!homeAirportLabel && hasNonLatinScript(homeAirport)) {
+      setSaving(false);
       const title = t('homeAirport.englishOnlyTitle');
       const message = t('homeAirport.englishOnly');
       if (Platform.OS !== "web") {
@@ -129,11 +150,10 @@ export default function Onboarding() {
       return;
     }
 
-    setSaving(true);
     try {
       await saveTravelPreferences({
         token: token || "",
-        homeAirport: resolvedHomeAirport?.label ?? homeAirport,
+        homeAirport: homeAirportLabel ?? homeAirport,
         defaultBudget: parseInt(defaultBudget) || undefined,
         interests: selectedInterests,
         flightTimePreference,

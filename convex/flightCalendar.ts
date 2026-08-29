@@ -307,12 +307,19 @@ export const fetchForCampaign = internalAction({
     departureId: v.string(),
     arrivalId: v.string(),
     currency: v.optional(v.string()),
+    // Where the campaign's route is actually going, when it was picked for
+    // specific dates: without these the strip prices the next fortnight, so a
+    // newsletter about October showed September fares.
+    startOffsetDays: v.optional(v.float64()),
+    returnGapDays: v.optional(v.float64()),
   },
   handler: async (ctx, args): Promise<FlightCalendar | null> => {
     const input: FlightCalendarQuery = {
       departureId: args.departureId,
       arrivalId: args.arrivalId,
       currency: args.currency,
+      startOffsetDays: args.startOffsetDays,
+      returnGapDays: args.returnGapDays,
     };
     if (!input.departureId?.trim() || !input.arrivalId?.trim()) return null;
 

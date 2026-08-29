@@ -28,12 +28,15 @@ import {
   dealSocialCopy,
   destinationFocusFrom,
   destinationHeroCacheKey,
+  heroSearchQuery,
   isCuratedHero,
   normalizeLang,
   pickTopDeals,
   queryCachedHeroByKey,
   queryDestinationHero,
   queryFeaturedDeals,
+  queryCampaignRouteFares,
+  routeFareToDeal,
   type DealForEmail,
   type DestinationFocus,
   type DestinationHero,
@@ -60,47 +63,59 @@ const MAX_PHOTO_VARIANTS = 8;
 // Localized chrome
 // ---------------------------------------------------------------------------
 
+/**
+ * Where the deck is going to be posted.
+ *
+ * The cards are the same pixels either way, but the ONE instruction a card
+ * carries only works on one surface: a carousel is swiped, a story is tapped
+ * (swiping there leaves for the next account), and a reel plays on its own.
+ * Telling a story viewer to swipe — or a reel viewer to save "this post" — is
+ * an ask that does nothing, so the prompts are chosen per surface.
+ */
+export type SocialSurface = "feed" | "story" | "reel";
+
+/** The asks that change with the surface. Everything else reads the same. */
+interface SurfaceLabels {
+  /** Cover prompt when the deck carries more than one fare; "{n}" is the count. */
+  swipeAll: string;
+  /** Cover prompt for a single-fare deck. */
+  swipe: string;
+  /** Deal-card prompt: how a viewer reaches the link from HERE. */
+  linkPrompt: string;
+  /** End-card sub-line: where the link lives. */
+  tapLink: string;
+  /** End-card prompt: the ask that costs the viewer nothing. */
+  savePost: string;
+}
+
 interface SocialLabels {
   /** Kicker above the route on a deal card. */
   liveFare: string;
   /** Cover kicker. */
   deals: string;
-  /** CTA slide sub-line. */
-  tapLink: string;
   /** Caption line introducing the deal list. */
   captionIntro: string;
   /** Photo credit prefix in the caption. */
   photos: string;
   /** Small print on every deal card. */
   pricesChange: string;
-  /** Cover prompt when the deck carries more than one fare; "{n}" is the count. */
-  swipeAll: string;
-  /** Cover prompt for a single-fare deck. */
-  swipe: string;
-  /** Deal-card prompt — the one instruction that works on a story. */
-  linkPrompt: string;
-  /** End-card prompt: the ask that costs the viewer nothing. */
-  savePost: string;
   /** End-card value props, three short lines. */
   bullets: string[];
   /** Caption opener — the only line Instagram shows before "more". */
   captionHook: string;
   /** Caption line asking for the save, the cheapest engagement there is. */
   captionSave: string;
+  /** Prompts, per surface. */
+  surfaces: Record<SocialSurface, SurfaceLabels>;
 }
 
 const LABELS: Record<Lang, SocialLabels> = {
   en: {
     liveFare: "Live fare",
     deals: "Flight deals",
-    tapLink: "Link in bio",
     captionIntro: "Live fares right now:",
     photos: "Photos",
     pricesChange: "Fares change fast — checked today",
-    swipeAll: "Swipe — {n} fares inside",
-    swipe: "Swipe for the fare",
-    linkPrompt: "Link in bio",
-    savePost: "Save this post",
     bullets: [
       "Free AI trip planner",
       "Live fares, checked every day",
@@ -108,18 +123,36 @@ const LABELS: Record<Lang, SocialLabels> = {
     ],
     captionHook: "Cheap flights our radar found overnight ✈️",
     captionSave: "📌 Save this before the fares move.",
+    surfaces: {
+      feed: {
+        swipeAll: "Swipe — {n} fares inside",
+        swipe: "Swipe for the fare",
+        linkPrompt: "Link in bio",
+        tapLink: "Link in bio",
+        savePost: "Save this post",
+      },
+      story: {
+        swipeAll: "Tap through — {n} fares",
+        swipe: "Tap for the fare",
+        linkPrompt: "Tap the link",
+        tapLink: "Link in this story",
+        savePost: "Send it to your travel buddy",
+      },
+      reel: {
+        swipeAll: "Watch — {n} fares",
+        swipe: "Watch to the end",
+        linkPrompt: "Link in bio",
+        tapLink: "Link in bio",
+        savePost: "Save this reel",
+      },
+    },
   },
   el: {
     liveFare: "Ζωντανή τιμή",
     deals: "Προσφορές πτήσεων",
-    tapLink: "Link στο bio",
     captionIntro: "Ζωντανές τιμές τώρα:",
     photos: "Φωτογραφίες",
     pricesChange: "Οι τιμές αλλάζουν γρήγορα — έλεγχος σήμερα",
-    swipeAll: "Swipe — {n} τιμές μέσα",
-    swipe: "Swipe για την τιμή",
-    linkPrompt: "Link στο bio",
-    savePost: "Αποθήκευσε το post",
     bullets: [
       "Δωρεάν AI σχεδιασμός ταξιδιού",
       "Ζωντανές τιμές, έλεγχος κάθε μέρα",
@@ -127,18 +160,36 @@ const LABELS: Record<Lang, SocialLabels> = {
     ],
     captionHook: "Φθηνά εισιτήρια που βρήκε το radar μας απόψε ✈️",
     captionSave: "📌 Αποθήκευσέ το πριν αλλάξουν οι τιμές.",
+    surfaces: {
+      feed: {
+        swipeAll: "Swipe — {n} τιμές μέσα",
+        swipe: "Swipe για την τιμή",
+        linkPrompt: "Link στο bio",
+        tapLink: "Link στο bio",
+        savePost: "Αποθήκευσε το post",
+      },
+      story: {
+        swipeAll: "Πάτα — {n} τιμές",
+        swipe: "Πάτα για την τιμή",
+        linkPrompt: "Πάτα το link",
+        tapLink: "Link σε αυτό το story",
+        savePost: "Στείλε το στην παρέα σου",
+      },
+      reel: {
+        swipeAll: "Δες — {n} τιμές",
+        swipe: "Δες μέχρι το τέλος",
+        linkPrompt: "Link στο bio",
+        tapLink: "Link στο bio",
+        savePost: "Αποθήκευσε το reel",
+      },
+    },
   },
   es: {
     liveFare: "Tarifa en directo",
     deals: "Ofertas de vuelos",
-    tapLink: "Link en la bio",
     captionIntro: "Tarifas en directo ahora:",
     photos: "Fotos",
     pricesChange: "Las tarifas cambian rápido — comprobado hoy",
-    swipeAll: "Desliza — {n} tarifas dentro",
-    swipe: "Desliza para ver la tarifa",
-    linkPrompt: "Link en la bio",
-    savePost: "Guarda este post",
     bullets: [
       "Planificador de viajes con IA, gratis",
       "Tarifas en directo, revisadas cada día",
@@ -146,18 +197,36 @@ const LABELS: Record<Lang, SocialLabels> = {
     ],
     captionHook: "Vuelos baratos que nuestro radar encontró esta noche ✈️",
     captionSave: "📌 Guárdalo antes de que suban las tarifas.",
+    surfaces: {
+      feed: {
+        swipeAll: "Desliza — {n} tarifas dentro",
+        swipe: "Desliza para ver la tarifa",
+        linkPrompt: "Link en la bio",
+        tapLink: "Link en la bio",
+        savePost: "Guarda este post",
+      },
+      story: {
+        swipeAll: "Toca — {n} tarifas",
+        swipe: "Toca para ver la tarifa",
+        linkPrompt: "Toca el enlace",
+        tapLink: "Enlace en esta historia",
+        savePost: "Envíaselo a quien viaja contigo",
+      },
+      reel: {
+        swipeAll: "Mira — {n} tarifas",
+        swipe: "Mira hasta el final",
+        linkPrompt: "Link en la bio",
+        tapLink: "Link en la bio",
+        savePost: "Guarda este reel",
+      },
+    },
   },
   fr: {
     liveFare: "Tarif en direct",
     deals: "Bons plans vols",
-    tapLink: "Lien en bio",
     captionIntro: "Tarifs en direct maintenant :",
     photos: "Photos",
     pricesChange: "Les tarifs changent vite — vérifié aujourd'hui",
-    swipeAll: "Balaye — {n} tarifs à l'intérieur",
-    swipe: "Balaye pour voir le tarif",
-    linkPrompt: "Lien en bio",
-    savePost: "Enregistre ce post",
     bullets: [
       "Planificateur de voyage IA, gratuit",
       "Tarifs en direct, vérifiés chaque jour",
@@ -165,18 +234,36 @@ const LABELS: Record<Lang, SocialLabels> = {
     ],
     captionHook: "Des vols pas chers repérés cette nuit par notre radar ✈️",
     captionSave: "📌 Enregistre avant que les tarifs bougent.",
+    surfaces: {
+      feed: {
+        swipeAll: "Balaye — {n} tarifs à l'intérieur",
+        swipe: "Balaye pour voir le tarif",
+        linkPrompt: "Lien en bio",
+        tapLink: "Lien en bio",
+        savePost: "Enregistre ce post",
+      },
+      story: {
+        swipeAll: "Appuie — {n} tarifs",
+        swipe: "Appuie pour voir le tarif",
+        linkPrompt: "Appuie sur le lien",
+        tapLink: "Lien dans cette story",
+        savePost: "Envoie-le à ton binôme de voyage",
+      },
+      reel: {
+        swipeAll: "Regarde — {n} tarifs",
+        swipe: "Regarde jusqu'au bout",
+        linkPrompt: "Lien en bio",
+        tapLink: "Lien en bio",
+        savePost: "Enregistre ce reel",
+      },
+    },
   },
   de: {
     liveFare: "Aktueller Preis",
     deals: "Flug-Deals",
-    tapLink: "Link in Bio",
     captionIntro: "Aktuelle Preise jetzt:",
     photos: "Fotos",
     pricesChange: "Preise ändern sich schnell — heute geprüft",
-    swipeAll: "Wischen — {n} Preise drin",
-    swipe: "Wischen für den Preis",
-    linkPrompt: "Link in Bio",
-    savePost: "Post speichern",
     bullets: [
       "Kostenloser KI-Reiseplaner",
       "Aktuelle Preise, täglich geprüft",
@@ -184,18 +271,36 @@ const LABELS: Record<Lang, SocialLabels> = {
     ],
     captionHook: "Günstige Flüge, über Nacht von unserem Radar gefunden ✈️",
     captionSave: "📌 Speichern, bevor die Preise steigen.",
+    surfaces: {
+      feed: {
+        swipeAll: "Wischen — {n} Preise drin",
+        swipe: "Wischen für den Preis",
+        linkPrompt: "Link in Bio",
+        tapLink: "Link in Bio",
+        savePost: "Post speichern",
+      },
+      story: {
+        swipeAll: "Tippen — {n} Preise",
+        swipe: "Tippen für den Preis",
+        linkPrompt: "Auf den Link tippen",
+        tapLink: "Link in dieser Story",
+        savePost: "Schick es deiner Reisecrew",
+      },
+      reel: {
+        swipeAll: "Ansehen — {n} Preise",
+        swipe: "Bis zum Ende ansehen",
+        linkPrompt: "Link in Bio",
+        tapLink: "Link in Bio",
+        savePost: "Reel speichern",
+      },
+    },
   },
   ar: {
     liveFare: "سعر مباشر",
     deals: "عروض الطيران",
-    tapLink: "الرابط في البايو",
     captionIntro: "أسعار مباشرة الآن:",
     photos: "الصور",
     pricesChange: "الأسعار تتغير بسرعة — تم التحقق اليوم",
-    swipeAll: "اسحب — {n} أسعار بالداخل",
-    swipe: "اسحب لرؤية السعر",
-    linkPrompt: "الرابط في البايو",
-    savePost: "احفظ المنشور",
     bullets: [
       "مخطط رحلات بالذكاء الاصطناعي، مجاناً",
       "أسعار مباشرة، تُراجع يومياً",
@@ -203,6 +308,29 @@ const LABELS: Record<Lang, SocialLabels> = {
     ],
     captionHook: "رحلات رخيصة رصدها الرادار الليلة ✈️",
     captionSave: "📌 احفظ المنشور قبل أن تتغير الأسعار.",
+    surfaces: {
+      feed: {
+        swipeAll: "اسحب — {n} أسعار بالداخل",
+        swipe: "اسحب لرؤية السعر",
+        linkPrompt: "الرابط في البايو",
+        tapLink: "الرابط في البايو",
+        savePost: "احفظ المنشور",
+      },
+      story: {
+        swipeAll: "اضغط — {n} أسعار",
+        swipe: "اضغط لرؤية السعر",
+        linkPrompt: "اضغط على الرابط",
+        tapLink: "الرابط في هذه الستوري",
+        savePost: "أرسله لرفيق سفرك",
+      },
+      reel: {
+        swipeAll: "شاهد — {n} أسعار",
+        swipe: "شاهد حتى النهاية",
+        linkPrompt: "الرابط في البايو",
+        tapLink: "الرابط في البايو",
+        savePost: "احفظ الريل",
+      },
+    },
   },
 };
 
@@ -243,6 +371,12 @@ function socialPhotoCacheKey(focus: DestinationFocus, variant: number): string {
 // Wire shape (mirrored by `src/lib/social/types.ts` on the website)
 // ---------------------------------------------------------------------------
 
+const surfaceValidator = v.union(
+  v.literal("feed"),
+  v.literal("story"),
+  v.literal("reel"),
+);
+
 const slideValidator = v.object({
   kind: v.union(v.literal("cover"), v.literal("deal"), v.literal("cta")),
   /** Largest line on the card. */
@@ -254,6 +388,17 @@ const slideValidator = v.object({
   // --- deal slides ---
   originCode: v.optional(v.string()),
   destinationCode: v.optional(v.string()),
+  /**
+   * The fare's real dates and destination, unformatted.
+   *
+   * `dates` above is display copy ("12 Oct – 19 Oct"); these are what a LINK
+   * needs — the website builds the share URLs for this exact flight out of
+   * them, so a viewer who taps the story lands on the fare the card showed
+   * rather than on a generic search.
+   */
+  outboundISO: v.optional(v.string()),
+  returnISO: v.optional(v.string()),
+  destinationCity: v.optional(v.string()),
   price: v.optional(v.string()),
   priceWas: v.optional(v.string()),
   perPerson: v.optional(v.string()),
@@ -307,6 +452,10 @@ export type SocialSlide = {
   kicker?: string;
   originCode?: string;
   destinationCode?: string;
+  /** Real dates + destination behind the display copy, for building links. */
+  outboundISO?: string;
+  returnISO?: string;
+  destinationCity?: string;
   price?: string;
   priceWas?: string;
   perPerson?: string;
@@ -424,6 +573,8 @@ export const deckFromDb = internalQuery({
     campaignId: v.id("newsletterCampaigns"),
     lang: v.optional(v.string()),
     maxDeals: v.optional(v.float64()),
+    /** Where the deck is headed; decides the prompt on every card. */
+    surface: v.optional(surfaceValidator),
   },
   returns: v.union(v.null(), deckValidator),
   handler: async (ctx, args): Promise<SocialDeck | null> => {
@@ -437,15 +588,37 @@ export const deckFromDb = internalQuery({
     const requested = normalizeLang(args.lang ?? campaign.languageFilter ?? undefined);
     const lang: Lang = requested === "ar" ? "en" : requested;
     const L = LABELS[lang];
+    // A carousel is the default because it is the only surface that carries a
+    // caption, so an unspecified caller gets the deck the caption describes.
+    const S = L.surfaces[(args.surface ?? "feed") as SocialSurface];
 
-    const focus = destinationFocusFrom(
-      campaign.routeDestinationCity,
-      campaign.routeDestination,
-    );
     const dealCount = clampDealCount(args.maxDeals ?? campaign.dealCount);
+
+    // A campaign that pinned its own routes IS its cards. Falling through to
+    // the curated radar here is how a deck for "Venice, London, Barcelona"
+    // came out advertising Malta, Verona and Chisinau — the deck was reading
+    // the global deal list while the email read the campaign's routes.
+    const routeFares = await queryCampaignRouteFares(ctx.db, campaign);
+    const routeDeals = routeFares.map(routeFareToDeal);
+
+    const focus =
+      destinationFocusFrom(campaign.routeDestinationCity, campaign.routeDestination) ??
+      // No single pinned destination (a multi-route round-up): the lead route
+      // dresses the cover, so the deck opens on somewhere it actually sells.
+      (routeDeals.length
+        ? destinationFocusFrom(routeDeals[0].destinationCity, routeDeals[0].destination)
+        : null);
+
     const allDeals: DealForEmail[] =
-      campaign.includeDeals && dealCount > 0 ? await queryFeaturedDeals(ctx.db) : [];
-    const deals = pickTopDeals(allDeals, campaign.countryFilter, dealCount, focus);
+      routeDeals.length || !campaign.includeDeals || dealCount <= 0
+        ? []
+        : await queryFeaturedDeals(ctx.db);
+    // Every pinned route earns a slide unless the caller asked for fewer:
+    // `dealCount` defaults from the EMAIL's curated-deal setting, which has
+    // nothing to say about how many routes this campaign is about.
+    const deals = routeDeals.length
+      ? routeDeals.slice(0, args.maxDeals != null ? dealCount : routeDeals.length)
+      : pickTopDeals(allDeals, campaign.countryFilter, dealCount, focus);
 
     const slides: SocialSlide[] = [];
     const credits: Array<{ name: string; url?: string }> = [];
@@ -503,10 +676,11 @@ export const deckFromDb = internalQuery({
       kicker: L.deals,
       headline: campaign.heading,
       sub: firstSentence(campaign.para1 || campaign.preheader || ""),
-      // The cover's whole job is to buy the swipe, so it says how much is
-      // behind it instead of leaving the count to be discovered.
+      // The cover's whole job is to buy the next card, so it says how much
+      // is behind it instead of leaving the count to be discovered — in the
+      // gesture this surface actually responds to.
       prompt:
-        deals.length > 1 ? L.swipeAll.replace("{n}", String(deals.length)) : L.swipe,
+        deals.length > 1 ? S.swipeAll.replace("{n}", String(deals.length)) : S.swipe,
       // Nothing found and nothing pinned still leaves the campaign's own
       // marketing photo, which is better than a bare gradient.
       ...(coverArt.image || coverArt.imageQuery
@@ -536,6 +710,9 @@ export const deckFromDb = internalQuery({
         sub: `${copy.dates} · ${copy.tripType}`,
         originCode: d.origin,
         destinationCode: d.destination,
+        outboundISO: d.outboundDate,
+        returnISO: d.returnDate,
+        destinationCity: d.destinationCity,
         price: copy.price,
         priceWas: copy.priceWas,
         perPerson: copy.perPerson,
@@ -547,7 +724,7 @@ export const deckFromDb = internalQuery({
         // block's own numbers, it never introduces a new claim.
         saveLabel: copy.saving,
         footnote: L.pricesChange,
-        prompt: L.linkPrompt,
+        prompt: S.linkPrompt,
         ...art,
       });
     }
@@ -567,9 +744,9 @@ export const deckFromDb = internalQuery({
     slides.push({
       kind: "cta",
       headline: campaign.ctaText,
-      sub: L.tapLink,
+      sub: S.tapLink,
       bullets: L.bullets,
-      prompt: L.savePost,
+      prompt: S.savePost,
       ...ctaArt,
     });
 
@@ -615,6 +792,8 @@ export const buildDeck = action({
     campaignId: v.id("newsletterCampaigns"),
     lang: v.optional(v.string()),
     maxDeals: v.optional(v.float64()),
+    /** Where the deck is headed; decides the prompt on every card. */
+    surface: v.optional(surfaceValidator),
   },
   returns: v.union(v.null(), deckValidator),
   handler: async (ctx, args): Promise<SocialDeck | null> => {
@@ -677,6 +856,9 @@ export const buildDeck = action({
     for (const entry of pending.values()) {
       const query = String(entry.slides[0].imageQuery);
       const focus = destinationFocusFrom(query, entry.iata);
+      // Same disambiguated search the email hero uses, so a deck and the
+      // campaign it illustrates agree on what the place looks like.
+      const photoQuery = focus ? heroSearchQuery(focus) : query;
       const heroSlides = entry.slides.filter((s) => !(s.imageVariant ?? 0));
       const altSlides = entry.slides.filter((s) => (s.imageVariant ?? 0) > 0);
 
@@ -685,7 +867,7 @@ export const buildDeck = action({
         try {
           const photo: UnsplashResult | null = await ctx.runAction(
             api.images.getNewsletterHeroImage,
-            { destination: query, width: 1440 },
+            { destination: photoQuery, width: 1440 },
           );
           if (photo?.url) {
             if (focus) {
@@ -716,7 +898,7 @@ export const buildDeck = action({
         const want = Math.min(MAX_PHOTO_VARIANTS, altSlides.length + 2);
         const photos: UnsplashResult[] = await ctx.runAction(
           api.images.getDestinationPhotoSet,
-          { destination: query, count: want, width: 1440, orientation: "portrait" },
+          { destination: photoQuery, count: want, width: 1440, orientation: "portrait" },
         );
 
         const fresh = photos.filter((p) => p.url && !usedUrls.has(p.url));

@@ -335,6 +335,19 @@ export interface FlightCalendarQuery {
   departureId: string; // origin IATA (resolved home airport)
   arrivalId: string; // destination IATA
   currency?: string; // ISO 4217, defaults to EUR
+  /**
+   * Where the scanned window starts, in days from today. Defaults to the
+   * engine wrapper's own lead time; a caller that already knows WHEN the trip
+   * is (a newsletter route picked for a specific month) sets it so the prices
+   * describe those dates instead of the next fortnight.
+   */
+  startOffsetDays?: number;
+  /**
+   * Days between the outbound and return windows — i.e. the trip length being
+   * priced. Defaults to the wrapper's ~5 days; a weekend route sets 2, or the
+   * cheapest pair found would always be a week-long trip.
+   */
+  returnGapDays?: number;
 }
 
 export interface FlightCalendarReturn {

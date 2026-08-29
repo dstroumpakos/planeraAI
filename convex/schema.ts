@@ -1329,6 +1329,12 @@ export default defineSchema({
     iataResolutionCache: defineTable({
         cityKey: v.string(),      // normalized (lowercased, trimmed) city name
         iata: v.string(),         // resolved 3-letter IATA code
+        // English city/country, filled in by the base-airport resolver
+        // (homeAirportAi.ts) so we can rebuild a readable label
+        // ("Kalamata, Greece KLX") without another OpenAI round-trip. Absent on
+        // rows written by the older destination-only resolver.
+        city: v.optional(v.string()),
+        country: v.optional(v.string()),
         createdAt: v.float64(),
     })
         .index("by_cityKey", ["cityKey"]),
@@ -1971,6 +1977,28 @@ export default defineSchema({
         routeOriginCity: v.optional(v.string()),       // "Athens" — display only
         routeDestinationCity: v.optional(v.string()),  // "Lisbon" — display only
         routeCurrency: v.optional(v.string()),         // ISO 4217, default EUR
+        // Dates the pinned route was chosen for, so its prices are re-fetched
+        // around them instead of over the default next-fortnight window.
+        routeOutboundDate: v.optional(v.string()),     // YYYY-MM-DD
+        routeReturnDate: v.optional(v.string()),       // YYYY-MM-DD
+        // Multi-route fare list: every route the campaign is about, rendered
+        // as one card each with a live "from" price fetched at send time. This
+        // is what an admin gets when they tick several routes in the generate
+        // dialog — the single `routeBlock` above stays for the one-route case
+        // (it also pins the destination focus for the content blocks, which a
+        // multi-destination email deliberately has no single answer for).
+        routes: v.optional(v.array(v.object({
+            origin: v.string(),            // IATA
+            destination: v.string(),       // IATA
+            originCity: v.string(),        // display only
+            destinationCity: v.string(),   // display only
+            currency: v.optional(v.string()),
+            // The dates the route was PICKED for (from the admin's flight
+            // search). Prices are re-fetched around these, so an email about
+            // October quotes October.
+            outboundDate: v.optional(v.string()),  // YYYY-MM-DD
+            returnDate: v.optional(v.string()),    // YYYY-MM-DD
+        }))),
         // Affiliate banner to append: "tripcom" | "kiwi" | "welcome" | "lot" | "airserbia" (CJ creatives).
         bannerKey: v.optional(v.string()),
         // --- Targeting (opted-in subscribers only) ---
@@ -2277,6 +2305,44 @@ export default defineSchema({
         metrics: v.any(),
     })
         .index("by_period_sentAt", ["period", "sentAt"]),
+
+    // Trackable short links handed out by the newsletter → social composer.
+    //
+    // A social card says "tap the link" and the admin pastes one URL into a bio
+    // or a story sticker. Pasted raw, that click is invisible: the destination
+    // is a public ISR page with no session, so nothing on our side ever learns
+    // the post worked. These rows are the redirect in between — `/l/<code>`
+    // counts the click and forwards to `targetUrl`.
+    //
+    // The code is stable per (campaign, slide, kind), so re-opening the
+    // composer hands back the SAME link rather than splitting one post's stats
+    // across two codes. `targetUrl` is refreshed on mint — an itinerary
+    // published after the fact changes where the link goes without resetting
+    // what it has earned.
+    socialShareLinks: defineTable({
+        code: v.string(),                  // URL-safe, unguessable path segment
+        campaignId: v.id("newsletterCampaigns"),
+        slideIndex: v.float64(),           // which card in the deck
+        kind: v.union(v.literal("itinerary"), v.literal("flights")),
+        route: v.string(),                 // "Athens → Lisbon", for the admin list
+        targetUrl: v.string(),
+        clicks: v.float64(),
+        createdAt: v.float64(),
+        lastClickAt: v.optional(v.float64()),
+    })
+        .index("by_code", ["code"])
+        .index("by_campaign", ["campaignId"]),
+
+    // One row per counted click, so the composer can say "12 today" and not
+    // only "212 ever". Deliberately holds NO visitor data — no IP, no user
+    // agent, no cookie: the question is how many taps a post earned, and
+    // answering it does not require knowing who tapped.
+    socialShareLinkClicks: defineTable({
+        code: v.string(),
+        at: v.float64(),
+        referrerHost: v.optional(v.string()),  // "instagram.com", when sent
+    })
+        .index("by_code_at", ["code", "at"]),
 
     // ── Planera for Travel Agencies (agency portal) — additive tenant tables ──
     ...agencyTables,

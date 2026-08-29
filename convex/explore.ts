@@ -17,7 +17,7 @@
  * The API key never crosses the frontend boundary and is never logged.
  */
 
-import { action } from "./_generated/server";
+import { action, internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { reportError } from "./helpers/reportError";
@@ -36,7 +36,10 @@ function buildCacheKey(q: ExploreQuery): string {
     // v3: added `hl`. It was always sent to the API but omitted here, so
     // whichever language missed the cache first served every other language
     // its localized destination/country names for the next 12h.
-    "explore:v3",
+    // v4: `max_price` is no longer part of the request (it emptied the grid —
+    // see searchApiExplore.ts), so a cap no longer needs its own entry and one
+    // cached grid serves every budget.
+    "explore:v4",
     q.departureId.trim().toUpperCase(),
     (q.currency || "EUR").toUpperCase(),
     // Normalized so "el-GR" and "el" share one entry rather than two.
@@ -44,9 +47,21 @@ function buildCacheKey(q: ExploreQuery): string {
     q.travelMode || "all",
     q.interests || "any",
     q.stops || "any",
-    q.maxPrice != null ? String(q.maxPrice) : "nomax",
     q.timePeriod || "default",
   ].join("|");
+}
+
+/**
+ * Apply a price cap to a grid the API returned unfiltered. Destinations with
+ * no price at all are dropped when a cap is set: an unpriced card cannot be
+ * shown to satisfy a budget.
+ */
+function withinBudget(
+  destinations: ExploreDestination[],
+  maxPrice?: number,
+): ExploreDestination[] {
+  if (!maxPrice || !Number.isFinite(maxPrice)) return destinations;
+  return destinations.filter((d) => typeof d.price === "number" && d.price <= maxPrice);
 }
 
 export const exploreDestinations = action({
@@ -118,7 +133,7 @@ export const exploreDestinations = action({
       );
       if (cached) {
         console.log(`[explore] cache hit ${input.departureId}`);
-        return cached;
+        return withinBudget(cached, input.maxPrice);
       }
 
       const destinations = await fetchExploreDestinations(input);
@@ -147,12 +162,92 @@ export const exploreDestinations = action({
         }
       }
 
-      return result;
+      return withinBudget(result, input.maxPrice);
     } catch (err) {
       await reportError(ctx, "explore:exploreDestinations", err, {
         departureId: args.input?.departureId,
       });
       throw err;
+    }
+  },
+});
+
+/**
+ * Same cached Explore grid, for our own server-side callers (currently the
+ * admin newsletter generator, which uses it to discover fresh routes to write
+ * about). No session token and no per-user rate limit — the caller is already
+ * admin-gated — but it shares the cache and cache key with the user-facing
+ * action above, so an admin search is usually a pure hit and never doubles the
+ * paid quota.
+ *
+ * Never throws: a failed discovery must degrade to "no ideas", not break the
+ * generation run.
+ */
+export const exploreForCampaign = internalAction({
+  args: {
+    input: v.object({
+      departureId: v.string(),
+      currency: v.optional(v.string()),
+      hl: v.optional(v.string()),
+      travelMode: v.optional(
+        v.union(v.literal("all"), v.literal("flights_only"))
+      ),
+      interests: v.optional(
+        v.union(
+          v.literal("popular"),
+          v.literal("outdoors"),
+          v.literal("beaches"),
+          v.literal("museums"),
+          v.literal("history"),
+          v.literal("skiing")
+        )
+      ),
+      stops: v.optional(
+        v.union(
+          v.literal("any"),
+          v.literal("nonstop"),
+          v.literal("one_stop_or_fewer"),
+          v.literal("two_stops_or_fewer")
+        )
+      ),
+      maxPrice: v.optional(v.float64()),
+      adults: v.optional(v.float64()),
+      timePeriod: v.optional(v.string()),
+    }),
+  },
+  handler: async (ctx, args): Promise<ExploreDestination[]> => {
+    const input = args.input as ExploreQuery;
+    if (!input.departureId?.trim()) return [];
+
+    try {
+      const cacheKey = buildCacheKey(input);
+      const cached: ExploreDestination[] | null = await ctx.runQuery(
+        internal.flightSearchCache.readCache,
+        { cacheKey }
+      );
+      if (cached) return withinBudget(cached, input.maxPrice);
+
+      const result = (await fetchExploreDestinations(input)) ?? [];
+      if (result.length > 0) {
+        try {
+          await ctx.runMutation(internal.flightSearchCache.writeCache, {
+            cacheKey,
+            kind: "explore",
+            ttlMs: EXPLORE_CACHE_TTL_MS,
+            normalizedResults: result,
+            departureId: input.departureId.trim().toUpperCase(),
+            currency: (input.currency ?? "EUR").toUpperCase(),
+          });
+        } catch {
+          console.error("[explore] campaign cache write failed");
+        }
+      }
+      return withinBudget(result, input.maxPrice);
+    } catch (err) {
+      await reportError(ctx, "explore:exploreForCampaign", err, {
+        departureId: args.input?.departureId,
+      });
+      return [];
     }
   },
 });

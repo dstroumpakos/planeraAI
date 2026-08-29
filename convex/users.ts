@@ -4,7 +4,7 @@ import { internal } from "./_generated/api";
 import { authMutation, authQuery } from "./functions";
 import { internalMutation, internalQuery } from "./_generated/server";
 import { isSubscriptionActiveWithGrace, BILLING_GRACE_PERIOD_MS } from "./helpers/subscription";
-import { canonicalHomeAirport } from "../lib/homeAirport";
+import { canonicalHomeAirport, needsAiHomeAirportLookup } from "../lib/homeAirport";
 
 /**
  * Store the base airport in canonical English ("Αθήνα" → "Athens, Greece ATH").
@@ -21,6 +21,31 @@ function canonicalizeHomeAirport(raw: string | undefined | null): string | undef
     const trimmed = String(raw).trim();
     if (!trimmed) return trimmed;
     return canonicalHomeAirport(trimmed)?.label ?? trimmed;
+}
+
+/**
+ * Second barrier, for airports our dataset simply doesn't contain.
+ *
+ * `canonicalizeHomeAirport` above only knows the airports in lib/airports.ts,
+ * so someone based in Kalamata or Podgorica still ends up stored as raw text
+ * with no IATA code — and silently loses radar deals, Explore origins and
+ * flight-search prefill. Schedule the OpenAI lookup (homeAirportAi.ts) to
+ * resolve it and rewrite the profile a moment later.
+ *
+ * Deliberately server-side and post-write: every client on this deployment
+ * (iOS, Android, website) gets it without shipping a release, and the save
+ * itself never waits on OpenAI or fails when it is down.
+ */
+async function scheduleAiHomeAirportLookup(
+    ctx: any,
+    userId: string,
+    stored: string | undefined
+): Promise<void> {
+    if (!stored || !needsAiHomeAirportLookup(stored)) return;
+    await ctx.scheduler.runAfter(0, (internal as any).homeAirportAi.resolveAndApplyForUser, {
+        userId,
+        raw: stored,
+    });
 }
 
 // Simple token validation query for actions
@@ -408,6 +433,8 @@ export const saveTravelPreferences = authMutation({
         ...updateData,
       });
     }
+
+    await scheduleAiHomeAirportLookup(ctx, ctx.user.userId, updateData.homeAirport);
     return null;
   },
 });
@@ -479,6 +506,9 @@ export const updateTravelPreferences = authMutation({
             });
         }
 
+        if ("homeAirport" in updates) {
+            await scheduleAiHomeAirportLookup(ctx, ctx.user.userId, updates.homeAirport);
+        }
         return null;
     },
 });
@@ -1311,5 +1341,61 @@ export const deleteAccount = authMutation({
 
         console.log("[deleteAccount] Account deletion complete");
         return { success: true };
+    },
+});
+
+// ============================ AI base-airport resolution =====================
+// Companions to convex/homeAirportAi.ts: that action does the OpenAI call (an
+// action can't touch the database), these do the reads and the write.
+
+/**
+ * Write back an AI-resolved base airport.
+ *
+ * `expected` guards the write: if the user saved a different airport between
+ * the lookup being scheduled and it finishing, we leave their newer value
+ * alone. Trimmed on both sides because that's the only rewriting the mutations
+ * do to what was typed.
+ */
+export const applyResolvedHomeAirport = internalMutation({
+    args: {
+        userId: v.string(),
+        expected: v.string(),
+        label: v.string(),
+    },
+    returns: v.boolean(),
+    handler: async (ctx, { userId, expected, label }) => {
+        const settings = await ctx.db
+            .query("userSettings")
+            .withIndex("by_user", (q) => q.eq("userId", userId))
+            .unique();
+        if (!settings) return false;
+        if ((settings.homeAirport ?? "").trim() !== expected.trim()) return false;
+
+        await ctx.db.patch(settings._id, { homeAirport: label });
+        return true;
+    },
+});
+
+/**
+ * Profiles whose base airport our offline dataset can't turn into a known IATA
+ * code — the backfill queue for `homeAirportAi.backfillHomeAirports`.
+ *
+ * Scans every settings row rather than using an index: there is nothing to
+ * index on (the test is a string parse), and it only ever runs from a manual
+ * backfill, never on a user-facing path.
+ */
+export const listHomeAirportsNeedingAi = internalQuery({
+    args: { limit: v.optional(v.float64()) },
+    handler: async (ctx, { limit }) => {
+        const all = await ctx.db.query("userSettings").collect();
+        const out: Array<{ userId: string; homeAirport: string }> = [];
+        for (const s of all) {
+            const raw = s.homeAirport?.trim();
+            if (!raw) continue;
+            if (!needsAiHomeAirportLookup(raw)) continue;
+            out.push({ userId: s.userId, homeAirport: raw });
+            if (out.length >= (limit ?? 50)) break;
+        }
+        return out;
     },
 });

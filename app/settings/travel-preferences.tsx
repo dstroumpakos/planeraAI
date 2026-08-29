@@ -2,13 +2,13 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, TextInput,
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
-import { useQuery, useMutation } from "convex/react";
+import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useToken } from "@/lib/useAuthenticatedMutation";
 import { useState, useEffect } from "react";
 import { INTERESTS } from "@/lib/data";
 import { AIRPORTS } from "@/lib/airports";
-import { canonicalHomeAirport, hasNonLatinScript, searchAirportOptions } from "@/lib/homeAirport";
+import { canonicalHomeAirport, hasNonLatinScript, needsAiHomeAirportLookup, searchAirportOptions } from "@/lib/homeAirport";
 import AIConsentModal from "@/components/AIConsentModal";
 import { useTranslation } from "react-i18next";
 
@@ -19,6 +19,9 @@ export default function TravelPreferences() {
     const settings = useQuery(api.users.getSettings as any, { token: token || "skip" }) as any;
     const updatePreferences = useMutation(api.users.updateTravelPreferences);
     const updateAiConsent = useMutation(api.users.updateAiConsent);
+    // Airports missing from lib/airports.ts are resolved server-side via
+    // OpenAI. `as any` because the generated api types lag a `npx convex codegen`.
+    const resolveBaseAirport = useAction((api as any).homeAirportAi.resolveBaseAirport);
 
     const [homeAirport, setHomeAirport] = useState("");
     const [defaultBudget, setDefaultBudget] = useState("2000");
@@ -29,6 +32,7 @@ export default function TravelPreferences() {
     const [aiDataConsent, setAiDataConsent] = useState(false);
     const [showAiConsentModal, setShowAiConsentModal] = useState(false);
 
+    const [resolvingAirport, setResolvingAirport] = useState(false);
     const [showAirportSuggestions, setShowAirportSuggestions] = useState(false);
     const [airportSuggestions, setAirportSuggestions] = useState<typeof AIRPORTS>([]);
 
@@ -69,14 +73,33 @@ export default function TravelPreferences() {
         }
         // The base airport has to end up as English + IATA — that's what the
         // low-fare radar, Explore and flight search all key off. A name we can
-        // translate is rewritten silently ("Αθήνα" → "Athens, Greece ATH"); one
-        // written in another script that we can't resolve is rejected, because
-        // storing it would silently cost the user every flight feature. Latin
-        // input we don't recognise is still accepted — it may be a small
-        // airport missing from our dataset, and the trip generator can resolve
-        // those with its AI fallback.
-        const resolved = canonicalHomeAirport(homeAirport);
-        if (!resolved && hasNonLatinScript(homeAirport)) {
+        // translate offline is rewritten silently ("Αθήνα" → "Athens, Greece
+        // ATH"); anything our dataset doesn't contain ("Καλαμάτα", "Podgorica")
+        // goes to the server, which asks OpenAI for the nearest airport and
+        // hands back the canonical label. Only when that fails too do we fall
+        // back to rejecting a non-Latin value, because storing one would
+        // silently cost the user every flight feature.
+        let homeAirportLabel = canonicalHomeAirport(homeAirport)?.label;
+        if (needsAiHomeAirportLookup(homeAirport)) {
+            setResolvingAirport(true);
+            try {
+                const aiResolved: any = await resolveBaseAirport({
+                    token: token || "",
+                    query: homeAirport.trim(),
+                });
+                if (aiResolved?.label) {
+                    homeAirportLabel = aiResolved.label;
+                    // Show the user what we're actually storing.
+                    setHomeAirport(aiResolved.label);
+                }
+            } catch (error) {
+                console.warn("Base airport AI lookup failed:", error);
+            } finally {
+                setResolvingAirport(false);
+            }
+        }
+
+        if (!homeAirportLabel && hasNonLatinScript(homeAirport)) {
             Alert.alert(t('homeAirport.englishOnlyTitle'), t('homeAirport.englishOnly'));
             return;
         }
@@ -84,7 +107,7 @@ export default function TravelPreferences() {
         try {
             await updatePreferences({
                 token: token || "",
-                homeAirport: resolved?.label ?? homeAirport,
+                homeAirport: homeAirportLabel ?? homeAirport,
                 defaultInterests,
                 defaultSkipFlights,
                 defaultSkipHotel,
@@ -346,11 +369,18 @@ export default function TravelPreferences() {
                 </View>
 
                 <TouchableOpacity
-                    style={[styles.saveButton, !homeAirport.trim() && styles.saveButtonDisabled]}
+                    style={[
+                        styles.saveButton,
+                        (!homeAirport.trim() || resolvingAirport) && styles.saveButtonDisabled,
+                    ]}
                     onPress={handleSave}
-                    disabled={!homeAirport.trim()}
+                    disabled={!homeAirport.trim() || resolvingAirport}
                 >
-                    <Text style={styles.saveButtonText}>{t('settings.travelPreferences.savePreferences')}</Text>
+                    {resolvingAirport ? (
+                        <ActivityIndicator color="#FFFFFF" />
+                    ) : (
+                        <Text style={styles.saveButtonText}>{t('settings.travelPreferences.savePreferences')}</Text>
+                    )}
                 </TouchableOpacity>
                 
                 <View style={{ height: 40 }} />
