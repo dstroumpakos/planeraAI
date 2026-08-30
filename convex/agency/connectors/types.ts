@@ -18,6 +18,7 @@
  */
 
 import type { NormalizedOffer } from "../model/types";
+import type { DestinationCandidate, DestinationTarget } from "../destinations";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Credentials (BYOK) — opaque to the engine; only the connector interprets them.
@@ -58,6 +59,12 @@ export type Capability =
 export interface ConnectorCapabilities {
   kinds: Array<NormalizedOffer["kind"]>; // what this provider sells
   supports: Record<Capability, boolean>;
+  /**
+   * True when a search is impossible without `providerDestinationId`. The
+   * orchestrator skips such a connector with a clear reason rather than calling
+   * it with a destination it cannot understand.
+   */
+  requiresDestinationId?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -76,6 +83,12 @@ export interface SearchQuery {
   rooms?: number;
   cabinClass?: string;
   sellCurrency: string;
+  /**
+   * The destination in THIS provider's own taxonomy, resolved and cached by
+   * `destinationMap.ts`. Injected per connector by the orchestrator, because
+   * the same trip is a different id at every supplier.
+   */
+  providerDestinationId?: string;
 }
 
 export interface RevalidateResult {
@@ -109,6 +122,19 @@ export interface SupplierConnector {
 
   /** Search — returns UNGUARANTEED offers. Must be normalised to `NormalizedOffer`. */
   search(creds: SupplierCredentials, query: SearchQuery): Promise<NormalizedOffer[]>;
+
+  /**
+   * Ask the provider's own locations feed which destinations could match a
+   * target, so `destinations.ts` can pick one. Present only where the provider
+   * publishes such a feed; without it a destination has to be mapped by hand.
+   *
+   * Returns CANDIDATES, never a decision — choosing is matching logic, and it
+   * lives in one tested place rather than in each connector.
+   */
+  listDestinations?(
+    creds: SupplierCredentials,
+    target: DestinationTarget,
+  ): Promise<DestinationCandidate[]>;
 
   /** Re-fetch one offer by its provider-locked token — the only guaranteed price. */
   revalidate(creds: SupplierCredentials, revalidationToken: string): Promise<RevalidateResult>;

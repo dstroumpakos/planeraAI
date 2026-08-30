@@ -10,6 +10,7 @@
 
 import { ConvexError } from "convex/values";
 import { AccessError } from "./access";
+import { ValidationError } from "./validation";
 
 export type AgencyErrorCode =
   | "unauthenticated"
@@ -55,6 +56,14 @@ export function fromAccessError(e: AccessError): AgencyError {
  * Wrap a handler body. Known errors pass through untouched; anything else is
  * logged server-side and replaced with an opaque `internal_error` so we never
  * leak a stack trace, a provider response, or a vault message to a client.
+ *
+ * EVERY function goes through this — including the INTERNAL queries and
+ * mutations that actions call. That is not belt-and-braces: only `ConvexError`
+ * survives a `ctx.runMutation` / `ctx.runQuery` boundary with its identity and
+ * payload intact. Anything else arrives in the calling action as a plain
+ * `Error`, where the `instanceof` checks below no longer recognise it and a
+ * perfectly good validation message ("departure date is in the past") turns
+ * into "something went wrong". Convert before you cross.
  */
 export async function guard<T>(label: string, fn: () => Promise<T>): Promise<T> {
   try {
@@ -62,6 +71,9 @@ export async function guard<T>(label: string, fn: () => Promise<T>): Promise<T> 
   } catch (e) {
     if (e instanceof ConvexError) throw e;
     if (e instanceof AccessError) throw fromAccessError(e);
+    // Validation messages are written for the person who typed the bad value —
+    // pass them through instead of hiding them behind "something went wrong".
+    if (e instanceof ValidationError) throw invalid(e.message);
     console.error(`[agency:${label}]`, e instanceof Error ? e.message : String(e));
     throw new AgencyError("internal_error", "something went wrong");
   }

@@ -14,6 +14,7 @@
 import { getRegistryEntry } from "./connectors/registry";
 import type { CredentialScheme, SupplierCredentials } from "./connectors/types";
 import { sealJson } from "./vault";
+import { ValidationError } from "./validation";
 
 export interface CreateConnectionInput {
   connectorId: string;
@@ -47,8 +48,13 @@ export function deriveDisplayHint(scheme: CredentialScheme, fields: Record<strin
   }
 }
 
-/** Fields each scheme requires; used to reject incomplete input early. */
-const REQUIRED_FIELDS: Record<CredentialScheme, string[]> = {
+/**
+ * Fallback per SCHEME, used only if a registry entry somehow declares no
+ * fields. The scheme alone is not enough to know what a provider needs —
+ * Hotelbeds and Expedia are both "api_key" but each also requires a secret to
+ * sign a request — so the registry's own `credentialFields` is authoritative.
+ */
+const SCHEME_FALLBACK_FIELDS: Record<CredentialScheme, string[]> = {
   api_key: ["apiKey"],
   oauth2_client_credentials: ["clientId", "clientSecret"],
   pcc_office_id: ["pcc", "officeId"],
@@ -57,15 +63,25 @@ const REQUIRED_FIELDS: Record<CredentialScheme, string[]> = {
 
 export function validateConnectionInput(input: CreateConnectionInput): void {
   const entry = getRegistryEntry(input.connectorId);
-  if (!entry) throw new Error(`unknown connector "${input.connectorId}"`);
-  if (!entry.enabled) throw new Error(`connector "${input.connectorId}" is disabled`);
+  if (!entry) throw new ValidationError(`unknown connector "${input.connectorId}"`);
+  if (!entry.enabled) throw new ValidationError(`connector "${input.connectorId}" is disabled`);
   if (entry.credentialScheme !== input.credentialScheme) {
-    throw new Error(
+    throw new ValidationError(
       `connector "${input.connectorId}" expects scheme "${entry.credentialScheme}", got "${input.credentialScheme}"`,
     );
   }
-  const missing = REQUIRED_FIELDS[input.credentialScheme].filter((f) => !input.fields?.[f]);
-  if (missing.length) throw new Error(`missing credential field(s): ${missing.join(", ")}`);
+
+  const required = entry.credentialFields.length
+    ? entry.credentialFields.map((f) => f.key)
+    : SCHEME_FALLBACK_FIELDS[input.credentialScheme];
+  const missing = required.filter((f) => !input.fields?.[f]);
+  if (missing.length) {
+    // Name them the way the provider does, so the agency knows what to go and find.
+    const labels = missing.map(
+      (key) => entry.credentialFields.find((f) => f.key === key)?.label ?? key,
+    );
+    throw new ValidationError(`missing credential field(s): ${labels.join(", ")}`);
+  }
 }
 
 /** Validate + seal. `masterKeyB64` comes from AGENCY_VAULT_MASTER_KEY (server only). */

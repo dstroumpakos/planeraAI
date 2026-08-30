@@ -76,7 +76,7 @@ validate, persist and audit.
 
 ## Tests
 
-126 pass / 0 fail. The pure modules have no Convex dependency, so they compile
+176 pass / 0 fail. The pure modules have no Convex dependency, so they compile
 and run standalone:
 
 ```bash
@@ -95,8 +95,9 @@ containing multiple dots), so they are never deployed.
 
 ## Deploy status
 
-**Written, typechecked and tested — but NOT deployed.** Prod is untouched. The
-functions take effect only on the next deliberate Convex deploy from this repo.
+**Deployed to prod on 2026-08-31.** It went out as a side effect of the agency-outreach
+deploy — Convex ships every module together, so there was no way to deploy one and not the
+other. Treat the portal as live: `/agency/signup` now reaches a real backend.
 
 ### Required before first use
 
@@ -110,7 +111,61 @@ Set in the Convex dashboard (see `.env.example`):
 
 ## Not yet built
 
-Connectors beyond Duffel (Amadeus, Travelport, Sabre, Hotelbeds, WebBeds,
-Expedia Rapid, Booking Demand, Travelgate, Liknoss, Ferryhopper, Viator, Tiqets)
-— each blocked on its own commercial/certification track, not on code. Quote PDF
-export. Package-scoped pricing rules.
+A destination-id mapping layer (see below — it unblocks most non-flight
+providers at once). Per-provider revalidation. Quote PDF export.
+Package-scoped pricing rules.
+
+## All 14 providers are callable (2026-08-30, NOT yet deployed)
+
+Every registry provider now has a working connector. What differs is depth, and
+the UI reports it honestly per provider (`searchable` + `pendingReason`).
+
+| Depth | Providers |
+|---|---|
+| Search + revalidate | Duffel, mock-air, mock-hotel |
+| Search | Amadeus (Flight Offers Search v2) |
+| Real auth + real health probe | Sabre, Travelport, Hotelbeds, Expedia Rapid, Booking.com Demand, Travelgate, Viator, Tiqets |
+| Auth wired, no confirmed endpoint | WebBeds, Liknoss, Ferryhopper |
+
+**Design.** `connectors/generic.ts` builds a connector from a declarative
+`ConnectorSpec` (`connectors/providers.ts`); `connectors/auth.ts` holds the
+shared auth schemes — OAuth2 client_credentials with token caching, Hotelbeds'
+per-request SHA-256 `X-Signature`, Expedia's SHA-512 EAN signature, and header
+keys. Twelve integrations stay comparable instead of drifting apart.
+
+**The honesty rule, enforced by tests.** A provider whose SEARCH contract is not
+public still authenticates and health-checks for real, but `search` throws a
+named reason rather than posting a guessed payload. A connector never declares a
+capability it cannot perform — in particular `revalidate` stays false, because
+declaring it would let the orchestrator present unverified fares as confirmed.
+
+**Why most non-flight providers cannot search yet.** Flights key off IATA codes,
+which are universal. Hotels, activities and ferries key off each provider's OWN
+destination taxonomy (Hotelbeds destination codes, Expedia region ids, Viator
+destination ids, Tiqets city ids, port codes) which cannot be derived from an
+IATA code. A destination-mapping layer, fed from each provider's locations feed,
+is the single piece of work that unblocks most of them at once.
+
+**Credential fields are per-provider, not per-scheme.** `registry.ts` declares
+exactly what each provider needs and drives both the connect form and the
+validator. Hotelbeds and Expedia are both "api_key" providers that also need a
+secret; Sabre needs a PCC; Amadeus needs its contract-issued host. Previously
+any of these could be saved half-filled and would only fail later, at search.
+
+### Two defects found by probing the real endpoints
+
+Running every host with deliberately invalid credentials (a 401 is the pass —
+the host resolved, the path routed, the provider read our credentials and said
+no) caught two things code review would not have:
+
+- **Travelport** issues tokens from `oauth[.pp].travelport.com`, not from its
+  API host. The same path on the API host is a 404 that reads like a credential
+  failure. `AuthSpec.tokenHosts` now separates them.
+- **Amadeus** hosts `api.amadeus.com` and `test.api.amadeus.com` no longer
+  resolve at all (confirmed by DNS, while `amadeus.com` and
+  `developers.amadeus.com` do) — the Self-Service platform was retired on
+  17 Jul 2026. Amadeus is Enterprise-only and issues an endpoint per contract,
+  so the host is now a validated per-connection credential field (`apiHost`).
+
+Both are covered by regression tests. Probe script:
+`scratchpad/probe-hosts.js` — 8/10 endpoints reached on the first run.

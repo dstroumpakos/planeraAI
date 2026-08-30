@@ -32,7 +32,11 @@ export interface ConnectorRunResult {
   count: number;
   ms: number;
   error?: string;
-  skippedReason?: "no_search_capability" | "kind_unsupported" | "not_implemented";
+  skippedReason?:
+    | "no_search_capability"
+    | "kind_unsupported"
+    | "not_implemented"
+    | "no_destination_mapping";
   /** True when the connector was cut off by the per-connector deadline. */
   timedOut?: boolean;
 }
@@ -79,9 +83,11 @@ export async function runSearch(
   query: SearchQuery,
   now: () => number = Date.now,
   timeoutMs: number = DEFAULT_CONNECTOR_TIMEOUT_MS,
+  /** Resolved destination ids, keyed by connector id. */
+  destinationIds: Record<string, string> = {},
 ): Promise<OrchestratorResult> {
   const byConnector: ConnectorRunResult[] = [];
-  const runnable: ConnectorBinding[] = [];
+  const runnable: Array<{ binding: ConnectorBinding; query: SearchQuery }> = [];
 
   for (const b of bindings) {
     const caps = b.connector.capabilities;
@@ -93,24 +99,40 @@ export async function runSearch(
       byConnector.push({ connectorId: b.connector.id, ok: false, count: 0, ms: 0, skippedReason: "kind_unsupported" });
       continue;
     }
-    runnable.push(b);
+
+    // Hotel/activity/ferry suppliers key off their own taxonomy. Calling one
+    // with an IATA code it does not recognise returns nothing useful, so skip
+    // it with a reason an agent can act on instead.
+    const providerDestinationId = destinationIds[b.connector.id];
+    if (caps.requiresDestinationId && !providerDestinationId) {
+      byConnector.push({
+        connectorId: b.connector.id,
+        ok: false,
+        count: 0,
+        ms: 0,
+        skippedReason: "no_destination_mapping",
+      });
+      continue;
+    }
+
+    runnable.push({ binding: b, query: { ...query, providerDestinationId } });
   }
 
   const settled = await Promise.allSettled(
-    runnable.map(async (b) => {
+    runnable.map(async ({ binding, query: perConnectorQuery }) => {
       const t0 = now();
       const offers = await withTimeout(
-        Promise.resolve(b.connector.search(b.creds, query)),
+        Promise.resolve(binding.connector.search(binding.creds, perConnectorQuery)),
         timeoutMs,
-        b.connector.id,
+        binding.connector.id,
       );
-      return { id: b.connector.id, offers, ms: now() - t0 };
+      return { id: binding.connector.id, offers, ms: now() - t0 };
     }),
   );
 
   const offers: NormalizedOffer[] = [];
   settled.forEach((r, i) => {
-    const id = runnable[i].connector.id;
+    const id = runnable[i].binding.connector.id;
     if (r.status === "fulfilled") {
       offers.push(...r.value.offers);
       byConnector.push({ connectorId: id, ok: true, count: r.value.offers.length, ms: r.value.ms });
@@ -143,10 +165,12 @@ export async function searchForQuote(
   bindings: ConnectorBinding[],
   baseQuery: Omit<SearchQuery, "kind">,
   timeoutMs: number = DEFAULT_CONNECTOR_TIMEOUT_MS,
+  /** Resolved destination ids, keyed by connector id. */
+  destinationIds: Record<string, string> = {},
 ): Promise<MultiKindSearch> {
   const [flightRes, hotelRes] = await Promise.all([
-    runSearch(bindings, { ...baseQuery, kind: "flight" }, Date.now, timeoutMs),
-    runSearch(bindings, { ...baseQuery, kind: "hotel" }, Date.now, timeoutMs),
+    runSearch(bindings, { ...baseQuery, kind: "flight" }, Date.now, timeoutMs, destinationIds),
+    runSearch(bindings, { ...baseQuery, kind: "hotel" }, Date.now, timeoutMs, destinationIds),
   ]);
   return {
     flights: flightRes.offers.filter((o): o is NormalizedFlightOffer => o.kind === "flight"),

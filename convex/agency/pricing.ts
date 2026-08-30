@@ -26,6 +26,7 @@ import type {
   Money,
   SupplierCost,
 } from "./model/types";
+import { ValidationError } from "./validation";
 import { money } from "./model/types";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -259,7 +260,7 @@ const ROUNDING_STRATEGIES: RoundingStrategy[] = ["none", "nearest_1", "charm_99"
  * than persisted, so a future rename cannot resurrect stale behaviour.
  */
 export function parsePricingRule(input: unknown): PricingRule {
-  if (input === null || typeof input !== "object") throw new Error("pricing rule must be an object");
+  if (input === null || typeof input !== "object") throw new ValidationError("pricing rule must be an object");
   const raw = input as Record<string, unknown>;
   const out: PricingRule = {};
 
@@ -267,9 +268,9 @@ export function parsePricingRule(input: unknown): PricingRule {
     const value = raw[key];
     if (value === undefined || value === null) return undefined;
     if (typeof value !== "number" || !Number.isFinite(value)) {
-      throw new Error(`${key} must be a number`);
+      throw new ValidationError(`${key} must be a number`);
     }
-    if (value < min || value > max) throw new Error(`${key} must be between ${min} and ${max}`);
+    if (value < min || value > max) throw new ValidationError(`${key} must be between ${min} and ${max}`);
     return value;
   };
 
@@ -290,14 +291,14 @@ export function parsePricingRule(input: unknown): PricingRule {
 
   if (raw.rounding !== undefined) {
     if (!ROUNDING_STRATEGIES.includes(raw.rounding as RoundingStrategy)) {
-      throw new Error(`rounding must be one of: ${ROUNDING_STRATEGIES.join(", ")}`);
+      throw new ValidationError(`rounding must be one of: ${ROUNDING_STRATEGIES.join(", ")}`);
     }
     out.rounding = raw.rounding as RoundingStrategy;
   }
 
   if (raw.allowMarkupOnCommissionable !== undefined) {
     if (typeof raw.allowMarkupOnCommissionable !== "boolean") {
-      throw new Error("allowMarkupOnCommissionable must be true or false");
+      throw new ValidationError("allowMarkupOnCommissionable must be true or false");
     }
     out.allowMarkupOnCommissionable = raw.allowMarkupOnCommissionable;
   }

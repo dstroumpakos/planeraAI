@@ -81,6 +81,8 @@ interface SearchContext {
   connections: StoredConnectionRow[];
   ttlMs: number;
   searchHash: string;
+  /** Resolved provider destination ids, keyed by connector id. */
+  destinationIds: Record<string, string>;
 }
 
 /**
@@ -100,78 +102,103 @@ export const beginSearch = internalMutation({
     currency: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<SearchContext> => {
-    const access = await requireAccessRW(ctx, args.token, "agent");
+    return guard("beginSearch", async () => {
+      const access = await requireAccessRW(ctx, args.token, "agent");
 
-    const originIata = normalizeIata(args.originIata, "origin");
-    const destinationIata = normalizeIata(args.destinationIata, "destination");
-    if (originIata === destinationIata) throw invalid("origin and destination must differ");
-    const dates = validateDateRange(args.departDate, args.returnDate, Date.now());
-    const party = validateParty(args.adults, args.childrenAges);
+      const originIata = normalizeIata(args.originIata, "origin");
+      const destinationIata = normalizeIata(args.destinationIata, "destination");
+      if (originIata === destinationIata) throw invalid("origin and destination must differ");
+      const dates = validateDateRange(args.departDate, args.returnDate, Date.now());
+      const party = validateParty(args.adults, args.childrenAges);
 
-    const agency = await ctx.db.get(access.agencyId);
-    if (!agency) throw notFound("agency");
-    const currency = normalizeCurrency(args.currency ?? agency.defaultCurrency);
+      const agency = await ctx.db.get(access.agencyId);
+      if (!agency) throw notFound("agency");
+      const currency = normalizeCurrency(args.currency ?? agency.defaultCurrency);
 
-    // Charged before the suppliers are called, so a failing search still costs
-    // budget — otherwise an error loop is a free way to hammer providers.
-    await consumeLimit(ctx, "search", access.agencyId);
+      // Charged before the suppliers are called, so a failing search still costs
+      // budget — otherwise an error loop is a free way to hammer providers.
+      await consumeLimit(ctx, "search", access.agencyId);
 
-    const rules = (
-      await ctx.db
-        .query("agencyPricingRules")
-        .withIndex("by_agency", (q) => q.eq("agencyId", access.agencyId))
-        .collect()
-    ).map((r) => ({
-      scope: r.scope,
-      selector: r.selector,
-      rule: r.rule,
-      active: r.active,
-    })) as PricingRuleRow[];
+      const rules = (
+        await ctx.db
+          .query("agencyPricingRules")
+          .withIndex("by_agency", (q) => q.eq("agencyId", access.agencyId))
+          .collect()
+      ).map((r) => ({
+        scope: r.scope,
+        selector: r.selector,
+        rule: r.rule,
+        active: r.active,
+      })) as PricingRuleRow[];
 
-    const connections = (
-      await ctx.db
-        .query("supplierConnections")
-        .withIndex("by_agency", (q) => q.eq("agencyId", access.agencyId))
-        .collect()
-    )
-      .filter((r) => !r.revokedAt && r.encryptedCredentials)
-      .map((r) => ({
-        connectorId: r.connectorId,
-        environment: r.environment,
-        credentialScheme: r.credentialScheme,
-        encryptedCredentials: r.encryptedCredentials,
-        status: r.status,
-      }));
+      const connections = (
+        await ctx.db
+          .query("supplierConnections")
+          .withIndex("by_agency", (q) => q.eq("agencyId", access.agencyId))
+          .collect()
+      )
+        .filter((r) => !r.revokedAt && r.encryptedCredentials)
+        .map((r) => ({
+          connectorId: r.connectorId,
+          environment: r.environment,
+          credentialScheme: r.credentialScheme,
+          encryptedCredentials: r.encryptedCredentials,
+          status: r.status,
+        }));
 
-    if (connections.length === 0) {
-      throw new AgencyError(
-        "connector_unavailable",
-        "connect at least one supplier before searching",
-      );
-    }
+      if (connections.length === 0) {
+        throw new AgencyError(
+          "connector_unavailable",
+          "connect at least one supplier before searching",
+        );
+      }
 
-    const params: NormalizedSearchParams = {
-      originIata,
-      destinationIata,
-      departDate: dates.departDate,
-      returnDate: dates.returnDate,
-      adults: party.adults,
-      childrenAges: party.childrenAges,
-      cabinClass: args.cabinClass,
-      currency,
-      nights: dates.nights,
-      travelers: party.travelers,
-    };
+      const params: NormalizedSearchParams = {
+        originIata,
+        destinationIata,
+        departDate: dates.departDate,
+        returnDate: dates.returnDate,
+        adults: party.adults,
+        childrenAges: party.childrenAges,
+        cabinClass: args.cabinClass,
+        currency,
+        nights: dates.nights,
+        travelers: party.travelers,
+      };
 
-    return {
-      agencyId: access.agencyId,
-      userId: access.userId,
-      params,
-      rules,
-      connections,
-      ttlMs: agency.quoteTtlMs ?? DEFAULT_QUOTE_TTL_MS,
-      searchHash: await sha256Hex(JSON.stringify(params)),
-    };
+      // Hotel and activity suppliers key off their own destination taxonomy, so
+      // each needs its own id for this trip. Only ALREADY-RESOLVED mappings are
+      // read here: resolving pulls a locations feed, which is a network call
+      // and cannot happen inside a mutation. An unmapped supplier is skipped by
+      // the orchestrator with `no_destination_mapping`, and the agent resolves
+      // it from Settings — which is far better than silently dropping it.
+      const destinationIds: Record<string, string> = {};
+      for (const c of connections) {
+        const mapping = await ctx.db
+          .query("agencyDestinationMappings")
+          .withIndex("by_agency_connector_iata", (q) =>
+            q
+              .eq("agencyId", access.agencyId)
+              .eq("connectorId", c.connectorId)
+              .eq("iata", destinationIata),
+          )
+          .unique();
+        if (mapping?.status === "resolved" && mapping.destinationId) {
+          destinationIds[c.connectorId] = mapping.destinationId;
+        }
+      }
+
+      return {
+        agencyId: access.agencyId,
+        userId: access.userId,
+        params,
+        rules,
+        connections,
+        ttlMs: agency.quoteTtlMs ?? DEFAULT_QUOTE_TTL_MS,
+        searchHash: await sha256Hex(JSON.stringify(params)),
+        destinationIds,
+      };
+    });
   },
 });
 
@@ -189,29 +216,31 @@ export const saveQuote = internalMutation({
     expiresAt: v.float64(),
   },
   handler: async (ctx, args) => {
-    const id = await ctx.db.insert("quotes", {
-      quoteId: args.quoteId,
-      agencyId: args.agencyId,
-      createdByUserId: args.createdByUserId,
-      currency: args.currency,
-      searchParams: args.searchParams,
-      packages: args.packages,
-      diagnostics: args.diagnostics,
-      searchHash: args.searchHash,
-      status: "draft",
-      searchedAt: args.searchedAt,
-      expiresAt: args.expiresAt,
-      createdAt: Date.now(),
+    return guard("saveQuote", async () => {
+      const id = await ctx.db.insert("quotes", {
+        quoteId: args.quoteId,
+        agencyId: args.agencyId,
+        createdByUserId: args.createdByUserId,
+        currency: args.currency,
+        searchParams: args.searchParams,
+        packages: args.packages,
+        diagnostics: args.diagnostics,
+        searchHash: args.searchHash,
+        status: "draft",
+        searchedAt: args.searchedAt,
+        expiresAt: args.expiresAt,
+        createdAt: Date.now(),
+      });
+      await audit(ctx, {
+        agencyId: args.agencyId,
+        actorUserId: args.createdByUserId,
+        action: "quote.create",
+        targetType: "quote",
+        targetId: args.quoteId,
+        meta: { currency: args.currency },
+      });
+      return id;
     });
-    await audit(ctx, {
-      agencyId: args.agencyId,
-      actorUserId: args.createdByUserId,
-      action: "quote.create",
-      targetType: "quote",
-      targetId: args.quoteId,
-      meta: { currency: args.currency },
-    });
-    return id;
   },
 });
 
@@ -302,7 +331,9 @@ export const search = action({
             childrenAges: p.childrenAges,
             cabinClass: p.cabinClass,
             sellCurrency: p.currency,
-          })
+          },
+          undefined,
+          context.destinationIds)
         : { flights: [], hotels: [], diagnostics: [] };
 
       const diagnostics = [...skipped, ...found.diagnostics];
@@ -462,42 +493,44 @@ interface RevalidationContext {
 export const beginRevalidate = internalMutation({
   args: { token: v.string(), quoteId: v.string() },
   handler: async (ctx, args): Promise<RevalidationContext> => {
-    const access = await requireAccessRW(ctx, args.token, "agent");
-    await consumeLimit(ctx, "revalidate", access.agencyId);
+    return guard("beginRevalidate", async () => {
+      const access = await requireAccessRW(ctx, args.token, "agent");
+      await consumeLimit(ctx, "revalidate", access.agencyId);
 
-    const row = await ctx.db
-      .query("quotes")
-      .withIndex("by_quoteId", (q) => q.eq("quoteId", args.quoteId))
-      .unique();
-    assertTenant(access, row);
+      const row = await ctx.db
+        .query("quotes")
+        .withIndex("by_quoteId", (q) => q.eq("quoteId", args.quoteId))
+        .unique();
+      assertTenant(access, row);
 
-    const offers = selectedOffers((row!.packages ?? []) as TravelPackage[]);
-    if (offers.length === 0) throw invalid("this quote has nothing to revalidate");
+      const offers = selectedOffers((row!.packages ?? []) as TravelPackage[]);
+      if (offers.length === 0) throw invalid("this quote has nothing to revalidate");
 
-    await ctx.db.patch(row!._id, { status: "revalidating", updatedAt: Date.now() });
+      await ctx.db.patch(row!._id, { status: "revalidating", updatedAt: Date.now() });
 
-    const connections = (
-      await ctx.db
-        .query("supplierConnections")
-        .withIndex("by_agency", (q) => q.eq("agencyId", access.agencyId))
-        .collect()
-    )
-      .filter((r) => !r.revokedAt && r.encryptedCredentials)
-      .map((r) => ({
-        connectorId: r.connectorId,
-        environment: r.environment,
-        credentialScheme: r.credentialScheme,
-        encryptedCredentials: r.encryptedCredentials,
-        status: r.status,
-      }));
+      const connections = (
+        await ctx.db
+          .query("supplierConnections")
+          .withIndex("by_agency", (q) => q.eq("agencyId", access.agencyId))
+          .collect()
+      )
+        .filter((r) => !r.revokedAt && r.encryptedCredentials)
+        .map((r) => ({
+          connectorId: r.connectorId,
+          environment: r.environment,
+          credentialScheme: r.credentialScheme,
+          encryptedCredentials: r.encryptedCredentials,
+          status: r.status,
+        }));
 
-    return {
-      agencyId: access.agencyId,
-      userId: access.userId,
-      quoteRowId: row!._id,
-      offers,
-      connections,
-    };
+      return {
+        agencyId: access.agencyId,
+        userId: access.userId,
+        quoteRowId: row!._id,
+        offers,
+        connections,
+      };
+    });
   },
 });
 
@@ -510,33 +543,35 @@ export const recordRevalidation = internalMutation({
     stillValid: v.boolean(),
   },
   handler: async (ctx, args) => {
-    const row = await ctx.db.get(args.quoteRowId);
-    // The action could pass any id — re-derive the tenant from the row itself.
-    if (!row || row.agencyId !== args.agencyId) throw notFound("quote");
+    return guard("recordRevalidation", async () => {
+      const row = await ctx.db.get(args.quoteRowId);
+      // The action could pass any id — re-derive the tenant from the row itself.
+      if (!row || row.agencyId !== args.agencyId) throw notFound("quote");
 
-    const now = Date.now();
-    // A quote that failed revalidation must not go back to looking live.
-    const status = args.stillValid
-      ? row.sentAt
-        ? ("sent" as const)
-        : ("draft" as const)
-      : ("expired" as const);
+      const now = Date.now();
+      // A quote that failed revalidation must not go back to looking live.
+      const status = args.stillValid
+        ? row.sentAt
+          ? ("sent" as const)
+          : ("draft" as const)
+        : ("expired" as const);
 
-    await ctx.db.patch(args.quoteRowId, {
-      revalidation: args.outcome,
-      lastRevalidatedAt: now,
-      status,
-      updatedAt: now,
+      await ctx.db.patch(args.quoteRowId, {
+        revalidation: args.outcome,
+        lastRevalidatedAt: now,
+        status,
+        updatedAt: now,
+      });
+      await audit(ctx, {
+        agencyId: args.agencyId,
+        actorUserId: args.actorUserId,
+        action: "quote.revalidate",
+        targetType: "quote",
+        targetId: row.quoteId,
+        meta: { stillValid: args.stillValid },
+      });
+      return null;
     });
-    await audit(ctx, {
-      agencyId: args.agencyId,
-      actorUserId: args.actorUserId,
-      action: "quote.revalidate",
-      targetType: "quote",
-      targetId: row.quoteId,
-      meta: { stillValid: args.stillValid },
-    });
-    return null;
   },
 });
 
@@ -723,38 +758,40 @@ export const markAccepted = mutation({
 export const resolveCustomerLink = internalMutation({
   args: { linkToken: v.string() },
   handler: async (ctx, args) => {
-    // Throttle on a prefix of the presented token: enough to bound one attacker
-    // without letting them dodge the counter by varying the whole token.
-    await consumeLimit(ctx, "publicQuote", args.linkToken.slice(0, 8));
+    return guard("resolveCustomerLink", async () => {
+      // Throttle on a prefix of the presented token: enough to bound one attacker
+      // without letting them dodge the counter by varying the whole token.
+      await consumeLimit(ctx, "publicQuote", args.linkToken.slice(0, 8));
 
-    const hash = await sha256Hex(args.linkToken);
-    const row = await ctx.db
-      .query("quotes")
-      .withIndex("by_customerLinkTokenHash", (q) => q.eq("customerLinkTokenHash", hash))
-      .unique();
-    // One uniform answer for "wrong token", "revoked" and "expired link".
-    if (!row || !row.customerLinkExpiresAt || row.customerLinkExpiresAt <= Date.now()) {
-      throw notFound("quote");
-    }
+      const hash = await sha256Hex(args.linkToken);
+      const row = await ctx.db
+        .query("quotes")
+        .withIndex("by_customerLinkTokenHash", (q) => q.eq("customerLinkTokenHash", hash))
+        .unique();
+      // One uniform answer for "wrong token", "revoked" and "expired link".
+      if (!row || !row.customerLinkExpiresAt || row.customerLinkExpiresAt <= Date.now()) {
+        throw notFound("quote");
+      }
 
-    const agency = await ctx.db.get(row.agencyId);
-    if (!agency || agency.status !== "active") throw notFound("quote");
+      const agency = await ctx.db.get(row.agencyId);
+      if (!agency || agency.status !== "active") throw notFound("quote");
 
-    return {
-      quoteId: row.quoteId,
-      currency: row.currency,
-      status: row.status,
-      searchParams: row.searchParams,
-      packages: toCustomerPackages((row.packages ?? []) as TravelPackage[]),
-      expiresAt: row.expiresAt,
-      expired: Date.now() >= row.expiresAt,
-      agency: {
-        name: agency.branding?.legalName ?? agency.name,
-        primaryColor: agency.branding?.primaryColor ?? null,
-        contactEmail: agency.branding?.contactEmail ?? null,
-        contactPhone: agency.branding?.contactPhone ?? null,
-      },
-    };
+      return {
+        quoteId: row.quoteId,
+        currency: row.currency,
+        status: row.status,
+        searchParams: row.searchParams,
+        packages: toCustomerPackages((row.packages ?? []) as TravelPackage[]),
+        expiresAt: row.expiresAt,
+        expired: Date.now() >= row.expiresAt,
+        agency: {
+          name: agency.branding?.legalName ?? agency.name,
+          primaryColor: agency.branding?.primaryColor ?? null,
+          contactEmail: agency.branding?.contactEmail ?? null,
+          contactPhone: agency.branding?.contactPhone ?? null,
+        },
+      };
+    });
   },
 });
 

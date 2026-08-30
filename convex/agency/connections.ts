@@ -18,7 +18,7 @@ import { makeFunctionReference } from "convex/server";
 import { action, internalMutation, internalQuery, mutation, query } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
 import { sealConnection, redactConnection, validateConnectionInput } from "./connectionService";
-import { getConnector, isConnectable, isImplemented } from "./connectors/factory";
+import { getConnector, isConnectable, isImplemented, isSearchable, pendingReason } from "./connectors/factory";
 import { CONNECTOR_REGISTRY, getRegistryEntry } from "./connectors/registry";
 import type { CredentialScheme, SupplierCredentials } from "./connectors/types";
 import { AgencyError, conflict, guard, invalid, notFound } from "./errors";
@@ -67,12 +67,20 @@ export const available = query({
         category: e.category,
         kinds: e.kinds,
         credentialScheme: e.credentialScheme,
+        // The form is driven by this, so a provider needing a key AND a secret
+        // cannot be half-connected.
+        credentialFields: e.credentialFields,
         status: e.status,
         requiresCertification: e.requiresCertification,
         docsUrl: e.docsUrl ?? null,
         notes: e.notes ?? null,
         implemented: isImplemented(e.id),
         connectable: isConnectable(e.id),
+        // Connecting a provider that only authenticates is still useful — it
+        // proves the credentials — but the UI must not imply searches will
+        // include it.
+        searchable: isSearchable(e.id),
+        pendingReason: pendingReason(e.id),
         alreadyConnected: connected.has(e.id),
       }));
     }),
@@ -95,6 +103,8 @@ export const list = query({
           ...redactConnection(r),
           displayName: getRegistryEntry(r.connectorId)?.displayName ?? r.connectorId,
           implemented: isImplemented(r.connectorId),
+          searchable: isSearchable(r.connectorId),
+          pendingReason: pendingReason(r.connectorId),
         }));
     }),
 });
@@ -295,18 +305,20 @@ interface HealthCheckContext {
 export const beginHealthCheck = internalMutation({
   args: { token: v.string(), connectionId: v.id("supplierConnections") },
   handler: async (ctx, args): Promise<HealthCheckContext> => {
-    const access = await requireAccessRW(ctx, args.token, "manager");
-    await consumeLimit(ctx, "healthCheck", access.agencyId);
-    const row = await ctx.db.get(args.connectionId);
-    assertTenant(access, row);
-    if (row!.revokedAt || !row!.encryptedCredentials) throw notFound("connection");
-    return {
-      agencyId: access.agencyId,
-      userId: access.userId,
-      connectorId: row!.connectorId,
-      environment: row!.environment,
-      encryptedCredentials: row!.encryptedCredentials,
-    };
+    return guard("beginHealthCheck", async () => {
+      const access = await requireAccessRW(ctx, args.token, "manager");
+      await consumeLimit(ctx, "healthCheck", access.agencyId);
+      const row = await ctx.db.get(args.connectionId);
+      assertTenant(access, row);
+      if (row!.revokedAt || !row!.encryptedCredentials) throw notFound("connection");
+      return {
+        agencyId: access.agencyId,
+        userId: access.userId,
+        connectorId: row!.connectorId,
+        environment: row!.environment,
+        encryptedCredentials: row!.encryptedCredentials,
+      };
+    });
   },
 });
 
@@ -319,25 +331,27 @@ export const recordHealthCheck = internalMutation({
     message: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const row = await ctx.db.get(args.connectionId);
-    // Re-assert the tenant: the action could have been given any id.
-    if (!row || row.agencyId !== args.agencyId) throw notFound("connection");
-    await ctx.db.patch(args.connectionId, {
-      lastHealthCheckAt: Date.now(),
-      lastHealthOk: args.ok,
-      // A failing key should stop being used for searches until it is fixed.
-      status: args.ok ? "active" : "error",
-      updatedAt: Date.now(),
+    return guard("recordHealthCheck", async () => {
+      const row = await ctx.db.get(args.connectionId);
+      // Re-assert the tenant: the action could have been given any id.
+      if (!row || row.agencyId !== args.agencyId) throw notFound("connection");
+      await ctx.db.patch(args.connectionId, {
+        lastHealthCheckAt: Date.now(),
+        lastHealthOk: args.ok,
+        // A failing key should stop being used for searches until it is fixed.
+        status: args.ok ? "active" : "error",
+        updatedAt: Date.now(),
+      });
+      await audit(ctx, {
+        agencyId: args.agencyId,
+        actorUserId: args.actorUserId,
+        action: "connection.healthCheck",
+        targetType: "supplierConnection",
+        targetId: args.connectionId,
+        meta: { ok: args.ok, message: args.message },
+      });
+      return null;
     });
-    await audit(ctx, {
-      agencyId: args.agencyId,
-      actorUserId: args.actorUserId,
-      action: "connection.healthCheck",
-      targetType: "supplierConnection",
-      targetId: args.connectionId,
-      meta: { ok: args.ok, message: args.message },
-    });
-    return null;
   },
 });
 

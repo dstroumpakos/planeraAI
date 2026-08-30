@@ -137,3 +137,80 @@ test("a connector that cannot serve the requested kind is skipped, not called", 
   assert.equal(result.offers.length, 0);
   assert.equal(result.byConnector[0].skippedReason, "kind_unsupported");
 });
+
+// ── Destination gating ──────────────────────────────────────────────────────
+
+/** A connector that needs its own destination id, like every hotel supplier. */
+function taxonomyConnector(id: string, seen: SearchQuery[]): SupplierConnector {
+  return {
+    id,
+    displayName: id,
+    capabilities: {
+      kinds: ["hotel"],
+      requiresDestinationId: true,
+      supports: {
+        search: true,
+        retrieveOffer: false,
+        revalidate: false,
+        createBooking: false,
+        retrieveBooking: false,
+        cancelBooking: false,
+        getCancellationTerms: false,
+        healthCheck: true,
+      },
+    },
+    async healthCheck() {
+      return { healthy: true, environment: "sandbox" as const };
+    },
+    async search(_creds, q) {
+      seen.push(q);
+      return [];
+    },
+    async revalidate() {
+      throw new Error("not supported");
+    },
+  };
+}
+
+test("a connector needing a destination id is SKIPPED when none was resolved", async () => {
+  const seen: SearchQuery[] = [];
+  const result = await runSearch(
+    [{ connector: taxonomyConnector("needs-map", seen), creds }],
+    { ...QUERY, kind: "hotel" },
+    Date.now,
+    500,
+    {}, // nothing resolved
+  );
+  assert.equal(seen.length, 0, "it must not be called with an id it cannot read");
+  assert.equal(result.byConnector[0].skippedReason, "no_destination_mapping");
+});
+
+test("each connector receives ITS OWN resolved destination id", async () => {
+  const a: SearchQuery[] = [];
+  const b: SearchQuery[] = [];
+  await runSearch(
+    [
+      { connector: taxonomyConnector("supplier-a", a), creds },
+      { connector: taxonomyConnector("supplier-b", b), creds },
+    ],
+    { ...QUERY, kind: "hotel" },
+    Date.now,
+    500,
+    { "supplier-a": "PAR", "supplier-b": "479" },
+  );
+  // The same trip is a different id at every provider — mixing them up would
+  // search the wrong city at one of them.
+  assert.equal(a[0]?.providerDestinationId, "PAR");
+  assert.equal(b[0]?.providerDestinationId, "479");
+});
+
+test("a flight connector is never gated on a destination mapping", async () => {
+  const result = await runSearch(
+    [{ connector: mockAirConnector, creds }],
+    QUERY,
+    Date.now,
+    500,
+    {}, // no mappings at all
+  );
+  assert.ok(result.offers.length > 0, "flights key off IATA and must still run");
+});

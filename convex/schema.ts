@@ -2374,6 +2374,120 @@ export default defineSchema({
     })
         .index("by_code_at", ["code", "at"]),
 
+    // ── B2B cold outreach to travel agencies (see agencyOutreach.ts) ──
+    //
+    // Deliberately NOT stored in `newsletterSubscribers`: these people never
+    // opted in. Mixing an unconsented B2B list into the opt-in newsletter table
+    // would let a campaign query pick them up by accident, and would blend
+    // their (structurally higher) bounce and complaint rates into the funnel
+    // numbers for a list that actually asked to be there.
+    agencyOutreachLeads: defineTable({
+        email: v.string(),                     // normalized: trimmed + lowercased
+        agencyName: v.string(),
+        city: v.optional(v.string()),
+        website: v.optional(v.string()),
+        phone: v.optional(v.string()),
+        agencyType: v.optional(v.string()),
+        // Verbatim services line from the source directory. Quoted back in the
+        // email so the first sentence is demonstrably about THEM — the single
+        // biggest difference between "outreach" and "bulk mail" to a filter.
+        services: v.optional(v.string()),
+        sourceName: v.optional(v.string()),    // e.g. "xo.gr", "Voyago"
+        sourceUrl: v.optional(v.string()),
+        language: v.string(),                  // "el" | "en"
+
+        status: v.union(
+            v.literal("new"),          // imported, never contacted
+            v.literal("queued"),       // picked up by the sender this window
+            v.literal("sent"),         // first touch delivered to Postmark
+            v.literal("followed_up"),  // second (and final) touch sent
+            v.literal("replied"),      // human replied — stop all automation
+            v.literal("converted"),    // signed up on the agency portal
+            v.literal("opted_out"),    // asked to be removed
+            v.literal("bounced"),
+            v.literal("complained"),
+            v.literal("failed"),       // send error, retryable
+            v.literal("skipped")       // failed validation / suppressed / blocklisted
+        ),
+        // 0 = nothing sent, 1 = first touch sent, 2 = follow-up sent.
+        stage: v.float64(),
+        optOutToken: v.string(),               // unguessable, one per lead
+
+        queuedAt: v.optional(v.float64()),
+        firstSentAt: v.optional(v.float64()),
+        lastSentAt: v.optional(v.float64()),
+        // When the follow-up becomes eligible. Null until the first touch lands.
+        followUpAt: v.optional(v.float64()),
+        repliedAt: v.optional(v.float64()),
+        optedOutAt: v.optional(v.float64()),
+        lastError: v.optional(v.string()),
+        sendAttempts: v.float64(),
+        skipReason: v.optional(v.string()),
+
+        // Engagement (fed by the Postmark webhook via `metadata.leadId`).
+        openCount: v.optional(v.float64()),
+        clickCount: v.optional(v.float64()),
+        lastOpenedAt: v.optional(v.float64()),
+        lastClickedAt: v.optional(v.float64()),
+
+        notes: v.optional(v.string()),
+        importedAt: v.float64(),
+    })
+        .index("by_email", ["email"])
+        .index("by_opt_out_token", ["optOutToken"])
+        .index("by_status", ["status"])
+        // Drives the sender: "who is due for stage N", cheapest first.
+        .index("by_status_stage", ["status", "stage"])
+        .index("by_follow_up", ["status", "followUpAt"]),
+
+    // Singleton (`key: "default"`) holding the throttle state for the outreach
+    // sender. The daily budget lives in the DB rather than in the cron cadence
+    // so the ramp survives redeploys and can be paused instantly.
+    agencyOutreachState: defineTable({
+        key: v.string(),
+        // "paused" is the safe default: importing a list must never start a send.
+        status: v.union(
+            v.literal("paused"),
+            v.literal("running"),
+            v.literal("completed"),
+            // Tripped by the bounce/complaint circuit breaker. Distinct from a
+            // manual pause so the admin sees WHY it stopped.
+            v.literal("auto_paused")
+        ),
+        // Reputation warm-up. Sending 547 cold emails in one burst from a domain
+        // that normally sends a trickle of receipts is the fastest way to a
+        // blocklist; the ramp raises volume slowly enough for the receiving
+        // side to build a history first.
+        dayIndex: v.float64(),                 // days elapsed since the campaign started
+        dailyCapOverride: v.optional(v.float64()),
+        sentToday: v.float64(),
+        // UTC-day boundary the `sentToday` counter belongs to.
+        counterDay: v.optional(v.string()),    // "YYYY-MM-DD"
+        totalSent: v.float64(),
+        lastTickAt: v.optional(v.float64()),
+        lastSendAt: v.optional(v.float64()),
+        startedAt: v.optional(v.float64()),
+        pausedReason: v.optional(v.string()),
+        // Rolling health over the last `windowSize` sends. The circuit breaker
+        // reads these; Postmark's own dashboard is the slower, coarser mirror.
+        windowSent: v.float64(),
+        windowBounced: v.float64(),
+        windowComplained: v.float64(),
+        // Convex file storage id for the partnership deck. Attached only where
+        // an attachment is appropriate (see agencyOutreach.ts).
+        deckStorageId: v.optional(v.id("_storage")),
+        deckFileName: v.optional(v.string()),
+        // Where the deck is allowed to travel as a real attachment. A 6 MB
+        // attachment on an unsolicited first email is one of the strongest
+        // spam signals there is, so the default ("followup") links to the deck
+        // on first contact and only attaches it once the agency has shown
+        // interest by opening or replying.
+        deckPolicy: v.optional(
+            v.union(v.literal("never"), v.literal("followup"), v.literal("always"))
+        ),
+        updatedAt: v.float64(),
+    }).index("by_key", ["key"]),
+
     // ── Planera for Travel Agencies (agency portal) — additive tenant tables ──
     ...agencyTables,
 });

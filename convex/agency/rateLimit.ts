@@ -49,6 +49,8 @@ export const LIMITS = {
   revalidate: { limit: 120, windowMs: 60 * 60_000 },
   connectionWrite: { limit: 30, windowMs: 60 * 60_000 },
   healthCheck: { limit: 60, windowMs: 60 * 60_000 },
+  /** Pulling a supplier locations feed — thousands of rows, seconds long. */
+  destinationLookup: { limit: 40, windowMs: 60 * 60_000 },
   /** Guessing a customer quote link token. */
   publicQuote: { limit: 60, windowMs: 15 * 60_000 },
   mfa: { limit: 10, windowMs: 15 * 60_000 },

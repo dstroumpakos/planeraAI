@@ -196,6 +196,47 @@ export const agencyTables = {
     .index("by_agency_status", ["agencyId", "status"])
     .index("by_agency_searchHash", ["agencyId", "searchHash"]),
 
+  // Resolved destination ids, per tenant.
+  //
+  // Hotel/activity/ferry suppliers key off their own destination taxonomies, so
+  // an IATA code has to be translated into each provider's id before a search
+  // can be built. Resolving means pulling that provider's locations feed, which
+  // is slow and large, so the ANSWER is cached here and the feed is fetched at
+  // most once per destination.
+  //
+  // Deliberately scoped per agency, even though the mapping itself contains no
+  // tenant data. A shared cache would let one agency's bad resolution silently
+  // redirect another agency's searches, and it would spend one agency's API
+  // quota on everyone else's lookups. Per-tenant costs a little more and cannot
+  // do either.
+  //
+  // Failures are cached too (`status: "unresolved"`), so a destination the
+  // provider simply does not cover stops re-fetching a 10k-row feed on every
+  // single search.
+  agencyDestinationMappings: defineTable({
+    agencyId: v.id("agencies"),
+    connectorId: v.string(),
+    /** Uppercase IATA — the canonical key we resolve from. */
+    iata: v.string(),
+    status: v.union(v.literal("resolved"), v.literal("unresolved")),
+    /** The provider's own id. Empty when unresolved. */
+    destinationId: v.string(),
+    destinationName: v.optional(v.string()),
+    countryCode: v.optional(v.string()),
+    /** "feed" = matched from the provider; "manual" = pinned by a human. */
+    source: v.union(v.literal("feed"), v.literal("manual")),
+    /** 0..1 from the matcher. Absent for manual pins, which are certain. */
+    confidence: v.optional(v.float64()),
+    /** Why this won, or why nothing did — shown to whoever fixes it. */
+    reason: v.optional(v.string()),
+    /** Runners-up, so a human can pin the right one without re-running a feed. */
+    alternatives: v.optional(v.any()),
+    resolvedAt: v.float64(),
+    updatedAt: v.optional(v.float64()),
+  })
+    .index("by_agency", ["agencyId"])
+    .index("by_agency_connector_iata", ["agencyId", "connectorId", "iata"]),
+
   // Fixed-window rate-limit + login-lockout counters. One row per key
   // ("login:<email>", "search:<agencyId>", "publicQuote:<tokenPrefix>"…). Keys
   // that embed an identity are HASHED so this table never becomes a user list.

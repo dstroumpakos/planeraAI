@@ -30,11 +30,14 @@ test("sha256Hex is deterministic; newToken is random base64url", async () => {
 });
 
 // ── connection service ──────────────────────────────────────────────────────
+// Hotelbeds signs every request with apiKey + secret, so a connection holding
+// only the key is incomplete and now fails at connect time rather than at the
+// first search.
 const goodInput: CreateConnectionInput = {
   connectorId: "hotelbeds",
   environment: "sandbox",
   credentialScheme: "api_key",
-  fields: { apiKey: "hb-live-SECRET-9f3a2b7c" },
+  fields: { apiKey: "hb-live-SECRET-9f3a2b7c", secret: "hb-shared-secret" },
 };
 
 test("seals credentials: envelope round-trips, but plaintext never leaks", async () => {
@@ -52,8 +55,37 @@ test("rejects unknown / disabled connector and scheme mismatch and missing field
   assert.throws(() => validateConnectionInput({ ...goodInput, fields: {} }), /missing credential field/);
 });
 
-test("GDS pcc scheme validates its own required fields", () => {
-  assert.doesNotThrow(() => validateConnectionInput({ connectorId: "travelport", environment: "sandbox", credentialScheme: "pcc_office_id", fields: { pcc: "2F3K", officeId: "ATH1S2100" } }));
+test("GDS providers validate their own required fields", () => {
+  // Travelport and Sabre authenticate with OAuth2; the branch/PCC rides along
+  // as an extra field rather than being the credential scheme itself.
+  assert.doesNotThrow(() =>
+    validateConnectionInput({
+      connectorId: "travelport",
+      environment: "sandbox",
+      credentialScheme: "oauth2_client_credentials",
+      fields: { clientId: "cid", clientSecret: "csec", targetBranch: "P1234567" },
+    }),
+  );
+  assert.throws(
+    () =>
+      validateConnectionInput({
+        connectorId: "travelport",
+        environment: "sandbox",
+        credentialScheme: "oauth2_client_credentials",
+        fields: { clientId: "cid", clientSecret: "csec" }, // no Target Branch
+      }),
+    /Target Branch/,
+  );
+  assert.throws(
+    () =>
+      validateConnectionInput({
+        connectorId: "sabre",
+        environment: "sandbox",
+        credentialScheme: "oauth2_client_credentials",
+        fields: { clientId: "cid", clientSecret: "csec" }, // no PCC
+      }),
+    /PCC/,
+  );
   assert.equal(deriveDisplayHint("pcc_office_id", { pcc: "2F3K", officeId: "ATH1S2100" }), "PCC 2F3K / Office ATH1S2100");
 });
 

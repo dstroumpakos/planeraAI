@@ -1,6 +1,6 @@
 import { httpRouter } from "convex/server";
 import { httpAction } from "./_generated/server";
-import { internal } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import {
   sha256Hex,
   parseBearer,
@@ -681,6 +681,72 @@ http.route({
     // on a genuinely signed event.
     await ctx.runAction(internal.stripeBilling.processWebhookEvent, { event });
     return new Response("OK", { status: 200 });
+  }),
+});
+
+/**
+ * Agency-outreach opt-out (see `agencyOutreach.ts`).
+ *
+ * Two methods on purpose:
+ *   GET  — renders a confirmation page with a POST button. Mail clients and
+ *          security scanners routinely PREFETCH links, so a GET that
+ *          unsubscribed on sight would silently remove people who never
+ *          clicked anything.
+ *   POST — performs the opt-out. This is also the endpoint Gmail/Yahoo hit for
+ *          `List-Unsubscribe-Post: List-Unsubscribe=One-Click`, which is why it
+ *          must work with no cookie, no session, and no confirmation step.
+ *
+ * The token is the only credential, and the answer is identical whether or not
+ * it matches, so the endpoint cannot be used to test whether an address is on
+ * the list.
+ */
+function outreachOptOutPage(body: string): Response {
+  return new Response(
+    `<!DOCTYPE html><html lang="el"><head><meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Planera</title></head>
+<body style="margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;background:#FAF9F6;color:#1A1A1A;">
+<div style="max-width:520px;margin:0 auto;padding:64px 24px;text-align:center;">${body}</div>
+</body></html>`,
+    { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } }
+  );
+}
+
+const OUTREACH_TOKEN_RE = /^[A-Za-z0-9_-]{8,128}$/;
+
+http.route({
+  path: "/agency-outreach/opt-out",
+  method: "GET",
+  handler: httpAction(async (_ctx, request) => {
+    const token = new URL(request.url).searchParams.get("token") ?? "";
+    if (!OUTREACH_TOKEN_RE.test(token)) {
+      return outreachOptOutPage(
+        `<h1 style="font-size:20px;">Ο σύνδεσμος δεν είναι έγκυρος</h1>
+         <p style="color:#4A4A4A;">Στείλτε μας email στο <a href="mailto:partners@planeraai.app">partners@planeraai.app</a> και θα σας αφαιρέσουμε χειροκίνητα.</p>`
+      );
+    }
+    return outreachOptOutPage(
+      `<h1 style="font-size:22px;margin:0 0 12px;">Διαγραφή από τη λίστα</h1>
+       <p style="color:#4A4A4A;margin:0 0 24px;">Πατήστε για επιβεβαίωση. Δεν θα λάβετε άλλο email συνεργασίας από την Planera.<br/><span style="font-size:13px;">Confirm to stop receiving partnership emails from Planera.</span></p>
+       <form method="POST" action="/agency-outreach/opt-out?token=${token}">
+         <button type="submit" style="background:#1A1A1A;color:#fff;border:0;border-radius:10px;padding:14px 28px;font-size:15px;font-weight:600;cursor:pointer;">Επιβεβαίωση / Confirm</button>
+       </form>`
+    );
+  }),
+});
+
+http.route({
+  path: "/agency-outreach/opt-out",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const token = new URL(request.url).searchParams.get("token") ?? "";
+    if (OUTREACH_TOKEN_RE.test(token)) {
+      await ctx.runMutation(api.agencyOutreach.optOut, { token });
+    }
+    return outreachOptOutPage(
+      `<h1 style="font-size:22px;margin:0 0 12px;">Έγινε</h1>
+       <p style="color:#4A4A4A;">Η διεύθυνσή σας αφαιρέθηκε. Συγγνώμη για την ενόχληση.<br/><span style="font-size:13px;">You have been removed. Sorry for the interruption.</span></p>`
+    );
   }),
 });
 

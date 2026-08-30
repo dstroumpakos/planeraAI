@@ -107,6 +107,23 @@ const POSTMARK_API_URL = "https://api.postmarkapp.com/email/withTemplate";
 const SENDER_EMAIL = "Planera <support@planeraai.app>";
 const MESSAGE_STREAM = "outbound";
 
+/** Postmark rejects a message over 10 MB after base64 (~33% inflation). */
+const MAX_ATTACHMENT_BYTES = 7 * 1024 * 1024;
+
+const ATTACHMENT_CONTENT_TYPES: Record<string, string> = {
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ppt: "application/vnd.ms-powerpoint",
+  pdf: "application/pdf",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  png: "image/png",
+  jpg: "image/jpeg",
+};
+
+function guessContentType(name: string): string {
+  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  return ATTACHMENT_CONTENT_TYPES[ext] ?? "application/octet-stream";
+}
+
 /**
  * Receipt template model type - uses Record for compatibility
  */
@@ -310,6 +327,12 @@ export const sendRawEmail = internalAction({
     // Postmark sender signature / signed domain.
     from: v.optional(v.string()),
     replyTo: v.optional(v.string()),
+    // Archive/visibility copies. `cc` is VISIBLE to the recipient — on cold
+    // outreach that instantly gives away a mail merge — so prefer `bcc` unless
+    // the recipient is meant to see who else is on the thread. Postmark counts
+    // each copy as a billed recipient. Comma-separated, max 50 each.
+    cc: v.optional(v.string()),
+    bcc: v.optional(v.string()),
     // Override the Postmark message stream. Defaults to the transactional
     // "outbound" stream; bulk newsletter broadcasts should pass a dedicated
     // broadcast stream (e.g. "newsletters") for separate deliverability,
@@ -325,6 +348,38 @@ export const sendRawEmail = internalAction({
     trackOpens: v.optional(v.boolean()),
     // "HtmlAndText" | "HtmlOnly" | "TextOnly" | "None"
     trackLinks: v.optional(v.string()),
+    // Extra SMTP headers. The one that matters is `List-Unsubscribe` (+
+    // `List-Unsubscribe-Post`): Gmail/Yahoo bulk-sender rules require one-click
+    // unsubscribe on marketing mail, and its absence is itself a spam signal.
+    headers: v.optional(v.record(v.string(), v.string())),
+    // Base64-encoded files. Postmark caps the WHOLE message at 10 MB after
+    // base64 (~7.5 MB of real bytes), so callers must budget for the ~33%
+    // encoding overhead before attaching anything large.
+    attachments: v.optional(
+      v.array(
+        v.object({
+          name: v.string(),
+          contentBase64: v.string(),
+          contentType: v.string(),
+        })
+      )
+    ),
+    // Attachments held in Convex file storage, loaded and encoded HERE.
+    //
+    // Passing the base64 in through `attachments` looks equivalent but is not:
+    // arguments to a Node action are capped at 5 MiB, and a 6 MB deck becomes
+    // ~8 MB of base64, so the call fails before it ever reaches Postmark. This
+    // module is already `"use node"`, so reading the blob here keeps the big
+    // payload from crossing an action boundary at all.
+    storageAttachments: v.optional(
+      v.array(
+        v.object({
+          storageId: v.id("_storage"),
+          name: v.string(),
+          contentType: v.optional(v.string()),
+        })
+      )
+    ),
     // Escape hatch for mail that MUST go out regardless of prior bounces —
     // password resets, account-deletion confirmations, booking receipts. A
     // suppressed marketing address should still be able to reset a password.
@@ -370,6 +425,33 @@ export const sendRawEmail = internalAction({
     }
 
     try {
+      const attachments: Array<{ Name: string; Content: string; ContentType: string }> = (
+        args.attachments ?? []
+      ).map((a) => ({ Name: a.name, Content: a.contentBase64, ContentType: a.contentType }));
+
+      for (const a of args.storageAttachments ?? []) {
+        const blob = await ctx.storage.get(a.storageId);
+        if (!blob) {
+          console.error("[postmark] attachment missing from storage", a.storageId);
+          continue;
+        }
+        const bytes = await blob.arrayBuffer();
+        if (bytes.byteLength > MAX_ATTACHMENT_BYTES) {
+          // Sending anyway would fail for every recipient; drop the attachment
+          // and still deliver the message rather than lose both.
+          console.error(
+            `[postmark] attachment ${a.name} is ${(bytes.byteLength / 1048576).toFixed(1)} MB, ` +
+              `over the ${(MAX_ATTACHMENT_BYTES / 1048576).toFixed(0)} MB budget — sending without it`
+          );
+          continue;
+        }
+        attachments.push({
+          Name: a.name,
+          Content: Buffer.from(bytes).toString("base64"),
+          ContentType: a.contentType ?? guessContentType(a.name),
+        });
+      }
+
       const response = await fetch("https://api.postmarkapp.com/email", {
         method: "POST",
         headers: {
@@ -384,13 +466,20 @@ export const sendRawEmail = internalAction({
           HtmlBody: args.html,
           TextBody: args.text ?? undefined,
           ReplyTo: args.replyTo ?? undefined,
+          Cc: args.cc ?? undefined,
+          Bcc: args.bcc ?? undefined,
           MessageStream: stream,
           Tag: args.tag ?? undefined,
           Metadata: args.metadata ?? undefined,
           TrackOpens: args.trackOpens ?? undefined,
           TrackLinks: args.trackLinks ?? undefined,
+          Headers: args.headers
+            ? Object.entries(args.headers).map(([Name, Value]) => ({ Name, Value }))
+            : undefined,
+          Attachments: attachments.length ? attachments : undefined,
         }),
       });
+
       const result = await response.json();
       if (!response.ok) {
         const errorCode: number | undefined =

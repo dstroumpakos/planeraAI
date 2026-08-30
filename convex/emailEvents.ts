@@ -38,6 +38,7 @@ import {
 import { internal as _internal } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
 import { assertAdmin } from "./admin";
+import { applyOutreachEmailEvent } from "./agencyOutreach";
 
 const internal = _internal as any;
 
@@ -497,6 +498,11 @@ export const ingestPostmarkEvent = internalMutation({
       stream: args.stream,
       tag: args.tag,
     };
+
+    // The B2B outreach list is a separate table with its own throttle and
+    // circuit breaker, but it shares this single write path so a bounce can
+    // never be recorded in one place and missed in the other.
+    await applyOutreachEmailEvent(ctx, { email, recordType: args.recordType });
 
     switch (args.recordType) {
       // -------------------------------------------------------------- Delivery

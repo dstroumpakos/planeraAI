@@ -6,8 +6,20 @@
  * password that isn't "password123"). Every public function runs its args
  * through here before touching the database.
  *
- * Throws plain `Error`s — the Convex adapters convert them to `invalid_input`.
+ * Throws `ValidationError`, which `guard()` in `errors.ts` converts to an
+ * `invalid_input` response carrying the message verbatim — these strings are
+ * written to be read by the person who typed the bad value. A plain `Error`
+ * would be swallowed as `internal_error` ("something went wrong"), which is
+ * exactly what happened before this class existed.
  */
+
+/** A rejected input, safe to show the caller. */
+export class ValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ValidationError";
+  }
+}
 
 // ── Identity ────────────────────────────────────────────────────────────────
 
@@ -16,7 +28,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@.]+\.[^\s@]{2,}$/;
 /** Lowercase + trim. The stored, unique, and compared form of an email. */
 export function normalizeEmail(raw: string): string {
   const email = String(raw ?? "").trim().toLowerCase();
-  if (email.length > 254 || !EMAIL_RE.test(email)) throw new Error("invalid email address");
+  if (email.length > 254 || !EMAIL_RE.test(email)) throw new ValidationError("invalid email address");
   return email;
 }
 
@@ -35,25 +47,25 @@ const WEAK_PASSWORDS = new Set([
 
 /** Throw unless the password meets the agency-portal policy. */
 export function assertPasswordPolicy(password: string, email?: string): void {
-  if (typeof password !== "string") throw new Error("password required");
+  if (typeof password !== "string") throw new ValidationError("password required");
   if (password.length < MIN_PASSWORD_LENGTH) {
-    throw new Error(`password must be at least ${MIN_PASSWORD_LENGTH} characters`);
+    throw new ValidationError(`password must be at least ${MIN_PASSWORD_LENGTH} characters`);
   }
-  if (password.length > 200) throw new Error("password is too long");
+  if (password.length > 200) throw new ValidationError("password is too long");
   const classes =
     Number(/[a-z]/.test(password)) +
     Number(/[A-Z]/.test(password)) +
     Number(/[0-9]/.test(password)) +
     Number(/[^a-zA-Z0-9]/.test(password));
   if (classes < 3) {
-    throw new Error("password must mix upper case, lower case, digits and symbols");
+    throw new ValidationError("password must mix upper case, lower case, digits and symbols");
   }
   const lower = password.toLowerCase();
-  if (WEAK_PASSWORDS.has(lower)) throw new Error("password is too common");
+  if (WEAK_PASSWORDS.has(lower)) throw new ValidationError("password is too common");
   if (email) {
     const local = email.split("@")[0];
     if (local.length >= 3 && lower.includes(local.toLowerCase())) {
-      throw new Error("password must not contain your email address");
+      throw new ValidationError("password must not contain your email address");
     }
   }
 }
@@ -62,7 +74,7 @@ export function assertPasswordPolicy(password: string, email?: string): void {
 
 export function normalizeAgencyName(raw: string): string {
   const name = String(raw ?? "").trim().replace(/\s+/g, " ");
-  if (name.length < 2 || name.length > 120) throw new Error("agency name must be 2–120 characters");
+  if (name.length < 2 || name.length > 120) throw new ValidationError("agency name must be 2–120 characters");
   return name;
 }
 
@@ -110,13 +122,13 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export function normalizeIata(raw: string, label = "airport code"): string {
   const code = String(raw ?? "").trim().toUpperCase();
-  if (!IATA_RE.test(code)) throw new Error(`${label} must be a 3-letter IATA code`);
+  if (!IATA_RE.test(code)) throw new ValidationError(`${label} must be a 3-letter IATA code`);
   return code;
 }
 
 export function normalizeCurrency(raw: string): string {
   const cur = String(raw ?? "").trim().toUpperCase();
-  if (!CURRENCY_RE.test(cur)) throw new Error("currency must be a 3-letter ISO 4217 code");
+  if (!CURRENCY_RE.test(cur)) throw new ValidationError("currency must be a 3-letter ISO 4217 code");
   return cur;
 }
 
@@ -125,9 +137,9 @@ export const MAX_SEARCH_HORIZON_DAYS = 365;
 export const MAX_TRIP_NIGHTS = 60;
 
 function parseYmd(date: string, label: string): number {
-  if (!DATE_RE.test(date)) throw new Error(`${label} must be YYYY-MM-DD`);
+  if (!DATE_RE.test(date)) throw new ValidationError(`${label} must be YYYY-MM-DD`);
   const ms = Date.parse(`${date}T00:00:00Z`);
-  if (Number.isNaN(ms)) throw new Error(`${label} is not a real date`);
+  if (Number.isNaN(ms)) throw new ValidationError(`${label} is not a real date`);
   return ms;
 }
 
@@ -150,16 +162,16 @@ export function validateDateRange(
 ): DateRange {
   const depart = parseYmd(departDate, "departure date");
   const today = Date.parse(new Date(now).toISOString().slice(0, 10) + "T00:00:00Z");
-  if (depart < today) throw new Error("departure date is in the past");
+  if (depart < today) throw new ValidationError("departure date is in the past");
   if (depart - today > MAX_SEARCH_HORIZON_DAYS * 86_400_000) {
-    throw new Error(`departure date is more than ${MAX_SEARCH_HORIZON_DAYS} days ahead`);
+    throw new ValidationError(`departure date is more than ${MAX_SEARCH_HORIZON_DAYS} days ahead`);
   }
   if (!returnDate) return { departDate, nights: 0 };
 
   const ret = parseYmd(returnDate, "return date");
-  if (ret < depart) throw new Error("return date is before the departure date");
+  if (ret < depart) throw new ValidationError("return date is before the departure date");
   const nights = Math.round((ret - depart) / 86_400_000);
-  if (nights > MAX_TRIP_NIGHTS) throw new Error(`trip cannot exceed ${MAX_TRIP_NIGHTS} nights`);
+  if (nights > MAX_TRIP_NIGHTS) throw new ValidationError(`trip cannot exceed ${MAX_TRIP_NIGHTS} nights`);
   return { departDate, returnDate, nights };
 }
 
@@ -174,13 +186,13 @@ export interface PartySize {
 
 export function validateParty(adults: number, childrenAges: number[] | undefined): PartySize {
   if (!Number.isInteger(adults) || adults < 1 || adults > MAX_ADULTS) {
-    throw new Error(`adults must be between 1 and ${MAX_ADULTS}`);
+    throw new ValidationError(`adults must be between 1 and ${MAX_ADULTS}`);
   }
   const ages = childrenAges ?? [];
-  if (ages.length > MAX_CHILDREN) throw new Error(`at most ${MAX_CHILDREN} children`);
+  if (ages.length > MAX_CHILDREN) throw new ValidationError(`at most ${MAX_CHILDREN} children`);
   for (const age of ages) {
     if (!Number.isInteger(age) || age < 0 || age > 17) {
-      throw new Error("each child age must be a whole number between 0 and 17");
+      throw new ValidationError("each child age must be a whole number between 0 and 17");
     }
   }
   return { adults, childrenAges: ages, travelers: adults + ages.length };
@@ -195,15 +207,15 @@ export function validateParty(adults: number, childrenAges: number[] | undefined
  */
 export function normalizeCredentialFields(fields: Record<string, string>): Record<string, string> {
   const entries = Object.entries(fields ?? {});
-  if (entries.length === 0) throw new Error("credentials are required");
-  if (entries.length > 12) throw new Error("too many credential fields");
+  if (entries.length === 0) throw new ValidationError("credentials are required");
+  if (entries.length > 12) throw new ValidationError("too many credential fields");
   const out: Record<string, string> = {};
   for (const [k, val] of entries) {
-    if (!/^[a-zA-Z][a-zA-Z0-9_]{0,39}$/.test(k)) throw new Error(`invalid credential field "${k}"`);
-    if (typeof val !== "string") throw new Error(`credential "${k}" must be a string`);
+    if (!/^[a-zA-Z][a-zA-Z0-9_]{0,39}$/.test(k)) throw new ValidationError(`invalid credential field "${k}"`);
+    if (typeof val !== "string") throw new ValidationError(`credential "${k}" must be a string`);
     const trimmed = val.trim();
-    if (trimmed.length === 0) throw new Error(`credential "${k}" is empty`);
-    if (trimmed.length > 4096) throw new Error(`credential "${k}" is too long`);
+    if (trimmed.length === 0) throw new ValidationError(`credential "${k}" is empty`);
+    if (trimmed.length > 4096) throw new ValidationError(`credential "${k}" is too long`);
     out[k] = trimmed;
   }
   return out;

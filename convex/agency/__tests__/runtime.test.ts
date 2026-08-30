@@ -39,9 +39,23 @@ test("a disabled connection is skipped with a reason, not silently dropped", asy
 });
 
 test("a provider we have not implemented is skipped, not attempted", async () => {
-  const { bindings, skipped } = await buildBindings(KEY, [await row({ connectorId: "sabre" })]);
+  // Every registry provider now has a connector, so this needs an id that is
+  // genuinely absent — e.g. a stored connection for a provider since removed.
+  const { bindings, skipped } = await buildBindings(KEY, [
+    await row({ connectorId: "retired-provider" }),
+  ]);
   assert.equal(bindings.length, 0);
   assert.equal(skipped[0].skippedReason, "not_implemented");
+});
+
+test("a real provider that only authenticates still becomes a binding", async () => {
+  // Sabre cannot search yet, but the connection is valid and the orchestrator
+  // is the thing that skips it — via the capability flag, not by pretending the
+  // connection does not exist.
+  const { bindings, skipped } = await buildBindings(KEY, [await row({ connectorId: "sabre" })]);
+  assert.equal(skipped.length, 0);
+  assert.equal(bindings.length, 1);
+  assert.equal(bindings[0].connector.capabilities.supports.search, false);
 });
 
 test("ONE unopenable envelope does not take down the whole search", async () => {

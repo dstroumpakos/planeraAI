@@ -186,4 +186,16 @@ crons.interval(
     {},
 );
 
+// B2B agency outreach. Ticks hourly, but the tick itself decides whether to do
+// anything: it is a no-op outside Athens business hours, on weekends, once the
+// day's warm-up budget is spent, or if the bounce/complaint circuit breaker has
+// tripped. Keeping the schedule dumb and the budget in the DB is what lets the
+// ramp be paused and resumed without touching the cron.
+crons.interval(
+    "agency-outreach-tick",
+    { hours: 1 },
+    internal.agencyOutreach.outreachTick,
+    {},
+);
+
 export default crons;

@@ -91,3 +91,9 @@ scripts/newsletter-preview/fr/drip3.html
 scripts/newsletter-preview/fr/welcome.html
 scripts/test-inbound-email.ts
 convex/agency/.env.example
+
+# Scraped B2B contact data — personal data under GDPR, never committed.
+scripts/agency-outreach/leads.json
+scripts/agency-outreach/*.xlsx
+scripts/agency-outreach/*.pptx
+scripts/agency-outreach/preview/
