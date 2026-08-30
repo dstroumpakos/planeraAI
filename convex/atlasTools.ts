@@ -30,7 +30,8 @@
 import { api, internal } from "./_generated/api";
 import { getAvgDailySpend, getAvgStay } from "./destinationSpend";
 import { lookupCountryFacts } from "./lib/countryFacts";
-import { hasTerraApiKey, terraSearchLocations } from "./lib/tripadvisorTerra";
+import { hasTerraApiKey, terraTopRestaurantsNearby } from "./lib/tripadvisorTerra";
+import { geocodeDestinationServer } from "./lib/geocoding";
 
 // ─────────────────────────────── Shared types ───────────────────────────────
 
@@ -265,13 +266,18 @@ async function toolRestaurants(city: string): Promise<ToolOutcome> {
     }
 
     try {
-        // Terra returns full Location objects inline, so the old per-result
-        // /details fan-out is gone — this is one call instead of 1+N.
-        const places = await terraSearchLocations({
-            query: `restaurants ${city}`,
-            geoName: city,
-            category: "RESTAURANT",
-            size: 5,
+        // Terra's search matches venue names, so asking it for "restaurants
+        // <city>" finds nothing. Geocode the city and ask by coordinates.
+        const center = await geocodeDestinationServer(city);
+        if (!center) {
+            return { result: `Could not locate ${city}.` };
+        }
+
+        const places = await terraTopRestaurantsNearby({
+            lat: center.lat,
+            lon: center.lng,
+            limit: 5,
+            radius: 5,
         });
         if (places.length === 0) {
             return { result: `No restaurants found for ${city}.` };

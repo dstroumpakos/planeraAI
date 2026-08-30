@@ -49,6 +49,9 @@ export default function TermsScreen() {
                 <Text style={styles.paragraph}>
                     {t('terms.h1p2')}
                 </Text>
+                <Text style={styles.paragraph}>
+                    {t('terms.h1p3')}
+                </Text>
 
                 <Text style={styles.heading}>{t('terms.h2')}</Text>
                 <Text style={styles.paragraph}>
@@ -77,6 +80,8 @@ export default function TermsScreen() {
                 <Text style={styles.bulletPoint}>{t('terms.h4b2')}</Text>
                 <Text style={styles.bulletPoint}>{t('terms.h4b3')}</Text>
                 <Text style={styles.bulletPoint}>{t('terms.h4b4')}</Text>
+                <Text style={styles.bulletPoint}>{t('terms.h4b5')}</Text>
+                <Text style={styles.bulletPoint}>{t('terms.h4b6')}</Text>
                 <Text style={styles.paragraph}>
                     {t('terms.h4p2')}
                 </Text>
@@ -88,6 +93,7 @@ export default function TermsScreen() {
                 <Text style={styles.bulletPoint}>{t('terms.h5b1')}</Text>
                 <Text style={styles.bulletPoint}>{t('terms.h5b2')}</Text>
                 <Text style={styles.bulletPoint}>{t('terms.h5b3')}</Text>
+                <Text style={styles.bulletPoint}>{t('terms.h5b7')}</Text>
                 <Text style={styles.paragraph}>
                     {t('terms.h5p2')}
                 </Text>
@@ -104,8 +110,12 @@ export default function TermsScreen() {
                 </Text>
                 <Text style={styles.bulletPoint}>{t('terms.h6b1')}</Text>
                 <Text style={styles.bulletPoint}>{t('terms.h6b2')}</Text>
+                <Text style={styles.bulletPoint}>{t('terms.h6b3')}</Text>
                 <Text style={styles.paragraph}>
                     {t('terms.h6p3')}
+                </Text>
+                <Text style={styles.paragraph}>
+                    {t('terms.h6p4')}
                 </Text>
 
                 <Text style={styles.heading}>{t('terms.h7')}</Text>
@@ -115,8 +125,17 @@ export default function TermsScreen() {
                 <Text style={styles.bulletPoint}>{t('terms.h7b1')}</Text>
                 <Text style={styles.bulletPoint}>{t('terms.h7b2')}</Text>
                 <Text style={styles.bulletPoint}>{t('terms.h7b3')}</Text>
+                <Text style={styles.bulletPoint}>{t('terms.h7b4')}</Text>
+                <Text style={styles.bulletPoint}>{t('terms.h7b5')}</Text>
+                <Text style={styles.bulletPoint}>{t('terms.h7b6')}</Text>
                 <Text style={styles.paragraph}>
                     {t('terms.h7p2')}
+                </Text>
+                <Text style={styles.paragraph}>
+                    {t('terms.h7p3')}
+                </Text>
+                <Text style={styles.paragraph}>
+                    {t('terms.h7p4')}
                 </Text>
 
                 <Text style={styles.heading}>{t('terms.h8')}</Text>
@@ -177,6 +196,17 @@ export default function TermsScreen() {
                 </Text>
                 <Text style={styles.paragraph}>
                     {t('terms.h13p2')}
+                </Text>
+
+                <Text style={styles.heading}>{t('terms.h13aTitle')}</Text>
+                <Text style={styles.paragraph}>
+                    {t('terms.h13aP1')}
+                </Text>
+                <Text style={styles.bulletPoint}>{t('terms.h13aB1')}</Text>
+                <Text style={styles.bulletPoint}>{t('terms.h13aB2')}</Text>
+                <Text style={styles.bulletPoint}>{t('terms.h13aB3')}</Text>
+                <Text style={styles.paragraph}>
+                    {t('terms.h13aP2')}
                 </Text>
 
                 <Text style={styles.heading}>{t('terms.h14')}</Text>

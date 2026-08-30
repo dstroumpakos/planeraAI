@@ -22,6 +22,7 @@ import {
     hasTerraApiKey,
     terraSearchLocations,
     tripadvisorProfileUrl,
+    terraTopRestaurantsNearby,
 } from "./lib/tripadvisorTerra";
 
 // Helper function to generate travel style guidance for OpenAI prompt
@@ -2573,16 +2574,23 @@ async function searchRestaurants(destination: string) {
     }
 
     try {
-        console.log(`📡 Searching TripAdvisor (Terra) for restaurants in: ${destination}`);
+        // Terra's search endpoint matches venue NAMES, so the obvious-looking
+        // `query: "restaurants " + destination` returns zero rows — nothing is
+        // named that. Restaurants "in a city" is a geographic question, so we
+        // geocode the destination and ask by coordinates instead.
+        const center = await geocodeDestinationServer(destination);
+        if (!center) {
+            console.log(`❌ Could not geocode ${destination}, using fallback restaurants`);
+            return getFallbackRestaurants(destination);
+        }
 
-        // Terra returns full Location objects (rating, price level, profile URL)
-        // inline, so the old per-result /details fan-out is gone. `size` is
-        // capped at 20 per page by Terra, which matches what we asked for anyway.
-        const places = await terraSearchLocations({
-            query: `restaurants ${destination}`,
-            geoName: destination,
-            category: "RESTAURANT",
-            size: 20,
+        console.log(`📡 Searching TripAdvisor (Terra) near ${destination} (${center.lat}, ${center.lng})`);
+
+        const places = await terraTopRestaurantsNearby({
+            lat: center.lat,
+            lon: center.lng,
+            limit: 20,
+            radius: 5,
         });
 
         if (places.length === 0) {
@@ -3291,27 +3299,23 @@ async function mergeRestaurantDataIntoItinerary(dayByDayItinerary: ItineraryDay[
         
         const existingNames = new Set(availablePool.map(r => r.name?.toLowerCase()));
         
-        // Try different search queries to get more diverse results
-        const extraQueries = [
-            `best restaurants ${destination}`,
-            `top rated dining ${destination}`,
-            `local food ${destination}`,
-            `popular cafes ${destination}`,
-            `traditional cuisine ${destination}`,
-        ];
+        // The old top-up ran five free-text queries ("best restaurants X",
+        // "local food X", ...). Every one of them returns zero rows on Terra,
+        // because search matches names. The geographic equivalent of "look
+        // harder" is a wider radius and more pages, so that is what we do.
+        const extraRadiiKm = [10, 20];
         
-        if (hasTerraApiKey()) {
-            for (const query of extraQueries) {
+        const topUpCenter = hasTerraApiKey() ? await geocodeDestinationServer(destination) : null;
+        if (topUpCenter) {
+            for (const radius of extraRadiiKm) {
                 if (availablePool.length >= totalRestaurantSlots) break;
 
                 try {
-                    // One Terra call per query — the rows already carry rating,
-                    // price level and profile URL, so there is no detail fan-out.
-                    const places = await terraSearchLocations({
-                        query,
-                        geoName: destination,
-                        category: "RESTAURANT",
-                        size: 20,
+                    const places = await terraTopRestaurantsNearby({
+                        lat: topUpCenter.lat,
+                        lon: topUpCenter.lng,
+                        limit: totalRestaurantSlots,
+                        radius,
                     });
 
                     for (const place of places) {
@@ -3334,7 +3338,7 @@ async function mergeRestaurantDataIntoItinerary(dayByDayItinerary: ItineraryDay[
                         console.log(`  ➕ Added: ${newRestaurant.name}`);
                     }
                 } catch (e) {
-                    console.log(`⚠️ Extra search failed for: ${query}`);
+                    console.log(`⚠️ Extra search failed at radius ${radius}km`);
                 }
             }
             console.log(`📊 Pool now has ${availablePool.length} restaurants after extra fetches`);

@@ -32,7 +32,9 @@ export interface ConnectorRunResult {
   count: number;
   ms: number;
   error?: string;
-  skippedReason?: "no_search_capability" | "kind_unsupported";
+  skippedReason?: "no_search_capability" | "kind_unsupported" | "not_implemented";
+  /** True when the connector was cut off by the per-connector deadline. */
+  timedOut?: boolean;
 }
 
 export interface OrchestratorResult {
@@ -40,11 +42,43 @@ export interface OrchestratorResult {
   byConnector: ConnectorRunResult[];
 }
 
+/**
+ * Per-connector deadline. Without it one hung supplier holds the whole search
+ * open until the platform kills the action, and the agent sees nothing at all
+ * instead of the results the other suppliers already returned.
+ */
+export const DEFAULT_CONNECTOR_TIMEOUT_MS = 12_000;
+
+export class ConnectorTimeoutError extends Error {
+  constructor(connectorId: string, ms: number) {
+    super(`connector ${connectorId} did not respond within ${ms}ms`);
+    this.name = "ConnectorTimeoutError";
+  }
+}
+
+/** Reject with ConnectorTimeoutError if `work` outlives the deadline. */
+export function withTimeout<T>(work: Promise<T>, ms: number, connectorId: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new ConnectorTimeoutError(connectorId, ms)), ms);
+    work.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
+
 /** Run one search kind across all eligible connectors, in parallel. */
 export async function runSearch(
   bindings: ConnectorBinding[],
   query: SearchQuery,
   now: () => number = Date.now,
+  timeoutMs: number = DEFAULT_CONNECTOR_TIMEOUT_MS,
 ): Promise<OrchestratorResult> {
   const byConnector: ConnectorRunResult[] = [];
   const runnable: ConnectorBinding[] = [];
@@ -65,7 +99,11 @@ export async function runSearch(
   const settled = await Promise.allSettled(
     runnable.map(async (b) => {
       const t0 = now();
-      const offers = await b.connector.search(b.creds, query);
+      const offers = await withTimeout(
+        Promise.resolve(b.connector.search(b.creds, query)),
+        timeoutMs,
+        b.connector.id,
+      );
       return { id: b.connector.id, offers, ms: now() - t0 };
     }),
   );
@@ -77,7 +115,14 @@ export async function runSearch(
       offers.push(...r.value.offers);
       byConnector.push({ connectorId: id, ok: true, count: r.value.offers.length, ms: r.value.ms });
     } else {
-      byConnector.push({ connectorId: id, ok: false, count: 0, ms: 0, error: String(r.reason?.message ?? r.reason) });
+      byConnector.push({
+        connectorId: id,
+        ok: false,
+        count: 0,
+        ms: 0,
+        timedOut: r.reason instanceof ConnectorTimeoutError,
+        error: String(r.reason?.message ?? r.reason),
+      });
     }
   });
 
@@ -97,10 +142,11 @@ export interface MultiKindSearch {
 export async function searchForQuote(
   bindings: ConnectorBinding[],
   baseQuery: Omit<SearchQuery, "kind">,
+  timeoutMs: number = DEFAULT_CONNECTOR_TIMEOUT_MS,
 ): Promise<MultiKindSearch> {
   const [flightRes, hotelRes] = await Promise.all([
-    runSearch(bindings, { ...baseQuery, kind: "flight" }),
-    runSearch(bindings, { ...baseQuery, kind: "hotel" }),
+    runSearch(bindings, { ...baseQuery, kind: "flight" }, Date.now, timeoutMs),
+    runSearch(bindings, { ...baseQuery, kind: "hotel" }, Date.now, timeoutMs),
   ]);
   return {
     flights: flightRes.offers.filter((o): o is NormalizedFlightOffer => o.kind === "flight"),
@@ -138,6 +184,7 @@ export async function revalidateSelected(
   bindingsById: Map<string, ConnectorBinding>,
   selectedOffers: NormalizedOffer[],
   now: number = Date.now(),
+  timeoutMs: number = DEFAULT_CONNECTOR_TIMEOUT_MS,
 ): Promise<RevalidationOutcome> {
   const lines: RevalidationLine[] = [];
 
@@ -148,7 +195,11 @@ export async function revalidateSelected(
       continue;
     }
     try {
-      const r = await b.connector.revalidate(b.creds, offer.revalidationToken);
+      const r = await withTimeout(
+        Promise.resolve(b.connector.revalidate(b.creds, offer.revalidationToken)),
+        timeoutMs,
+        b.connector.id,
+      );
       lines.push({ offerId: offer.offerId, connectorId: offer.connectorId, stillAvailable: r.stillAvailable, priceChanged: !!r.priceChanged, message: r.message });
     } catch (e) {
       // A timeout/error is NOT treated as "unavailable" data — it's unverifiable.

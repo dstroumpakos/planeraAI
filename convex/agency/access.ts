@@ -40,12 +40,31 @@ export interface SessionRow {
   tokenHash: string;
   expiresAt: number;
   mfaSatisfied?: boolean;
+  /** When the session was issued — compared against the user's cut-off. */
+  createdAt?: number;
+  /** Touched on each authenticated call; drives the idle timeout. */
+  lastSeenAt?: number;
+  /** Explicitly signed out. */
+  revokedAt?: number;
 }
 export interface UserRow {
   _id: string;
   status: "invited" | "active" | "disabled";
   mfaEnabled?: boolean;
+  /**
+   * Sessions issued before this instant are dead. Bumped on password change,
+   * MFA enrolment/removal, and "sign out everywhere", so one action revokes
+   * every stolen token at once.
+   */
+  sessionsValidFrom?: number;
 }
+
+/**
+ * Hard cap on an unused session. Independent of the absolute expiry: a laptop
+ * left open in a shared agency back office stops being a valid session after
+ * this long without a call.
+ */
+export const IDLE_TIMEOUT_MS = 8 * 60 * 60 * 1000; // 8 hours
 export interface MemberRow {
   agencyId: string;
   userId: string;
@@ -88,9 +107,17 @@ export async function resolveAccess(
     throw new AccessError("unauthenticated", "invalid session");
   }
   if (session.expiresAt <= now) throw new AccessError("unauthenticated", "session expired");
+  if (session.revokedAt) throw new AccessError("unauthenticated", "session revoked");
+  if (session.lastSeenAt !== undefined && now - session.lastSeenAt > IDLE_TIMEOUT_MS) {
+    throw new AccessError("unauthenticated", "session idle too long");
+  }
 
   const user = await store.getUserById(session.userId);
   if (!user || user.status !== "active") throw new AccessError("unauthenticated", "user not active");
+  // A credential change invalidates every session issued before it.
+  if (user.sessionsValidFrom !== undefined && (session.createdAt ?? 0) < user.sessionsValidFrom) {
+    throw new AccessError("unauthenticated", "session superseded");
+  }
   if (user.mfaEnabled && !session.mfaSatisfied) {
     throw new AccessError("mfa_required", "second factor required");
   }

@@ -47,6 +47,8 @@ export default function PrivacyPolicy() {
                     <Text style={styles.bullet}>{t('privacy.s2_1b3')}</Text>
                     <Text style={styles.bullet}>{t('privacy.s2_1b4')}</Text>
                     <Text style={styles.bullet}>{t('privacy.s2_1b5')}</Text>
+                    <Text style={styles.bullet}>{t('privacy.s2_1b6')}</Text>
+                    <Text style={styles.bullet}>{t('privacy.s2_1b7')}</Text>
 
                     <Text style={styles.subtitle}>{t('privacy.s2_2Title')}</Text>
                     <Text style={styles.text}>{t('privacy.s2_2Text')}</Text>
@@ -62,6 +64,8 @@ export default function PrivacyPolicy() {
                     <Text style={styles.bullet}>{t('privacy.s3b3')}</Text>
                     <Text style={styles.bullet}>{t('privacy.s3b4')}</Text>
                     <Text style={styles.bullet}>{t('privacy.s3b5')}</Text>
+                    <Text style={styles.bullet}>{t('privacy.s3b6')}</Text>
+                    <Text style={styles.bullet}>{t('privacy.s3b7')}</Text>
                     <Text style={styles.text}>{t('privacy.s3NoSell')}</Text>
                 </Section>
 
@@ -75,12 +79,15 @@ export default function PrivacyPolicy() {
                     <Text style={styles.bullet}>{t('privacy.s4_1b3')}</Text>
                     <Text style={styles.bullet}>{t('privacy.s4_1b4')}</Text>
                     <Text style={styles.bullet}>{t('privacy.s4_1b5')}</Text>
+                    <Text style={styles.bullet}>{t('privacy.s4_1b6')}</Text>
+                    <Text style={styles.bullet}>{t('privacy.s4_1b7')}</Text>
 
                     <Text style={styles.subtitle}>{t('privacy.s4_2Title')}</Text>
                     <Text style={styles.text}>{t('privacy.s4_2Text')}</Text>
                     <Text style={styles.bullet}>{t('privacy.s4_2b1')}</Text>
                     <Text style={styles.bullet}>{t('privacy.s4_2b2')}</Text>
                     <Text style={styles.bullet}>{t('privacy.s4_2b3')}</Text>
+                    <Text style={styles.bullet}>{t('privacy.s4_2b4')}</Text>
 
                     <Text style={styles.subtitle}>{t('privacy.s4_3Title')}</Text>
                     <Text style={styles.text}>{t('privacy.s4_3Text')}</Text>
@@ -95,12 +102,14 @@ export default function PrivacyPolicy() {
                     <Text style={styles.bullet}>{t('privacy.s5b2')}</Text>
                     <Text style={styles.bullet}>{t('privacy.s5b3')}</Text>
                     <Text style={styles.bullet}>{t('privacy.s5b4')}</Text>
+                    <Text style={styles.bullet}>{t('privacy.s5b5')}</Text>
                     <Text style={styles.text}>{t('privacy.s5Text2')}</Text>
                 </Section>
 
                 <Section title={t('privacy.s6Title')}>
                     <Text style={styles.text}>{t('privacy.s6p1')}</Text>
                     <Text style={styles.text}>{t('privacy.s6p2')}</Text>
+                    <Text style={styles.text}>{t('privacy.s6p3')}</Text>
                 </Section>
 
                 <Section title={t('privacy.s7Title')}>
@@ -108,6 +117,7 @@ export default function PrivacyPolicy() {
                     <Text style={styles.bullet}>{t('privacy.s7b1')}</Text>
                     <Text style={styles.bullet}>{t('privacy.s7b2')}</Text>
                     <Text style={styles.bullet}>{t('privacy.s7b3')}</Text>
+                    <Text style={styles.bullet}>{t('privacy.s7b4')}</Text>
                     <Text style={styles.text}>{t('privacy.s7Text2')}</Text>
                 </Section>
 
@@ -132,6 +142,18 @@ export default function PrivacyPolicy() {
 
                 <Section title={t('privacy.s11Title')}>
                     <Text style={styles.text}>{t('privacy.s11Text')}</Text>
+                </Section>
+
+                <Section title={t('privacy.s12aTitle')}>
+                    <Text style={styles.text}>{t('privacy.s12aP1')}</Text>
+                    <Text style={styles.text}>{t('privacy.s12aP2')}</Text>
+                    <Text style={styles.text}>{t('privacy.s12aP3')}</Text>
+                </Section>
+
+                <Section title={t('privacy.s12bTitle')}>
+                    <Text style={styles.text}>{t('privacy.s12bP1')}</Text>
+                    <Text style={styles.text}>{t('privacy.s12bP2')}</Text>
+                    <Text style={styles.text}>{t('privacy.s12bP3')}</Text>
                 </Section>
 
                 <Section title={t('privacy.s12Title')}>

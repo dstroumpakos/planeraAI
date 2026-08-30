@@ -14,6 +14,7 @@ import {
   corsPreflight,
 } from "./partnerApiAuth";
 import { serializeItinerary } from "./partnerApi";
+import { verifyStripeSignature } from "./lib/stripe";
 
 const http = httpRouter();
 
@@ -628,6 +629,58 @@ http.route({
       { created: result.created, skipped: result.errors.length, errors: result.errors },
       202
     );
+  }),
+});
+
+/**
+ * Stripe webhook — the authoritative source for web subscription state.
+ *
+ * Setup (one-time, outside the code):
+ *   1. Stripe Dashboard → Developers → Webhooks → Add endpoint:
+ *        https://<deployment>.convex.site/stripe/webhook
+ *   2. Subscribe to: checkout.session.completed,
+ *      checkout.session.async_payment_succeeded,
+ *      customer.subscription.created / .updated / .deleted
+ *   3. Copy the signing secret into the Convex env as STRIPE_WEBHOOK_SECRET.
+ *
+ * The signature is computed over the RAW body, so the payload is read with
+ * `.text()` and only parsed after verification — re-serializing the JSON first
+ * would change the bytes and fail every check.
+ *
+ * Responses:
+ *   200 — verified & processed (including deliberate no-ops and duplicates)
+ *   400 — missing/invalid signature (reject forgeries; Stripe won't retry)
+ *   500 — verified but processing failed → Stripe retries with backoff
+ */
+http.route({
+  path: "/stripe/webhook",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const secret = process.env.STRIPE_WEBHOOK_SECRET;
+    if (!secret) {
+      console.error("[Stripe] STRIPE_WEBHOOK_SECRET not configured");
+      return new Response("Not configured", { status: 500 });
+    }
+
+    const rawBody = await request.text();
+    const signature = request.headers.get("stripe-signature");
+
+    const verified = await verifyStripeSignature(rawBody, signature, secret);
+    if (!verified) {
+      return new Response("Invalid signature", { status: 400 });
+    }
+
+    let event: any;
+    try {
+      event = JSON.parse(rawBody);
+    } catch {
+      return new Response("Bad request", { status: 400 });
+    }
+
+    // Throws → 500, which is what we want: Stripe retries a transient failure
+    // on a genuinely signed event.
+    await ctx.runAction(internal.stripeBilling.processWebhookEvent, { event });
+    return new Response("OK", { status: 200 });
   }),
 });
 

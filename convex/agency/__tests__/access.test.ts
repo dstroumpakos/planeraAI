@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  resolveAccess, assertSameTenant, requireRole, hasAtLeast, Permissions, AccessError,
+  resolveAccess, assertSameTenant, requireRole, hasAtLeast, Permissions, AccessError, IDLE_TIMEOUT_MS,
   type AgencyAuthStore, type SessionRow, type UserRow, type MemberRow,
 } from "../access";
 import { sha256Hex } from "../crypto";
@@ -88,4 +88,70 @@ test("role hierarchy + permission matrix", async () => {
   assert.ok(Permissions.manageConnections("manager"));
   assert.ok(!Permissions.manageMembers("manager"));
   assert.ok(Permissions.manageMembers("owner"));
+});
+
+// ── Session hardening (idle timeout, revocation, credential cut-off) ─────────
+
+test("an explicitly revoked session is dead even before it expires", async () => {
+  const s = await seed();
+  const h = await sha256Hex("tokA");
+  s.sessions.get(h)!.revokedAt = Date.now();
+  await assert.rejects(
+    () => resolveAccess(s, "tokA"),
+    (e) => e instanceof AccessError && e.code === "unauthenticated",
+  );
+});
+
+test("a session idle past the timeout stops resolving", async () => {
+  const s = await seed();
+  const h = await sha256Hex("tokA");
+  const now = Date.now();
+  // Still inside the absolute expiry, but untouched for longer than the idle cap.
+  s.sessions.get(h)!.expiresAt = now + 30 * HOUR;
+  s.sessions.get(h)!.lastSeenAt = now - IDLE_TIMEOUT_MS - 1000;
+  await assert.rejects(
+    () => resolveAccess(s, "tokA"),
+    (e) => e instanceof AccessError && e.code === "unauthenticated",
+  );
+
+  // A session used recently is fine.
+  s.sessions.get(h)!.lastSeenAt = now - 1000;
+  const ctx = await resolveAccess(s, "tokA");
+  assert.equal(ctx.agencyId, "agA");
+});
+
+test("changing credentials kills every session issued before the change", async () => {
+  const s = await seed();
+  const h = await sha256Hex("tokA");
+  const now = Date.now();
+  s.sessions.get(h)!.createdAt = now - HOUR;
+
+  // Password changed five minutes ago → this older session is superseded.
+  s.users.get("uA")!.sessionsValidFrom = now - 5 * 60_000;
+  await assert.rejects(
+    () => resolveAccess(s, "tokA"),
+    (e) => e instanceof AccessError && e.code === "unauthenticated",
+  );
+
+  // A session minted after the change survives.
+  s.sessions.get(h)!.createdAt = now;
+  assert.equal((await resolveAccess(s, "tokA")).userId, "uA");
+});
+
+test("a disabled user cannot resolve, even holding a valid token", async () => {
+  const s = await seed();
+  s.users.get("uA")!.status = "disabled";
+  await assert.rejects(
+    () => resolveAccess(s, "tokA"),
+    (e) => e instanceof AccessError && e.code === "unauthenticated",
+  );
+});
+
+test("losing membership revokes access to the tenant", async () => {
+  const s = await seed();
+  s.members.delete("agA:uA");
+  await assert.rejects(
+    () => resolveAccess(s, "tokA"),
+    (e) => e instanceof AccessError && e.code === "forbidden",
+  );
 });

@@ -239,3 +239,68 @@ export function sumFinancials(
     expectedGrossProfit: m(acc.expectedGrossProfit),
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Rule validation
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Hard bounds on a stored rule. A typo here silently mis-prices every quote. */
+export const RULE_BOUNDS = {
+  maxMarkupPct: 2, // +200%
+  maxFlatMinor: 10_000_00, // €10,000 in cents
+  maxFxBufferPct: 0.2, // +20%
+} as const;
+
+const ROUNDING_STRATEGIES: RoundingStrategy[] = ["none", "nearest_1", "charm_99", "nearest_5"];
+
+/**
+ * Validate and normalise a pricing rule arriving from the UI. Returns a clean
+ * rule containing only known keys — an unrecognised field is dropped rather
+ * than persisted, so a future rename cannot resurrect stale behaviour.
+ */
+export function parsePricingRule(input: unknown): PricingRule {
+  if (input === null || typeof input !== "object") throw new Error("pricing rule must be an object");
+  const raw = input as Record<string, unknown>;
+  const out: PricingRule = {};
+
+  const num = (key: string, min: number, max: number): number | undefined => {
+    const value = raw[key];
+    if (value === undefined || value === null) return undefined;
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      throw new Error(`${key} must be a number`);
+    }
+    if (value < min || value > max) throw new Error(`${key} must be between ${min} and ${max}`);
+    return value;
+  };
+
+  const markupPct = num("markupPct", 0, RULE_BOUNDS.maxMarkupPct);
+  if (markupPct !== undefined) out.markupPct = markupPct;
+
+  const markupFlat = num("markupFlatMinor", 0, RULE_BOUNDS.maxFlatMinor);
+  if (markupFlat !== undefined) out.markupFlatMinor = Math.round(markupFlat);
+
+  const serviceFee = num("serviceFeeMinor", 0, RULE_BOUNDS.maxFlatMinor);
+  if (serviceFee !== undefined) out.serviceFeeMinor = Math.round(serviceFee);
+
+  const perTraveler = num("serviceFeePerTravelerMinor", 0, RULE_BOUNDS.maxFlatMinor);
+  if (perTraveler !== undefined) out.serviceFeePerTravelerMinor = Math.round(perTraveler);
+
+  const fxBuffer = num("fxBufferPct", 0, RULE_BOUNDS.maxFxBufferPct);
+  if (fxBuffer !== undefined) out.fxBufferPct = fxBuffer;
+
+  if (raw.rounding !== undefined) {
+    if (!ROUNDING_STRATEGIES.includes(raw.rounding as RoundingStrategy)) {
+      throw new Error(`rounding must be one of: ${ROUNDING_STRATEGIES.join(", ")}`);
+    }
+    out.rounding = raw.rounding as RoundingStrategy;
+  }
+
+  if (raw.allowMarkupOnCommissionable !== undefined) {
+    if (typeof raw.allowMarkupOnCommissionable !== "boolean") {
+      throw new Error("allowMarkupOnCommissionable must be true or false");
+    }
+    out.allowMarkupOnCommissionable = raw.allowMarkupOnCommissionable;
+  }
+
+  return out;
+}

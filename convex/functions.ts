@@ -2,11 +2,10 @@ import { action, mutation, query } from "./_generated/server";
 import { ConvexError, v } from "convex/values";
 import {
   customQuery,
-  customCtx,
   customMutation,
   customAction,
 } from "convex-helpers/server/customFunctions";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 
 /**
  * Native-auth based auth wrappers.
@@ -155,13 +154,56 @@ export const authMutation = (config: any) => {
 };
 
 // ---- AUTH ACTION ----
-// For actions you can pass token OR rely on Authorization header.
-export const authAction = customAction(
-  action,
-  customCtx(async (ctx: any, args: any) => {
-    const token = (typeof args?.token === "string" && args.token) || getBearerTokenFromHeaders(ctx);
+// For actions you can pass `token` OR rely on the Authorization header.
+//
+// NOTE ON THE SHAPE OF THIS — it is not interchangeable with authQuery/
+// authMutation above, and two earlier attempts to write it the obvious way
+// were silently broken:
+//
+//  • It must use the `{ args, input }` customization form, NOT `customCtx`.
+//    `customCtx`'s callback is called as `(ctx, extra)` — the second argument
+//    is convex-helpers' internal `extra` object, never the caller's args — so
+//    reading `args.token` there always yielded undefined and every call threw
+//    "Authentication required". Only fields declared in `args` below are
+//    handed to `input` (see `customFnBuilder`: it calls
+//    `customInput(ctx, pick(allArgs, Object.keys(inputArgs)), extra)`).
+//
+//  • It must validate via `ctx.runQuery`, NOT `ctx.db`. Actions have no
+//    database handle, so the `validateTokenDirect` helper used by the query
+//    and mutation wrappers throws inside an action.
+//
+// `token` is declared OPTIONAL on purpose. convex-helpers merges these fields
+// into each function's own args with `intersectValidators`, which prefers the
+// REQUIRED side on a mismatch — so optional here preserves every existing
+// signature exactly (homeAirportAi.resolveBaseAirport keeps its optional
+// token; the trips.ts actions keep theirs required). Declaring it required
+// here would silently make it mandatory for all of them.
+//
+// Convex strips these declared fields from the args the handler receives, so a
+// handler must not expect `args.token`; read the identity off `ctx.user`.
+export const authAction = customAction(action, {
+  args: { token: v.optional(v.string()) },
+  input: async (ctx: any, args: any) => {
+    const token =
+      (typeof args?.token === "string" && args.token) ||
+      getBearerTokenFromHeaders(ctx);
     if (!token) throw new ConvexError("Authentication required");
-    const user: any = await validateTokenDirect(ctx, token);
-    return { user };
-  })
-);
+
+    const session: any = await ctx.runQuery(
+      internal.authNativeDb.getSessionByToken,
+      { token }
+    );
+    if (!session) throw new ConvexError("Invalid session token");
+    if (session.expiresAt && session.expiresAt < Date.now()) {
+      throw new ConvexError("Session expired");
+    }
+
+    const user: any = await ctx.runQuery(
+      internal.authNativeDb.getUserSettings,
+      { userId: session.userId }
+    );
+    if (!user) throw new ConvexError("User not found");
+
+    return { ctx: { user }, args: {} };
+  },
+});

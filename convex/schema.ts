@@ -143,15 +143,35 @@ export default defineSchema({
         tripCredits: v.optional(v.float64()),
         subscriptionExpiresAt: v.optional(v.float64()),
         subscriptionType: v.optional(v.union(v.literal("monthly"), v.literal("yearly"))),
+        // Which processor owns the CURRENT entitlement. Absent on every row
+        // written before web billing existed — those are all Apple/Google, and
+        // the IAP refresh cron still treats `undefined` as "re-verify against
+        // the store", so no backfill is needed. Only "stripe" is excluded
+        // there: without this field a subscriber who once paid through Apple
+        // and now pays on the web would be downgraded by the cron the moment
+        // their stale App Store receipt reported an expiry.
+        subscriptionSource: v.optional(
+            v.union(v.literal("apple"), v.literal("google"), v.literal("stripe"))
+        ),
         // Apple IAP tracking
         lastTransactionId: v.optional(v.string()),
         // Stable per-subscription key from Apple. App Store Server Notifications
         // and renewals reference this (not the per-renewal transactionId), so we
         // index it to map an inbound notification back to the owning user.
         originalTransactionId: v.optional(v.string()),
+        // Stripe (web checkout) tracking. The customer id outlives any single
+        // subscription, so it stays put after a cancellation and is reused for
+        // the customer portal and for re-subscribing.
+        stripeCustomerId: v.optional(v.string()),
+        stripeSubscriptionId: v.optional(v.string()),
+        // Cancelled but still inside the paid period — access continues until
+        // `subscriptionExpiresAt`, and the UI says "ends on" instead of "renews".
+        stripeCancelAtPeriodEnd: v.optional(v.boolean()),
     })
         .index("by_user", ["userId"])
-        .index("by_original_transaction", ["originalTransactionId"]),
+        .index("by_original_transaction", ["originalTransactionId"])
+        .index("by_stripe_customer", ["stripeCustomerId"])
+        .index("by_stripe_subscription", ["stripeSubscriptionId"]),
 
     // In-App Purchase transaction history (Apple StoreKit + Google Play)
     iapTransactions: defineTable({
@@ -176,6 +196,16 @@ export default defineSchema({
     })
         .index("by_user", ["userId"])
         .index("by_transaction", ["transactionId"]),
+
+    // Stripe webhook de-duplication. Stripe retries a delivery until it gets a
+    // 2xx and can send the same event more than once even after success, so
+    // every handler is keyed on the event id: a replay becomes a no-op instead
+    // of a second grant.
+    stripeEvents: defineTable({
+        eventId: v.string(),
+        type: v.string(),
+        processedAt: v.float64(),
+    }).index("by_event", ["eventId"]),
 
     bookings: defineTable({
         userId: v.string(),

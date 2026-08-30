@@ -15,7 +15,7 @@
  *   GET /location/search?searchQuery=     GET /locations/search?query=
  *   GET /location/{id}/details            GET /locations/{id}
  *   category=restaurants (lowercase)      category=RESTAURANT (enum, uppercase)
- *   language=en                           locale=en
+ *   language=en                           locale=en-US (bare "en" is a 400!)
  *   flat rows: name, rating, num_reviews  nested: names[], traveler_ratings{},
  *   web_url, address_obj.address_string   urls.tripadvisor.main, addresses[]
  *   search returns stubs (id + name)      search returns FULL Location objects
@@ -80,6 +80,17 @@ export type TerraPlace = {
   webUrl: string | null;
   latitude: number | null;
   longitude: number | null;
+  /**
+   * Venue type, parsed out of the profile URL rather than taken from the
+   * `categories` field (which comes back null on every row we have seen) or
+   * from the `category` request filter (which Terra largely ignores — a
+   * `category=RESTAURANT` nearby search returned 8 attractions and 5 hotels
+   * among 20 results, verified live 2026-08-29).
+   *
+   * The URL is the only reliable discriminator Terra actually populates:
+   * `/Restaurant_Review-...`, `/Attraction_Review-...`, `/Hotel_Review-...`.
+   */
+  kind: TerraCategory | null;
 };
 
 export type TerraPhoto = {
@@ -155,6 +166,57 @@ export function hasTerraApiKey(): boolean {
 // ---------------------------------------------------------------------------
 
 const DEFAULT_TIMEOUT_MS = 6000;
+
+/**
+ * Terra rejects bare language codes. `locale=en` comes back as a 400
+ * ("Unsupported factual locale 'en'") — it wants region-qualified codes, with
+ * only `ar`, `fi`, `hu`, `pl` and `zh` accepted bare. Verified live 2026-08-29.
+ *
+ * This is the same shape of trap as the Google Travel `hl` parameter in
+ * searchApiExplore.ts, and it fails the same way: every single call 400s, so a
+ * wrong default here silently disables the whole integration.
+ */
+const TERRA_LOCALES = new Set([
+  "ar", "ar-EG", "da-DK", "de-AT", "de-CH", "de-DE", "el-GR", "en-AU", "en-CA",
+  "en-HK", "en-IE", "en-IN", "en-MY", "en-NZ", "en-PH", "en-SG", "en-UK",
+  "en-US", "en-ZA", "es-AR", "es-CL", "es-CO", "es-ES", "es-MX", "es-PE",
+  "es-VE", "fi", "fr-BE", "fr-CA", "fr-CH", "fr-FR", "he-IL", "hu", "id-ID",
+  "it-CH", "it-IT", "ja-JP", "ko-KR", "nl-BE", "nl-NL", "no-NO", "pl", "pt-BR",
+  "pt-PT", "ru-RU", "sv-SE", "th-TH", "tr-TR", "vi-VN", "zh", "zh-CN", "zh-HK",
+  "zh-TW",
+]);
+
+/** The app's six languages onto their Terra equivalents. */
+const APP_LANG_TO_TERRA: Record<string, string> = {
+  en: "en-US",
+  el: "el-GR",
+  de: "de-DE",
+  fr: "fr-FR",
+  es: "es-ES",
+  ar: "ar",
+};
+
+const DEFAULT_LOCALE = "en-US";
+
+/**
+ * Coerce whatever the caller passes ("en", "el", "en-GB", undefined) onto a
+ * locale Terra accepts. Unknown values fall back to en-US rather than being
+ * forwarded, because forwarding an unsupported code fails the whole request
+ * instead of just losing the translation.
+ */
+export function normalizeLocale(locale: string | undefined | null): string {
+  const raw = (locale ?? "").trim();
+  if (!raw) return DEFAULT_LOCALE;
+  if (TERRA_LOCALES.has(raw)) return raw;
+
+  const lower = raw.toLowerCase();
+  const base = lower.split(/[-_]/)[0];
+  if (APP_LANG_TO_TERRA[base]) return APP_LANG_TO_TERRA[base];
+
+  // Try a case-corrected match (e.g. "en-us" -> "en-US") before giving up.
+  const match = Array.from(TERRA_LOCALES).find((l) => l.toLowerCase() === lower);
+  return match ?? DEFAULT_LOCALE;
+}
 
 type ParamValue = string | number | boolean | Array<string | number> | undefined | null;
 
@@ -305,6 +367,20 @@ function pickCuisine(loc: any): string | null {
   return unique.length ? unique.join(", ") : null;
 }
 
+const URL_KIND: Record<string, TerraCategory> = {
+  restaurant: "RESTAURANT",
+  attraction: "ATTRACTION",
+  hotel: "HOTEL",
+};
+
+/** Derive the venue type from the Tripadvisor profile URL. See `TerraPlace.kind`. */
+function pickKind(loc: any): TerraCategory | null {
+  const url = str(loc?.urls?.tripadvisor?.main);
+  if (!url) return null;
+  const m = /\/([A-Za-z]+)_Review-/.exec(url);
+  return (m && URL_KIND[m[1].toLowerCase()]) || null;
+}
+
 function pickRating(loc: any): { rating: number | null; count: number | null } {
   // `/locations/*` nests it under traveler_ratings.overall; the abbreviated
   // catalog endpoints expose it flat as overall_rating.
@@ -330,6 +406,7 @@ export function normalizeTerraLocation(loc: any): TerraPlace | null {
     webUrl: str(loc?.urls?.tripadvisor?.main),
     latitude: num(loc?.coordinates?.latitude),
     longitude: num(loc?.coordinates?.longitude),
+    kind: pickKind(loc),
   };
 }
 
@@ -357,7 +434,9 @@ function normalizePhoto(raw: any): TerraPhoto | null {
     width: num(info?.original_width),
     height: num(info?.original_height),
     caption: str(raw?.caption),
-    source: str(raw?.source),
+    // Live responses return an object ({ name: "Management" }), not the bare
+    // string the schema docs imply — handle both.
+    source: str(raw?.source?.name ?? raw?.source),
     attractivenessScore: num(cv?.attractiveness_score),
     scenes,
     username: str(raw?.user?.username),
@@ -435,7 +514,7 @@ export async function terraSearchLocations(opts: {
       geo_name: opts.geoName,
       country_code: opts.countryCode,
       postal_code: opts.postalCode,
-      locale: opts.locale ?? "en",
+      locale: normalizeLocale(opts.locale),
       size: clampSize(opts.size),
       page: opts.page,
     },
@@ -483,13 +562,119 @@ export async function terraNearbyLocations(opts: {
       min_rating: opts.minRating,
       sort: opts.sort,
       include_photo: opts.includePhoto,
-      locale: opts.locale ?? "en",
+      locale: normalizeLocale(opts.locale),
       size: clampSize(opts.size),
       page: opts.page,
     },
     opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
   );
   return body ? normalizePage(body) : [];
+}
+
+/**
+ * Top-rated restaurants around a point — the call the trip pipeline actually
+ * wants, and the reason `terraSearchLocations` must not be used for this.
+ *
+ * Three live-verified quirks are handled here so callers do not each rediscover
+ * them (all confirmed against the real API on 2026-08-29):
+ *
+ *  1. `/locations/search` matches venue NAMES, not free text. The legacy
+ *     Content API happily answered `searchQuery="restaurants Athens"`; Terra
+ *     returns zero rows for it, because nothing is named that. Geography is
+ *     what we actually mean, so this goes through `/locations/nearby`.
+ *  2. `category=RESTAURANT` is close to advisory — roughly a third of the rows
+ *     came back restaurants. We send it anyway (it costs nothing and may
+ *     improve) but filter on `kind` afterwards, which is exact.
+ *  3. `sort=rating,desc` did not visibly sort, so ordering is done here — and
+ *     a raw rating sort is its own trap. Sorting Athens by rating alone put
+ *     four venues with a single 5-star review each above the city's
+ *     best-established restaurants. One review is not evidence. Ranking
+ *     therefore uses a Bayesian weighted score (see `rankScore`), and unrated
+ *     venues sink to the bottom rather than being dropped: a new restaurant
+ *     with no reviews is still a real place, just not a headline.
+ *
+ * Because only ~1 in 3 rows survives the filter, this pages until it has
+ * enough. Pagination is loose — `total_elements` grows as you page and rows
+ * repeat — so results are deduped by id and the page count is capped.
+ */
+export async function terraTopRestaurantsNearby(opts: {
+  lat: number;
+  lon: number;
+  limit?: number;
+  radius?: number;
+  unit?: "KM" | "MI";
+  maxPages?: number;
+  locale?: string;
+  timeoutMs?: number;
+}): Promise<TerraPlace[]> {
+  if (!Number.isFinite(opts.lat) || !Number.isFinite(opts.lon)) return [];
+
+  const limit = Math.max(opts.limit ?? 20, 1);
+  const maxPages = Math.max(opts.maxPages ?? 3, 1);
+  const byId = new Map<string, TerraPlace>();
+
+  for (let page = 1; page <= maxPages; page++) {
+    const rows = await terraNearbyLocations({
+      lat: opts.lat,
+      lon: opts.lon,
+      radius: opts.radius ?? 5,
+      unit: opts.unit ?? "KM",
+      category: "RESTAURANT",
+      locale: opts.locale,
+      size: 20,
+      page,
+      timeoutMs: opts.timeoutMs,
+    });
+    if (rows.length === 0) break; // past the end, or the call failed
+
+    for (const row of rows) {
+      if (row.kind === "RESTAURANT") byId.set(row.id, row);
+    }
+    if (byId.size >= limit) break; // enough survivors, stop spending calls
+  }
+
+  const found = Array.from(byId.values());
+  const rated = found.filter((p) => p.rating != null);
+  // Prior = the mean rating of this result set, so the pull-toward-average is
+  // calibrated to the city rather than to a hardcoded global guess.
+  const prior =
+    rated.length > 0
+      ? rated.reduce((sum, p) => sum + (p.rating ?? 0), 0) / rated.length
+      : 0;
+
+  return found
+    .sort((a, b) => {
+      if ((a.rating == null) !== (b.rating == null)) return a.rating == null ? 1 : -1;
+      const diff = rankScore(b, prior) - rankScore(a, prior);
+      if (diff !== 0) return diff;
+      return (b.reviewCount ?? 0) - (a.reviewCount ?? 0);
+    })
+    .slice(0, limit);
+}
+
+/**
+ * How many reviews a venue needs before its raw rating is taken at face value.
+ * Below this the score is pulled toward the set average in proportion to how
+ * little evidence there is.
+ */
+const RANK_CONFIDENCE_REVIEWS = 50;
+
+/**
+ * Bayesian weighted rating — the standard fix for "5.0 from one review beats
+ * 4.7 from thirty-eight thousand".
+ *
+ *   score = (v / (v + m)) * R  +  (m / (v + m)) * C
+ *
+ * with v = review count, m = RANK_CONFIDENCE_REVIEWS, R = the venue's rating
+ * and C = the prior. A venue with one review sits almost entirely on the
+ * prior; one with thousands sits almost entirely on its own rating.
+ */
+function rankScore(place: TerraPlace, prior: number): number {
+  const r = place.rating;
+  if (r == null) return -1;
+  const v = place.reviewCount ?? 0;
+  const m = RANK_CONFIDENCE_REVIEWS;
+  return (v / (v + m)) * r + (m / (v + m)) * prior;
 }
 
 // ---------------------------------------------------------------------------
@@ -510,7 +695,7 @@ export async function terraLocationDetails(
   if (!validId(id)) return null;
   const body = await terraGet(
     `/locations/${encodeURIComponent(String(id))}`,
-    { locale: opts.locale ?? "en" },
+    { locale: normalizeLocale(opts.locale) },
     opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
   );
   return body ? normalizeTerraLocation(body) : null;
@@ -534,7 +719,7 @@ export async function terraLocationsBatch(
 
   const body = await terraGet(
     "/locations",
-    { id: unique, locale: opts.locale ?? "en" },
+    { id: unique, locale: normalizeLocale(opts.locale) },
     opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
   );
   return body ? normalizePage(body) : [];
@@ -564,7 +749,7 @@ export async function terraLocationPhotos(
   const body = await terraGet(
     `/locations/${encodeURIComponent(String(id))}/photos`,
     {
-      locale: opts.locale ?? "en",
+      locale: normalizeLocale(opts.locale),
       size: opts.size,
       page: opts.page,
       sort: opts.sort,
@@ -667,7 +852,7 @@ export async function terraRecommendations(opts: {
       exclude_location_ids: opts.excludeLocationIds?.filter(validId).map(Number),
       response_preference: opts.responsePreference,
     },
-    { locale: opts.locale ?? "en" },
+    { locale: normalizeLocale(opts.locale) },
     // Quality mode does real work server-side, so allow more headroom.
     opts.timeoutMs ?? 15000
   );
@@ -708,7 +893,7 @@ export async function terraGeos(
 
   const body = await terraGet(
     "/geos",
-    { id: unique, locale: opts.locale ?? "en" },
+    { id: unique, locale: normalizeLocale(opts.locale) },
     opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
   );
   const rows = Array.isArray(body?.data) ? body.data : [];
@@ -762,7 +947,7 @@ export async function terraCatalogSearch(opts: {
       geo_name: opts.geoName,
       country_code: opts.countryCode,
       postal_code: opts.postalCode,
-      locale: opts.locale ?? "en",
+      locale: normalizeLocale(opts.locale),
       size: clampSize(opts.size),
       page: opts.page,
     },
@@ -804,7 +989,7 @@ export async function terraCatalogNearby(opts: {
       category: opts.category,
       min_rating: opts.minRating,
       sort: opts.sort,
-      locale: opts.locale ?? "en",
+      locale: normalizeLocale(opts.locale),
       size: clampSize(opts.size),
       page: opts.page,
     },
@@ -827,7 +1012,7 @@ export async function terraCatalogLocation(
   if (!validId(id)) return null;
   const body = await terraGet(
     `/catalog/locations/${encodeURIComponent(String(id))}`,
-    { locale: opts.locale ?? "en" },
+    { locale: normalizeLocale(opts.locale) },
     opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
   );
   return body ? normalizeTerraLocation(body?.location ?? body) : null;

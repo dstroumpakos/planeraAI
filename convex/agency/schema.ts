@@ -37,6 +37,8 @@ export const agencyTables = {
       contactEmail: v.optional(v.string()),
       contactPhone: v.optional(v.string()),
     })),
+    /** Tenant override for how long a new quote stays valid (ms). */
+    quoteTtlMs: v.optional(v.float64()),
     createdAt: v.float64(),
     updatedAt: v.optional(v.float64()),
   })
@@ -59,7 +61,17 @@ export const agencyTables = {
     // MFA (TOTP) — ready but optional in MVP.
     mfaSecretEnvelope: v.optional(v.string()), // vault-sealed TOTP secret
     mfaEnabled: v.optional(v.boolean()),
+    /** Last accepted TOTP counter step — blocks replay of the same code. */
+    mfaLastUsedStep: v.optional(v.float64()),
+    /** SHA-256 hashes of single-use recovery codes (raw codes shown once). */
+    mfaRecoveryHashes: v.optional(v.array(v.string())),
     lastLoginAt: v.optional(v.float64()),
+    passwordUpdatedAt: v.optional(v.float64()),
+    /**
+     * Global session cut-off: every session issued before this instant is dead.
+     * Bumped on password change, MFA change, and "sign out everywhere".
+     */
+    sessionsValidFrom: v.optional(v.float64()),
     createdAt: v.float64(),
   })
     .index("by_email", ["email"])
@@ -86,6 +98,9 @@ export const agencyTables = {
     expiresAt: v.float64(),
     // True only after a second factor is satisfied (when MFA is enabled).
     mfaSatisfied: v.optional(v.boolean()),
+    /** Touched on use; drives the idle timeout independently of the hard expiry. */
+    lastSeenAt: v.optional(v.float64()),
+    revokedAt: v.optional(v.float64()),
   })
     .index("by_tokenHash", ["tokenHash"])
     .index("by_user", ["userId"]),
@@ -163,6 +178,13 @@ export const agencyTables = {
     expiresAt: v.float64(),
     // Customer-facing secure link: only the HASH is stored.
     customerLinkTokenHash: v.optional(v.string()),
+    customerLinkExpiresAt: v.optional(v.float64()),
+    /** Per-connector search outcome (ok/skipped/error) — agent-facing diagnostics. */
+    diagnostics: v.optional(v.any()),
+    /** Result of the most recent revalidation pass. */
+    revalidation: v.optional(v.any()),
+    /** Hash of the search inputs — makes a repeated search idempotent. */
+    searchHash: v.optional(v.string()),
     sentAt: v.optional(v.float64()),
     acceptedAt: v.optional(v.float64()),
     createdAt: v.float64(),
@@ -171,7 +193,20 @@ export const agencyTables = {
     .index("by_agency", ["agencyId"])
     .index("by_quoteId", ["quoteId"])
     .index("by_customerLinkTokenHash", ["customerLinkTokenHash"])
-    .index("by_agency_status", ["agencyId", "status"]),
+    .index("by_agency_status", ["agencyId", "status"])
+    .index("by_agency_searchHash", ["agencyId", "searchHash"]),
+
+  // Fixed-window rate-limit + login-lockout counters. One row per key
+  // ("login:<email>", "search:<agencyId>", "publicQuote:<tokenPrefix>"…). Keys
+  // that embed an identity are HASHED so this table never becomes a user list.
+  agencyRateLimits: defineTable({
+    key: v.string(),
+    windowStartAt: v.float64(),
+    count: v.float64(),
+    blockedUntil: v.optional(v.float64()),
+    failures: v.optional(v.float64()),
+    updatedAt: v.float64(),
+  }).index("by_key", ["key"]),
 
   // Append-only audit trail. Metadata is redacted (never secrets/credentials).
   agencyAuditLog: defineTable({

@@ -515,17 +515,23 @@ async function lookupRestaurant(
     category: "RESTAURANT",
     timeoutMs: TA_SEARCH_TIMEOUT_MS,
   });
-  if (places.length === 0) return null;
+  // Terra's `category` filter is advisory — a RESTAURANT search happily
+  // returns hotels and attractions — so keep only rows whose profile URL says
+  // restaurant. Without this a stop can end up linked to a hotel of the same
+  // name. Cafes and bars live under Restaurant_Review too, so this does not
+  // exclude them.
+  const restaurants = places.filter((p) => p.kind === "RESTAURANT");
+  if (restaurants.length === 0) return null;
 
   // Confident match only: exact normalized name, or strong containment.
   const id = matchPoolEntry(
     name,
-    places.map((p) => ({ id: p.id, name: p.name })),
+    restaurants.map((p) => ({ id: p.id, name: p.name })),
     new Set()
   );
   if (!id) return null;
 
-  const match = places.find((p) => p.id === id);
+  const match = restaurants.find((p) => p.id === id);
   if (!match) return null;
 
   return {

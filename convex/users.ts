@@ -916,6 +916,11 @@ export const applyVerifiedApplePurchase = internalMutation({
                 plan: "premium",
                 subscriptionExpiresAt: expiresAt,
                 subscriptionType: productId === PRODUCT_IDS.YEARLY ? "yearly" : "monthly",
+                // Claim ownership of the entitlement for this store. A user who
+                // previously paid on the web and now buys in-app hands the
+                // entitlement over here, so later Stripe cancellation events
+                // stop applying to them.
+                subscriptionSource: platform === "android" ? "google" : "apple",
                 lastTransactionId: transactionId,
                 ...(originalTransactionId ? { originalTransactionId } : {}),
             });
@@ -967,6 +972,14 @@ export const getSubscriptionsNeedingRefresh = internalQuery({
             .filter(
                 (p) =>
                     p.plan === "premium" &&
+                    // Web subscribers are owned by Stripe and kept current by
+                    // its webhook. Re-verifying them against Apple/Google would
+                    // at best waste a call and at worst — for someone who once
+                    // had a store subscription and now pays on the web — feed a
+                    // stale receipt into `refreshSubscriptionExpiry` and
+                    // downgrade a paying customer. `undefined` stays in scope:
+                    // every row predating web billing is a store purchase.
+                    p.subscriptionSource !== "stripe" &&
                     p.subscriptionExpiresAt != null &&
                     p.subscriptionExpiresAt <= horizon &&
                     p.subscriptionExpiresAt >= cutoff
@@ -1029,6 +1042,15 @@ export const refreshSubscriptionExpiry = internalMutation({
             .withIndex("by_user", (q) => q.eq("userId", userId))
             .unique();
         if (!plan) return { action: "no_plan" };
+
+        // A store receipt may not touch an entitlement Stripe owns. The cron
+        // already filters these out, but `refreshMySubscription` gets here from
+        // the client on every app launch — a web subscriber who once bought in
+        // the App Store would otherwise be downgraded by their own stale
+        // receipt the first time they opened the app.
+        if (plan.subscriptionSource === "stripe") {
+            return { action: "skipped_stripe" };
+        }
 
         // Backfill the Apple key so future server notifications can map to us.
         const backfill =
@@ -1102,6 +1124,13 @@ export const applyAppleNotification = internalMutation({
             // Unknown subscriber (e.g. legacy purchase before originalTransactionId
             // tracking). The polling cron backfills these; nothing to do here.
             return { action: "unmapped" };
+        }
+
+        // The user has since moved to a web subscription, which now owns their
+        // entitlement. Apple is still entitled to tell us its own subscription
+        // ended — it just may not revoke the one Stripe is billing for.
+        if (plan.subscriptionSource === "stripe") {
+            return { action: "skipped_stripe" };
         }
 
         const subType =
