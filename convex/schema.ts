@@ -833,6 +833,11 @@ export default defineSchema({
         currency: v.optional(v.string()), // ISO 4217, e.g. "EUR"
         topSite: v.boolean(),
         travelStyles: v.optional(v.array(v.string())),
+        // Door-to-door length in minutes. Drives both the "2-3 hours" label on the
+        // card and where the day's schedule can fit it: Versailles is a ~360min
+        // round trip out of Paris, not a 2-3h city stop. Absent = 180 (the old
+        // hardcoded default).
+        durationMinutes: v.optional(v.float64()),
         notes: v.optional(v.string()),
         active: v.boolean(),
         clicks: v.optional(v.float64()), // # of times users tapped this booking link

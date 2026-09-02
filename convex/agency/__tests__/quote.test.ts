@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildQuote, resolvePricingRule, isQuoteExpired, DEFAULT_FOOD_BUDGET_MINOR, type PricingRuleRow, type BuildQuoteInput } from "../quote";
+import { buildQuote, resolvePricingRule, isQuoteExpired, revalidatedExpiry, DEFAULT_FOOD_BUDGET_MINOR, type PricingRuleRow, type BuildQuoteInput } from "../quote";
 import { mockAirConnector, mockHotelConnector } from "../connectors/mock";
 import type { NormalizedFlightOffer, NormalizedHotelOffer } from "../model/types";
 import type { SearchQuery, SupplierCredentials } from "../connectors/types";
@@ -81,4 +81,40 @@ test("resolvePricingRule: destination > supplier > agency default", () => {
   assert.equal(resolvePricingRule(rules, { connectorId: "mock-air", destinationIata: "BCN" }).markupPct, 0.2);
   assert.equal(resolvePricingRule(rules, { connectorId: "other", destinationIata: "BCN" }).markupPct, 0.1);
   assert.deepEqual(resolvePricingRule([], { connectorId: "x" }), {});
+});
+
+// ── Revalidation restarts the clock ─────────────────────────────────────────
+
+const HOUR = 3600_000;
+
+test("a successful revalidation restarts the validity window", () => {
+  const now = 1_700_000_000_000;
+  // An expired quote is precisely the case that must recover: `send` refuses an
+  // expired quote and tells the agent to revalidate it first.
+  const expiredAt = now - 5 * HOUR;
+
+  assert.equal(
+    revalidatedExpiry({ stillValid: true, now, ttlMs: 24 * HOUR, currentExpiresAt: expiredAt }),
+    now + 24 * HOUR,
+  );
+});
+
+test("a failed revalidation does not buy the quote more time", () => {
+  const now = 1_700_000_000_000;
+  const expiredAt = now - 5 * HOUR;
+
+  // An offer that is gone, or that no connector could verify, must leave the
+  // quote exactly as expired as it was.
+  assert.equal(
+    revalidatedExpiry({ stillValid: false, now, ttlMs: 24 * HOUR, currentExpiresAt: expiredAt }),
+    expiredAt,
+  );
+});
+
+test("revalidation honours the tenant's own quote validity, not a default", () => {
+  const now = 1_700_000_000_000;
+  assert.equal(
+    revalidatedExpiry({ stillValid: true, now, ttlMs: 2 * HOUR, currentExpiresAt: now }),
+    now + 2 * HOUR,
+  );
 });

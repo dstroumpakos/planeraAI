@@ -22,6 +22,7 @@ import { v } from "convex/values";
 import { makeFunctionReference } from "convex/server";
 import { action, internalMutation, internalQuery, mutation, query } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
+import { iataToCountry } from "../lib/airportCountry";
 import { getConnector } from "./connectors/factory";
 import { getRegistryEntry } from "./connectors/registry";
 import type { SupplierCredentials } from "./connectors/types";
@@ -348,7 +349,15 @@ export const resolve = action({
       const context = await ctx.runMutation(beginResolveRef, { token: args.token, iata });
 
       const { bindings } = await buildBindings(vaultMasterKey(), context.connections);
-      const target: DestinationTarget = { iata, cityName: args.cityName };
+      // The country is what stops us mapping Paris, Texas. `destinations.ts`
+      // halves the confidence of a candidate in the wrong country, but that
+      // rail only engages when the target HAS a country — so derive it from the
+      // airport rather than leaving the check inert.
+      const target: DestinationTarget = {
+        iata,
+        cityName: args.cityName,
+        countryCode: iataToCountry(iata),
+      };
       const results: ResolveOutcome["results"] = [];
 
       await Promise.all(

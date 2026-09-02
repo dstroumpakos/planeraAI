@@ -23,7 +23,7 @@ import { makeFunctionReference } from "convex/server";
 import { action, internalMutation, mutation, query } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
 import type { NormalizedOffer, TravelPackage } from "./model/types";
-import { buildQuote, type PricingRuleRow } from "./quote";
+import { buildQuote, revalidatedExpiry, type PricingRuleRow } from "./quote";
 import { searchForQuote, revalidateSelected, type ConnectorRunResult } from "./orchestrator";
 import { bindingsById, buildBindings, type StoredConnectionRow } from "./runtime";
 import { scrubForStorage, selectedOffers, toAgentPackages, toCustomerPackages } from "./quoteView";
@@ -41,6 +41,8 @@ import {
 import {
   normalizeCurrency,
   normalizeIata,
+  normalizeMaxStops,
+  normalizeRooms,
   validateDateRange,
   validateParty,
 } from "./validation";
@@ -67,11 +69,30 @@ interface NormalizedSearchParams {
   returnDate?: string;
   adults: number;
   childrenAges: number[];
+  /** Hotel rooms. Suppliers price per room, so 2 rooms is not 2x one room. */
+  rooms: number;
   cabinClass?: string;
   currency: string;
   nights: number;
   travelers: number;
+  /** 0 = direct only. Absent means the agent did not care. */
+  maxStops?: number;
+  /** Which kinds to search. An agency quoting a hotel-only stay says so here. */
+  kinds: Array<"flight" | "hotel" | "activity" | "transfer">;
+  /** Whose trip this is — an agency runs many searches a day. */
+  clientName?: string;
+  clientReference?: string;
 }
+
+const SEARCHABLE_KINDS = ["flight", "hotel", "activity", "transfer"] as const;
+type SearchableKind = (typeof SEARCHABLE_KINDS)[number];
+
+const searchKind = v.union(
+  v.literal("flight"),
+  v.literal("hotel"),
+  v.literal("activity"),
+  v.literal("transfer"),
+);
 
 interface SearchContext {
   agencyId: Id<"agencies">;
@@ -98,8 +119,13 @@ export const beginSearch = internalMutation({
     returnDate: v.optional(v.string()),
     adults: v.float64(),
     childrenAges: v.optional(v.array(v.float64())),
+    rooms: v.optional(v.float64()),
     cabinClass: v.optional(v.string()),
     currency: v.optional(v.string()),
+    maxStops: v.optional(v.float64()),
+    kinds: v.optional(v.array(searchKind)),
+    clientName: v.optional(v.string()),
+    clientReference: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<SearchContext> => {
     return guard("beginSearch", async () => {
@@ -153,6 +179,13 @@ export const beginSearch = internalMutation({
         );
       }
 
+      // An empty selection means "everything" rather than "nothing": a caller
+      // that sends no kinds wants a normal search, not an empty quote.
+      const requested = (args.kinds ?? []).filter((k): k is SearchableKind =>
+        (SEARCHABLE_KINDS as readonly string[]).includes(k),
+      );
+      const kinds = requested.length ? [...new Set(requested)] : [...SEARCHABLE_KINDS];
+
       const params: NormalizedSearchParams = {
         originIata,
         destinationIata,
@@ -160,10 +193,15 @@ export const beginSearch = internalMutation({
         returnDate: dates.returnDate,
         adults: party.adults,
         childrenAges: party.childrenAges,
+        rooms: normalizeRooms(args.rooms, party.adults),
         cabinClass: args.cabinClass,
         currency,
         nights: dates.nights,
         travelers: party.travelers,
+        maxStops: normalizeMaxStops(args.maxStops),
+        kinds,
+        clientName: args.clientName?.trim().slice(0, 120) || undefined,
+        clientReference: args.clientReference?.trim().slice(0, 60) || undefined,
       };
 
       // Hotel and activity suppliers key off their own destination taxonomy, so
@@ -211,6 +249,8 @@ export const saveQuote = internalMutation({
     searchParams: v.any(),
     packages: v.any(),
     diagnostics: v.any(),
+    clientName: v.optional(v.string()),
+    clientReference: v.optional(v.string()),
     searchHash: v.string(),
     searchedAt: v.float64(),
     expiresAt: v.float64(),
@@ -225,6 +265,8 @@ export const saveQuote = internalMutation({
         searchParams: args.searchParams,
         packages: args.packages,
         diagnostics: args.diagnostics,
+        clientName: args.clientName,
+        clientReference: args.clientReference,
         searchHash: args.searchHash,
         status: "draft",
         searchedAt: args.searchedAt,
@@ -239,10 +281,36 @@ export const saveQuote = internalMutation({
         targetId: args.quoteId,
         meta: { currency: args.currency },
       });
+
+      // Client-facing copy is written after the fact, never inline: a search
+      // must not wait on OpenAI, and a quote with no copy is complete and
+      // sendable. It appears on the document a few seconds later.
+      await ctx.scheduler.runAfter(0, generateCopyRef, {
+        quoteId: args.quoteId,
+        agencyId: args.agencyId,
+      });
       return id;
     });
   },
 });
+
+const notifyQuoteEventRef = makeFunctionReference<
+  "action",
+  {
+    agencyId: Id<"agencies">;
+    quoteId: string;
+    event: "viewed" | "accepted";
+    tier?: string;
+    note?: string;
+  },
+  null
+>("agency/notify:quoteEvent");
+
+const generateCopyRef = makeFunctionReference<
+  "action",
+  { quoteId: string; agencyId: Id<"agencies"> },
+  null
+>("agency/packageCopy:generate");
 
 const beginSearchRef = makeFunctionReference<
   "mutation",
@@ -254,8 +322,13 @@ const beginSearchRef = makeFunctionReference<
     returnDate?: string;
     adults: number;
     childrenAges?: number[];
+    rooms?: number;
     cabinClass?: string;
     currency?: string;
+    maxStops?: number;
+    kinds?: SearchableKind[];
+    clientName?: string;
+    clientReference?: string;
   },
   SearchContext
 >("agency/quotes:beginSearch");
@@ -270,6 +343,8 @@ const saveQuoteRef = makeFunctionReference<
     searchParams: unknown;
     packages: unknown;
     diagnostics: unknown;
+    clientName?: string;
+    clientReference?: string;
     searchHash: string;
     searchedAt: number;
     expiresAt: number;
@@ -301,8 +376,13 @@ export const search = action({
     returnDate: v.optional(v.string()),
     adults: v.float64(),
     childrenAges: v.optional(v.array(v.float64())),
+    rooms: v.optional(v.float64()),
     cabinClass: v.optional(v.string()),
     currency: v.optional(v.string()),
+    maxStops: v.optional(v.float64()),
+    kinds: v.optional(v.array(searchKind)),
+    clientName: v.optional(v.string()),
+    clientReference: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<SearchResult> =>
     guard("quotes.search", async () => {
@@ -314,8 +394,13 @@ export const search = action({
         returnDate: args.returnDate,
         adults: args.adults,
         childrenAges: args.childrenAges,
+        rooms: args.rooms,
         cabinClass: args.cabinClass,
         currency: args.currency,
+        maxStops: args.maxStops,
+        kinds: args.kinds,
+        clientName: args.clientName,
+        clientReference: args.clientReference,
       });
 
       const { bindings, skipped } = await buildBindings(vaultMasterKey(), context.connections);
@@ -329,14 +414,34 @@ export const search = action({
             returnDate: p.returnDate,
             adults: p.adults,
             childrenAges: p.childrenAges,
+            rooms: p.rooms,
             cabinClass: p.cabinClass,
             sellCurrency: p.currency,
           },
           undefined,
-          context.destinationIds)
-        : { flights: [], hotels: [], diagnostics: [] };
+          context.destinationIds,
+          p.kinds)
+        : { flights: [], hotels: [], activities: [], transfers: [], diagnostics: [] };
 
       const diagnostics = [...skipped, ...found.diagnostics];
+
+      // Applied AFTER the search rather than sent to each supplier: not every
+      // connector exposes a stops filter, and filtering here means the rule is
+      // one rule instead of thirteen. Falls back to the unfiltered pool when
+      // nothing clears the bar — an empty quote helps nobody, and the agent can
+      // see the stops on every line anyway.
+      const flights =
+        p.maxStops === undefined
+          ? found.flights
+          : (() => {
+              const within = found.flights.filter(
+                (f) =>
+                  f.outboundStops <= p.maxStops! &&
+                  (f.inboundStops ?? 0) <= p.maxStops!,
+              );
+              return within.length > 0 ? within : found.flights;
+            })();
+
       const searchedAt = Date.now();
       const quoteId = `qte_${newToken().replace(/[^a-zA-Z0-9]/g, "").slice(0, 16)}`;
 
@@ -350,8 +455,10 @@ export const search = action({
         days: Math.max(1, p.nights),
         travelers: p.travelers,
         destinationIata: p.destinationIata,
-        flights: found.flights,
+        flights,
         hotels: found.hotels,
+        activities: found.activities,
+        transfers: found.transfers,
         rules: context.rules,
         now: searchedAt,
         ttlMs: context.ttlMs,
@@ -379,6 +486,8 @@ export const search = action({
         searchParams: p,
         packages,
         diagnostics,
+        clientName: p.clientName,
+        clientReference: p.clientReference,
         searchHash: context.searchHash,
         searchedAt,
         expiresAt: built.expiresAt,
@@ -430,6 +539,9 @@ export const list = query({
           quoteId: r.quoteId,
           status: r.status,
           currency: r.currency,
+          // What makes a list of 40 quotes searchable by a human.
+          clientName: r.clientName ?? null,
+          clientReference: r.clientReference ?? null,
           searchParams: r.searchParams,
           searchedAt: r.searchedAt,
           expiresAt: r.expiresAt,
@@ -468,11 +580,21 @@ export const get = query({
         diagnostics: row!.diagnostics ?? [],
         revalidation: row!.revalidation ?? null,
         searchedAt: row!.searchedAt,
+        clientName: row!.clientName ?? null,
+        clientReference: row!.clientReference ?? null,
+        aiCopy: row!.aiCopy ?? null,
         expiresAt: row!.expiresAt,
         expired: Date.now() >= row!.expiresAt,
         lastRevalidatedAt: row!.lastRevalidatedAt ?? null,
         sentAt: row!.sentAt ?? null,
         acceptedAt: row!.acceptedAt ?? null,
+        acceptedTier: row!.acceptedTier ?? null,
+        acceptedNote: row!.acceptedNote ?? null,
+        // "They read it twice and did not reply" is a different sales call
+        // from "they never opened it", and the agent had no way to tell.
+        firstViewedAt: row!.firstViewedAt ?? null,
+        lastViewedAt: row!.lastViewedAt ?? null,
+        viewCount: row!.viewCount ?? 0,
         customerLinkActive:
           !!row!.customerLinkTokenHash &&
           (row!.customerLinkExpiresAt ?? 0) > Date.now(),
@@ -556,10 +678,28 @@ export const recordRevalidation = internalMutation({
           : ("draft" as const)
         : ("expired" as const);
 
+      // A successful revalidation IS a fresh confirmation from every supplier
+      // behind the quote — that is the entire point of the call — so it has to
+      // restart the validity window. Leaving `expiresAt` at its original value
+      // left a just-confirmed quote still reading as expired, and `send`
+      // refuses an expired quote with "revalidate it before sending", so an
+      // expired quote could never be recovered by the one action that exists
+      // to recover it.
+      //
+      // Only on success: a quote whose offers are gone or unverifiable keeps
+      // its old expiry and stays expired.
+      const agency = await ctx.db.get(args.agencyId);
+
       await ctx.db.patch(args.quoteRowId, {
         revalidation: args.outcome,
         lastRevalidatedAt: now,
         status,
+        expiresAt: revalidatedExpiry({
+          stillValid: args.stillValid,
+          now,
+          ttlMs: agency?.quoteTtlMs ?? DEFAULT_QUOTE_TTL_MS,
+          currentExpiresAt: row.expiresAt,
+        }),
         updatedAt: now,
       });
       await audit(ctx, {
@@ -776,12 +916,34 @@ export const resolveCustomerLink = internalMutation({
       const agency = await ctx.db.get(row.agencyId);
       if (!agency || agency.status !== "active") throw notFound("quote");
 
+      // An agency has no other way to know whether a quote was ever opened,
+      // and "they read it twice and did not reply" is a different sales call
+      // from "they never saw it". Recorded here because this is already the
+      // mutation every open goes through.
+      const viewedAt = Date.now();
+      const firstView = !row.firstViewedAt;
+      await ctx.db.patch(row._id, {
+        firstViewedAt: row.firstViewedAt ?? viewedAt,
+        lastViewedAt: viewedAt,
+        viewCount: (row.viewCount ?? 0) + 1,
+      });
+      // Only the FIRST open is worth an email. A client re-reading a quote four
+      // times should not put four messages in an agent's inbox.
+      if (firstView) {
+        await ctx.scheduler.runAfter(0, notifyQuoteEventRef, {
+          agencyId: row.agencyId,
+          quoteId: row.quoteId,
+          event: "viewed",
+        });
+      }
+
       return {
         quoteId: row.quoteId,
         currency: row.currency,
         status: row.status,
         searchParams: row.searchParams,
         packages: toCustomerPackages((row.packages ?? []) as TravelPackage[]),
+        aiCopy: row.aiCopy ?? null,
         expiresAt: row.expiresAt,
         expired: Date.now() >= row.expiresAt,
         agency: {
@@ -789,6 +951,12 @@ export const resolveCustomerLink = internalMutation({
           primaryColor: agency.branding?.primaryColor ?? null,
           contactEmail: agency.branding?.contactEmail ?? null,
           contactPhone: agency.branding?.contactPhone ?? null,
+          // Resolved here rather than handed out as a storage id, which means
+          // nothing to a browser. Public on purpose: this is the agency's own
+          // mark on a document it chose to send.
+          logoUrl: agency.branding?.logoStorageId
+            ? await ctx.storage.getUrl(agency.branding.logoStorageId)
+            : null,
         },
       };
     });
@@ -800,6 +968,98 @@ const resolveCustomerLinkRef = makeFunctionReference<
   { linkToken: string },
   unknown
 >("agency/quotes:resolveCustomerLink");
+
+/**
+ * Accept a quote from the customer link.
+ *
+ * The traveller could always READ the quote and never act on it, so every "yes"
+ * arrived by email or phone and had to be typed back in by an agent. This is
+ * the same capability URL doing the same job it already does for reading.
+ *
+ * It records intent, NOT a booking: the agency still confirms, re-prices and
+ * tickets — the quote page says so, and nothing here touches a supplier.
+ */
+export const acceptFromLink = mutation({
+  args: {
+    linkToken: v.string(),
+    tier: v.string(),
+    note: v.optional(v.string()),
+  },
+  handler: async (ctx, args) =>
+    guard("acceptFromLink", async () => {
+      await consumeLimit(ctx, "acceptQuote", args.linkToken.slice(0, 8));
+
+      const hash = await sha256Hex(args.linkToken);
+      const row = await ctx.db
+        .query("quotes")
+        .withIndex("by_customerLinkTokenHash", (q) => q.eq("customerLinkTokenHash", hash))
+        .unique();
+      if (!row || !row.customerLinkExpiresAt || row.customerLinkExpiresAt <= Date.now()) {
+        throw notFound("quote");
+      }
+
+      const agency = await ctx.db.get(row.agencyId);
+      if (!agency || agency.status !== "active") throw notFound("quote");
+
+      // An expired quote holds prices nobody can honour. Accepting one would
+      // set a client's expectation at a number the agency may have to walk
+      // back, which is worse than asking them to request fresh prices.
+      if (Date.now() >= row.expiresAt) {
+        throw new AgencyError(
+          "quote_expired",
+          "this quote has expired — ask your agent for updated prices",
+        );
+      }
+
+      const tier = String(args.tier);
+      const packages = (row.packages ?? []) as TravelPackage[];
+      if (!packages.some((p) => p.tier === tier)) throw invalid("unknown package");
+
+      // Already accepted: answer success rather than an error. A traveller who
+      // double-taps has done nothing wrong, and the agent already has the
+      // first answer.
+      if (row.status !== "accepted") {
+        await ctx.db.patch(row._id, {
+          status: "accepted",
+          acceptedAt: Date.now(),
+          acceptedTier: tier,
+          acceptedNote: args.note?.trim().slice(0, 1000) || undefined,
+          updatedAt: Date.now(),
+        });
+        await ctx.scheduler.runAfter(0, notifyQuoteEventRef, {
+          agencyId: row.agencyId,
+          quoteId: row.quoteId,
+          event: "accepted",
+          tier,
+          note: args.note?.trim().slice(0, 1000),
+        });
+      }
+
+      return { ok: true as const, tier };
+    }),
+});
+
+const acceptFromLinkRef = makeFunctionReference<
+  "mutation",
+  { linkToken: string; tier: string; note?: string },
+  { ok: true; tier: string }
+>("agency/quotes:acceptFromLink");
+
+/** Public wrapper, mirroring `publicQuote` — the link token is the credential. */
+export const acceptQuote = action({
+  args: { linkToken: v.string(), tier: v.string(), note: v.optional(v.string()) },
+  handler: async (ctx, args): Promise<unknown> =>
+    guard("quotes.acceptQuote", async () => {
+      if (!args.linkToken || args.linkToken.length < 16 || args.linkToken.length > 200) {
+        throw notFound("quote");
+      }
+      return await ctx.runMutation(acceptFromLinkRef, {
+        linkToken: args.linkToken,
+        tier: args.tier,
+        note: args.note,
+      });
+    }),
+});
 
 /**
  * The traveller's view of a quote. Public by design — the link token IS the

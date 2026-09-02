@@ -78,18 +78,82 @@ export interface HealthSpec {
   body?: unknown;
 }
 
+export interface HttpCall {
+  method: "GET" | "POST";
+  url: string;
+  body?: unknown;
+}
+
+/**
+ * A call made BEFORE the search, because some providers cannot be asked "what
+ * is available in this city" at all.
+ *
+ * Expedia Rapid is the clearest case: its availability endpoint takes a list of
+ * PROPERTY ids and has no notion of a region, so the region has to be expanded
+ * into properties first. Modelling that as a declared first step keeps it in
+ * the same tested engine as every other connector, rather than forcing a
+ * hand-written file for each provider whose contract needs two round trips.
+ */
+export interface PrepareSpec {
+  request: (creds: SupplierCredentials, query: SearchQuery, host: string) => HttpCall | null;
+  /** Whatever `request`/`map` need downstream; return null to decline the search. */
+  map: (payload: unknown, query: SearchQuery) => unknown | null;
+  timeoutMs?: number;
+}
+
+/**
+ * A call made AFTER the search, for fields the availability response omits.
+ *
+ * Expedia Rapid and Booking.com both answer a price query with ids and rates
+ * and no human-readable name — the name lives in a separate content endpoint.
+ * A quote needs the name, so it is fetched here.
+ *
+ * Enrichment is best-effort BY DESIGN: if it fails, the offers still stand with
+ * whatever the search itself returned. Losing a whole set of real prices
+ * because a cosmetic lookup timed out would be the worse outcome.
+ */
+export interface EnrichSpec {
+  request: (
+    creds: SupplierCredentials,
+    query: SearchQuery,
+    host: string,
+    offers: NormalizedOffer[],
+  ) => HttpCall | null;
+  apply: (payload: unknown, offers: NormalizedOffer[]) => NormalizedOffer[];
+  timeoutMs?: number;
+}
+
 export interface SearchSpec {
   kinds: Array<NormalizedOffer["kind"]>;
   /** Set when the provider keys off its own destination taxonomy. */
   requiresDestinationId?: boolean;
+  /** Optional first round trip; its result is passed to `request` and `map`. */
+  prepare?: PrepareSpec;
   /** Build the HTTP call for a search, or return null to decline this query. */
   request: (
     creds: SupplierCredentials,
     query: SearchQuery,
     host: string,
-  ) => { method: "GET" | "POST"; url: string; body?: unknown } | null;
+    prepared: unknown,
+  ) => HttpCall | null;
   /** Map the provider payload onto the canonical model. */
-  map: (payload: unknown, query: SearchQuery) => NormalizedOffer[];
+  map: (payload: unknown, query: SearchQuery, prepared: unknown) => NormalizedOffer[];
+  /** Optional follow-up round trip that fills in what the search left out. */
+  enrich?: EnrichSpec;
+}
+
+/**
+ * How to re-price one offer by its provider-locked token.
+ *
+ * This is the ONLY source of a bookable price, so a connector declares it only
+ * when the provider's re-price contract is confirmed. Everything else keeps
+ * `makeConnector`'s default, which refuses rather than implying a search price
+ * is guaranteed.
+ */
+export interface RevalidateSpec {
+  request: (creds: SupplierCredentials, token: string, host: string) => HttpCall;
+  map: (payload: unknown, token: string) => RevalidateResult;
+  timeoutMs?: number;
 }
 
 /**
@@ -118,6 +182,16 @@ export interface ConnectorSpec {
   destinations?: DestinationSpec;
   /** Absent when the provider's search contract is not publicly documented. */
   search?: SearchSpec;
+  /** Absent unless the provider's re-price contract is confirmed. */
+  revalidate?: RevalidateSpec;
+  /**
+   * Static headers this provider requires on every call beyond authentication —
+   * an API version it pins behaviour to, or a caller identity it mandates.
+   * Getting these wrong is not a subtle failure: Viator serves a different
+   * response schema per `Accept` version, so omitting it silently changes the
+   * shape we parse.
+   */
+  headers?: (creds: SupplierCredentials) => Record<string, string>;
   /**
    * What still has to be confirmed with the provider before `search` can be
    * written. Required whenever `search` is absent — it is the message an agency
@@ -142,7 +216,12 @@ async function authHeaders(
   creds: SupplierCredentials,
   host: string,
 ): Promise<Record<string, string>> {
-  const base: Record<string, string> = { Accept: "application/json" };
+  // Spec headers are applied UNDER the auth headers so a provider can pin its
+  // own Accept version, but can never overwrite the Authorization we computed.
+  const base: Record<string, string> = {
+    Accept: "application/json",
+    ...(spec.headers?.(creds) ?? {}),
+  };
 
   switch (spec.auth.kind) {
     case "bearer": {
@@ -252,6 +331,50 @@ function verdictFor(status: number, connectorId: string): HealthStatus["message"
 const AUTH_OK_BUT_BAD_PARAMS = new Set([400, 422]);
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Calling
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** One authenticated round trip to a provider, as described by an `HttpCall`. */
+async function callProvider(
+  spec: ConnectorSpec,
+  creds: SupplierCredentials,
+  host: string,
+  call: HttpCall,
+  timeoutMs: number,
+  maxBytes?: number,
+): Promise<unknown> {
+  const headers = await authHeaders(spec, creds, host);
+  if (call.body !== undefined) headers["Content-Type"] = "application/json";
+
+  return fetchJson<unknown>(
+    call.url,
+    {
+      method: call.method,
+      headers,
+      ...(call.body !== undefined ? { body: JSON.stringify(call.body) } : {}),
+    },
+    { connectorId: spec.id, timeoutMs, retries: 1, ...(maxBytes ? { maxBytes } : {}) },
+  );
+}
+
+/**
+ * Run a mapper, turning any parse failure into a connector-attributed error.
+ * Without this a provider changing its response shape surfaces as an opaque
+ * "cannot read property of undefined" with no hint of which supplier broke.
+ */
+function readPayload<T>(spec: ConnectorSpec, map: () => T): T {
+  try {
+    return map();
+  } catch (e) {
+    throw new SupplierHttpError(
+      0,
+      spec.id,
+      `could not read ${spec.displayName}'s response: ${(e as Error).message}`.slice(0, 300),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Factory
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -280,7 +403,7 @@ export function makeConnector(spec: ConnectorSpec): SupplierConnector {
         // Revalidation is per-provider work that has to follow a working
         // search; declaring it before it exists would let the orchestrator
         // present unverified prices as confirmed.
-        revalidate: false,
+        revalidate: !!spec.revalidate,
         createBooking: false,
         retrieveBooking: false,
         cancelBooking: false,
@@ -377,35 +500,60 @@ export function makeConnector(spec: ConnectorSpec): SupplierConnector {
     },
 
     async search(creds: SupplierCredentials, query: SearchQuery): Promise<NormalizedOffer[]> {
-      if (!spec.search) return notReady();
-      if (!spec.search.kinds.includes(query.kind)) return [];
+      const searchSpec = spec.search;
+      if (!searchSpec) return notReady();
+      if (!searchSpec.kinds.includes(query.kind)) return [];
 
       const host = resolveHost(spec, creds);
-      const built = spec.search.request(creds, query, host);
+
+      // ── Step 1 (optional): expand the query into whatever the search needs ──
+      let prepared: unknown = undefined;
+      if (searchSpec.prepare) {
+        const preCall = searchSpec.prepare.request(creds, query, host);
+        if (!preCall) return [];
+        const prePayload = await callProvider(
+          spec,
+          creds,
+          host,
+          preCall,
+          searchSpec.prepare.timeoutMs ?? spec.timeoutMs ?? 11_000,
+        );
+        prepared = readPayload(spec, () => searchSpec.prepare!.map(prePayload, query));
+        // A provider that knows nothing about this destination is not an error.
+        if (prepared === null || prepared === undefined) return [];
+      }
+
+      // ── Step 2: the search itself ──
+      const built = searchSpec.request(creds, query, host, prepared);
       // A connector may decline a query it cannot express (e.g. no IATA code).
       if (!built) return [];
 
-      const headers = await authHeaders(spec, creds, host);
-      if (built.body !== undefined) headers["Content-Type"] = "application/json";
-
-      const payload = await fetchJson<unknown>(
-        built.url,
-        {
-          method: built.method,
-          headers,
-          ...(built.body !== undefined ? { body: JSON.stringify(built.body) } : {}),
-        },
-        { connectorId: spec.id, timeoutMs: spec.timeoutMs ?? 11_000, retries: 1 },
+      const payload = await callProvider(
+        spec,
+        creds,
+        host,
+        built,
+        spec.timeoutMs ?? 11_000,
       );
+      const offers = readPayload(spec, () => searchSpec.map(payload, query, prepared));
 
+      // ── Step 3 (optional): fill in what the availability response omits ──
+      if (!searchSpec.enrich || offers.length === 0) return offers;
       try {
-        return spec.search.map(payload, query);
-      } catch (e) {
-        throw new SupplierHttpError(
-          0,
-          spec.id,
-          `could not read ${spec.displayName}'s response: ${(e as Error).message}`.slice(0, 300),
+        const enrichCall = searchSpec.enrich.request(creds, query, host, offers);
+        if (!enrichCall) return offers;
+        const enrichPayload = await callProvider(
+          spec,
+          creds,
+          host,
+          enrichCall,
+          searchSpec.enrich.timeoutMs ?? spec.timeoutMs ?? 11_000,
         );
+        return searchSpec.enrich.apply(enrichPayload, offers);
+      } catch (e) {
+        // Best-effort by design: real prices survive a failed cosmetic lookup.
+        console.error(`[agency:${spec.id}] enrichment failed:`, (e as Error).message);
+        return offers;
       }
     },
 
@@ -456,14 +604,33 @@ export function makeConnector(spec: ConnectorSpec): SupplierConnector {
         }
       : {}),
 
-    async revalidate(): Promise<RevalidateResult> {
-      // Never claim a price is still good on a provider we cannot re-price.
-      // The orchestrator treats this as "unverifiable", which is the truth.
-      throw new SupplierHttpError(
-        0,
-        spec.id,
-        `${spec.displayName} cannot re-price an offer yet — confirm it manually before booking`,
+    async revalidate(
+      creds: SupplierCredentials,
+      revalidationToken: string,
+    ): Promise<RevalidateResult> {
+      if (!spec.revalidate) {
+        // Never claim a price is still good on a provider we cannot re-price.
+        // The orchestrator treats this as "unverifiable", which is the truth.
+        throw new SupplierHttpError(
+          0,
+          spec.id,
+          `${spec.displayName} cannot re-price an offer yet — confirm it manually before booking`,
+        );
+      }
+
+      const host = resolveHost(spec, creds);
+      // Building the call can itself fail — Amadeus parses the offer back out
+      // of the token — and a corrupt token must read as a connector error, not
+      // as an unhandled SyntaxError from deep inside a quote refresh.
+      const call = readPayload(spec, () => spec.revalidate!.request(creds, revalidationToken, host));
+      const payload = await callProvider(
+        spec,
+        creds,
+        host,
+        call,
+        spec.revalidate.timeoutMs ?? spec.timeoutMs ?? 11_000,
       );
+      return readPayload(spec, () => spec.revalidate!.map(payload, revalidationToken));
     },
   };
 }

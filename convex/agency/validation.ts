@@ -198,6 +198,34 @@ export function validateParty(adults: number, childrenAges: number[] | undefined
   return { adults, childrenAges: ages, travelers: adults + ages.length };
 }
 
+/** Hotel suppliers price PER ROOM, so this is not cosmetic. */
+export const MAX_ROOMS = 9;
+
+/**
+ * How many rooms to price.
+ *
+ * Defaults to one, and is capped by the adult count: a supplier asked for four
+ * rooms for two adults returns either nothing or nonsense, and the agent would
+ * have no idea which. Clamping is kinder than an error here — the agent is
+ * mid-search, and one room per adult is unambiguously what they meant.
+ */
+export function normalizeRooms(rooms: number | undefined, adults: number): number {
+  if (rooms === undefined) return 1;
+  if (!Number.isInteger(rooms) || rooms < 1) {
+    throw new ValidationError("rooms must be a whole number of at least 1");
+  }
+  return Math.min(rooms, Math.min(MAX_ROOMS, Math.max(1, adults)));
+}
+
+/** `0` means direct flights only; anything above 3 is not a real preference. */
+export function normalizeMaxStops(maxStops: number | undefined): number | undefined {
+  if (maxStops === undefined) return undefined;
+  if (!Number.isInteger(maxStops) || maxStops < 0 || maxStops > 3) {
+    throw new ValidationError("maximum stops must be between 0 and 3");
+  }
+  return maxStops;
+}
+
 // ── Credentials ─────────────────────────────────────────────────────────────
 
 /**

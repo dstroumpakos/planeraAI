@@ -17,9 +17,11 @@
 
 import type {
   InternalFinancials,
+  NormalizedActivityOffer,
   NormalizedFlightOffer,
   NormalizedHotelOffer,
   NormalizedOffer,
+  NormalizedTransferOffer,
   PackageTier,
 } from "./model/types";
 
@@ -96,6 +98,47 @@ export const HOTEL_WEIGHTS: Record<PackageTier, HotelWeights> = {
   comfort: { price: 0.26, starRating: 0.2, reviewScore: 0.18, proximity: 0.12, breakfast: 0.1, freeCancellation: 0.08, margin: 0.06 },
   premium: { price: 0.12, starRating: 0.24, reviewScore: 0.2, proximity: 0.2, breakfast: 0.08, freeCancellation: 0.12, margin: 0.04 },
 };
+
+export interface ExperienceWeights {
+  price: number;
+  quality: number;
+  refundable: number;
+  margin: number;
+}
+
+/**
+ * Experiences (activities and transfers) are scored far more on QUALITY than
+ * flights or hotels are, and barely on margin.
+ *
+ * The reason is commercial, not aesthetic: activity suppliers pay a commission
+ * on a retail price the traveller can look up, so `markupForbidden` is set and
+ * there is no spread to optimise. What an excursion earns the agency is the
+ * booking, and what wins the booking is that it is obviously the right one.
+ */
+export const ACTIVITY_WEIGHTS: Record<PackageTier, ExperienceWeights> = {
+  basic: { price: 0.6, quality: 0.28, refundable: 0.06, margin: 0.06 },
+  comfort: { price: 0.34, quality: 0.5, refundable: 0.1, margin: 0.06 },
+  premium: { price: 0.14, quality: 0.66, refundable: 0.16, margin: 0.04 },
+};
+
+export const TRANSFER_WEIGHTS: Record<PackageTier, ExperienceWeights> = {
+  basic: { price: 0.7, quality: 0.18, refundable: 0.06, margin: 0.06 },
+  comfort: { price: 0.42, quality: 0.42, refundable: 0.1, margin: 0.06 },
+  premium: { price: 0.2, quality: 0.6, refundable: 0.16, margin: 0.04 },
+};
+
+/**
+ * How many experiences each tier carries.
+ *
+ * Basic gets NONE on purpose. It is the price-led option, and padding it with
+ * extras is exactly how a cheap tier stops being cheap — an agent who wants a
+ * bare comparison would have to strip it back by hand. The ladder is the
+ * product: flight + bed, then + something to do, then + a full few days.
+ */
+export const ACTIVITY_PICKS: Record<PackageTier, number> = { basic: 0, comfort: 1, premium: 2 };
+
+/** A ground/ferry leg is a Comfort-and-up convenience, for the same reason. */
+export const TRANSFER_PICKS: Record<PackageTier, number> = { basic: 0, comfort: 1, premium: 1 };
 
 /** Minimum acceptable hotel review score per tier (candidates below are filtered). */
 export const MIN_HOTEL_REVIEW: Record<PackageTier, number> = { basic: 6.5, comfort: 7.5, premium: 8.3 };
@@ -196,10 +239,77 @@ function pickBest<T extends NormalizedOffer>(scored: Scored<T>[]): Scored<T> | n
   })[0];
 }
 
+/**
+ * Score one experience. `quality` is whatever signal the provider gave us,
+ * defaulting to the middle rather than to zero — an activity with no rating
+ * yet is unknown, not bad, and scoring it as bad would bury every new product.
+ */
+function scoreExperience(
+  cand: PricedCandidate<NormalizedActivityOffer | NormalizedTransferOffer>,
+  tier: PackageTier,
+  pool: Pool,
+  weights: Record<PackageTier, ExperienceWeights>,
+): number {
+  const w = weights[tier];
+  const price = invMinMax(cand.financials.customerPrice.amountMinor, pool.priceMin, pool.priceMax);
+  const quality =
+    cand.offer.kind === "activity"
+      ? (cand.offer.qualityScore ?? 0.5)
+      : // A private transfer is the premium product; shared is the economical one.
+        cand.offer.mode === "private"
+        ? 1
+        : 0.5;
+  const refundable = cand.offer.conditions.refundable ? 1 : 0;
+  const margin = invMinMaxHigh(
+    cand.financials.expectedGrossProfit.amountMinor,
+    pool.marginMin,
+    pool.marginMax,
+  );
+
+  const total = w.price + w.quality + w.refundable + w.margin;
+  return (
+    (w.price * price + w.quality * quality + w.refundable * refundable + w.margin * margin) / total
+  );
+}
+
+/**
+ * The best N, never the same product twice.
+ *
+ * De-duplicating by supplier id matters because two connectors covering the
+ * same city routinely list the same museum ticket, and a Premium package that
+ * sold the Louvre twice would be an obvious, embarrassing bug on a document
+ * going to a client.
+ */
+function pickTop<T extends NormalizedOffer>(scored: Scored<T>[], count: number): Scored<T>[] {
+  if (count <= 0) return [];
+  const ordered = [...scored].sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    const dc = a.cand.financials.supplierCost.amountMinor - b.cand.financials.supplierCost.amountMinor;
+    if (dc !== 0) return dc;
+    return a.cand.offer.offerId < b.cand.offer.offerId ? -1 : 1;
+  });
+
+  const picked: Scored<T>[] = [];
+  const seen = new Set<string>();
+  for (const s of ordered) {
+    const key = `${s.cand.offer.supplierOfferId}|${
+      "title" in s.cand.offer ? String(s.cand.offer.title).toLowerCase() : ""
+    }`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    picked.push(s);
+    if (picked.length >= count) break;
+  }
+  return picked;
+}
+
 export interface SelectedTier {
   tier: PackageTier;
   flight: Scored<NormalizedFlightOffer> | null;
   hotel: Scored<NormalizedHotelOffer> | null;
+  /** Zero or more experiences — Basic deliberately carries none. */
+  activities: Scored<NormalizedActivityOffer>[];
+  transfers: Scored<NormalizedTransferOffer>[];
 }
 
 /**
@@ -212,6 +322,8 @@ export function selectTier(
   flights: PricedCandidate<NormalizedFlightOffer>[],
   hotels: PricedCandidate<NormalizedHotelOffer>[],
   tier: PackageTier,
+  activities: PricedCandidate<NormalizedActivityOffer>[] = [],
+  transfers: PricedCandidate<NormalizedTransferOffer>[] = [],
 ): SelectedTier {
   const flightPool = poolStats(flights, (o) => (o as NormalizedFlightOffer).totalDurationMinutes, () => -1);
   const scoredFlights: Scored<NormalizedFlightOffer>[] = flights.map((c) => ({ cand: c, score: scoreFlight(c, tier, flightPool) }));
@@ -223,17 +335,37 @@ export function selectTier(
   const hotelPool = poolStats(hotelSet, () => 0, (o) => (o as NormalizedHotelOffer).distanceFromCentreM ?? -1);
   const scoredHotels: Scored<NormalizedHotelOffer>[] = hotelSet.map((c) => ({ cand: c, score: scoreHotel(c, tier, hotelPool) }));
 
-  return { tier, flight: pickBest(scoredFlights), hotel: pickBest(scoredHotels) };
+  const actPool = poolStats(activities, () => 0, () => -1);
+  const scoredActivities: Scored<NormalizedActivityOffer>[] = activities.map((c) => ({
+    cand: c,
+    score: scoreExperience(c, tier, actPool, ACTIVITY_WEIGHTS),
+  }));
+
+  const trPool = poolStats(transfers, () => 0, () => -1);
+  const scoredTransfers: Scored<NormalizedTransferOffer>[] = transfers.map((c) => ({
+    cand: c,
+    score: scoreExperience(c, tier, trPool, TRANSFER_WEIGHTS),
+  }));
+
+  return {
+    tier,
+    flight: pickBest(scoredFlights),
+    hotel: pickBest(scoredHotels),
+    activities: pickTop(scoredActivities, ACTIVITY_PICKS[tier]),
+    transfers: pickTop(scoredTransfers, TRANSFER_PICKS[tier]),
+  };
 }
 
 /** Convenience: run all three tiers. */
 export function selectAllTiers(
   flights: PricedCandidate<NormalizedFlightOffer>[],
   hotels: PricedCandidate<NormalizedHotelOffer>[],
+  activities: PricedCandidate<NormalizedActivityOffer>[] = [],
+  transfers: PricedCandidate<NormalizedTransferOffer>[] = [],
 ): Record<PackageTier, SelectedTier> {
   return {
-    basic: selectTier(flights, hotels, "basic"),
-    comfort: selectTier(flights, hotels, "comfort"),
-    premium: selectTier(flights, hotels, "premium"),
+    basic: selectTier(flights, hotels, "basic", activities, transfers),
+    comfort: selectTier(flights, hotels, "comfort", activities, transfers),
+    premium: selectTier(flights, hotels, "premium", activities, transfers),
   };
 }

@@ -2967,6 +2967,7 @@ interface ItineraryActivity {
     skipTheLine?: boolean;
     skipTheLinePrice?: number | null;
     duration?: string;
+    durationMinutes?: number;
     bookingUrl?: string | null;
     tips?: string | null;
     fromTripAdvisor?: boolean;
@@ -3017,6 +3018,8 @@ interface AttractionAffiliateLink {
     currency?: string;
     topSite: boolean;
     travelStyles?: string[];
+    /** Door-to-door length in minutes. Absent = the 3h city-attraction default. */
+    durationMinutes?: number;
     active: boolean;
 }
 
@@ -3076,6 +3079,83 @@ function findMatchingAffiliateLink(
     return undefined;
 }
 
+// A curated affiliate card is a recommendation bolted onto a day the model has
+// already planned, so it needs a slot that day can actually hold. 11:00 is the
+// slot these cards have always used, and nothing curated should still be running
+// past 19:00 — which leaves a default 3h card its original 16:00 latest start.
+const CURATED_CARD_EARLIEST_MIN = 11 * 60;
+const CURATED_CARD_DAY_END_MIN = 19 * 60;
+// Fallback for a link that declares no length of its own. Matches the "2-3 hours"
+// these cards have always shown.
+const CURATED_CARD_DEFAULT_DURATION_MIN = 3 * 60;
+
+/**
+ * How long a curated card actually takes, door to door. Admin-set per link,
+ * because "2-3 hours" is true of the Panthéon and false of Versailles — which is
+ * a ~6h round trip out of Paris and cannot be slotted like a city-centre stop.
+ * Clamped to something a single day could hold.
+ */
+function curatedCardDurationMin(link: AttractionAffiliateLink): number {
+    const raw = link.durationMinutes;
+    if (typeof raw !== "number" || !isFinite(raw) || raw <= 0) {
+        return CURATED_CARD_DEFAULT_DURATION_MIN;
+    }
+    return Math.min(Math.max(raw, 30), CURATED_CARD_DAY_END_MIN - CURATED_CARD_EARLIEST_MIN);
+}
+
+/**
+ * The duration label on the card. The stated length is the top of the range, so
+ * the default 3h still reads "2-3 hours" exactly as it always has.
+ */
+function formatCuratedDuration(minutes: number): string {
+    if (minutes >= 420) return "Full day";
+    const upper = Math.max(2, Math.ceil(minutes / 60));
+    return `${upper - 1}-${upper} hours`;
+}
+
+function formatClock12(minutes: number): string {
+    const hour24 = Math.floor(minutes / 60) % 24;
+    const minute = minutes % 60;
+    const suffix = hour24 >= 12 ? "PM" : "AM";
+    const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
+    return `${hour12}:${String(minute).padStart(2, "0")} ${suffix}`;
+}
+
+/**
+ * The time a curated card may claim on this day, or null when the day has no
+ * room for one.
+ *
+ * The day's own activities already encode the flight window: the arrival buffer
+ * and the departure cutoff are applied (enforceFlightBuffersOnDay) before
+ * enrichment runs, so a Day 1 behind a 21:00 landing holds nothing earlier than
+ * its 22:00 dinner. Reading the window back off the day is what stops a bookable
+ * attraction from advertising an 11:00 AM slot the traveler spent in the air,
+ * and it works unchanged for the single-day regenerate path.
+ */
+function curatedCardTimeForDay(day: any, durationMin: number): string | null {
+    const activities: any[] = Array.isArray(day?.activities) ? day.activities : [];
+
+    const starts = activities
+        .map((a) => parseClockToMinutes(a?.startTime || a?.time))
+        .filter((m): m is number => m != null);
+
+    // The card cannot start before the day itself does.
+    let earliest = CURATED_CARD_EARLIEST_MIN;
+    if (starts.length > 0) earliest = Math.max(earliest, Math.min(...starts));
+
+    // ...and it has to be over by the end of the day, and before the traveler
+    // leaves for the airport. A full-day excursion therefore needs a far earlier
+    // start than a museum, and drops off a day that has already run late.
+    let latest = CURATED_CARD_DAY_END_MIN - durationMin;
+    for (const activity of activities) {
+        if (activity?.type !== "departure") continue;
+        const transfer = parseClockToMinutes(activity?.startTime || activity?.time);
+        if (transfer != null) latest = Math.min(latest, transfer - durationMin);
+    }
+
+    return earliest <= latest ? formatClock12(earliest) : null;
+}
+
 function enrichItineraryWithAffiliateAttractions(
     dayByDayItinerary: ItineraryDay[],
     destination: string,
@@ -3130,9 +3210,14 @@ function enrichItineraryWithAffiliateAttractions(
     const sortedLinks = [...activeLinks].sort((a, b) => Number(b.topSite) - Number(a.topSite));
     let nonTopInserted = 0;
     const nonTopInsertLimit = Math.max(1, dayByDayItinerary.length);
-    // Our curated affiliate cards are shown first: insert at the top of day 1
-    // (preserving top-site-first order) so the bookable card is the most visible.
-    let affiliateInsertPos = 0;
+    // Our curated affiliate cards are shown first: each goes at the top of the
+    // earliest day that can actually hold it (preserving top-site-first order) so
+    // the bookable card is the most visible. Day 1 is skipped when the inbound
+    // flight leaves no daylight on it — a 21:00 landing means Day 1 starts with a
+    // 22:00 dinner, and an attraction card pinned above it would be selling a
+    // morning the traveler spent in the air. The search runs per link because a
+    // full-day excursion fits fewer days than a two-hour museum does.
+    const insertPosByDay = new Map<ItineraryDay, number>();
 
     for (const link of sortedLinks) {
         const key = normalizeAffiliateKey(link.activityTitle);
@@ -3152,17 +3237,33 @@ function enrichItineraryWithAffiliateAttractions(
         const shouldInsert = link.topSite || hasStyleMatch;
         if (!shouldInsert) continue;
 
-        const targetDay = dayByDayItinerary[0];
+        const durationMin = curatedCardDurationMin(link);
+        let targetDay: ItineraryDay | undefined;
+        let curatedCardTime: string | undefined;
+        for (const day of dayByDayItinerary) {
+            const slot = curatedCardTimeForDay(day, durationMin);
+            if (slot) {
+                targetDay = day;
+                curatedCardTime = slot;
+                break;
+            }
+        }
+        // No day in this trip has room for it: skip the card rather than sell a
+        // slot that does not exist.
+        if (!targetDay || !curatedCardTime) continue;
+
         if (!targetDay.activities) {
             targetDay.activities = [];
         }
 
+        const affiliateInsertPos = insertPosByDay.get(targetDay) ?? 0;
         targetDay.activities!.splice(affiliateInsertPos, 0, {
-            time: "11:00 AM",
+            time: curatedCardTime,
             title: link.displayTitle || link.activityTitle,
             description: `Recommended experience in ${destination}`,
             type: "activity",
-            duration: "2-3 hours",
+            duration: formatCuratedDuration(durationMin),
+            durationMinutes: durationMin,
             price: link.price ?? undefined,
             currency: link.currency ?? undefined,
             bookingUrl: link.affiliateUrl,
@@ -3171,7 +3272,7 @@ function enrichItineraryWithAffiliateAttractions(
             affiliateSource: "admin_forced_insertion",
             affiliateLinkId: link._id,
         });
-        affiliateInsertPos++;
+        insertPosByDay.set(targetDay, affiliateInsertPos + 1);
         existingActivityKeys.push(key);
         if (!link.topSite) nonTopInserted++;
     }
@@ -4257,13 +4358,28 @@ export const regenerateDayAction = internalAction({
 This is the DEPARTURE day: the traveler leaves for the airport at ${departureCutoff}. Schedule NOTHING at or after that time and do NOT include the transfer itself — it is appended automatically as the day's last item.`
             : "";
 
+        // Day 1 is bounded by the inbound flight exactly as it was during the
+        // first generation. Without this the regenerate cheerfully rebuilds a
+        // 21:00-landing arrival day around a 09:00 breakfast.
+        const regenBuffers = generateTimeAwareGuidance(
+            trip.arrivalTime,
+            trip.departureTime,
+            trip.startDate,
+            trip.endDate,
+        );
+        const arrivalLine =
+            dayIndex === 0 && regenBuffers.firstDayStartTime
+                ? `
+This is the ARRIVAL day: after landing, transfer and check-in the traveler is not free until ${regenBuffers.firstDayStartTime}. Schedule NOTHING before that time, and keep the day light — a meal or a short stroll, not a full sightseeing programme.`
+                : "";
+
         const prompt = `You are a travel itinerary planner for ${trip.destination}.
 Regenerate the activities for ONE day of an existing trip. Keep it geographically logical and well-paced.
 
 ${budgetGuidance.guidance}
 
 Traveler interests: ${interestsLine}.
-This is day ${currentDay.day ?? dayIndex + 1} of a ${tripDays}-day trip.${departureLine}
+This is day ${currentDay.day ?? dayIndex + 1} of a ${tripDays}-day trip.${arrivalLine}${departureLine}
 
 HARD RULE — do NOT use any venue already used on the other days of this trip: ${otherDayTitles || "(none)"}.
 Generate a FRESH, different set of activities for this day, respecting the budget tier (${budgetGuidance.budgetTier}).
@@ -4325,6 +4441,16 @@ The first activity's travelFromPrevious MUST be null. Each subsequent activity s
 
         // Re-enrich just this day, mirroring enrichItinerary's two passes.
         let enrichedDay: any = { ...newDay, day: currentDay.day ?? dayIndex + 1 };
+        // Hard-enforce the flight window before enrichment runs: the curated-card
+        // pass reads the day's own first start time to decide where a bookable
+        // attraction fits, so the day has to be trimmed first.
+        enforceFlightBuffersOnDay(
+            enrichedDay,
+            dayIndex,
+            regenBuffers.firstDayStartTime,
+            regenBuffers.lastDayEndTime,
+            tripDays,
+        );
         try {
             const curatedCity = extractDestinationCity(trip.destination);
             const curatedAttractionLinks = ((await ctx.runQuery(

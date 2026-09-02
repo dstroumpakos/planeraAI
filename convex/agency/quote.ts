@@ -15,8 +15,11 @@
 import type {
   CurrencyCode,
   Money,
+  NormalizedActivityOffer,
   NormalizedFlightOffer,
   NormalizedHotelOffer,
+  NormalizedOffer,
+  NormalizedTransferOffer,
   PackageLine,
   PackageTier,
   Quote,
@@ -65,13 +68,16 @@ export interface BuildQuoteInput {
   destinationIata?: string;
   flights: NormalizedFlightOffer[];
   hotels: NormalizedHotelOffer[];
+  /** Optional: absent when no activity supplier is connected or mapped. */
+  activities?: NormalizedActivityOffer[];
+  transfers?: NormalizedTransferOffer[];
   rules: PricingRuleRow[];
   now: number;
   ttlMs: number;
   foodBudgetMinor?: Record<PackageTier, number>;
 }
 
-function priceCandidates<T extends NormalizedFlightOffer | NormalizedHotelOffer>(
+function priceCandidates<T extends NormalizedOffer>(
   offers: T[],
   rules: PricingRuleRow[],
   input: BuildQuoteInput,
@@ -98,6 +104,16 @@ function buildPackage(tier: PackageTier, sel: SelectedTier, input: BuildQuoteInp
     scores.push(sel.hotel.score);
     for (const c of sel.hotel.cand.offer.cost.payAtProperty ?? []) payAtProperty.push(c.amount);
   }
+  // Transfers before activities: the document reads as a journey — get there,
+  // sleep, then do things — and the line order is what a client actually scans.
+  for (const t of sel.transfers) {
+    lines.push({ kind: "transfer", offer: t.cand.offer, financials: t.cand.financials });
+    scores.push(t.score);
+  }
+  for (const a of sel.activities) {
+    lines.push({ kind: "activity", offer: a.cand.offer, financials: a.cand.financials });
+    scores.push(a.score);
+  }
 
   const internal = sumFinancials(lines.map((l) => l.financials), cur);
   const perDay = (input.foodBudgetMinor ?? DEFAULT_FOOD_BUDGET_MINOR)[tier];
@@ -120,7 +136,9 @@ function buildPackage(tier: PackageTier, sel: SelectedTier, input: BuildQuoteInp
 export function buildQuote(input: BuildQuoteInput): Quote {
   const pricedFlights = priceCandidates(input.flights, input.rules, input);
   const pricedHotels = priceCandidates(input.hotels, input.rules, input);
-  const tiers = selectAllTiers(pricedFlights, pricedHotels);
+  const pricedActivities = priceCandidates(input.activities ?? [], input.rules, input);
+  const pricedTransfers = priceCandidates(input.transfers ?? [], input.rules, input);
+  const tiers = selectAllTiers(pricedFlights, pricedHotels, pricedActivities, pricedTransfers);
 
   const packages: TravelPackage[] = (["basic", "comfort", "premium"] as PackageTier[]).map((t) =>
     buildPackage(t, tiers[t], input),
@@ -141,4 +159,25 @@ export function buildQuote(input: BuildQuoteInput): Quote {
 /** True if the quote's hard expiry has passed → must revalidate before acting. */
 export function isQuoteExpired(quote: Quote, now: number = Date.now()): boolean {
   return now >= quote.expiresAt;
+}
+
+/**
+ * The expiry a quote carries after a revalidation attempt.
+ *
+ * A SUCCESSFUL revalidation is a fresh confirmation from every supplier behind
+ * the quote — that is the whole point of the call — so it restarts the validity
+ * window from now. Without this an expired quote could never be recovered: it
+ * would revalidate cleanly and still read as expired, and `send` refuses an
+ * expired quote with "revalidate it before sending".
+ *
+ * A FAILED revalidation keeps the old expiry. An offer that is gone, or that no
+ * connector could verify, must not buy the quote more time.
+ */
+export function revalidatedExpiry(input: {
+  stillValid: boolean;
+  now: number;
+  ttlMs: number;
+  currentExpiresAt: number;
+}): number {
+  return input.stillValid ? input.now + input.ttlMs : input.currentExpiresAt;
 }

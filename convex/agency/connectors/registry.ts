@@ -42,6 +42,25 @@ export interface RegistryEntry {
   capabilities: Partial<Record<Capability, boolean>>;
   /** Whether a provider certification step is known to be required. */
   requiresCertification: boolean;
+  /**
+   * Test doubles. Real, `enabled` providers in every other sense, but never
+   * offered to a tenant unless the deployment explicitly asks for them — an
+   * agency seeing "Mock Air (sandbox)" in its supplier catalogue reads as an
+   * unfinished product. Kept as DATA rather than deleted so the demo workspace
+   * and the test suite still have something deterministic to run against.
+   */
+  internalOnly?: boolean;
+  /**
+   * Whether this provider's SEARCH has been run against a live account.
+   *
+   * Only meaningful where the connector can search at all. False means the
+   * request was built from public documentation and is correct as far as the
+   * docs go, but has never round-tripped with real credentials — so its first
+   * real search may need a correction. Agencies see this: telling them a
+   * supplier is wired when nobody has ever run it is the kind of half-truth
+   * that costs a quote.
+   */
+  searchVerified?: boolean;
   docsUrl?: string;
   notes?: string;
 }
@@ -80,10 +99,11 @@ export const CONNECTOR_REGISTRY: RegistryEntry[] = [
     enabled: true,
     status: "sandbox",
     capabilities: { search: true, revalidate: true, getCancellationTerms: true, healthCheck: true },
+    searchVerified: true,
     requiresCertification: true,
     docsUrl: "https://developers.amadeus.com",
     notes:
-      "OAuth2 client_credentials. SEARCH IS LIVE — Flight Offers Search v2. The public Self-Service hosts (api/test.api.amadeus.com) were retired on 17 Jul 2026 and no longer resolve; Amadeus is Enterprise-only and issues an endpoint with the contract, so the host is a per-connection field. ToS: keep the API User Identity confidential and prevent third parties from using it.",
+      "OAuth2 client_credentials. SEARCH IS LIVE — Flight Offers Search v2 — and RE-PRICING IS LIVE via Flight Offers Price, which takes the whole offer back, so the offer itself is the revalidation token. The public Self-Service hosts (api/test.api.amadeus.com) were retired on 17 Jul 2026 and no longer resolve; Amadeus is Enterprise-only and issues an endpoint with the contract, so the host is a per-connection field. ToS: keep the API User Identity confidential and prevent third parties from using it.",
   },
   {
     id: "travelport",
@@ -130,6 +150,7 @@ export const CONNECTOR_REGISTRY: RegistryEntry[] = [
     enabled: true,
     status: "sandbox",
     capabilities: { search: true, revalidate: true, getCancellationTerms: true, healthCheck: true },
+    searchVerified: true,
     requiresCertification: false,
     docsUrl: "https://duffel.com/docs/api/overview/making-requests",
     notes:
@@ -147,10 +168,11 @@ export const CONNECTOR_REGISTRY: RegistryEntry[] = [
     enabled: true,
     status: "sandbox",
     capabilities: { search: true, revalidate: true, getCancellationTerms: true, healthCheck: true },
+    searchVerified: true,
     requiresCertification: true,
     docsUrl: "https://developer.hotelbeds.com/documentation/getting-started/",
     notes:
-      "Api-key header + X-Signature (SHA-256 of apiKey+secret+unixSeconds), recomputed per request (verified). Health check hits the real /status endpoint. SEARCH IS LIVE — hotel availability, keyed off the destination code resolved by destinationMap.ts.",
+      "Api-key header + X-Signature (SHA-256 of apiKey+secret+unixSeconds), recomputed per request (verified). Health check hits the real /status endpoint. SEARCH IS LIVE — hotel availability, keyed off the destination code resolved by destinationMap.ts. The mapper scans every room and rate for the cheapest bookable one, reads real cancellation deadlines (NRF plus policy start dates) and routes non-included taxes to payAtProperty.",
   },
   {
     id: "webbeds",
@@ -171,14 +193,29 @@ export const CONNECTOR_REGISTRY: RegistryEntry[] = [
     category: "hotel",
     kinds: ["hotel"],
     credentialScheme: "api_key",
-    credentialFields: keyAndSecret("From your Expedia Rapid partner account"),
+    credentialFields: [
+      ...keyAndSecret("From your Expedia Rapid partner account"),
+      {
+        key: "pointOfSaleCountry",
+        label: "Point-of-sale country",
+        secret: false,
+        hint: "ISO code Rapid prices and taxes against, e.g. GR",
+      },
+      {
+        key: "customerIp",
+        label: "Originating IP address",
+        secret: false,
+        hint: "Rapid requires the IP shopping requests come from — use a public IP your agency owns",
+      },
+    ],
     enabled: true,
-    status: "planned",
-    capabilities: { search: true, revalidate: true, healthCheck: true },
+    status: "sandbox",
+    capabilities: { search: true, revalidate: false, healthCheck: true },
+    searchVerified: false,
     requiresCertification: true,
     docsUrl: "https://developers.expediagroup.com/docs/products/rapid",
     notes:
-      "EAN signature auth: SHA-512 of key+secret+unixSeconds, sent as Authorization: EAN APIKey=..,Signature=..,timestamp=.. (verified). Region ids resolve through destinationMap.ts; search pending the availability payload.",
+      "EAN signature auth: SHA-512 of key+secret+unixSeconds, sent as Authorization: EAN APIKey=..,Signature=..,timestamp=.. (verified). SEARCH IS BUILT from the public Rapid docs in three calls — region property_ids, availability, then content for names — and is UNVERIFIED against a live account. Re-pricing needs the shopping context this connector does not keep, so the price_check link is stored but revalidate is not declared.",
   },
   {
     id: "booking_demand",
@@ -189,13 +226,21 @@ export const CONNECTOR_REGISTRY: RegistryEntry[] = [
     credentialFields: [
       { key: "apiKey", label: "Bearer token", secret: true, hint: "From the Booking.com Demand API console" },
       { key: "affiliateId", label: "Affiliate ID", secret: false },
+      {
+        key: "pointOfSaleCountry",
+        label: "Booker country",
+        secret: false,
+        hint: "ISO code Booking prices against, e.g. gr",
+      },
     ],
     enabled: true,
-    status: "planned",
-    capabilities: { search: true, revalidate: true, healthCheck: true },
+    status: "sandbox",
+    capabilities: { search: true, revalidate: false, healthCheck: true },
+    searchVerified: false,
     requiresCertification: true,
     docsUrl: "https://developers.booking.com/demand/docs",
-    notes: "Bearer + X-Affiliate-Id. Destination ids resolve through destinationMap.ts; search pending the availability payload.",
+    notes:
+      "Bearer + X-Affiliate-Id. SEARCH IS BUILT from the public Demand API docs (accommodations/search, then accommodations/details for names) and is UNVERIFIED against a live account. Rates are commissionable gross prices, so markup is forbidden and the margin is the affiliate commission.",
   },
   {
     id: "travelgate",
@@ -249,11 +294,13 @@ export const CONNECTOR_REGISTRY: RegistryEntry[] = [
     credentialScheme: "api_key",
     credentialFields: apiKeyOnly("Your Viator partner API key"),
     enabled: true,
-    status: "planned",
+    status: "sandbox",
     capabilities: { search: true, healthCheck: true },
+    searchVerified: false,
     requiresCertification: false,
     docsUrl: "https://docs.viator.com/partner-api/technical/",
-    notes: "exp-api-key header. Destination ids resolve through destinationMap.ts (Viator publishes a locations feed); search pending the product payload.",
+    notes:
+      "exp-api-key header, pinned to Accept: application/json;version=2.0 — the response schema is version-dependent. Destination ids resolve through destinationMap.ts. SEARCH IS BUILT from the public partner docs (products/search) and is UNVERIFIED against a live account. Prices are per person and commissionable, so the offer is multiplied by traveller count and markup is forbidden.",
   },
   {
     id: "tiqets",
@@ -263,11 +310,13 @@ export const CONNECTOR_REGISTRY: RegistryEntry[] = [
     credentialScheme: "api_key",
     credentialFields: apiKeyOnly("Your Tiqets distributor token"),
     enabled: true,
-    status: "planned",
+    status: "sandbox",
     capabilities: { search: true, healthCheck: true },
+    searchVerified: false,
     requiresCertification: false,
     docsUrl: "https://developers.tiqets.com",
-    notes: "Authorization: Token <key>. City ids resolve through destinationMap.ts (Tiqets publishes a cities feed); search pending the product payload.",
+    notes:
+      "Authorization: Token <key>. City ids resolve through destinationMap.ts. SEARCH IS BUILT from the public distributor docs (/v2/products) and is UNVERIFIED against a live account; the price mapper accepts all three shapes Tiqets has used. Per-ticket and commissionable, so it is multiplied by traveller count and markup is forbidden.",
   },
 
   // ── Test doubles ──
@@ -281,6 +330,8 @@ export const CONNECTOR_REGISTRY: RegistryEntry[] = [
     enabled: true,
     status: "sandbox",
     capabilities: { search: true, revalidate: true, healthCheck: true },
+    searchVerified: true,
+    internalOnly: true,
     requiresCertification: false,
     notes: "Deterministic test double. No network calls.",
   },
@@ -294,6 +345,8 @@ export const CONNECTOR_REGISTRY: RegistryEntry[] = [
     enabled: true,
     status: "sandbox",
     capabilities: { search: true, revalidate: true, healthCheck: true },
+    searchVerified: true,
+    internalOnly: true,
     requiresCertification: false,
     notes: "Deterministic test double. No network calls.",
   },
@@ -303,8 +356,20 @@ export function getRegistryEntry(id: string): RegistryEntry | undefined {
   return CONNECTOR_REGISTRY.find((e) => e.id === id);
 }
 
+/**
+ * Whether this deployment offers the test doubles. Off unless asked for, so
+ * production never shows them; the demo workspace sets it.
+ */
+export const mocksEnabled = (): boolean => process.env.AGENCY_ENABLE_MOCKS === "1";
+
+/**
+ * What a tenant may connect right now. Note this filters the CATALOGUE only —
+ * an existing connection to a mock keeps working and keeps being listed, so
+ * turning the flag off never silently breaks a workspace that already has one.
+ */
 export function enabledConnectors(): RegistryEntry[] {
-  return CONNECTOR_REGISTRY.filter((e) => e.enabled);
+  const allowMocks = mocksEnabled();
+  return CONNECTOR_REGISTRY.filter((e) => e.enabled && (allowMocks || !e.internalOnly));
 }
 
 /** The credential fields a given provider requires. */

@@ -15,9 +15,11 @@
  */
 
 import type {
+  NormalizedActivityOffer,
   NormalizedFlightOffer,
   NormalizedHotelOffer,
   NormalizedOffer,
+  NormalizedTransferOffer,
 } from "./model/types";
 import type { SearchQuery, SupplierConnector, SupplierCredentials } from "./connectors/types";
 
@@ -154,12 +156,14 @@ export async function runSearch(
 export interface MultiKindSearch {
   flights: NormalizedFlightOffer[];
   hotels: NormalizedHotelOffer[];
+  activities: NormalizedActivityOffer[];
+  transfers: NormalizedTransferOffer[];
   diagnostics: ConnectorRunResult[];
 }
 
 /**
- * Run the flight + hotel searches a quote needs, in parallel. `baseQuery` holds
- * the shared trip params; `kind` is overridden per search.
+ * Run every search a quote needs, in parallel. `baseQuery` holds the shared
+ * trip params; `kind` is overridden per search.
  */
 export async function searchForQuote(
   bindings: ConnectorBinding[],
@@ -167,15 +171,40 @@ export async function searchForQuote(
   timeoutMs: number = DEFAULT_CONNECTOR_TIMEOUT_MS,
   /** Resolved destination ids, keyed by connector id. */
   destinationIds: Record<string, string> = {},
+  /** Which kinds to actually run. Defaults to all four. */
+  kinds: ReadonlyArray<NormalizedOffer["kind"]> = ["flight", "hotel", "activity", "transfer"],
 ): Promise<MultiKindSearch> {
-  const [flightRes, hotelRes] = await Promise.all([
-    runSearch(bindings, { ...baseQuery, kind: "flight" }, Date.now, timeoutMs, destinationIds),
-    runSearch(bindings, { ...baseQuery, kind: "hotel" }, Date.now, timeoutMs, destinationIds),
+  // Requested kinds in parallel. A connector that does not sell a kind is
+  // skipped with `kind_unsupported` rather than called, so this costs nothing
+  // for an agency that has only connected an airline — but an agent quoting a
+  // hotel-only stay should not spend supplier budget on flights either.
+  const empty = { offers: [], byConnector: [] } as OrchestratorResult;
+  const run = (kind: NormalizedOffer["kind"]) =>
+    kinds.includes(kind)
+      ? runSearch(bindings, { ...baseQuery, kind }, Date.now, timeoutMs, destinationIds)
+      : Promise.resolve(empty);
+
+  const [flightRes, hotelRes, activityRes, transferRes] = await Promise.all([
+    run("flight"),
+    run("hotel"),
+    run("activity"),
+    run("transfer"),
   ]);
   return {
     flights: flightRes.offers.filter((o): o is NormalizedFlightOffer => o.kind === "flight"),
     hotels: hotelRes.offers.filter((o): o is NormalizedHotelOffer => o.kind === "hotel"),
-    diagnostics: [...flightRes.byConnector, ...hotelRes.byConnector],
+    activities: activityRes.offers.filter(
+      (o): o is NormalizedActivityOffer => o.kind === "activity",
+    ),
+    transfers: transferRes.offers.filter(
+      (o): o is NormalizedTransferOffer => o.kind === "transfer",
+    ),
+    diagnostics: [
+      ...flightRes.byConnector,
+      ...hotelRes.byConnector,
+      ...activityRes.byConnector,
+      ...transferRes.byConnector,
+    ],
   };
 }
 

@@ -53,6 +53,14 @@ export const LIMITS = {
   destinationLookup: { limit: 40, windowMs: 60 * 60_000 },
   /** Guessing a customer quote link token. */
   publicQuote: { limit: 60, windowMs: 15 * 60_000 },
+  /**
+   * Password-reset requests, keyed by email. Tight: this endpoint SENDS MAIL to
+   * an address the caller chose, so an open one is a way to use us to spam
+   * somebody else's inbox.
+   */
+  passwordReset: { limit: 5, windowMs: 60 * 60_000 },
+  /** Accepting a quote from a customer link. */
+  acceptQuote: { limit: 20, windowMs: 60 * 60_000 },
   mfa: { limit: 10, windowMs: 15 * 60_000 },
 } as const satisfies Record<string, RateLimitSpec>;
 

@@ -76,7 +76,7 @@ validate, persist and audit.
 
 ## Tests
 
-176 pass / 0 fail. The pure modules have no Convex dependency, so they compile
+237 pass / 0 fail. The pure modules have no Convex dependency, so they compile
 and run standalone:
 
 ```bash
@@ -99,6 +99,16 @@ containing multiple dots), so they are never deployed.
 deploy — Convex ships every module together, so there was no way to deploy one and not the
 other. Treat the portal as live: `/agency/signup` now reaches a real backend.
 
+**Pending a deploy since then:** the Amadeus re-pricing call, the richer Hotelbeds
+mapping, the four doc-derived searches (Expedia Rapid, Booking.com, Viator, Tiqets),
+`searchVerified`, the airport-derived country on destination targets, the
+agency logo, the revalidation-expiry fix, the new-signup alert, experiences in
+the package ladder, AI package copy, password reset, quote accept + view
+tracking, Hotelbeds re-pricing, the mock-connector gate, and the admin
+agencies view. Until that
+ships, connecting one of those four stores the key and health-checks it but the search
+still refuses.
+
 ### Required before first use
 
 Set in the Convex dashboard (see `.env.example`):
@@ -108,24 +118,189 @@ Set in the Convex dashboard (see `.env.example`):
 | `AGENCY_VAULT_MASTER_KEY` | 32 bytes, base64url. Without it every credential operation fails closed. Generate with `vault.generateMasterKeyB64url()`. |
 | `AGENCY_AUTH_PEPPER` | Optional. A leaked database alone cannot be attacked offline with it set. Adding it later invalidates existing passwords, so set it **before** the first signup. |
 | `AGENCY_QUOTE_PUBLIC_BASE_URL` | Origin for invite and customer-quote links. Defaults to `https://planeraai.app`. |
+| `AGENCY_ALERT_TO` | Optional. Where new-signup alerts go. Falls back to `STATS_REPORT_TO`, then the founder address. |
+| `OPENAI_API_KEY` | Optional. Without it quotes simply carry no AI copy. |
+| `AGENCY_COPY_MODEL` | Optional. Defaults to `gpt-4o-mini`. |
+| `AGENCY_ENABLE_MOCKS` | Set to `1` to offer the mock connectors in the catalogue. Off in production. |
+
+## Search redesign (2026-09-01, web `2026.9.1`)
+
+The form was a flat six-field grid with two free-text IATA boxes. Agents know
+cities, not codes, and a typo produced either an empty search or a real airport
+somewhere else entirely.
+
+- **`AirportPicker`** — a combobox over `lib/agency/airports.ts`, which
+  SUPPLEMENTS the consumer list rather than replacing it (five other features
+  depend on that file). The consumer list is the top ~220 hubs by traffic, so a
+  Greek agency could not search **Thessaloniki**, Kos, Zakynthos, Chania,
+  Larnaca, Paphos, Antalya, Bodrum, Gatwick or Orly. ~140 airports added across
+  Europe, the Med, the Middle East and North Africa.
+- **Localised matching.** Indexed from the existing `CITY_TRANSLATIONS`, with
+  accents and Greek tonos folded — "Θεσσαλονίκη", "θεσσαλονικη", "Λονδίνο"
+  (returns all five London airports) and "Mailand" all resolve. The UI is
+  Greek; requiring English city names from a Greek keyboard is the kind of
+  friction that makes a tool feel foreign.
+- **New search options**, each backed end to end: rooms (`SearchQuery.rooms`
+  was already used by the hotel connectors but `beginSearch` never accepted it
+  — a real gap), max stops, which kinds to price, currency override, one-way vs
+  return, duration shortcuts, and a **client name + file reference** stored on
+  the quote so a list of forty is searchable by a human.
+
+`maxStops` filters AFTER the search, not per supplier: not every connector
+exposes a stops filter, and one rule beats thirteen. It falls back to the
+unfiltered pool when nothing clears the bar — an empty quote helps nobody.
+
+## Experiences in the package ladder (2026-09-01)
+
+`searchForQuote` only ever ran a flight and a hotel search, and `buildQuote`
+composed packages from those two pools — so the activity and transfer connectors
+could return offers that NOTHING consumed. Viator and Tiqets were dead ends the
+day they were written.
+
+All four kinds now search in parallel, and the ladder is the product:
+
+| Tier | Carries |
+|---|---|
+| Basic | flight + hotel, nothing else |
+| Comfort | + 1 experience, + 1 transfer |
+| Premium | + 2 experiences, + 1 transfer |
+
+Basic stays bare **on purpose**: padding the price-led tier is how a cheap
+option stops being cheap, and an agent would have to strip it back by hand.
+
+`scoring.ts` gained `ACTIVITY_WEIGHTS` / `TRANSFER_WEIGHTS`, which weight
+QUALITY far above margin — activity suppliers pay commission on a retail price
+the traveller can look up, so there is no spread to optimise and what earns the
+booking is that it is obviously the right one. `pickTop` de-duplicates by
+supplier id and title, because two connectors covering one city routinely list
+the same museum ticket and a Premium package that sold the Louvre twice is a
+visible bug on a client's document.
+
+## AI package copy (2026-09-01)
+
+`agency/packageCopy.ts` writes the paragraph an agent would otherwise type by
+hand: a per-tier headline and pitch, an honest one-line trade-off against the
+tier above, and a summary for the covering email.
+
+**It cannot leak margin**, and not by remembering not to: the prompt is built
+from `toCustomerPackages`, the projection with no field for supplier cost,
+markup or commission. A model that never receives a number cannot print one.
+**It cannot invent** — it gets the real lines and is told to write only from
+them, because copy promising a rooftop pool nobody booked reads to a client as
+a commitment.
+
+Generation is SCHEDULED after `saveQuote`, never inline: a search must not wait
+on OpenAI, and a quote with no copy is complete and sendable. Every failure path
+returns null. Language comes from `branding.quoteLanguage` (default Greek).
+
+## Recovering an account, and closing the loop (2026-09-01)
+
+- **Password reset.** There was none: a locked-out owner had no path back to a
+  workspace holding their supplier credentials. `requestPasswordReset` always
+  reports success so it cannot enumerate accounts; `resetPassword` consumes the
+  token, bumps `sessionsValidFrom` and revokes every live session — which is
+  what actually evicts somebody who had the account. `/agency/forgot` and
+  `/agency/reset` had to be added to the shell's PUBLIC_ROUTES; guarding
+  recovery behind sign-in would have made it useless.
+- **The traveller can now accept.** `acceptQuote` records intent, not a booking,
+  refuses an expired quote, and is idempotent so a double-tap is harmless.
+- **View tracking.** `resolveCustomerLink` records first/last view and a count;
+  the agent sees "opened 3×" or "not opened yet". Only the FIRST open emails the
+  agency.
+- **Mocks are hidden.** `enabledConnectors()` drops `internalOnly` entries unless
+  `AGENCY_ENABLE_MOCKS=1`. It filters the CATALOGUE only, so an existing demo
+  connection keeps working.
+- **Hotelbeds re-pricing** (`checkrates`). This is what makes the revalidation
+  fix useful: `quoteStillValid` needs every line to verify, so before it, any
+  quote containing a hotel was permanently stuck once expired.
+
+## Operator alert on signup (2026-09-01)
+
+`registerAgency` wrote an audit row and nothing else, so the only way to learn a
+real agency had signed up was to go looking in the Convex dashboard — which
+means in practice nobody would have. `agency/notify.ts` now emails the operator
+on every signup: agency, owner, currency, slug, and the running agency count,
+with `[internal]` in the subject for our own demo/test tenants so the inbox
+stays honest.
+
+It is SCHEDULED, not awaited. `ctx.scheduler.runAfter(0, ...)` runs after the
+signup mutation commits, so a Postmark outage or a bad key can never fail or
+roll back somebody's registration. The worst case is a missed email.
+
+## Fixed: revalidation never cleared the expiry (2026-09-01)
+
+`recordRevalidation` wrote `status`, `revalidation` and `lastRevalidatedAt` but
+never touched `expiresAt`. Every read computes `expired: now >= expiresAt`, so a
+quote that revalidated cleanly still displayed as expired — and `send` refuses
+an expired quote with *"revalidate it before sending"*, so an expired quote
+could never be recovered by the one action that exists to recover it. Pressing
+the button repeatedly did nothing visible.
+
+A successful revalidation is a fresh confirmation from every supplier behind the
+quote, so it now restarts the validity window from the tenant's own
+`quoteTtlMs`. A FAILED one keeps the old expiry — an offer that is gone, or that
+no connector could verify, must not buy the quote more time. The decision is the
+pure `revalidatedExpiry()` in `quote.ts`, tested in both directions.
+
+## Agency logo
+
+`branding.logoStorageId` was in the schema from the start but never written.
+It now drives the masthead of both quote surfaces — the traveller's `/q/<token>`
+page and the agent's PDF — because those share one `QuoteDocument`.
+
+Upload is three steps, since the file never passes through a Convex function:
+`generateLogoUploadUrl` mints a URL, the browser POSTs the bytes straight to it,
+and `setLogo` adopts the returned id. **That last step is the only place type
+and size can be enforced** — the upload URL accepts any bytes — so it reads the
+metadata from `ctx.db.system.get(storageId)` and DELETES the blob if it fails,
+which also stops the endpoint being used as free file hosting. Replacing a logo
+deletes the previous blob for the same reason.
+
+SVG is allowed on purpose: it is what agencies have, and the only format that
+stays crisp in a printed PDF. It is safe because the document renders it via
+`<img src>`, which does not execute scripts, and Convex serves it from its own
+origin rather than ours.
+
+`publicAgency()` is async now — it resolves `logoStorageId` to a URL on every
+read path, because a storage id means nothing to a browser and leaving each
+caller to remember would guarantee one forgets. A blob that no longer resolves
+comes back as null; the document falls back to the agency name.
+
+**The session needed a setter.** `getMe` resolves ONCE per token, and the PDF
+route reads its branding from there — so without `setAgency()` a freshly
+uploaded logo would silently not appear on the very document it was uploaded
+for until a full reload. Every mutation returning an `AgencySummary` now feeds
+it back.
 
 ## Not yet built
 
-A destination-id mapping layer (see below — it unblocks most non-flight
-providers at once). Per-provider revalidation. Quote PDF export.
-Package-scoped pricing rules.
+Booking (deliberately out of MVP scope). Re-pricing for the hotel and activity
+providers. Package-scoped pricing rules. A locations feed for Expedia and
+Booking.com — their region/city ids are mapped by hand until then.
 
-## All 14 providers are callable (2026-08-30, NOT yet deployed)
+## All 13 providers are callable
 
-Every registry provider now has a working connector. What differs is depth, and
-the UI reports it honestly per provider (`searchable` + `pendingReason`).
+Every registry provider has a working connector. What differs is depth, and the
+UI reports it honestly per provider (`searchable`, `searchVerified`,
+`pendingReason`).
 
 | Depth | Providers |
 |---|---|
-| Search + revalidate | Duffel, mock-air, mock-hotel |
-| Search | Amadeus (Flight Offers Search v2) |
-| Real auth + real health probe | Sabre, Travelport, Hotelbeds, Expedia Rapid, Booking.com Demand, Travelgate, Viator, Tiqets |
-| Auth wired, no confirmed endpoint | WebBeds, Liknoss, Ferryhopper |
+| Search + re-pricing, run for real | Duffel, Amadeus, mock-air, mock-hotel |
+| Search, run for real | Hotelbeds |
+| Search built from public docs, never run against a live account | Expedia Rapid, Booking.com Demand, Viator, Tiqets |
+| Real auth + real health probe, no public search contract | Sabre, Travelport, Travelgate |
+| Auth wired, no confirmed endpoint at all | WebBeds, Liknoss, Ferryhopper |
+
+The fourth row is the one to watch. Those four are read-only and fail loudly, so
+shipping them ahead of a test account is safe — but an agency connecting one
+sees an **αδοκίμαστο** badge and a warning before it saves, because calling an
+untested integration "wired" is the kind of half-truth that costs a quote.
+
+Three providers need more than a key, and the connect form asks for it:
+Expedia wants a point-of-sale country and an originating IP (Rapid requires
+one on every shopping call, and our searches run from Convex, so there is no
+honest value to discover at runtime); Booking.com wants a booker country.
 
 **Design.** `connectors/generic.ts` builds a connector from a declarative
 `ConnectorSpec` (`connectors/providers.ts`); `connectors/auth.ts` holds the
@@ -136,15 +311,24 @@ keys. Twelve integrations stay comparable instead of drifting apart.
 **The honesty rule, enforced by tests.** A provider whose SEARCH contract is not
 public still authenticates and health-checks for real, but `search` throws a
 named reason rather than posting a guessed payload. A connector never declares a
-capability it cannot perform — in particular `revalidate` stays false, because
-declaring it would let the orchestrator present unverified fares as confirmed.
+capability it cannot perform: `revalidate` tracks whether a re-price contract
+actually exists, in both directions, because declaring it falsely would let the
+orchestrator present unverified fares as confirmed.
 
-**Why most non-flight providers cannot search yet.** Flights key off IATA codes,
-which are universal. Hotels, activities and ferries key off each provider's OWN
-destination taxonomy (Hotelbeds destination codes, Expedia region ids, Viator
-destination ids, Tiqets city ids, port codes) which cannot be derived from an
-IATA code. A destination-mapping layer, fed from each provider's locations feed,
-is the single piece of work that unblocks most of them at once.
+**Destination mapping is what unblocked the non-flight providers.** Flights key
+off IATA codes, which are universal. Hotels, activities and ferries key off each
+provider's OWN taxonomy (Hotelbeds destination codes, Expedia region ids, Viator
+destination ids, Tiqets city ids) which cannot be derived from an IATA code.
+`destinations.ts` matches candidates from each provider's locations feed;
+`destinationMap.ts` fetches, caches and lets ops correct them by hand. The
+target now carries a country derived from the airport, which is what makes the
+matcher's country-mismatch penalty — the Paris, Texas guard — actually engage.
+
+Expedia Rapid is the awkward one: it has no "what is available in this city"
+call at all, so a region is expanded into property ids first and the priced
+results are named afterwards. `SearchSpec` therefore supports an optional
+`prepare` and `enrich` round trip, which Booking.com also uses for names.
+Enrichment is best-effort: real prices survive a failed cosmetic lookup.
 
 **Credential fields are per-provider, not per-scheme.** `registry.ts` declares
 exactly what each provider needs and drives both the connect form and the

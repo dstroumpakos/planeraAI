@@ -62,6 +62,22 @@ import { openJson, sealJson } from "./vault";
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
+/**
+ * The operator alert for a new agency. Referenced by name because `notify` is
+ * newer than the last codegen — the same workaround used across this module.
+ */
+const newAgencySignupRef = makeFunctionReference<
+  "action",
+  {
+    agencyName: string;
+    slug: string;
+    ownerEmail: string;
+    currency: string;
+    signedUpAt: number;
+  },
+  null
+>("agency/notify:newAgencySignup");
+
 const sendEmailRef = makeFunctionReference<
   "action",
   { to: string; subject: string; html: string; text?: string },
@@ -129,13 +145,34 @@ const publicUser = (user: any, role: AgencyRole, displayName?: string) => ({
   lastLoginAt: user.lastLoginAt ?? null,
 });
 
-const publicAgency = (agency: any) => ({
+/**
+ * Anything that can hand out a storage URL — query and mutation contexts both
+ * can, which is why this is structural rather than a Convex ctx type.
+ */
+type StorageReader = { storage: { getUrl: (id: Id<"_storage">) => Promise<string | null> } };
+
+/**
+ * The agency as the workspace sees it.
+ *
+ * Async because the logo is stored as a file, not a URL: `logoStorageId` is
+ * meaningless to a browser, so every read path resolves it here rather than
+ * leaving each caller to remember. A storage id that no longer resolves comes
+ * back as null — a deleted blob must not break a quote.
+ */
+const publicAgency = async (ctx: StorageReader, agency: any) => ({
   agencyId: agency._id as Id<"agencies">,
   name: agency.name as string,
   slug: agency.slug as string,
   status: agency.status as "active" | "suspended",
   defaultCurrency: agency.defaultCurrency as string,
-  branding: agency.branding ?? null,
+  branding: agency.branding
+    ? {
+        ...agency.branding,
+        logoUrl: agency.branding.logoStorageId
+          ? await ctx.storage.getUrl(agency.branding.logoStorageId)
+          : null,
+      }
+    : null,
 });
 
 // ── Registration ────────────────────────────────────────────────────────────
@@ -207,9 +244,22 @@ export const registerAgency = mutation({
 
       const agency = await ctx.db.get(agencyId);
       const user = await ctx.db.get(userId);
+
+      // Tell the operator a real agency just arrived. Scheduled rather than
+      // awaited: it runs after this mutation COMMITS, so a mail failure can
+      // never fail or roll back somebody's signup. Worst case is a missed
+      // email, and the audit row above records the signup regardless.
+      await ctx.scheduler.runAfter(0, newAgencySignupRef, {
+        agencyName: name,
+        slug: agency!.slug,
+        ownerEmail: email,
+        currency,
+        signedUpAt: now,
+      });
+
       return {
         ...session,
-        agency: publicAgency(agency),
+        agency: await publicAgency(ctx, agency),
         me: publicUser(user, "owner", args.displayName),
       };
     }),
@@ -306,7 +356,7 @@ export const login = mutation({
       return {
         status: "ok" as const,
         ...session,
-        agency: publicAgency(agency),
+        agency: await publicAgency(ctx, agency),
         me: publicUser(user, member.role, member.displayName),
       };
     }),
@@ -404,7 +454,7 @@ export const getMe = query({
       ]);
       if (!agency || !user) throw notFound("workspace");
       return {
-        agency: publicAgency(agency),
+        agency: await publicAgency(ctx, agency),
         me: publicUser(user, access.role, member?.displayName),
         permissions: {
           manageMembers: Permissions.manageMembers(access.role),
@@ -593,7 +643,7 @@ export const acceptInvite = mutation({
       const fresh = await ctx.db.get(user._id);
       return {
         ...session,
-        agency: publicAgency(agency),
+        agency: await publicAgency(ctx, agency),
         me: publicUser(fresh, member.role, args.displayName),
       };
     }),
@@ -839,6 +889,7 @@ export const updateAgency = mutation({
         legalName: v.optional(v.string()),
         contactEmail: v.optional(v.string()),
         contactPhone: v.optional(v.string()),
+        quoteLanguage: v.optional(v.string()),
       }),
     ),
   },
@@ -871,6 +922,10 @@ export const updateAgency = mutation({
           legalName: b.legalName?.trim().slice(0, 120),
           contactEmail: b.contactEmail?.trim().toLowerCase(),
           contactPhone: b.contactPhone?.trim().slice(0, 40),
+          // Free text on purpose — it is passed to the copy model as a plain
+          // instruction ("write in Greek"), so any language name works and an
+          // enum would only ever be a list we forgot to extend.
+          quoteLanguage: b.quoteLanguage?.trim().slice(0, 40),
         };
       }
 
@@ -881,7 +936,228 @@ export const updateAgency = mutation({
         action: "agency.update",
         meta: { fields: Object.keys(patch) },
       });
-      return publicAgency(await ctx.db.get(access.agencyId));
+      return await publicAgency(ctx, await ctx.db.get(access.agencyId));
+    }),
+});
+
+// ── Forgotten password ──────────────────────────────────────────────────────
+
+/** A reset link is short-lived on purpose: it is a bearer credential in email. */
+const RESET_TTL_MS = 60 * 60 * 1000;
+
+/**
+ * Start a password reset.
+ *
+ * ALWAYS reports success, whether or not the address exists. The response is
+ * the one place this endpoint could be turned into an account-enumeration
+ * oracle — "no such user" would let anyone test which agencies bank with us —
+ * so the caller learns nothing either way. Same principle as `login`.
+ */
+export const requestPasswordReset = mutation({
+  args: { email: v.string() },
+  handler: async (ctx, args) =>
+    guard("requestPasswordReset", async () => {
+      const email = normalizeEmail(args.email);
+      // Keyed by email: this endpoint sends mail to an address the caller
+      // chose, so an unthrottled one is a way to use us to spam an inbox.
+      await consumeLimit(ctx, "passwordReset", email);
+
+      const user = await ctx.db
+        .query("agencyUsers")
+        .withIndex("by_email", (q) => q.eq("email", email))
+        .unique();
+
+      // A disabled account must not be recoverable by its former holder.
+      if (user && user.status !== "disabled") {
+        const raw = newToken();
+        await ctx.db.patch(user._id, {
+          resetTokenHash: await sha256Hex(raw),
+          resetExpiresAt: Date.now() + RESET_TTL_MS,
+        });
+
+        const url = `${quotePublicBaseUrl()}/agency/reset?token=${encodeURIComponent(raw)}`;
+        await ctx.scheduler.runAfter(0, sendEmailRef, {
+          to: email,
+          subject: "Reset your Planera agency password",
+          html:
+            `<p>Someone asked to reset the password for this Planera agency account.</p>` +
+            `<p><a href="${url}">Choose a new password</a></p>` +
+            `<p>This link expires in one hour and can be used once. If you did not ask ` +
+            `for it, ignore this email — your password has not changed.</p>`,
+          text: `Reset your Planera agency password: ${url} (expires in 1 hour)`,
+        });
+      }
+
+      return { ok: true as const };
+    }),
+});
+
+/**
+ * Complete a reset.
+ *
+ * Consumes the token, sets the password, and bumps `sessionsValidFrom` — which
+ * kills every session issued earlier. That last part is the security-relevant
+ * one: if the reset was triggered because somebody else had the account, this
+ * is what actually evicts them.
+ */
+export const resetPassword = mutation({
+  args: { token: v.string(), password: v.string() },
+  handler: async (ctx, args) =>
+    guard("resetPassword", async () => {
+      if (!args.token || args.token.length < 16 || args.token.length > 200) {
+        throw invalid("this reset link is invalid or has expired");
+      }
+      const hash = await sha256Hex(args.token);
+      const user = await ctx.db
+        .query("agencyUsers")
+        .withIndex("by_resetTokenHash", (q) => q.eq("resetTokenHash", hash))
+        .unique();
+
+      // One uniform answer for unknown, expired and already-used.
+      if (!user || !user.resetExpiresAt || user.resetExpiresAt <= Date.now()) {
+        throw invalid("this reset link is invalid or has expired");
+      }
+      if (user.status === "disabled") throw invalid("this reset link is invalid or has expired");
+
+      assertPasswordPolicy(args.password, user.email);
+      const pw = await hashPassword(args.password, authPepper());
+      const now = Date.now();
+
+      await ctx.db.patch(user._id, {
+        passwordHash: pw.hash,
+        passwordSalt: pw.salt,
+        passwordUpdatedAt: now,
+        // Single use.
+        resetTokenHash: undefined,
+        resetExpiresAt: undefined,
+        // Evict every session that existed before this moment.
+        sessionsValidFrom: now,
+        // An invited user who never set a password is now a real one.
+        status: user.status === "invited" ? ("active" as const) : user.status,
+      });
+      await revokeAllSessions(ctx, user._id);
+
+      const member = await ctx.db
+        .query("agencyMembers")
+        .withIndex("by_user", (q) => q.eq("userId", user._id))
+        .first();
+      if (member) {
+        await audit(ctx, {
+          agencyId: member.agencyId,
+          actorUserId: user._id,
+          action: "auth.resetPassword",
+        });
+      }
+
+      return { ok: true as const };
+    }),
+});
+
+// ── Agency logo ─────────────────────────────────────────────────────────────
+
+/**
+ * What a logo may be.
+ *
+ * SVG is allowed deliberately: it is what agencies actually have, and it is the
+ * only format that stays crisp in a printed PDF. It is safe here because the
+ * document renders it through `<img src>`, which does not execute scripts, and
+ * Convex serves it from its own origin rather than ours — so even a hostile
+ * file cannot reach a session on planeraai.app.
+ */
+const LOGO_CONTENT_TYPES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/svg+xml",
+  "image/gif",
+]);
+
+/** A logo is a masthead, not a photograph. Anything larger is a mistake. */
+const LOGO_MAX_BYTES = 1024 * 1024;
+
+/**
+ * Step one of the upload: a short-lived URL the browser POSTs the file to
+ * directly, so the image never passes through a Convex function.
+ */
+export const generateLogoUploadUrl = mutation({
+  args: { token: v.string() },
+  handler: async (ctx, args) =>
+    guard("generateLogoUploadUrl", async () => {
+      await requireAccessRW(ctx, args.token, "owner");
+      return await ctx.storage.generateUploadUrl();
+    }),
+});
+
+/**
+ * Step two: adopt an uploaded file as the agency's logo.
+ *
+ * The upload URL accepts ANY bytes — it has no idea what it is receiving — so
+ * this is the only place type and size can be enforced. A file that fails is
+ * deleted rather than left orphaned in storage, which also stops the endpoint
+ * being used as free file hosting.
+ */
+export const setLogo = mutation({
+  args: { token: v.string(), storageId: v.id("_storage") },
+  handler: async (ctx, args) =>
+    guard("setLogo", async () => {
+      const access = await requireAccessRW(ctx, args.token, "owner");
+      const agency = await ctx.db.get(access.agencyId);
+      if (!agency) throw notFound("agency");
+
+      const meta = await ctx.db.system.get(args.storageId);
+      if (!meta) throw invalid("that upload could not be found — please try again");
+
+      const reject = async (message: string): Promise<never> => {
+        await ctx.storage.delete(args.storageId);
+        throw invalid(message);
+      };
+      if (!meta.contentType || !LOGO_CONTENT_TYPES.has(meta.contentType)) {
+        await reject("the logo must be a PNG, JPEG, WebP, GIF or SVG image");
+      }
+      if (meta.size > LOGO_MAX_BYTES) {
+        await reject("the logo must be 1 MB or smaller");
+      }
+
+      // Replacing a logo must not leave the old blob behind, billed forever.
+      const previous = agency.branding?.logoStorageId;
+      await ctx.db.patch(access.agencyId, {
+        branding: { ...(agency.branding ?? {}), logoStorageId: args.storageId },
+        updatedAt: Date.now(),
+      });
+      if (previous && previous !== args.storageId) {
+        await ctx.storage.delete(previous);
+      }
+
+      await audit(ctx, {
+        agencyId: access.agencyId,
+        actorUserId: access.userId,
+        action: "agency.setLogo",
+        meta: { contentType: meta.contentType, size: meta.size },
+      });
+      return await publicAgency(ctx, await ctx.db.get(access.agencyId));
+    }),
+});
+
+export const removeLogo = mutation({
+  args: { token: v.string() },
+  handler: async (ctx, args) =>
+    guard("removeLogo", async () => {
+      const access = await requireAccessRW(ctx, args.token, "owner");
+      const agency = await ctx.db.get(access.agencyId);
+      if (!agency) throw notFound("agency");
+
+      const previous = agency.branding?.logoStorageId;
+      if (previous) {
+        const { logoStorageId: _dropped, ...rest } = agency.branding ?? {};
+        await ctx.db.patch(access.agencyId, { branding: rest, updatedAt: Date.now() });
+        await ctx.storage.delete(previous);
+        await audit(ctx, {
+          agencyId: access.agencyId,
+          actorUserId: access.userId,
+          action: "agency.removeLogo",
+        });
+      }
+      return await publicAgency(ctx, await ctx.db.get(access.agencyId));
     }),
 });
 

@@ -33,6 +33,8 @@ export const agencyTables = {
     branding: v.optional(v.object({
       logoStorageId: v.optional(v.id("_storage")),
       primaryColor: v.optional(v.string()),
+      /** Language the AI writes customer-facing quote copy in. Defaults to Greek. */
+      quoteLanguage: v.optional(v.string()),
       legalName: v.optional(v.string()),
       contactEmail: v.optional(v.string()),
       contactPhone: v.optional(v.string()),
@@ -58,6 +60,13 @@ export const agencyTables = {
     ),
     inviteTokenHash: v.optional(v.string()),
     inviteExpiresAt: v.optional(v.float64()),
+    /**
+     * Forgotten-password recovery. Only the HASH is stored, exactly like the
+     * invite and session tokens, so a database read cannot mint a working
+     * reset link. One live reset per user — requesting again replaces it.
+     */
+    resetTokenHash: v.optional(v.string()),
+    resetExpiresAt: v.optional(v.float64()),
     // MFA (TOTP) — ready but optional in MVP.
     mfaSecretEnvelope: v.optional(v.string()), // vault-sealed TOTP secret
     mfaEnabled: v.optional(v.boolean()),
@@ -75,6 +84,7 @@ export const agencyTables = {
     createdAt: v.float64(),
   })
     .index("by_email", ["email"])
+    .index("by_resetTokenHash", ["resetTokenHash"])
     .index("by_inviteTokenHash", ["inviteTokenHash"]),
 
   // Membership: which user belongs to which agency, with what role.
@@ -185,8 +195,28 @@ export const agencyTables = {
     revalidation: v.optional(v.any()),
     /** Hash of the search inputs — makes a repeated search idempotent. */
     searchHash: v.optional(v.string()),
+    /**
+     * Whose trip this is. An agency runs many searches a day, and "ATH → CDG"
+     * is not enough to find the right one again a week later.
+     */
+    clientName: v.optional(v.string()),
+    clientReference: v.optional(v.string()),
     sentAt: v.optional(v.float64()),
     acceptedAt: v.optional(v.float64()),
+    /** Which package the traveller chose, when they accepted from the link. */
+    acceptedTier: v.optional(v.string()),
+    /** Free text the traveller left when accepting. */
+    acceptedNote: v.optional(v.string()),
+    /** First and latest time the customer link was opened. */
+    firstViewedAt: v.optional(v.float64()),
+    lastViewedAt: v.optional(v.float64()),
+    viewCount: v.optional(v.float64()),
+    /**
+     * AI-written, customer-facing copy per tier — generated from the CUSTOMER
+     * projection only, so it structurally cannot mention cost or margin.
+     * Optional throughout: a quote is complete and sendable without it.
+     */
+    aiCopy: v.optional(v.any()),
     createdAt: v.float64(),
     updatedAt: v.optional(v.float64()),
   })

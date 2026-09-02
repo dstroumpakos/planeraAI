@@ -80,6 +80,9 @@ export const available = query({
         // proves the credentials — but the UI must not imply searches will
         // include it.
         searchable: isSearchable(e.id),
+        // Built from public docs but never run against a live account. The UI
+        // says so rather than presenting it as proven.
+        searchVerified: e.searchVerified !== false,
         pendingReason: pendingReason(e.id),
         alreadyConnected: connected.has(e.id),
       }));
@@ -104,6 +107,7 @@ export const list = query({
           displayName: getRegistryEntry(r.connectorId)?.displayName ?? r.connectorId,
           implemented: isImplemented(r.connectorId),
           searchable: isSearchable(r.connectorId),
+          searchVerified: getRegistryEntry(r.connectorId)?.searchVerified !== false,
           pendingReason: pendingReason(r.connectorId),
         }));
     }),

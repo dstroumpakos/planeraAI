@@ -66,9 +66,14 @@ test("every provider declares the credential fields it actually needs", () => {
 test("signature providers require BOTH a key and a secret", () => {
   // Both are "api_key" scheme, and both silently fail at call time with only a
   // key — which is exactly the bug the per-provider field list exists to stop.
+  // Expedia asks for more besides (point of sale, originating IP), so this
+  // checks the signature pair is present rather than that it is all there is.
   for (const id of ["hotelbeds", "expedia_rapid"]) {
-    assert.deepEqual(requiredFieldsFor(id), ["apiKey", "secret"], id);
+    const fields = requiredFieldsFor(id);
+    assert.ok(fields.includes("apiKey"), `${id} does not ask for an API key`);
+    assert.ok(fields.includes("secret"), `${id} does not ask for a shared secret`);
   }
+  assert.deepEqual(requiredFieldsFor("hotelbeds"), ["apiKey", "secret"]);
 });
 
 test("a half-filled signature credential is rejected at connect time", () => {
@@ -120,8 +125,13 @@ test("HONESTY: a connector never declares a capability it cannot perform", () =>
     );
     // Revalidation is the call that turns an indicative price into a committed
     // one. Declaring it without implementing it would let the orchestrator
-    // present unverified fares as confirmed.
-    assert.equal(c.capabilities.supports.revalidate, false, `${spec.id}`);
+    // present unverified fares as confirmed, so the flag must track the spec
+    // exactly — in both directions.
+    assert.equal(
+      c.capabilities.supports.revalidate,
+      !!spec.revalidate,
+      `${spec.id} misreports its revalidation capability`,
+    );
     assert.equal(c.capabilities.supports.createBooking, false, `${spec.id}`);
   }
 });
@@ -153,10 +163,18 @@ test("HONESTY: an unsearchable provider refuses rather than inventing a request"
 });
 
 test("HONESTY: revalidation refuses instead of claiming a price still holds", async () => {
-  await assert.rejects(
-    () => getConnector("amadeus")!.revalidate(creds({}), "tok"),
-    /cannot re-price/,
-  );
+  // Every provider we cannot re-price must say so, rather than echoing the
+  // quoted price back as if a supplier had just confirmed it.
+  const unpriceable = CONNECTOR_SPECS.filter((spec) => !spec.revalidate);
+  assert.ok(unpriceable.length > 0, "this invariant needs at least one such provider");
+
+  for (const spec of unpriceable) {
+    await assert.rejects(
+      () => getConnector(spec.id)!.revalidate(creds({ apiKey: "k" }), "tok"),
+      /cannot re-price/,
+      spec.id,
+    );
+  }
 });
 
 test("pendingReason is exposed for exactly the unsearchable providers", () => {
@@ -236,8 +254,10 @@ test("Amadeus: token is fetched, then the search call carries it", async () => {
   assert.equal(offer.outboundStops, 0);
   assert.equal(offer.totalDurationMinutes, 230);
   assert.equal(offer.baggage.checked, 1);
-  // No re-price call exists yet, so it must not hand out a token implying one does.
-  assert.equal(offer.revalidationToken, undefined);
+  // Amadeus re-prices by posting the whole offer back, so the token IS the
+  // offer. Round-tripping it is what makes the revalidate call buildable.
+  assert.ok(offer.revalidationToken, "no re-price token was issued");
+  assert.deepEqual(JSON.parse(offer.revalidationToken!), AMADEUS_OFFER);
 });
 
 test("Amadeus: the contract host is used verbatim in production too", async () => {
