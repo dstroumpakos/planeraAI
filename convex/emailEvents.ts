@@ -39,6 +39,12 @@ import { internal as _internal } from "./_generated/api";
 import { Doc, Id } from "./_generated/dataModel";
 import { assertAdmin } from "./admin";
 import { applyOutreachEmailEvent } from "./agencyOutreach";
+import {
+  HARD_BOUNCE_CODES,
+  IGNORED_BOUNCE_CODES,
+  UNSUBSCRIBE_BOUNCE_CODE,
+  COMPLAINT_BOUNCE_CODES,
+} from "./emailBounceCodes";
 
 const internal = _internal as any;
 
@@ -46,38 +52,8 @@ const internal = _internal as any;
 // Constants
 // ---------------------------------------------------------------------------
 
-/**
- * Postmark bounce TypeCodes that mean "this address will never accept mail".
- * Matched on the numeric code rather than the description, which is prose and
- * has changed wording before.
- *
- *    1      HardBounce            mailbox does not exist
- *  100000   BadEmailAddress       malformed / rejected outright
- *  100002   ManuallyDeactivated   deactivated in Postmark
- *  100006   Blocked               ISP blocked the recipient
- *
- * Deliberately NOT here:
- *  - 256 DnsError and 100009 DMARCPolicy look like hard failures but are
- *    usually OUR configuration or a temporary domain problem. Suppressing the
- *    recipient would hide a fault we need to fix and silently shrink the list.
- *  - 512 SpamNotification is routed to the complaint path instead.
- */
-const HARD_BOUNCE_CODES = new Set([1, 100000, 100002, 100006]);
-
-/** Codes that are informational noise, not a delivery failure at all. */
-const IGNORED_BOUNCE_CODES = new Set([
-  32, // Subscribe
-  64, // AutoResponder ("out of office")
-  128, // AddressChange
-  1024, // OpenRelayTest
-  16384, // ChallengeVerification
-]);
-
-/** Postmark's "unsubscribe" bounce type — the recipient opted out at the ISP. */
-const UNSUBSCRIBE_BOUNCE_CODE = 16;
-
-/** Complaint-shaped bounce codes (SpamNotification, SpamComplaint). */
-const COMPLAINT_BOUNCE_CODES = new Set([512, 100001]);
+// Bounce TypeCode classification is shared with the B2B outreach breaker;
+// see `emailBounceCodes.ts` for what each set means and why.
 
 /**
  * How many soft bounces in a row (with no delivery in between) before we treat
@@ -502,7 +478,20 @@ export const ingestPostmarkEvent = internalMutation({
     // The B2B outreach list is a separate table with its own throttle and
     // circuit breaker, but it shares this single write path so a bounce can
     // never be recorded in one place and missed in the other.
-    await applyOutreachEmailEvent(ctx, { email, recordType: args.recordType });
+    // Passed the full bounce context, not just the record type: without the
+    // TypeCode the outreach breaker cannot tell an out-of-office reply from a
+    // dead mailbox, and without the suppression reason it cannot tell a real
+    // unsubscribe from the auto-suppression Postmark fires after a hard bounce.
+    await applyOutreachEmailEvent(ctx, {
+      email,
+      recordType: args.recordType,
+      typeCode: args.typeCode,
+      bounceType: args.bounceType,
+      inactive: args.inactive,
+      description: args.description ?? args.detail,
+      suppressionReason: args.suppressionReason,
+      suppressSending: args.suppressSending,
+    });
 
     switch (args.recordType) {
       // -------------------------------------------------------------- Delivery

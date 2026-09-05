@@ -30,9 +30,11 @@ import StreakWidget from "@/components/StreakWidget";
 import AchievementUnlocked from "@/components/AchievementUnlocked";
 import AirplaneIntro from "@/components/AirplaneIntro";
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, withSequence, Easing } from "react-native-reanimated";
+import { useTrackMarketing } from "@/lib/trackMarketing";
 
 export default function HomeScreen() {
   const router = useRouter();
+  const trackMarketing = useTrackMarketing();
   const { isAuthenticated, isLoading: authLoading } = useConvexAuth();
   const { colors, isDarkMode } = useTheme();
   const hideOnScroll = useHideTabBarOnScroll();
@@ -572,14 +574,17 @@ export default function HomeScreen() {
                 <TouchableOpacity 
                   key={index}
                   style={[styles.trendingCard, { backgroundColor: colors.lightGray }]}
-                  onPress={() => router.push({
-                    pathname: "/destination-preview",
-                    params: {
-                      destination: destination.destination,
-                      avgBudget: destination.avgBudget.toString(),
-                      count: destination.count.toString(),
-                    }
-                  })}
+                  onPress={() => {
+                    trackMarketing("destination_click", "app-home-trending");
+                    router.push({
+                      pathname: "/destination-preview",
+                      params: {
+                        destination: destination.destination,
+                        avgBudget: destination.avgBudget.toString(),
+                        count: destination.count.toString(),
+                      }
+                    });
+                  }}
                   activeOpacity={0.9}
                 >
                   {destinationImages[destination.destination] ? (

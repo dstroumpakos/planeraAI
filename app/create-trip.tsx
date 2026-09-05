@@ -1,8 +1,8 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import React from "react";
-import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Modal, Image, StatusBar, Platform } from "react-native";
+import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Modal, Image, StatusBar, Platform, PanResponder, KeyboardAvoidingView } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation, useQuery, useAction } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -14,8 +14,9 @@ import { useAuthenticatedMutation, useToken } from "@/lib/useAuthenticatedMutati
 import AIConsentModal from "@/components/AIConsentModal";
 import { useTranslation } from "react-i18next";
 import { TripGuideTooltip, GuideStep } from "@/components/FirstTripGuide";
-import { CITY_TRANSLATIONS, COUNTRY_TRANSLATIONS } from "@/lib/destinationTranslations";
-import { canonicalHomeAirport } from "@/lib/homeAirport";
+import { CITY_TRANSLATIONS, COUNTRY_TRANSLATIONS, normalizeDestinationToEnglish } from "@/lib/destinationTranslations";
+import { canonicalHomeAirport, resolveHomeIata, airportCityName } from "@/lib/homeAirport";
+import { resolveAirport } from "@/lib/destinationAirports";
 import { countTripDays, maxEndDate, MAX_TRIP_DAYS } from "@/lib/tripDays";
 
 import logoImage from "@/assets/images/appicon-1024x1024-01-1vb1vx.png";
@@ -435,6 +436,100 @@ const DESTINATIONS = [
     { city: "Ulaanbaatar", country: "Mongolia", image: "🇲🇳" },
 ];
 
+
+// ─── Step builder ───────────────────────────────────────────────────────────
+// The create flow is five short steps instead of one long scroll. Everything
+// below is presentation: the payload sent to `trips.create` is unchanged.
+const TOTAL_STEPS = 5;
+const MAX_VIBES = 3;
+const BUDGET_MIN = 300;
+const BUDGET_MAX = 12000;
+const GOLD = "#C09329";
+const GOLD_SOFT = "rgba(192,147,41,0.55)";
+const CHEAP_GREEN = "#1FA463";
+/** Stable empty object so an unpriced month doesn't churn memo dependencies. */
+const EMPTY_FARES: Record<string, number> = {};
+
+/** Perforation dot positions, as a percentage along each edge of a stamp. */
+const PERF_H = [4, 16, 28, 40, 52, 64, 76, 88, 96];
+const PERF_V = [6, 20, 34, 48, 62, 76, 90];
+
+/** Six vibes, each mapping onto an INTERESTS value the generator already takes. */
+const VIBES = [
+    { id: "Culture", hintKey: "createTrip.vibeCultureHint", icon: "library" as const },
+    { id: "Culinary", hintKey: "createTrip.vibeFoodHint", icon: "restaurant" as const },
+    { id: "Relaxation", hintKey: "createTrip.vibeSlowHint", icon: "cafe" as const },
+    { id: "Nightlife", hintKey: "createTrip.vibeNightHint", icon: "wine" as const },
+    { id: "Nature", hintKey: "createTrip.vibeOutdoorsHint", icon: "leaf" as const },
+    { id: "Shopping", hintKey: "createTrip.vibeShoppingHint", icon: "cart" as const },
+];
+
+const LENGTH_PRESETS = [
+    { key: "createTrip.lenWeekend", nights: 2 },
+    { key: "createTrip.lenFive", nights: 4 },
+    { key: "createTrip.lenWeek", nights: 6 },
+    { key: "createTrip.lenTwoWeeks", nights: 13 },
+];
+
+const PARTY_PRESETS = [
+    { key: "createTrip.partySolo", count: 1 },
+    { key: "createTrip.partyCouple", count: 2 },
+    { key: "createTrip.partyFamily", count: 4 },
+    { key: "createTrip.partyGroup", count: 6 },
+];
+
+const TIERS = [
+    { id: "budget", labelKey: "createTrip.budget" },
+    { id: "moderate", labelKey: "createTrip.moderate" },
+    { id: "high", labelKey: "createTrip.high" },
+    { id: "premium", labelKey: "createTrip.premium" },
+];
+
+/** Local flavour is the optional second tier, revealed once a vibe is picked. */
+const FLAVOUR_IDS = ["hidden-gems", "markets", "workshops", "neighborhoods"];
+
+/** Which builder step each first-trip guide tip belongs to. */
+const GUIDE_STEP_INDEX: Record<string, number> = {
+    destination: 1, dates: 2, travelers: 3, budget: 3, interests: 4, generate: 5,
+};
+
+/**
+ * Map the ten INTERESTS values onto the six vibe cards the builder shows.
+ * Anything without a card is dropped rather than held as an invisible pick.
+ */
+const INTEREST_TO_VIBE: Record<string, string> = {
+    Adventure: "Nature",
+    History: "Culture",
+    Culinary: "Culinary",
+    Culture: "Culture",
+    Relaxation: "Relaxation",
+    Nightlife: "Nightlife",
+    Nature: "Nature",
+    Shopping: "Shopping",
+};
+
+function toVibeIds(values: string[]): string[] {
+    const out: string[] = [];
+    for (const value of values || []) {
+        const mapped = INTEREST_TO_VIBE[value];
+        if (mapped && !out.includes(mapped)) out.push(mapped);
+    }
+    return out.slice(0, MAX_VIBES);
+}
+
+function splitDestination(value: string): [string, string] {
+    const parts = String(value || "").split(",").map((s) => s.trim());
+    return [parts[0] || "", parts[1] || ""];
+}
+
+/** "Rome, Italy" → "Ρώμη, Ιταλία" for display. The stored value stays English. */
+function localDestinationLabel(value: string, lang: string): string {
+    const [city, country] = splitDestination(value);
+    const localCity = (CITY_TRANSLATIONS[city] as any)?.[lang] || city;
+    const localCountry = country ? ((COUNTRY_TRANSLATIONS[country] as any)?.[lang] || country) : "";
+    return localCountry ? `${localCity}, ${localCountry}` : localCity;
+}
+
 export default function CreateTripScreen() {
     const router = useRouter();
     const params = useLocalSearchParams();
@@ -514,7 +609,8 @@ export default function CreateTripScreen() {
         const next = guideStep + 1;
         if (next < GUIDE_STEPS.length) {
             setGuideStep(next);
-            setTimeout(() => scrollToSection(GUIDE_STEPS[next].key), 300);
+            const target = GUIDE_STEP_INDEX[GUIDE_STEPS[next].key];
+            if (target) setStep(target);
         } else {
             setGuideStep(-1); // guide complete
         }
@@ -555,7 +651,7 @@ export default function CreateTripScreen() {
         budgetTotal: prefilledBudget ? Number(prefilledBudget) : 2000,
         // V1: travelerCount is the primary traveler count field (1-12)
         travelerCount: prefilledTravelers ? Number(prefilledTravelers) : 1,
-        interests: prefilledInterests ? prefilledInterests.split(",").filter(Boolean) : [] as string[],
+        interests: prefilledInterests ? toVibeIds(prefilledInterests.split(",").filter(Boolean)) : [] as string[],
         localExperiences: [] as string[],
         skipFlights: false,
         skipHotel: false,
@@ -597,7 +693,12 @@ export default function CreateTripScreen() {
                     prev.origin,
                 budgetTotal: userSettings.defaultBudget || prev.budgetTotal,
                 travelerCount: userSettings.defaultTravelers || prev.travelerCount,
-                interests: userSettings.interests && userSettings.interests.length > 0 ? userSettings.interests : prev.interests,
+                // Only vibes the step can actually show. A saved interest outside
+                // the six (Luxury, Family, ...) used to occupy a slot invisibly,
+                // so the grid looked empty but refused the third pick.
+                interests: userSettings.interests && userSettings.interests.length > 0
+                    ? toVibeIds(userSettings.interests)
+                    : prev.interests,
                 skipFlights: userSettings.skipFlights ?? prev.skipFlights,
                 skipHotel: userSettings.skipHotels ?? prev.skipHotel,
                 preferredFlightTime: (userSettings.flightTimePreference as any) || prev.preferredFlightTime,
@@ -647,7 +748,10 @@ export default function CreateTripScreen() {
     };
 
     const selectDestination = (destination: typeof DESTINATIONS[0]) => {
-        setFormData({ ...formData, destination: `${destination.city}, ${destination.country}` });
+        const canonical = `${destination.city}, ${destination.country}`;
+        setFormData({ ...formData, destination: canonical });
+        // The field shows the name in the user's language; the value stays English.
+        setDestQuery(localDestinationLabel(canonical, i18n.language));
         setShowDestinationSuggestions(false);
         setDestinationSuggestions([]);
     };
@@ -655,7 +759,9 @@ export default function CreateTripScreen() {
     const pickRandomDestination = () => {
         const randomIndex = Math.floor(Math.random() * DESTINATIONS.length);
         const dest = DESTINATIONS[randomIndex];
-        setFormData({ ...formData, destination: `${dest.city}, ${dest.country}` });
+        const canonical = `${dest.city}, ${dest.country}`;
+        setFormData({ ...formData, destination: canonical });
+        setDestQuery(localDestinationLabel(canonical, i18n.language));
         setShowDestinationSuggestions(false);
         setDestinationSuggestions([]);
     };
@@ -810,6 +916,461 @@ export default function CreateTripScreen() {
     };
 
      // V1: Traveler profiles disabled - removed getSelectedTravelersWithAges and areAllTravelersReady
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Step builder — state, data and helpers
+    // ─────────────────────────────────────────────────────────────────────────
+    const [step, setStep] = useState(1);
+    const [destQuery, setDestQuery] = useState(
+        prefilledDestination ? localDestinationLabel(prefilledDestination, i18n.language) : ""
+    );
+    const [editingOrigin, setEditingOrigin] = useState(false);
+    const [editingBudget, setEditingBudget] = useState(false);
+    const [budgetDraft, setBudgetDraft] = useState("");
+    const [showTimesSection, setShowTimesSection] = useState(
+        !!(prefilledArrivalTime || prefilledDepartureTime)
+    );
+    const [awaitingEnd, setAwaitingEnd] = useState(false);
+    const [tileImages, setTileImages] = useState<Record<string, { url: string; photographer: string; downloadLocation?: string }>>({});
+    const [tickerIndex, setTickerIndex] = useState(0);
+    // Fares are scanned per visible month and cached by route+month, so paging
+    // the calendar re-prices what you're actually looking at and paging back is
+    // free. Key: "FCO|2026-05".
+    const [faresByMonth, setFaresByMonth] = useState<Record<string, Record<string, number>>>({});
+    const [visibleMonth, setVisibleMonth] = useState(() => new Date().toISOString().slice(0, 7));
+    const [loadingFareKey, setLoadingFareKey] = useState<string | null>(null);
+    const [askText, setAskText] = useState("");
+    const [parsingAsk, setParsingAsk] = useState(false);
+    const trackWidthRef = useRef(0);
+
+    // Public proof + trending, both already cron-computed singletons.
+    const landingStats = useQuery(api.publicStats.getLandingStats, {}) as any;
+    const recentTrips = useQuery(api.publicStats.getRecentPublicTrips, {}) as any;
+    const trending = useQuery(api.trips.getTrendingDestinations, {}) as any;
+    const getDestinationImages = useAction(api.images.getDestinationImages);
+    const trackUnsplashDownload = useAction(api.images.trackUnsplashDownload);
+    const parseTripRequest = useAction(api.atlasParseTrip.parseTripRequest);
+    const runFlightCalendar = useAction(api.flightCalendar.flightCalendar);
+
+    const localCity = useCallback(
+        (city: string) => (CITY_TRANSLATIONS[city] as any)?.[i18n.language] || city,
+        [i18n.language]
+    );
+    const localCountry = useCallback(
+        (country: string) => (COUNTRY_TRANSLATIONS[country] as any)?.[i18n.language] || country,
+        [i18n.language]
+    );
+    const localDestination = useCallback(
+        (value: string) => localDestinationLabel(value, i18n.language),
+        [i18n.language]
+    );
+
+    const formatMoney = useCallback(
+        (value: number) => {
+            try {
+                return new Intl.NumberFormat(i18n.language, {
+                    style: "currency",
+                    currency: "EUR",
+                    maximumFractionDigits: 0,
+                }).format(value);
+            } catch {
+                return `€${Math.round(value)}`;
+            }
+        },
+        [i18n.language]
+    );
+
+    /**
+     * Leaving the destination field commits it. The field keeps showing the name
+     * in the user's own language; `formData.destination` always holds the
+     * canonical English "City, Country" the generator and flight search need —
+     * the same display/value split `canonicalHomeAirport` gives the origin.
+     */
+    const commitDestination = useCallback(() => {
+        setShowDestinationSuggestions(false);
+        const raw = destQuery.trim();
+        if (!raw) {
+            setFormData((prev) => ({ ...prev, destination: "" }));
+            return;
+        }
+        const lower = raw.toLowerCase();
+        const match =
+            DESTINATIONS.find((d) => `${d.city}, ${d.country}`.toLowerCase() === lower) ||
+            DESTINATIONS.find((d) => d.city.toLowerCase() === lower) ||
+            DESTINATIONS.find((d) => {
+                const trans = CITY_TRANSLATIONS[d.city];
+                return trans ? Object.values(trans).some((v) => v.toLowerCase() === lower) : false;
+            }) ||
+            DESTINATIONS.find((d) => d.city.toLowerCase().startsWith(lower) && lower.length >= 3);
+
+        if (match) {
+            setFormData((prev) => ({ ...prev, destination: `${match.city}, ${match.country}` }));
+            setDestQuery(`${localCity(match.city)}, ${localCountry(match.country)}`);
+            return;
+        }
+        // Not in the list: still send English rather than the typed script.
+        setFormData((prev) => ({ ...prev, destination: normalizeDestinationToEnglish(raw) }));
+    }, [destQuery, localCity, localCountry]);
+
+    /**
+     * "Just say it" — one line of natural language becomes a filled-in trip.
+     * Atlas returns already-validated fields (see convex/atlasParseTrip.ts), so
+     * anything it couldn't read simply keeps the value the form already had.
+     */
+    const runAsk = async () => {
+        const text = askText.trim();
+        if (!text || parsingAsk || !token) return;
+        setParsingAsk(true);
+        try {
+            const res: any = await parseTripRequest({
+                token,
+                text,
+                language: i18n.language,
+                origin: formData.origin,
+            });
+            if (!res?.ok) {
+                Alert.alert(t("createTrip.askFailedTitle"), t("createTrip.askFailedMsg"));
+                return;
+            }
+            setFormData((prev) => {
+                const start = res.startDate ?? prev.startDate;
+                let end = res.endDate ?? null;
+                if (end === null) {
+                    // Keep the length the user already had when only a start came back.
+                    end = res.startDate ? res.startDate + (prev.endDate - prev.startDate) : prev.endDate;
+                }
+                return {
+                    ...prev,
+                    destination: res.destination || prev.destination,
+                    startDate: start,
+                    endDate: Math.max(end, start + 24 * 60 * 60 * 1000),
+                    travelerCount: res.travelerCount ?? prev.travelerCount,
+                    budgetTotal: res.budgetTotal ?? prev.budgetTotal,
+                    interests: Array.isArray(res.interests) && res.interests.length > 0 ? res.interests : prev.interests,
+                };
+            });
+            if (res.destination) setDestQuery(localDestinationLabel(res.destination, i18n.language));
+            setAskText("");
+            setAwaitingEnd(false);
+            // Enough to review; otherwise drop them on the step that's still missing.
+            setStep(res.destination && res.startDate ? TOTAL_STEPS : 2);
+        } catch (error) {
+            console.error("[CreateTrip] ask parse failed", error);
+            Alert.alert(t("createTrip.askFailedTitle"), t("createTrip.askFailedMsg"));
+        } finally {
+            setParsingAsk(false);
+        }
+    };
+
+    // Rotating "someone just planned" line, from the anonymised public feed.
+    const tickerLine = useMemo(() => {
+        if (!Array.isArray(recentTrips) || recentTrips.length === 0) return "";
+        const item = recentTrips[tickerIndex % recentTrips.length];
+        if (!item?.destination) return "";
+        return t("createTrip.recentlyPlanned", { destination: localDestination(item.destination) });
+    }, [recentTrips, tickerIndex, localDestination, t]);
+
+    useEffect(() => {
+        if (!Array.isArray(recentTrips) || recentTrips.length < 2) return;
+        const timer = setInterval(() => setTickerIndex((i) => i + 1), 3800);
+        return () => clearInterval(timer);
+    }, [recentTrips]);
+
+    // Four trending destinations, rendered as stamps.
+    const stamps = useMemo(() => (Array.isArray(trending) ? trending.slice(0, 4) : []), [trending]);
+
+    useEffect(() => {
+        if (stamps.length === 0) return;
+        let cancelled = false;
+        (async () => {
+            for (const item of stamps) {
+                if (cancelled || tileImages[item.destination]) continue;
+                try {
+                    const res: any = await getDestinationImages({ destination: item.destination, count: 1 });
+                    const photo = Array.isArray(res) ? res[0] : res?.images?.[0];
+                    if (photo?.url && !cancelled) {
+                        setTileImages((prev) => ({
+                            ...prev,
+                            [item.destination]: {
+                                url: photo.url,
+                                photographer: photo.photographer || "",
+                                downloadLocation: photo.downloadLocation,
+                            },
+                        }));
+                    }
+                } catch {
+                    // Stamp keeps its flat placeholder — never blocks the step.
+                }
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [stamps]);
+
+    const routeKey = useMemo(() => {
+        const departureId = resolveHomeIata(formData.origin);
+        const arrivalId = resolveAirport(formData.destination)?.iata;
+        if (!departureId || !arrivalId || departureId === arrivalId) return null;
+        return { departureId, arrivalId };
+    }, [formData.origin, formData.destination]);
+
+    const fareKey = routeKey ? `${routeKey.arrivalId}|${visibleMonth}` : null;
+    const cheapDates = (fareKey && faresByMonth[fareKey]) || EMPTY_FARES;
+
+    /**
+     * Indicative fares for the month on screen. `flightCalendar` scans a rolling
+     * ~14-day window by default, so a month needs `startOffsetDays` + 3 windows
+     * — three searchapi calls on a cache miss, 12h cached server-side and kept
+     * per month here so paging back and forth costs nothing.
+     */
+    useEffect(() => {
+        if (step !== 2 || !token || !routeKey || !fareKey) return;
+        if (faresByMonth[fareKey]) return;
+        const monthStart = new Date(`${visibleMonth}-01T12:00:00`).getTime();
+        const offsetDays = Math.round((monthStart - Date.now()) / (24 * 60 * 60 * 1000));
+        if (offsetDays > 300) return; // too far out for the engine to price usefully
+        let cancelled = false;
+        setLoadingFareKey(fareKey);
+        (async () => {
+            try {
+                const res: any = await runFlightCalendar({
+                    token,
+                    input: { departureId: routeKey.departureId, arrivalId: routeKey.arrivalId, currency: "EUR" },
+                    startOffsetDays: Math.max(0, offsetDays),
+                    windows: 3,
+                    maxDates: 31,
+                });
+                if (cancelled) return;
+                const map: Record<string, number> = {};
+                for (const d of res?.dates || []) {
+                    if (d?.date && typeof d.price === "number") map[d.date] = d.price;
+                }
+                setFaresByMonth((prev) => ({ ...prev, [fareKey]: map }));
+            } catch {
+                // No calendar for this route or month — remember that, so a failed
+                // month doesn't refetch on every render.
+                if (!cancelled) setFaresByMonth((prev) => ({ ...prev, [fareKey]: {} }));
+            } finally {
+                if (!cancelled) setLoadingFareKey(null);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, [step, token, routeKey, fareKey, visibleMonth]);
+
+    const faresLoading = !!fareKey && loadingFareKey === fareKey;
+    const visibleMonthLabel = useMemo(() => {
+        try {
+            return new Date(`${visibleMonth}-01T12:00:00`).toLocaleDateString(i18n.language, { month: "long" });
+        } catch {
+            return visibleMonth;
+        }
+    }, [visibleMonth, i18n.language]);
+
+    const cheapestFare = useMemo(() => {
+        const values = Object.values(cheapDates);
+        return values.length ? Math.min(...values) : null;
+    }, [cheapDates]);
+
+    const cheapestHint = useMemo(() => {
+        const entries = Object.entries(cheapDates);
+        if (entries.length < 3) return "";
+        const sorted = [...entries].sort((a, b) => a[1] - b[1]);
+        const [cheapDate, cheapPrice] = sorted[0];
+        const median = sorted[Math.floor(sorted.length / 2)][1];
+        if (!median || cheapPrice >= median) return "";
+        const saving = Math.round(((median - cheapPrice) / median) * 100);
+        if (saving < 8) return "";
+        const label = new Date(`${cheapDate}T12:00:00`).toLocaleDateString(i18n.language, {
+            weekday: "short",
+            day: "numeric",
+            month: "short",
+        });
+        return t("createTrip.cheaperOn", { date: label, percent: saving });
+    }, [cheapDates, i18n.language, t]);
+
+    /** Move the trip onto the cheapest departure, keeping its length. */
+    const applyCheapestDate = () => {
+        const entries = Object.entries(cheapDates);
+        if (entries.length === 0) return;
+        const [cheapDate] = entries.sort((a, b) => a[1] - b[1])[0];
+        const ts = new Date(`${cheapDate}T12:00:00`).getTime();
+        if (!Number.isFinite(ts)) return;
+        setFormData((prev) => ({
+            ...prev,
+            startDate: ts,
+            endDate: ts + (prev.endDate - prev.startDate),
+        }));
+        setAwaitingEnd(false);
+    };
+
+    const applyLengthPreset = (nights: number) => {
+        setFormData((prev) => ({ ...prev, endDate: prev.startDate + nights * 24 * 60 * 60 * 1000 }));
+        setAwaitingEnd(false);
+    };
+
+    /** Inline range picking: first tap sets the start, second the end. */
+    const handleRangePress = (day: DateData) => {
+        const ts = new Date(`${day.dateString}T12:00:00`).getTime();
+        if (!awaitingEnd) {
+            setFormData((prev) => ({ ...prev, startDate: ts, endDate: ts }));
+            setAwaitingEnd(true);
+            return;
+        }
+        if (ts <= formData.startDate) {
+            setFormData((prev) => ({ ...prev, startDate: ts, endDate: ts }));
+            return;
+        }
+        if (countTripDays(formData.startDate, ts) > MAX_TRIP_DAYS) {
+            Alert.alert(t("createTrip.tripTooLong"), t("createTrip.tripTooLongMsg"));
+            return;
+        }
+        setFormData((prev) => ({ ...prev, endDate: ts }));
+        setAwaitingEnd(false);
+    };
+
+    const sameDay = (a: number, b: number) => {
+        const x = new Date(a); const y = new Date(b);
+        return x.getFullYear() === y.getFullYear() && x.getMonth() === y.getMonth() && x.getDate() === y.getDate();
+    };
+
+    /** Day cell with the indicative fare under the number. */
+    const renderDay = ({ date, state }: any) => {
+        if (!date) return <View style={styles.dayCell} />;
+        const ts = new Date(`${date.dateString}T12:00:00`).getTime();
+        const disabled = state === "disabled";
+        const isStart = sameDay(ts, formData.startDate);
+        const isEnd = sameDay(ts, formData.endDate);
+        const inRange = !isStart && !isEnd && ts > formData.startDate && ts < formData.endDate;
+        const price = cheapDates[date.dateString];
+        const isCheapest = price != null && cheapestFare != null && price <= cheapestFare * 1.02;
+        return (
+            <TouchableOpacity
+                disabled={disabled}
+                activeOpacity={0.7}
+                onPress={() => handleRangePress(date)}
+                style={[
+                    styles.dayCell,
+                    inRange && { backgroundColor: colors.secondary },
+                    (isStart || isEnd) && { backgroundColor: colors.primary, borderRadius: 10 },
+                ]}
+            >
+                <Text
+                    style={[
+                        styles.dayNumber,
+                        { color: disabled ? colors.border : colors.text },
+                        (isStart || isEnd) && { color: "#1A1A1A", fontWeight: "800" },
+                    ]}
+                >
+                    {date.day}
+                </Text>
+                {!disabled && price != null && (
+                    <Text
+                        style={[
+                            styles.dayPrice,
+                            { color: isCheapest ? CHEAP_GREEN : colors.textMuted },
+                            (isStart || isEnd) && { color: "rgba(26,26,26,0.7)" },
+                        ]}
+                        numberOfLines={1}
+                    >
+                        {formatMoney(Math.round(price))}
+                    </Text>
+                )}
+            </TouchableOpacity>
+        );
+    };
+
+    const getMarkedDatesWithFares = () => {
+        const marked: any = getMarkedDates();
+        for (const [date, price] of Object.entries(cheapDates)) {
+            const cheapest = Math.min(...Object.values(cheapDates));
+            if (price > cheapest * 1.05) continue;
+            marked[date] = { ...(marked[date] || {}), marked: true, dotColor: "#1FA463" };
+        }
+        return marked;
+    };
+
+    const budgetRatio = Math.max(
+        0,
+        Math.min(1, (formData.budgetTotal - BUDGET_MIN) / (BUDGET_MAX - BUDGET_MIN))
+    );
+
+    const setBudgetFromX = (x: number) => {
+        const width = trackWidthRef.current;
+        if (!width) return;
+        const ratio = Math.max(0, Math.min(1, x / width));
+        const raw = BUDGET_MIN + ratio * (BUDGET_MAX - BUDGET_MIN);
+        const snapped = Math.round(raw / 50) * 50;
+        setFormData((prev) => ({ ...prev, budgetTotal: snapped }));
+    };
+
+    const budgetPan = useRef(
+        PanResponder.create({
+            onStartShouldSetPanResponder: () => true,
+            onMoveShouldSetPanResponder: () => true,
+            onPanResponderGrant: (evt) => setBudgetFromX(evt.nativeEvent.locationX),
+            onPanResponderMove: (evt) => setBudgetFromX(evt.nativeEvent.locationX),
+        })
+    ).current;
+
+    const commitBudgetDraft = () => {
+        const value = parseInt(budgetDraft.replace(/[^0-9]/g, ""), 10);
+        if (Number.isFinite(value) && value > 0) {
+            setFormData((prev) => ({ ...prev, budgetTotal: value }));
+        }
+        setEditingBudget(false);
+    };
+
+    const budgetTierId =
+        dailyBudgetPerPerson > 300 ? "premium" : dailyBudgetPerPerson >= 150 ? "high" : dailyBudgetPerPerson > 60 ? "moderate" : "budget";
+
+    /**
+     * Destination-aware vibe order. `getTrendingDestinations` already ships an
+     * `interests` array per destination, aggregated by the same cron that feeds
+     * the trending list — no new backend for the ranking.
+     */
+    const destinationInterests: string[] = useMemo(() => {
+        if (!Array.isArray(trending) || !formData.destination) return [];
+        const target = formData.destination.toLowerCase();
+        const row = trending.find((d: any) => {
+            const dd = String(d.destination || "").toLowerCase();
+            return dd === target || dd.split(",")[0].trim() === target.split(",")[0].trim();
+        });
+        return Array.isArray(row?.interests) ? row.interests : [];
+    }, [trending, formData.destination]);
+
+    const orderedVibes = useMemo(() => {
+        if (destinationInterests.length === 0) return VIBES;
+        const rank = (id: string) => {
+            const i = destinationInterests.indexOf(id);
+            return i === -1 ? 99 : i;
+        };
+        return [...VIBES].sort((a, b) => rank(a.id) - rank(b.id));
+    }, [destinationInterests]);
+
+    const suggestedVibes = useMemo(
+        () => orderedVibes.filter((v) => destinationInterests.includes(v.id)).slice(0, MAX_VIBES),
+        [orderedVibes, destinationInterests]
+    );
+
+    const applySuggestedMix = () => {
+        setFormData((prev) => ({ ...prev, interests: suggestedVibes.map((v) => v.id) }));
+    };
+
+    const toggleVibe = (id: string) => {
+        setFormData((prev) => {
+            if (prev.interests.includes(id)) {
+                return { ...prev, interests: prev.interests.filter((i) => i !== id) };
+            }
+            if (prev.interests.length >= MAX_VIBES) return prev;
+            return { ...prev, interests: [...prev.interests, id] };
+        });
+    };
+
+    const creditsLabel = useMemo(() => {
+        if (!userPlan) return "";
+        if (userPlan.isSubscriptionActive) return t("createTrip.creditsUnlimited");
+        const left = userPlan.tripCredits ?? 0;
+        return t("createTrip.creditsLeft", { count: left });
+    }, [userPlan, t]);
 
     const handleSubmit = async (options?: { skipConsentCheck?: boolean }) => {
         if (!formData.destination) {
@@ -1014,76 +1575,118 @@ export default function CreateTripScreen() {
         );
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Step builder render
+    // ─────────────────────────────────────────────────────────────────────────
+    const stepValid = (n: number) => {
+        if (n === 1) return !!formData.destination.trim();
+        if (n === 2) return countTripDays(formData.startDate, formData.endDate) <= MAX_TRIP_DAYS && formData.endDate > formData.startDate;
+        if (n === 3) return formData.travelerCount >= 1 && formData.travelerCount <= 12 && formData.budgetTotal > 0;
+        return true;
+    };
+
+    const goNext = () => {
+        if (!stepValid(step)) return;
+        if (step < TOTAL_STEPS) {
+            setStep(step + 1);
+            scrollRef.current?.scrollTo({ y: 0, animated: false });
+        }
+    };
+    const goBack = () => {
+        if (step > 1) {
+            setStep(step - 1);
+            scrollRef.current?.scrollTo({ y: 0, animated: false });
+        } else {
+            router.back();
+        }
+    };
+
+    const originIata = resolveHomeIata(formData.origin);
+    const originCity = airportCityName(originIata) || formData.origin.split(",")[0];
+    const destAirport = resolveAirport(formData.destination);
+    const tripDaysNow = countTripDays(formData.startDate, formData.endDate);
+    const nightsNow = Math.max(0, tripDaysNow - 1);
+
+    const rangeLabel = `${new Date(formData.startDate).toLocaleDateString(i18n.language, { weekday: "short", day: "numeric" })} → ${new Date(formData.endDate).toLocaleDateString(i18n.language, { weekday: "short", day: "numeric", month: "short" })}`;
+
     return (
         <>
             <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor="transparent" translucent={true} />
             <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-            <ScrollView ref={scrollRef} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-                {/* Header */}
-                <View style={styles.headerSection}>
-                    <View style={styles.headerTop}>
-                        <TouchableOpacity onPress={() => router.back()} style={[styles.backButton, { backgroundColor: colors.secondary }]}>
-                            <Ionicons name="arrow-back" size={24} color={colors.text} />
-                        </TouchableOpacity>
-                        <View style={styles.logoContainer}>
-                            <Image source={logoImage} style={styles.headerLogo} resizeMode="contain" />
-                            <Text style={[styles.headerLogoText, { color: colors.text }]}>PLANERA</Text>
-                        </View>
-                        <View style={{ width: 44 }} />
-                    </View>
-                    
-                    <View style={styles.titleSection}>
-                        <Text style={[styles.titleMain, { color: colors.text }]}>{t('createTrip.designYour')}</Text>
-                        <Text style={[styles.titleHighlight, { color: colors.text, borderBottomColor: colors.primary }]}>{t('createTrip.perfectEscape')}</Text>
-                        <Text style={[styles.subtitle, { color: colors.textMuted }]}>{t('createTrip.letAICraft')}</Text>
-                    </View>
+                <View style={styles.stepHeader}>
+                    <TouchableOpacity onPress={goBack} style={[styles.backButton, { backgroundColor: colors.secondary }]}>
+                        <Ionicons name="arrow-back" size={22} color={colors.text} />
+                    </TouchableOpacity>
+                    <Text style={[styles.stepHeaderTitle, { color: colors.text }]}>{t("createTrip.newTrip")}</Text>
+                    <Text style={[styles.stepCount, { color: colors.textMuted }]}>{step} / {TOTAL_STEPS}</Text>
+                </View>
+                <View style={[styles.progressTrack, { backgroundColor: colors.secondary }]}>
+                    <View style={[styles.progressFill, { backgroundColor: colors.primary, width: `${(step / TOTAL_STEPS) * 100}%` }]} />
                 </View>
 
-                {/* From/To Section */}
-                <View ref={(r) => { sectionRefs.current["destination"] = r; }} style={[styles.card, { backgroundColor: colors.card }, getHighlightStyle("destination")]}>
-                    <View style={styles.locationSection}>
-                        <View style={styles.locationItem}>
-                            <Text style={[styles.locationLabel, { color: colors.textMuted }]}>{t('createTrip.from')}</Text>
-                            <View style={styles.locationContent}>
-                                <Ionicons name="location" size={24} color={colors.text} />
-                                <TextInput
-                                    style={[styles.locationText, { color: colors.text }]}
-                                    placeholder={t('createTrip.whereFrom')}
-                                    placeholderTextColor={colors.textMuted}
-                                    value={formData.origin}
-                                    onChangeText={(text) => setFormData({ ...formData, origin: text })}
-                                />
-                            </View>
-                        </View>
+                <KeyboardAvoidingView
+                    style={styles.keyboardWrap}
+                    behavior={Platform.OS === "ios" ? "padding" : "height"}
+                >
+                <ScrollView
+                    ref={scrollRef}
+                    contentContainerStyle={styles.stepContent}
+                    keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode="interactive"
+                    automaticallyAdjustKeyboardInsets
+                    showsVerticalScrollIndicator={false}
+                >
+                    {/* ── Step 1 · where ─────────────────────────────────── */}
+                    {step === 1 && (
+                        <View style={styles.stepBody}>
+                            {!!landingStats?.tripsCount && (
+                                <View style={styles.proofBlock}>
+                                    <View style={styles.proofRow}>
+                                        <View style={styles.liveDot} />
+                                        <Text style={[styles.proofNum, { color: colors.text }]}>
+                                            {landingStats.tripsCount.toLocaleString(i18n.language)}
+                                        </Text>
+                                        <Text style={[styles.proofText, { color: colors.textSecondary }]}>{t("createTrip.totalTrips")}</Text>
+                                    </View>
+                                    {!!tickerLine && (
+                                        <Text style={[styles.proofTicker, { color: colors.textMuted }]} numberOfLines={1}>{tickerLine}</Text>
+                                    )}
+                                </View>
+                            )}
 
-                        <TouchableOpacity style={styles.swapButton}>
-                            <Ionicons name="swap-vertical" size={20} color={colors.textMuted} />
-                        </TouchableOpacity>
+                            <Text style={[styles.stepTitle, { color: colors.text }]}>{t("createTrip.q1")}</Text>
 
-                        <View style={styles.locationItem}>
-                            <Text style={[styles.locationLabel, { color: colors.textMuted }]}>{t('createTrip.to')}</Text>
-                            <View style={styles.locationContent}>
-                                <Ionicons name="location" size={24} color={colors.error} />
+                            <View style={[styles.destField, { backgroundColor: colors.card, borderColor: formData.destination ? colors.primary : colors.border }]}>
+                                <Ionicons name="location" size={20} color={colors.error} />
                                 <TextInput
-                                    style={[styles.destinationInput, { color: colors.text }]}
-                                    placeholder={t('createTrip.whereTo')}
+                                    style={[styles.destInput, { color: colors.text }]}
+                                    placeholder={t("createTrip.whereTo")}
                                     placeholderTextColor={colors.textMuted}
-                                    value={formData.destination}
+                                    value={destQuery}
                                     onChangeText={(text) => {
-                                        setFormData({ ...formData, destination: text });
+                                        setDestQuery(text);
+                                        setFormData((prev) => ({ ...prev, destination: "" }));
                                         searchDestinations(text);
                                     }}
-                                    onFocus={() => {
-                                        if (formData.destination.length >= 2) {
-                                            searchDestinations(formData.destination);
-                                        }
-                                    }}
+                                    onBlur={commitDestination}
+                                    returnKeyType="done"
+                                    onSubmitEditing={commitDestination}
                                 />
+                                {!!formData.destination && <Ionicons name="checkmark-circle" size={20} color={colors.primary} />}
                             </View>
-                            
+
+                            {/* Localised label above, canonical value below — the value is what we send. */}
+                            {!!formData.destination && destQuery.trim() !== formData.destination && (
+                                <View style={styles.sentAsRow}>
+                                    <Ionicons name="paper-plane-outline" size={12} color={colors.textMuted} />
+                                    <Text style={[styles.sentAsLabel, { color: colors.textMuted }]}>{t("createTrip.sentAs")}</Text>
+                                    <Text style={[styles.sentAsValue, { color: colors.textSecondary, backgroundColor: colors.secondary }]}>{formData.destination}</Text>
+                                </View>
+                            )}
+
                             {showDestinationSuggestions && destinationSuggestions.length > 0 && (
                                 <View style={[styles.suggestionsContainer, { backgroundColor: colors.secondary }]}>
-                                    <ScrollView nestedScrollEnabled={true} keyboardShouldPersistTaps="handled">
+                                    <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled">
                                         {destinationSuggestions.map((dest, index) => (
                                             <TouchableOpacity
                                                 key={`${dest.city}-${dest.country}-${index}`}
@@ -1092,412 +1695,582 @@ export default function CreateTripScreen() {
                                             >
                                                 <Text style={{ fontSize: 18, marginRight: 12 }}>{dest.image}</Text>
                                                 <View>
-                                                    <Text style={[styles.suggestionCity, { color: colors.text }]}>{dest.city}</Text>
-                                                    <Text style={[styles.suggestionDetails, { color: colors.textMuted }]}>{dest.country}</Text>
+                                                    <Text style={[styles.suggestionCity, { color: colors.text }]}>{localCity(dest.city)}</Text>
+                                                    <Text style={[styles.suggestionDetails, { color: colors.textMuted }]}>{localCountry(dest.country)}</Text>
                                                 </View>
                                             </TouchableOpacity>
                                         ))}
                                     </ScrollView>
                                 </View>
                             )}
-                        </View>
-                    </View>
 
-                    {/* Surprise Me - Random Destination */}
-                    <TouchableOpacity 
-                        style={[styles.surpriseMeButton, { backgroundColor: colors.primary }]} 
-                        onPress={pickRandomDestination}
-                        activeOpacity={0.7}
-                    >
-                        <Ionicons name="shuffle" size={20} color={colors.text} />
-                        <Text style={[styles.surpriseMeText, { color: colors.text }]}>{t('createTrip.surpriseMe')}</Text>
-                        <Text style={[styles.surpriseMeSubtext, { color: colors.text, opacity: 0.7 }]}>{t('createTrip.pickRandom')}</Text>
-                    </TouchableOpacity>
+                            {editingOrigin ? (
+                                <View style={[styles.destField, { backgroundColor: colors.card, borderColor: colors.text }]}>
+                                    <Ionicons name="airplane" size={18} color={colors.text} />
+                                    <TextInput
+                                        style={[styles.destInput, { color: colors.text }]}
+                                        placeholder={t("createTrip.whereFrom")}
+                                        placeholderTextColor={colors.textMuted}
+                                        value={formData.origin}
+                                        autoFocus
+                                        onChangeText={(text) => setFormData((prev) => ({ ...prev, origin: text }))}
+                                        onBlur={() => {
+                                            const canon = canonicalHomeAirport(formData.origin);
+                                            if (canon?.label) setFormData((prev) => ({ ...prev, origin: canon.label }));
+                                            setEditingOrigin(false);
+                                        }}
+                                        returnKeyType="done"
+                                    />
+                                </View>
+                            ) : (
+                                <TouchableOpacity style={[styles.originChip, { backgroundColor: colors.secondary }]} onPress={() => setEditingOrigin(true)} activeOpacity={0.7}>
+                                    <Ionicons name="airplane" size={16} color={colors.textSecondary} />
+                                    <Text style={[styles.originText, { color: colors.text }]} numberOfLines={1}>
+                                        {t("createTrip.from")} {originCity}
+                                    </Text>
+                                    {!!originIata && (
+                                        <Text style={[styles.originPill, { color: colors.text, backgroundColor: colors.card, borderColor: colors.border }]}>{originIata}</Text>
+                                    )}
+                                    <Text style={[styles.originChange, { color: colors.primary }]}>{t("common.change", { defaultValue: "Change" })}</Text>
+                                </TouchableOpacity>
+                            )}
 
-                    <TouchableOpacity style={[styles.multiCityButton, { backgroundColor: colors.inputBackground, borderColor: colors.border }]} disabled={true}>
-                        <View style={styles.multiCityContent}>
-                            <Ionicons name="git-merge-outline" size={20} color={colors.text} />
-                            <Text style={[styles.multiCityText, { color: colors.text }]}>{t('createTrip.multiCityTrip')}</Text>
-                        </View>
-                        <View style={[styles.comingSoonBadge, { backgroundColor: colors.primary }]}>
-                            <Text style={[styles.comingSoonText, { color: colors.text }]}>{t('common.comingSoon')}</Text>
-                        </View>
-                    </TouchableOpacity>
-                </View>
+                            {stamps.length > 0 && (
+                                <View>
+                                    <Text style={[styles.sectionLabel, { color: colors.textMuted, marginTop: 4 }]}>
+                                        {t("createTrip.trendingFrom", { city: originCity })}
+                                    </Text>
+                                    <View style={styles.stampGrid}>
+                                        {stamps.map((item: any) => {
+                                            const [sCity, sCountry] = splitDestination(item.destination);
+                                            const photo = tileImages[item.destination];
+                                            return (
+                                                <TouchableOpacity
+                                                    key={item.destination}
+                                                    style={[styles.stamp, { backgroundColor: colors.card, borderColor: GOLD }]}
+                                                    activeOpacity={0.85}
+                                                    onPress={() => {
+                                                        setFormData((prev) => ({ ...prev, destination: normalizeDestinationToEnglish(item.destination) }));
+                                                        setDestQuery(localDestination(item.destination));
+                                                        setShowDestinationSuggestions(false);
+                                                        // Unsplash requires a download ping when a photo is actually used.
+                                                        if (photo?.downloadLocation) {
+                                                            trackUnsplashDownload({ downloadLocation: photo.downloadLocation }).catch(() => {});
+                                                        }
+                                                    }}
+                                                >
+                                                    {/* Punched edge: dots in the page colour read as perforations. */}
+                                                    <View pointerEvents="none" style={styles.perfLayer}>
+                                                        {PERF_H.map((pos, i) => (
+                                                            <View key={`t${i}`} style={[styles.perfDot, { backgroundColor: colors.background, top: -5, left: `${pos}%` }]} />
+                                                        ))}
+                                                        {PERF_H.map((pos, i) => (
+                                                            <View key={`b${i}`} style={[styles.perfDot, { backgroundColor: colors.background, bottom: -5, left: `${pos}%` }]} />
+                                                        ))}
+                                                        {PERF_V.map((pos, i) => (
+                                                            <View key={`l${i}`} style={[styles.perfDotV, { backgroundColor: colors.background, left: -5, top: `${pos}%` }]} />
+                                                        ))}
+                                                        {PERF_V.map((pos, i) => (
+                                                            <View key={`r${i}`} style={[styles.perfDotV, { backgroundColor: colors.background, right: -5, top: `${pos}%` }]} />
+                                                        ))}
+                                                    </View>
+                                                    <View style={[styles.stampPhoto, { backgroundColor: colors.secondary, borderColor: GOLD_SOFT }]}>
+                                                        {!!photo?.url && <Image source={{ uri: photo.url }} style={styles.stampImage} resizeMode="cover" />}
+                                                        {!!photo?.photographer && (
+                                                            <Text style={styles.stampCredit} numberOfLines={1}>{photo.photographer}</Text>
+                                                        )}
+                                                        {typeof item.avgTripSpend === "number" && item.avgTripSpend > 0 && (
+                                                            <View style={styles.stampDenom}>
+                                                                <Text style={styles.stampDenomText}>
+                                                                    {formatMoney(Math.round(item.avgTripSpend))}{t("createTrip.perDaySuffix")}
+                                                                </Text>
+                                                            </View>
+                                                        )}
+                                                        {!!originIata && (
+                                                            <View style={styles.postmark}>
+                                                                <Text style={styles.postmarkText}>{originIata}</Text>
+                                                            </View>
+                                                        )}
+                                                    </View>
+                                                    <View style={[styles.stampCaption, { borderTopColor: GOLD_SOFT }]}>
+                                                        <Text style={[styles.stampCity, { color: colors.text }]} numberOfLines={1}>{localCity(sCity)}</Text>
+                                                        <Text style={[styles.stampCountry, { color: colors.textMuted }]} numberOfLines={1}>{localCountry(sCountry)}</Text>
+                                                    </View>
+                                                </TouchableOpacity>
+                                            );
+                                        })}
+                                    </View>
+                                </View>
+                            )}
 
-                {currentGuideKey === "destination" && (
-                    <TripGuideTooltip step={GUIDE_STEPS[guideStep]} currentIndex={guideStep} totalSteps={GUIDE_STEPS.length} onNext={advanceGuide} onSkip={dismissGuide} />
-                )}
-
-                {/* Dates Section */}
-                <View ref={(r) => { sectionRefs.current["dates"] = r; }} style={[styles.card, { backgroundColor: colors.card }, getHighlightStyle("dates")]}>
-                    <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>{t('createTrip.dates')}</Text>
-                    <View style={[styles.datesContainer, { backgroundColor: colors.secondary }]}>
-                        <TouchableOpacity 
-                            style={styles.dateInputButton}
-                            onPress={() => {
-                                setSelectingDate('start');
-                                setShowCalendar(true);
-                            }}
-                        >
-                            <Text style={[styles.dateLabel, { color: colors.textMuted }]}>{t('createTrip.startDate')}</Text>
-                            <View style={styles.dateValueContainer}>
-                                <Ionicons name="calendar-outline" size={20} color={colors.text} />
-                                <Text style={[styles.dateValueText, { color: colors.text }]}>{formatDate(formData.startDate)}</Text>
-                            </View>
-                        </TouchableOpacity>
-                        
-                        <View style={[styles.dateSeparator, { backgroundColor: colors.border }]} />
-
-                        <TouchableOpacity 
-                            style={styles.dateInputButton}
-                            onPress={() => {
-                                setSelectingDate('end');
-                                setShowCalendar(true);
-                            }}
-                        >
-                            <Text style={[styles.dateLabel, { color: colors.textMuted }]}>{t('createTrip.endDate')}</Text>
-                            <View style={styles.dateValueContainer}>
-                                <Ionicons name="calendar-outline" size={20} color={colors.text} />
-                                <Text style={[styles.dateValueText, { color: colors.text }]}>{formatDate(formData.endDate)}</Text>
-                            </View>
-                        </TouchableOpacity>
-                    </View>
-                    <View style={styles.dateLimitHint}>
-                        <Ionicons name="information-circle-outline" size={14} color={colors.textMuted} />
-                        <Text style={[styles.dateLimitHintText, { color: colors.textMuted }]}>
-                            {t('createTrip.daysSelected', { count: tripDays })}
-                        </Text>
-                    </View>
-                </View>
-
-                {currentGuideKey === "dates" && (
-                    <TripGuideTooltip step={GUIDE_STEPS[guideStep]} currentIndex={guideStep} totalSteps={GUIDE_STEPS.length} onNext={advanceGuide} onSkip={dismissGuide} />
-                )}
-
-                {/* Flight Times Section (Optional) - Affects itinerary timing */}
-                <View style={[styles.card, { backgroundColor: colors.card }]}>
-                    <View style={styles.sectionHeaderRow}>
-                        <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>{t('createTrip.flightTimes')}</Text>
-                        <View style={[styles.optionalBadge, { backgroundColor: colors.secondary }]}>
-                            <Text style={[styles.optionalText, { color: colors.textMuted }]}>{t('common.optional')}</Text>
-                        </View>
-                    </View>
-                    <Text style={[styles.sectionHelpText, { color: colors.textSecondary }]}>
-                        {t('createTrip.flightTimesHelp')}
-                    </Text>
-                    
-                    <View style={[styles.datesContainer, { backgroundColor: colors.secondary, marginTop: 12 }]}>
-                        {/* Arrival Time */}
-                        <TouchableOpacity 
-                            style={styles.dateInputButton}
-                            onPress={() => {
-                                setSelectingTime('arrival');
-                                // Initialize temp time based on existing arrival time or default to 3:00 PM
-                                const defaultTime = formData.arrivalTime 
-                                    ? new Date(formData.arrivalTime) 
-                                    : new Date(new Date().setHours(15, 0, 0, 0));
-                                setTempTime(defaultTime);
-                                setShowTimePicker(true);
-                            }}
-                        >
-                            <Text style={[styles.dateLabel, { color: colors.textMuted }]}>{t('createTrip.arrivalAtDestination')}</Text>
-                            <View style={styles.dateValueContainer}>
-                                <Ionicons name="airplane" size={20} color={colors.text} style={{ transform: [{ rotate: '45deg' }] }} />
-                                <Text style={[styles.dateValueText, { color: formData.arrivalTime ? colors.text : colors.textMuted }]}>
-                                    {formData.arrivalTime ? formatTime(formData.arrivalTime) : t('createTrip.tapToSet')}
-                                </Text>
-                                {formData.arrivalTime && (
-                                    <TouchableOpacity 
-                                        onPress={(e) => { e.stopPropagation(); clearTime('arrival'); }}
-                                        style={styles.clearTimeButton}
-                                    >
-                                        <Ionicons name="close-circle" size={18} color={colors.textMuted} />
+                            <View style={[styles.askBar, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                                <View style={[styles.askSpark, { backgroundColor: colors.primary }]}>
+                                    {parsingAsk
+                                        ? <ActivityIndicator size="small" color="#1A1A1A" />
+                                        : <Ionicons name="sparkles" size={14} color="#1A1A1A" />}
+                                </View>
+                                <TextInput
+                                    style={[styles.askInput, { color: colors.text }]}
+                                    placeholder={t("createTrip.askPlaceholder")}
+                                    placeholderTextColor={colors.textMuted}
+                                    value={askText}
+                                    onChangeText={setAskText}
+                                    onFocus={() => {
+                                        // The bar sits near the bottom of step 1; lift it clear of the keyboard.
+                                        setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 250);
+                                    }}
+                                    onSubmitEditing={runAsk}
+                                    returnKeyType="go"
+                                    editable={!parsingAsk}
+                                    maxLength={200}
+                                />
+                                {!!askText.trim() && !parsingAsk && (
+                                    <TouchableOpacity onPress={runAsk} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                                        <Ionicons name="arrow-forward-circle" size={26} color={colors.primary} />
                                     </TouchableOpacity>
                                 )}
                             </View>
-                        </TouchableOpacity>
-                        
-                        <View style={[styles.dateSeparator, { backgroundColor: colors.border }]} />
 
-                        {/* Departure Time */}
-                        <TouchableOpacity 
-                            style={styles.dateInputButton}
-                            onPress={() => {
-                                setSelectingTime('departure');
-                                // Initialize temp time based on existing departure time or default to 6:00 PM
-                                const defaultTime = formData.departureTime 
-                                    ? new Date(formData.departureTime) 
-                                    : new Date(new Date().setHours(18, 0, 0, 0));
-                                setTempTime(defaultTime);
-                                setShowTimePicker(true);
-                            }}
-                        >
-                            <Text style={[styles.dateLabel, { color: colors.textMuted }]}>{t('createTrip.departureFromDestination')}</Text>
-                            <View style={styles.dateValueContainer}>
-                                <Ionicons name="airplane" size={20} color={colors.text} style={{ transform: [{ rotate: '-45deg' }] }} />
-                                <Text style={[styles.dateValueText, { color: formData.departureTime ? colors.text : colors.textMuted }]}>
-                                    {formData.departureTime ? formatTime(formData.departureTime) : t('createTrip.tapToSet')}
+                            <TouchableOpacity style={[styles.surpriseRow, { borderColor: colors.border }]} onPress={pickRandomDestination} activeOpacity={0.7}>
+                                <Ionicons name="shuffle" size={18} color={colors.primary} />
+                                <Text style={[styles.surpriseRowText, { color: colors.text }]}>{t("createTrip.surpriseMe")}</Text>
+                            </TouchableOpacity>
+                        </View>
+                    )}
+
+                    {/* ── Step 2 · when ──────────────────────────────────── */}
+                    {step === 2 && (
+                        <View style={styles.stepBody}>
+                            <Text style={[styles.stepTitle, { color: colors.text }]}>{t("createTrip.q2")}</Text>
+
+                            <View style={styles.chipRow}>
+                                {LENGTH_PRESETS.map((p) => {
+                                    const active = nightsNow === p.nights;
+                                    return (
+                                        <TouchableOpacity
+                                            key={p.key}
+                                            style={[styles.chip, { backgroundColor: active ? colors.primary : colors.card, borderColor: active ? colors.primary : colors.border }]}
+                                            onPress={() => applyLengthPreset(p.nights)}
+                                        >
+                                            <Text style={[styles.chipText, { color: colors.text }]}>{t(p.key)}</Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </View>
+                            <Text style={[styles.stepHint, { color: colors.textMuted }]}>{t("createTrip.tapAny")}</Text>
+
+                            {!!cheapestHint && (
+                                <TouchableOpacity
+                                    style={[styles.nudge, { backgroundColor: colors.primary }]}
+                                    onPress={applyCheapestDate}
+                                    activeOpacity={0.85}
+                                >
+                                    <Ionicons name="trending-down" size={18} color="#1A1A1A" />
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.nudgeTitle}>{cheapestHint}</Text>
+                                        <Text style={styles.nudgeSub}>{t("createTrip.indicativeFares")}</Text>
+                                    </View>
+                                    <Ionicons name="arrow-forward-circle" size={22} color="#1A1A1A" />
+                                </TouchableOpacity>
+                            )}
+
+                            {faresLoading && (
+                                <View style={[styles.faresLoading, { backgroundColor: colors.secondary }]}>
+                                    <ActivityIndicator size="small" color={colors.primary} />
+                                    <Text style={[styles.faresLoadingText, { color: colors.textSecondary }]} numberOfLines={2}>
+                                        {t("createTrip.checkingFares", { month: visibleMonthLabel })}
+                                    </Text>
+                                </View>
+                            )}
+
+                            <View style={[styles.inlineCalendar, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                                <Calendar
+                                    initialDate={formatDateForCalendar(formData.startDate)}
+                                    minDate={formatDateForCalendar(Date.now())}
+                                    maxDate={formatDateForCalendar(Date.now() + 18 * 30 * 24 * 60 * 60 * 1000)}
+                                    onDayPress={handleRangePress}
+                                    onMonthChange={(m: DateData) => setVisibleMonth(m.dateString.slice(0, 7))}
+                                    dayComponent={renderDay}
+                                    disableArrowLeft={faresLoading}
+                                    disableArrowRight={faresLoading}
+                                    theme={{
+                                        backgroundColor: colors.card,
+                                        calendarBackground: colors.card,
+                                        textSectionTitleColor: colors.textMuted,
+                                        selectedDayBackgroundColor: colors.primary,
+                                        selectedDayTextColor: colors.text,
+                                        todayTextColor: colors.primary,
+                                        dayTextColor: colors.text,
+                                        textDisabledColor: colors.border,
+                                        dotColor: "#1FA463",
+                                        arrowColor: colors.text,
+                                        monthTextColor: colors.text,
+                                        textDayFontWeight: "500",
+                                        textMonthFontWeight: "700",
+                                        textDayHeaderFontWeight: "600",
+                                        textDayFontSize: 15,
+                                        textMonthFontSize: 16,
+                                        textDayHeaderFontSize: 12,
+                                    }}
+                                />
+                            </View>
+
+                            <View style={[styles.readout, { backgroundColor: colors.secondary }]}>
+                                <Text style={[styles.readoutBig, { color: colors.text }]}>{rangeLabel}</Text>
+                                <Text style={[styles.readoutSmall, { color: colors.textMuted }]}>
+                                    {t("createTrip.daysCount", { count: tripDaysNow })}
                                 </Text>
-                                {formData.departureTime && (
-                                    <TouchableOpacity 
-                                        onPress={(e) => { e.stopPropagation(); clearTime('departure'); }}
-                                        style={styles.clearTimeButton}
+                            </View>
+
+                            <TouchableOpacity
+                                style={[styles.accordion, { backgroundColor: colors.card, borderColor: colors.border }]}
+                                onPress={() => setShowTimesSection(!showTimesSection)}
+                                activeOpacity={0.7}
+                            >
+                                <Ionicons name="time-outline" size={18} color={colors.textSecondary} />
+                                <Text style={[styles.accordionText, { color: colors.text }]}>{t("createTrip.flightTimes")}</Text>
+                                <Text style={[styles.accordionOpt, { color: colors.textMuted }]}>{t("createTrip.optionalLabel")}</Text>
+                                <Ionicons name={showTimesSection ? "chevron-up" : "chevron-down"} size={16} color={colors.textMuted} />
+                            </TouchableOpacity>
+
+                            {showTimesSection && (
+                                <View style={[styles.timesBox, { backgroundColor: colors.secondary }]}>
+                                    <TouchableOpacity
+                                        style={styles.timeRow}
+                                        onPress={() => {
+                                            setSelectingTime("arrival");
+                                            setTempTime(formData.arrivalTime ? new Date(formData.arrivalTime) : new Date());
+                                            setShowTimePicker(true);
+                                        }}
                                     >
-                                        <Ionicons name="close-circle" size={18} color={colors.textMuted} />
+                                        <Text style={[styles.timeLabel, { color: colors.textSecondary }]}>{t("createTrip.arrivalAtDestination")}</Text>
+                                        <Text style={[styles.timeValue, { color: formData.arrivalTime ? colors.text : colors.textMuted }]}>
+                                            {formData.arrivalTime ? formatTime(formData.arrivalTime) : t("createTrip.tapToSet")}
+                                        </Text>
                                     </TouchableOpacity>
-                                )}
-                            </View>
-                        </TouchableOpacity>
-                    </View>
-                    
-                    {/* Help text explaining the impact */}
-                    {(formData.arrivalTime || formData.departureTime) && (
-                        <View style={[styles.timeImpactInfo, { backgroundColor: colors.secondary, marginTop: 12 }]}>
-                            <Ionicons name="information-circle-outline" size={18} color={colors.primary} />
-                            <Text style={[styles.timeImpactText, { color: colors.textSecondary }]}>
-                                {formData.arrivalTime && !formData.departureTime && 
-                                    t('createTrip.firstDayActivities')}
-                                {!formData.arrivalTime && formData.departureTime && 
-                                    t('createTrip.lastDayActivities')}
-                                {formData.arrivalTime && formData.departureTime && 
-                                    t('createTrip.itineraryAdjusted')}
-                            </Text>
+                                    <View style={[styles.timeDivider, { backgroundColor: colors.border }]} />
+                                    <TouchableOpacity
+                                        style={styles.timeRow}
+                                        onPress={() => {
+                                            setSelectingTime("departure");
+                                            setTempTime(formData.departureTime ? new Date(formData.departureTime) : new Date());
+                                            setShowTimePicker(true);
+                                        }}
+                                    >
+                                        <Text style={[styles.timeLabel, { color: colors.textSecondary }]}>{t("createTrip.departureFromDestination")}</Text>
+                                        <Text style={[styles.timeValue, { color: formData.departureTime ? colors.text : colors.textMuted }]}>
+                                            {formData.departureTime ? formatTime(formData.departureTime) : t("createTrip.tapToSet")}
+                                        </Text>
+                                    </TouchableOpacity>
+                                </View>
+                            )}
                         </View>
                     )}
-                </View>
 
-  {/* Who's Going Section - V1: Simple Traveler Count (Profiles Disabled) */}
-                <View ref={(r) => { sectionRefs.current["travelers"] = r; }} style={[styles.card, { backgroundColor: colors.card }, getHighlightStyle("travelers")]}>
-                    <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>{t('createTrip.numberOfTravelers')} <Text style={{ color: colors.error }}>*</Text></Text>
-                    {/* V1: Simple stepper for traveler count */}
-                    <View style={[styles.numberInputContainer, { backgroundColor: colors.secondary }]}>
-                        <View style={styles.counterContainer}>
-                            <TouchableOpacity 
-                                style={[styles.counterButton, { backgroundColor: colors.card }]}
-                                onPress={() => setFormData(prev => ({ 
-                                    ...prev, 
-                                    travelerCount: Math.max(1, prev.travelerCount - 1) 
-                                }))}
-                                disabled={formData.travelerCount <= 1}
-                            >
-                                <Ionicons name="remove" size={24} color={formData.travelerCount <= 1 ? colors.textMuted : colors.text} />
-                            </TouchableOpacity>
-                            <Text style={[styles.counterValue, { color: colors.text }]}>{formData.travelerCount}</Text>
-                            <TouchableOpacity 
-                                style={[styles.counterButton, { backgroundColor: colors.card }]}
-                                onPress={() => setFormData(prev => ({ 
-                                    ...prev, 
-                                    travelerCount: Math.min(12, prev.travelerCount + 1) 
-                                }))}
-                                disabled={formData.travelerCount >= 12}
-                            >
-                                <Ionicons name="add" size={24} color={formData.travelerCount >= 12 ? colors.textMuted : colors.text} />
-                            </TouchableOpacity>
-                        </View>
-                    </View>
-                </View>
+                    {/* ── Step 3 · who and budget ────────────────────────── */}
+                    {step === 3 && (
+                        <View style={styles.stepBody}>
+                            <Text style={[styles.stepTitle, { color: colors.text }]}>{t("createTrip.q3")}</Text>
 
-                {currentGuideKey === "travelers" && (
-                    <TripGuideTooltip step={GUIDE_STEPS[guideStep]} currentIndex={guideStep} totalSteps={GUIDE_STEPS.length} onNext={advanceGuide} onSkip={dismissGuide} />
-                )}
-
-                {/* Budget Section */}
-                <View ref={(r) => { sectionRefs.current["budget"] = r; }} style={[styles.card, { backgroundColor: colors.card }, getHighlightStyle("budget")]}>
-                        <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>{t('createTrip.totalBudget')} <Text style={{ color: colors.error }}>*</Text></Text>
-                    <View style={[styles.budgetInputContainer, { backgroundColor: colors.secondary }]}>
-                        <Text style={[styles.currencySymbol, { color: colors.text }]}>€</Text>
-                        <TextInput
-                            style={[styles.budgetInput, { color: colors.text }]}
-                            value={formData.budgetTotal.toString()}
-                            onChangeText={(text) => {
-                                const value = parseInt(text.replace(/[^0-9]/g, '')) || 0;
-                                setFormData({ ...formData, budgetTotal: value });
-                            }}
-                            keyboardType="numeric"
-                            placeholder={t('createTrip.enterTotalBudget')}
-                            placeholderTextColor={colors.textMuted}
-                        />
-                    </View>
-                       {/* V1: Show per-person budget breakdown */}
-                    <View style={[styles.perPersonBudgetContainer, { backgroundColor: colors.secondary, marginTop: 12 }]}>
-                        <Ionicons name="person-outline" size={18} color={colors.primary} />
-                        <Text style={[styles.perPersonBudgetText, { color: colors.text }]}>
-                            {t('createTrip.estPerPerson')} <Text style={{ fontWeight: '700', color: colors.primary }}>€{perPersonBudget}</Text>
-                        </Text>
-                    </View>
-
-                    {/* Budget Tier Indicator */}
-                    <View style={[styles.budgetTierContainer, { backgroundColor: colors.secondary, marginTop: 8 }]}>
-                        <View style={[styles.budgetTierBadge, { backgroundColor: budgetTier.color + '20' }]}>
-                            <Ionicons name={budgetTier.icon} size={16} color={budgetTier.color} />
-                            <Text style={[styles.budgetTierLabel, { color: budgetTier.color }]}>{budgetTier.label}</Text>
-                        </View>
-                        <View style={styles.budgetTierInfo}>
-                            <Text style={[styles.budgetTierDaily, { color: colors.text }]}>~€{dailyBudgetPerPerson}<Text style={{ color: colors.textMuted, fontSize: 12 }}>/person/day</Text></Text>
-                            <Text style={[styles.budgetTierDescription, { color: colors.textMuted }]}>{budgetTier.description}</Text>
-                        </View>
-                    </View>
-                </View>
-
-                {currentGuideKey === "budget" && (
-                    <TripGuideTooltip step={GUIDE_STEPS[guideStep]} currentIndex={guideStep} totalSteps={GUIDE_STEPS.length} onNext={advanceGuide} onSkip={dismissGuide} />
-                )}
-
-                {/* Travel Style Section */}
-                <View ref={(r) => { sectionRefs.current["interests"] = r; }} style={[styles.card, { backgroundColor: colors.card }, getHighlightStyle("interests")]}>
-                    <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>{t('createTrip.travelStyle')}</Text>
-                    <View style={styles.interestsContainer}>
-                        {INTERESTS.map((interest) => (
-                            <TouchableOpacity
-                                key={interest}
-                                style={[
-                                    styles.interestTag,
-                                    { backgroundColor: colors.secondary, borderColor: colors.primary },
-                                    formData.interests.includes(interest) && { backgroundColor: colors.primary },
-                                ]}
-                                onPress={() => toggleInterest(interest)}
-                            >
-                                <Ionicons 
-                                    name={
-                                        interest === "Adventure" ? "trail-sign" : 
-                                        interest === "Culinary" ? "restaurant" : 
-                                        interest === "Culture" ? "library" :
-                                        interest === "Relaxation" ? "cafe" :
-                                        interest === "Nightlife" ? "wine" :
-                                        interest === "Nature" ? "leaf" :
-                                        interest === "History" ? "book" :
-                                        interest === "Shopping" ? "cart" :
-                                        interest === "Luxury" ? "diamond" :
-                                        "people"
-                                    } 
-                                    size={20} 
-                                    color={formData.interests.includes(interest) ? colors.text : colors.primary}
-                                />
-                                <Text style={[
-                                    styles.interestTagText,
-                                    { color: colors.text },
-                                ]}>
-                                    {t(`interests.${interest}`)}
+                            <View style={[styles.stepper, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                                <TouchableOpacity
+                                    style={[styles.stepperBtn, { borderColor: colors.border }]}
+                                    onPress={() => setFormData((p) => ({ ...p, travelerCount: Math.max(1, p.travelerCount - 1) }))}
+                                >
+                                    <Ionicons name="remove" size={18} color={colors.text} />
+                                </TouchableOpacity>
+                                <Text style={[styles.stepperValue, { color: colors.text }]}>
+                                    {t("createTrip.travelersCount", { count: formData.travelerCount })}
                                 </Text>
-                            </TouchableOpacity>
-                        ))}
-                    </View>
-                </View>
-
-                {currentGuideKey === "interests" && (
-                    <TripGuideTooltip step={GUIDE_STEPS[guideStep]} currentIndex={guideStep} totalSteps={GUIDE_STEPS.length} onNext={advanceGuide} onSkip={dismissGuide} />
-                )}
-
-                {/* Local Experiences Section (Optional) */}
-                <View style={[styles.card, { backgroundColor: colors.card }]}>
-                    <Text style={[styles.sectionLabel, { color: colors.textMuted }]}>{t('createTrip.localExperiences')}</Text>
-                    <Text style={[styles.sectionSubtitle, { color: colors.textSecondary }]}>
-                        {t('createTrip.experienceLikeLocal')}
-                    </Text>
-                    <View style={styles.localExperiencesContainer}>
-                        {LOCAL_EXPERIENCES.map((experience) => (
-                            <TouchableOpacity
-                                key={experience.id}
-                                style={[
-                                    styles.localExperienceTag,
-                                    { backgroundColor: colors.secondary, borderColor: colors.primary },
-                                    formData.localExperiences.includes(experience.id) && { backgroundColor: colors.primary },
-                                ]}
-                                onPress={() => toggleLocalExperience(experience.id)}
-                            >
-                                <Ionicons 
-                                    name={experience.icon}
-                                    size={18} 
-                                    color={formData.localExperiences.includes(experience.id) ? colors.text : colors.primary}
-                                />
-                                <Text style={[
-                                    styles.localExperienceTagText,
-                                    { color: colors.text },
-                                ]}>
-                                    {t(experience.labelKey)}
-                                </Text>
-                            </TouchableOpacity>
-                        ))}
-                    </View>
-                </View>
-
-                {/* Generate Button */}
-                <View ref={(r) => { sectionRefs.current["generate"] = r; }}>
-                {currentGuideKey === "generate" && (
-                    <TripGuideTooltip step={GUIDE_STEPS[guideStep]} currentIndex={guideStep} totalSteps={GUIDE_STEPS.length} onNext={advanceGuide} onSkip={dismissGuide} />
-                )}
-                <TouchableOpacity 
-                    style={[styles.generateButton, { backgroundColor: colors.text }, loading && styles.disabledButton, currentGuideKey === "generate" ? { borderWidth: 2, borderColor: colors.primary } : {}]}
-                    onPress={() => handleSubmit()}
-                    disabled={loading}
-                >
-                    {loading ? (
-                        <ActivityIndicator color={colors.background} />
-                    ) : (
-                        <>
-                            <Text style={[styles.generateButtonText, { color: colors.background }]}>{t('createTrip.generateWithAI')}</Text>
-                            <View style={[styles.sparkleIcon, { backgroundColor: colors.primary }]}>
-                                <Ionicons name="sparkles" size={20} color={colors.text} />
-                            </View>
-                        </>
-                    )}
-                </TouchableOpacity>
-                </View>
-
-                {/* Calendar Modal */}
-                <Modal
-                    visible={showCalendar}
-                    animationType="slide"
-                    transparent={true}
-                    onRequestClose={() => setShowCalendar(false)}
-                >
-                    <View style={styles.modalOverlay}>
-                        <View style={[styles.calendarModal, { backgroundColor: colors.card }]}>
-                            <View style={[styles.calendarHeader, { borderBottomColor: colors.border }]}>
-                                <Text style={[styles.calendarTitle, { color: colors.text }]}>
-                                    {selectingDate === 'start' ? t('createTrip.selectDepartureDate') : t('createTrip.selectReturnDate')}
-                                </Text>
-                                <TouchableOpacity onPress={() => setShowCalendar(false)}>
-                                    <Ionicons name="close" size={24} color={colors.text} />
+                                <TouchableOpacity
+                                    style={[styles.stepperBtn, { borderColor: colors.border }]}
+                                    onPress={() => setFormData((p) => ({ ...p, travelerCount: Math.min(12, p.travelerCount + 1) }))}
+                                >
+                                    <Ionicons name="add" size={18} color={colors.text} />
                                 </TouchableOpacity>
                             </View>
-                            
-                            <Calendar
-                                initialDate={formatDateForCalendar(selectingDate === 'start' ? formData.startDate : formData.endDate)}
-                                minDate={selectingDate === 'start' ? formatDateForCalendar(Date.now()) : formatDateForCalendar(formData.startDate + 24 * 60 * 60 * 1000)}
-                                maxDate={selectingDate === 'end' ? formatDateForCalendar(maxEndDate(formData.startDate)) : formatDateForCalendar(Date.now() + 18 * 30 * 24 * 60 * 60 * 1000)}
-                                onDayPress={handleDayPress}
-                                markingType={'period'}
-                                markedDates={getMarkedDates()}
-                                theme={{
-                                    backgroundColor: colors.card,
-                                    calendarBackground: colors.card,
-                                    textSectionTitleColor: colors.primary,
-                                    selectedDayBackgroundColor: colors.primary,
-                                    selectedDayTextColor: colors.text,
-                                    todayTextColor: colors.primary,
-                                    dayTextColor: colors.text,
-                                    textDisabledColor: colors.border,
-                                    dotColor: colors.primary,
-                                    selectedDotColor: colors.text,
-                                    arrowColor: colors.primary,
-                                    monthTextColor: colors.text,
-                                    textDayFontWeight: '500',
-                                    textMonthFontWeight: '700',
-                                    textDayHeaderFontWeight: '600',
-                                    textDayFontSize: 16,
-                                    textMonthFontSize: 18,
-                                    textDayHeaderFontSize: 14,
-                                }}
-                                style={styles.calendar}
-                            />
+
+                            <View style={styles.chipRow}>
+                                {PARTY_PRESETS.map((p) => {
+                                    const active = formData.travelerCount === p.count;
+                                    return (
+                                        <TouchableOpacity
+                                            key={p.key}
+                                            style={[styles.chip, { backgroundColor: active ? colors.primary : colors.card, borderColor: active ? colors.primary : colors.border }]}
+                                            onPress={() => setFormData((prev) => ({ ...prev, travelerCount: p.count }))}
+                                        >
+                                            <Text style={[styles.chipText, { color: colors.text }]}>{t(p.key)}</Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </View>
+
+                            <Text style={[styles.sectionLabel, { color: colors.textMuted, marginTop: 8 }]}>{t("createTrip.totalBudget")}</Text>
+
+                            {editingBudget ? (
+                                <View style={[styles.budgetEdit, { backgroundColor: colors.card, borderColor: colors.text }]}>
+                                    <Text style={[styles.budgetCurrency, { color: colors.text }]}>€</Text>
+                                    <TextInput
+                                        style={[styles.budgetInputBig, { color: colors.text }]}
+                                        value={budgetDraft}
+                                        onChangeText={(text) => setBudgetDraft(text.replace(/[^0-9]/g, ""))}
+                                        keyboardType="number-pad"
+                                        autoFocus
+                                        onBlur={commitBudgetDraft}
+                                        returnKeyType="done"
+                                        onSubmitEditing={commitBudgetDraft}
+                                    />
+                                </View>
+                            ) : (
+                                <TouchableOpacity
+                                    style={styles.budgetAmountRow}
+                                    activeOpacity={0.7}
+                                    onPress={() => {
+                                        setBudgetDraft(String(formData.budgetTotal));
+                                        setEditingBudget(true);
+                                    }}
+                                >
+                                    <Text style={[styles.budgetAmount, { color: colors.text, borderBottomColor: colors.border }]}>
+                                        {formatMoney(formData.budgetTotal)}
+                                    </Text>
+                                    <Ionicons name="pencil" size={16} color={colors.primary} />
+                                </TouchableOpacity>
+                            )}
+                            <Text style={[styles.stepHint, { color: colors.textMuted }]}>{t("createTrip.tapAmount")}</Text>
+
+                            <View
+                                style={styles.sliderTrackWrap}
+                                onLayout={(e) => { trackWidthRef.current = e.nativeEvent.layout.width; }}
+                                {...budgetPan.panHandlers}
+                            >
+                                <View style={[styles.sliderTrack, { backgroundColor: colors.secondary }]}>
+                                    <View style={[styles.sliderFill, { backgroundColor: colors.primary, width: `${budgetRatio * 100}%` }]} />
+                                </View>
+                                <View style={[styles.sliderThumb, { backgroundColor: colors.card, borderColor: colors.text, left: `${budgetRatio * 100}%` }]} />
+                            </View>
+
+                            <View style={styles.ladderRow}>
+                                {TIERS.map((tier) => {
+                                    const active = tier.id === budgetTierId;
+                                    return (
+                                        <View key={tier.id} style={[styles.ladderCell, { borderTopColor: active ? colors.primary : colors.border }]}>
+                                            <Text style={[styles.ladderText, { color: active ? colors.text : colors.textMuted, fontWeight: active ? "600" : "400" }]} numberOfLines={2}>
+                                                {t(tier.labelKey)}
+                                            </Text>
+                                        </View>
+                                    );
+                                })}
+                            </View>
+
+                            <View style={[styles.worthBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                                <Text style={[styles.worthHead, { color: colors.textMuted }]}>
+                                    {t("createTrip.perPersonPerDay", { amount: formatMoney(dailyBudgetPerPerson) })}
+                                </Text>
+                                <View style={styles.worthLine}>
+                                    <Ionicons name={budgetTier.icon} size={14} color={budgetTier.color} />
+                                    <Text style={[styles.worthText, { color: colors.text }]}>{budgetTier.description}</Text>
+                                </View>
+                                <View style={styles.worthLine}>
+                                    <Ionicons name="person-outline" size={14} color={colors.primary} />
+                                    <Text style={[styles.worthText, { color: colors.text }]}>
+                                        {t("createTrip.estPerPerson")} {formatMoney(perPersonBudget)}
+                                    </Text>
+                                </View>
+                            </View>
                         </View>
-                    </View>
-                </Modal>
+                    )}
+
+                    {/* ── Step 4 · vibe ──────────────────────────────────── */}
+                    {step === 4 && (
+                        <View style={styles.stepBody}>
+                            <Text style={[styles.stepTitle, { color: colors.text }]}>{t("createTrip.q4")}</Text>
+                            <Text style={[styles.stepHint, { color: colors.textMuted }]}>
+                                {t("createTrip.pickUpTo", { max: MAX_VIBES, count: formData.interests.length })}
+                            </Text>
+
+                            {suggestedVibes.length > 0 && (
+                                <View style={[styles.nudge, { backgroundColor: colors.primary }]}>
+                                    <Ionicons name="sparkles" size={18} color="#1A1A1A" />
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.nudgeTitle}>
+                                            {t("createTrip.suggestedForCity", { city: localCity(splitDestination(formData.destination)[0]) })}
+                                        </Text>
+                                        <Text style={styles.nudgeSub} numberOfLines={1}>
+                                            {suggestedVibes.map((v) => t(`interests.${v.id}`)).join(" · ")}
+                                        </Text>
+                                    </View>
+                                    <TouchableOpacity style={styles.nudgeAction} onPress={applySuggestedMix}>
+                                        <Text style={styles.nudgeActionText}>{t("createTrip.useThisMix")}</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            )}
+
+                            <View style={styles.vibeGrid}>
+                                {orderedVibes.map((vibe) => {
+                                    const selected = formData.interests.includes(vibe.id);
+                                    const rank = suggestedVibes.findIndex((v) => v.id === vibe.id);
+                                    return (
+                                        <TouchableOpacity
+                                            key={vibe.id}
+                                            style={[
+                                                styles.vibeCard,
+                                                { backgroundColor: selected ? colors.primary : colors.card, borderColor: selected ? colors.text : (rank === 0 ? colors.primary : colors.border) },
+                                            ]}
+                                            onPress={() => toggleVibe(vibe.id)}
+                                            activeOpacity={0.8}
+                                        >
+                                            {rank === 0 && !selected && (
+                                                <View style={[styles.vibeFlag, { backgroundColor: colors.text }]}>
+                                                    <Text style={[styles.vibeFlagText, { color: colors.background }]}>{t("createTrip.mostPicked")}</Text>
+                                                </View>
+                                            )}
+                                            <Ionicons name={vibe.icon} size={20} color={selected ? colors.text : colors.primary} />
+                                            <Text style={[styles.vibeName, { color: colors.text }]}>{t(`interests.${vibe.id}`)}</Text>
+                                            <Text style={[styles.vibeHint, { color: selected ? "rgba(26,26,26,0.65)" : colors.textMuted }]} numberOfLines={2}>
+                                                {t(vibe.hintKey)}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
+                            </View>
+
+                            {formData.interests.length > 0 && (
+                                <View>
+                                    <Text style={[styles.sectionLabel, { color: colors.textMuted, marginTop: 4 }]}>{t("createTrip.localExperiences")}</Text>
+                                    <View style={styles.chipRow}>
+                                        {LOCAL_EXPERIENCES.filter((e) => FLAVOUR_IDS.includes(e.id)).map((exp) => {
+                                            const on = formData.localExperiences.includes(exp.id);
+                                            return (
+                                                <TouchableOpacity
+                                                    key={exp.id}
+                                                    style={[styles.chip, { backgroundColor: on ? colors.primary : colors.card, borderColor: on ? colors.primary : colors.border }]}
+                                                    onPress={() => toggleLocalExperience(exp.id)}
+                                                >
+                                                    <Ionicons name={exp.icon} size={14} color={on ? colors.text : colors.primary} />
+                                                    <Text style={[styles.chipText, { color: colors.text, marginLeft: 6 }]}>{t(exp.labelKey)}</Text>
+                                                </TouchableOpacity>
+                                            );
+                                        })}
+                                    </View>
+                                </View>
+                            )}
+                        </View>
+                    )}
+
+                    {/* ── Step 5 · boarding pass ─────────────────────────── */}
+                    {step === 5 && (
+                        <View style={styles.stepBody}>
+                            <Text style={[styles.stepTitle, { color: colors.text }]}>{t("createTrip.q5")}</Text>
+
+                            <View style={[styles.ticket, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                                <View style={[styles.ticketHead, { backgroundColor: colors.primary }]}>
+                                    <Text style={styles.ticketBrand}>PLANERA</Text>
+                                    <Text style={styles.ticketRef}>{t("createTrip.draftDays", { count: tripDaysNow })}</Text>
+                                </View>
+
+                                <View style={styles.ticketRoute}>
+                                    <View>
+                                        <Text style={[styles.ticketCode, { color: colors.text }]}>{originIata || "—"}</Text>
+                                        <Text style={[styles.ticketCity, { color: colors.textMuted }]} numberOfLines={1}>{originCity}</Text>
+                                    </View>
+                                    <View style={styles.ticketMid}>
+                                        <View style={[styles.ticketDash, { borderTopColor: colors.border }]} />
+                                        <Ionicons name="airplane" size={16} color={colors.textMuted} style={{ backgroundColor: colors.card, paddingHorizontal: 6 }} />
+                                    </View>
+                                    <View style={{ alignItems: "flex-end" }}>
+                                        <Text style={[styles.ticketCode, { color: colors.text }]}>{destAirport?.iata || "—"}</Text>
+                                        <Text style={[styles.ticketCity, { color: colors.textMuted }]} numberOfLines={1}>
+                                            {localCity(splitDestination(formData.destination)[0])}
+                                        </Text>
+                                    </View>
+                                </View>
+
+                                {[
+                                    { label: t("createTrip.dates"), value: rangeLabel, sub: "", goto: 2 },
+                                    { label: t("createTrip.travelers"), value: t("createTrip.travelersCount", { count: formData.travelerCount }), sub: "", goto: 3 },
+                                    { label: t("createTrip.totalBudget"), value: formatMoney(formData.budgetTotal), sub: `${formatMoney(perPersonBudget)} · ${budgetTier.label}`, goto: 3 },
+                                    {
+                                        label: t("createTrip.travelStyle"),
+                                        value: formData.interests.length ? formData.interests.map((id) => t(`interests.${id}`)).join(", ") : t("createTrip.notSet"),
+                                        sub: formData.localExperiences.length ? `+ ${formData.localExperiences.length}` : "",
+                                        goto: 4,
+                                    },
+                                ].map((row) => (
+                                    <TouchableOpacity key={row.label} style={[styles.ticketRow, { borderTopColor: colors.border }]} onPress={() => setStep(row.goto)} activeOpacity={0.7}>
+                                        <Text style={[styles.ticketKey, { color: colors.textMuted }]}>{row.label}</Text>
+                                        <View style={{ flex: 1, alignItems: "flex-end" }}>
+                                            <Text style={[styles.ticketValue, { color: colors.text }]} numberOfLines={1}>{row.value}</Text>
+                                            {!!row.sub && <Text style={[styles.ticketSub, { color: colors.textMuted }]} numberOfLines={1}>{row.sub}</Text>}
+                                        </View>
+                                        <Ionicons name="pencil" size={13} color={colors.primary} style={{ marginLeft: 8 }} />
+                                    </TouchableOpacity>
+                                ))}
+
+                                <View style={styles.perfRow}>
+                                    <View style={[styles.perfNotch, { backgroundColor: colors.background }]} />
+                                    <View style={[styles.perfDash, { borderTopColor: colors.border }]} />
+                                    <View style={[styles.perfNotch, { backgroundColor: colors.background }]} />
+                                </View>
+
+                                <View style={styles.ticketStub}>
+                                    <View style={[styles.stubSpark, { backgroundColor: colors.primary }]}>
+                                        <Ionicons name="sparkles" size={13} color="#1A1A1A" />
+                                    </View>
+                                    <Text style={[styles.stubText, { color: colors.textSecondary }]} numberOfLines={2}>{t("createTrip.stubLine")}</Text>
+                                    {creditsLabel ? <Text style={[styles.stubCredits, { color: colors.textMuted }]}>{creditsLabel}</Text> : null}
+                                </View>
+                            </View>
+
+                            <View style={[styles.worthBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                                {[t("createTrip.valueDay"), t("createTrip.valueLive"), t("createTrip.valueFree")].map((line) => (
+                                    <View key={line} style={styles.worthLine}>
+                                        <Ionicons name="checkmark-circle" size={14} color={colors.primary} />
+                                        <Text style={[styles.worthText, { color: colors.text }]}>{line}</Text>
+                                    </View>
+                                ))}
+                            </View>
+                        </View>
+                    )}
+
+                    {guideActive && !!currentGuideKey && GUIDE_STEP_INDEX[currentGuideKey] === step && (
+                        <TripGuideTooltip step={GUIDE_STEPS[guideStep]} currentIndex={guideStep} totalSteps={GUIDE_STEPS.length} onNext={advanceGuide} onSkip={dismissGuide} />
+                    )}
+                </ScrollView>
+
+                {/* Footer */}
+                <View style={[styles.stepFooter, { backgroundColor: colors.background, borderTopColor: colors.border }]}>
+                    <TouchableOpacity
+                        style={[
+                            styles.primaryCta,
+                            { backgroundColor: step === TOTAL_STEPS ? colors.primary : colors.text },
+                            (!stepValid(step) || loading) && styles.disabledButton,
+                        ]}
+                        onPress={() => (step === TOTAL_STEPS ? handleSubmit() : goNext())}
+                        disabled={!stepValid(step) || loading}
+                        activeOpacity={0.85}
+                    >
+                        {loading ? (
+                            <ActivityIndicator color={step === TOTAL_STEPS ? "#1A1A1A" : colors.background} />
+                        ) : (
+                            <>
+                                <Text style={[styles.primaryCtaText, { color: step === TOTAL_STEPS ? "#1A1A1A" : colors.background }]}>
+                                    {step === TOTAL_STEPS
+                                        ? t("createTrip.generateWithAI")
+                                        : step === 4
+                                            ? t("createTrip.reviewTrip")
+                                            : t("createTrip.continueLabel")}
+                                </Text>
+                                {step === TOTAL_STEPS && <Ionicons name="sparkles" size={18} color="#1A1A1A" />}
+                            </>
+                        )}
+                    </TouchableOpacity>
+                    {step === 2 && <Text style={[styles.footNote, { color: colors.textMuted }]}>{t("createTrip.maxDaysNote", { count: MAX_TRIP_DAYS })}</Text>}
+                    {step === TOTAL_STEPS && <Text style={[styles.footNote, { color: colors.textMuted }]}>{t("createTrip.usuallyReady")}</Text>}
+                </View>
+                </KeyboardAvoidingView>
 
                 {/* Time Picker Modal for Arrival/Departure times */}
-                {Platform.OS === 'ios' ? (
+                {Platform.OS === "ios" ? (
                     <Modal
                         visible={showTimePicker}
                         animationType="slide"
@@ -1508,20 +2281,18 @@ export default function CreateTripScreen() {
                             <View style={[styles.calendarModal, { backgroundColor: colors.card }]}>
                                 <View style={[styles.calendarHeader, { borderBottomColor: colors.border }]}>
                                     <TouchableOpacity onPress={() => setShowTimePicker(false)}>
-                                        <Text style={[styles.cancelButtonText, { color: colors.error }]}>{t('common.cancel')}</Text>
+                                        <Text style={[styles.cancelButtonText, { color: colors.error }]}>{t("common.cancel")}</Text>
                                     </TouchableOpacity>
                                     <Text style={[styles.calendarTitle, { color: colors.text }]}>
-                                        {selectingTime === 'arrival' ? t('createTrip.arrivalTime') : t('createTrip.departureTime')}
+                                        {selectingTime === "arrival" ? t("createTrip.arrivalTime") : t("createTrip.departureTime")}
                                     </Text>
                                     <TouchableOpacity onPress={confirmTimeSelection}>
-                                        <Text style={[styles.doneButtonText, { color: colors.primary }]}>{t('common.done')}</Text>
+                                        <Text style={[styles.doneButtonText, { color: colors.primary }]}>{t("common.done")}</Text>
                                     </TouchableOpacity>
                                 </View>
                                 <View style={styles.timePickerContainer}>
                                     <Text style={[styles.timePickerLabel, { color: colors.textMuted }]}>
-                                        {selectingTime === 'arrival' 
-                                            ? t('createTrip.whatTimeArrive') 
-                                            : t('createTrip.whatTimeDeparture')}
+                                        {selectingTime === "arrival" ? t("createTrip.whatTimeArrive") : t("createTrip.whatTimeDeparture")}
                                     </Text>
                                     <DateTimePicker
                                         value={tempTime}
@@ -1532,9 +2303,7 @@ export default function CreateTripScreen() {
                                         style={{ height: 200 }}
                                     />
                                     <Text style={[styles.timePickerHint, { color: colors.textSecondary }]}>
-                                        {selectingTime === 'arrival' 
-                                            ? t('createTrip.firstDayScheduled') 
-                                            : t('createTrip.lastDayEnd')}
+                                        {selectingTime === "arrival" ? t("createTrip.firstDayScheduled") : t("createTrip.lastDayEnd")}
                                     </Text>
                                 </View>
                             </View>
@@ -1542,16 +2311,11 @@ export default function CreateTripScreen() {
                     </Modal>
                 ) : (
                     showTimePicker && (
-                        <DateTimePicker
-                            value={tempTime}
-                            mode="time"
-                            display="default"
-                            onChange={handleTimeChange}
-                        />
+                        <DateTimePicker value={tempTime} mode="time" display="default" onChange={handleTimeChange} />
                     )
                 )}
-            </ScrollView>
-        </SafeAreaView>
+            </SafeAreaView>
+
 
         {/* AI Data Consent Modal */}
         <AIConsentModal
@@ -2338,4 +3102,142 @@ const styles = StyleSheet.create({
         fontSize: 13,
         fontWeight: "500",
     },
+
+    // --- Step builder ------------------------------------------------------
+    stepHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingTop: 6, paddingBottom: 8 },
+    stepHeaderTitle: { fontSize: 14, fontWeight: "700", letterSpacing: 0.2 },
+    stepCount: { fontSize: 13, fontWeight: "600", minWidth: 44, textAlign: "right" },
+    progressTrack: { height: 3, marginHorizontal: 16, borderRadius: 2, overflow: "hidden" },
+    progressFill: { height: "100%", borderRadius: 2 },
+    keyboardWrap: { flex: 1 },
+    stepContent: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 28 },
+    stepBody: { gap: 14 },
+    stepTitle: { fontSize: 27, fontWeight: "800", letterSpacing: -0.6, lineHeight: 31 },
+    stepHint: { fontSize: 13, marginTop: -8 },
+
+    proofBlock: { gap: 2 },
+    proofRow: { flexDirection: "row", alignItems: "center", gap: 7 },
+    liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: "#1FA463" },
+    proofNum: { fontSize: 13, fontWeight: "800" },
+    proofText: { fontSize: 13 },
+    proofTicker: { fontSize: 12 },
+
+    destField: { flexDirection: "row", alignItems: "center", gap: 10, borderWidth: 1.5, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 13 },
+    destInput: { flex: 1, fontSize: 17, fontWeight: "600", padding: 0 },
+    sentAsRow: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: -8, paddingHorizontal: 4 },
+    sentAsLabel: { fontSize: 11 },
+    sentAsValue: { fontSize: 11, fontWeight: "600", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 5, overflow: "hidden" },
+
+    originChip: { flexDirection: "row", alignItems: "center", gap: 8, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 11 },
+    originText: { fontSize: 14, fontWeight: "600", flexShrink: 1 },
+    originPill: { fontSize: 11, fontWeight: "700", borderWidth: 1, borderRadius: 5, paddingHorizontal: 6, paddingVertical: 1, overflow: "hidden" },
+    originChange: { marginLeft: "auto", fontSize: 13, fontWeight: "700" },
+
+    stampGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", rowGap: 20, marginTop: 10, paddingHorizontal: 4 },
+    stamp: { width: "46%", borderWidth: 1.2, borderRadius: 2, padding: 6, paddingBottom: 4, overflow: "visible" },
+    perfLayer: { ...StyleSheet.absoluteFillObject },
+    perfDot: { position: "absolute", width: 10, height: 10, borderRadius: 5, marginLeft: -5 },
+    perfDotV: { position: "absolute", width: 10, height: 10, borderRadius: 5, marginTop: -5 },
+    stampPhoto: { height: 78, borderWidth: 1, borderRadius: 2, overflow: "hidden" },
+    stampImage: { width: "100%", height: "100%" },
+    stampDenom: { position: "absolute", top: 4, right: 4, backgroundColor: "rgba(12,12,10,0.82)", borderRadius: 4, paddingHorizontal: 5, paddingVertical: 1 },
+    stampDenomText: { color: "#FFE500", fontSize: 10, fontWeight: "700" },
+    postmark: { position: "absolute", left: 5, bottom: 5, width: 30, height: 30, borderRadius: 15, borderWidth: 1.2, borderStyle: "dashed", borderColor: "rgba(255,255,255,0.85)", alignItems: "center", justifyContent: "center" },
+    postmarkText: { color: "rgba(255,255,255,0.9)", fontSize: 9, fontWeight: "700" },
+    stampCredit: { position: "absolute", right: 4, bottom: 3, color: "rgba(255,255,255,0.85)", fontSize: 8, textShadowColor: "rgba(0,0,0,0.5)", textShadowRadius: 3 },
+    stampCaption: { borderTopWidth: 1, marginTop: 4, paddingTop: 4, alignItems: "center" },
+    stampCity: { fontSize: 13, fontWeight: "700" },
+    stampCountry: { fontSize: 10, fontWeight: "500" },
+
+    askBar: { flexDirection: "row", alignItems: "center", gap: 9, borderWidth: 1, borderStyle: "dashed", borderRadius: 12, paddingHorizontal: 11, paddingVertical: 10 },
+    askSpark: { width: 24, height: 24, borderRadius: 7, alignItems: "center", justifyContent: "center" },
+    askInput: { flex: 1, fontSize: 13, padding: 0 },
+    surpriseRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderWidth: 1, borderStyle: "dashed", borderRadius: 12, paddingVertical: 12 },
+    surpriseRowText: { fontSize: 14, fontWeight: "600" },
+
+    chipRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+    chip: { flexDirection: "row", alignItems: "center", borderWidth: 1, borderRadius: 999, paddingHorizontal: 13, paddingVertical: 9 },
+    chipText: { fontSize: 13, fontWeight: "600" },
+
+    nudge: { flexDirection: "row", alignItems: "center", gap: 10, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 11 },
+    nudgeTitle: { color: "#1A1A1A", fontSize: 13, fontWeight: "700" },
+    nudgeSub: { color: "rgba(26,26,26,0.62)", fontSize: 11, marginTop: 1 },
+    nudgeAction: { backgroundColor: "rgba(26,26,26,0.88)", borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7 },
+    nudgeActionText: { color: "#FFE500", fontSize: 12, fontWeight: "700" },
+
+    inlineCalendar: { borderWidth: 1, borderRadius: 14, overflow: "hidden", paddingBottom: 4 },
+    faresLoading: { flexDirection: "row", alignItems: "center", gap: 10, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 11 },
+    faresLoadingText: { fontSize: 12.5, flex: 1 },
+    dayCell: { width: 42, height: 44, alignItems: "center", justifyContent: "center", paddingTop: 2 },
+    dayNumber: { fontSize: 15, fontWeight: "500" },
+    dayPrice: { fontSize: 9, fontWeight: "600", marginTop: 1 },
+    readout: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderRadius: 12, paddingHorizontal: 13, paddingVertical: 11 },
+    readoutBig: { fontSize: 16, fontWeight: "700", flexShrink: 1 },
+    readoutSmall: { fontSize: 12, fontWeight: "600" },
+
+    accordion: { flexDirection: "row", alignItems: "center", gap: 9, borderWidth: 1, borderRadius: 12, paddingHorizontal: 13, paddingVertical: 12 },
+    accordionText: { fontSize: 14, fontWeight: "600", flex: 1 },
+    accordionOpt: { fontSize: 11, fontWeight: "600", letterSpacing: 0.6 },
+    timesBox: { borderRadius: 12, paddingHorizontal: 13 },
+    timeRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 13 },
+    timeLabel: { fontSize: 13 },
+    timeValue: { fontSize: 14, fontWeight: "700" },
+    timeDivider: { height: 1 },
+
+    stepper: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10 },
+    stepperBtn: { width: 34, height: 34, borderRadius: 17, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+    stepperValue: { fontSize: 17, fontWeight: "700" },
+
+    budgetAmountRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+    budgetAmount: { fontSize: 36, fontWeight: "800", letterSpacing: -1, borderBottomWidth: 1.5, borderStyle: "dashed", paddingBottom: 2 },
+    budgetEdit: { flexDirection: "row", alignItems: "center", gap: 8, borderWidth: 1.5, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 10 },
+    budgetCurrency: { fontSize: 26, fontWeight: "800" },
+    budgetInputBig: { flex: 1, fontSize: 30, fontWeight: "800", padding: 0 },
+
+    sliderTrackWrap: { height: 34, justifyContent: "center", marginTop: 4 },
+    sliderTrack: { height: 6, borderRadius: 3, overflow: "hidden" },
+    sliderFill: { height: "100%", borderRadius: 3 },
+    sliderThumb: { position: "absolute", width: 24, height: 24, borderRadius: 12, borderWidth: 2, marginLeft: -12 },
+
+    ladderRow: { flexDirection: "row", gap: 6 },
+    ladderCell: { flex: 1, borderTopWidth: 2, paddingTop: 6 },
+    ladderText: { fontSize: 10, letterSpacing: 0.3, textAlign: "center" },
+
+    worthBox: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, gap: 6 },
+    worthHead: { fontSize: 11, fontWeight: "700", letterSpacing: 0.6 },
+    worthLine: { flexDirection: "row", alignItems: "center", gap: 8 },
+    worthText: { fontSize: 13, flexShrink: 1 },
+
+    vibeGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+    vibeCard: { width: "47%", borderWidth: 1.5, borderRadius: 14, padding: 12, gap: 5, minHeight: 104 },
+    vibeFlag: { position: "absolute", top: -9, right: 10, borderRadius: 5, paddingHorizontal: 7, paddingVertical: 2 },
+    vibeFlagText: { fontSize: 9, fontWeight: "800", letterSpacing: 0.4 },
+    vibeName: { fontSize: 14, fontWeight: "700" },
+    vibeHint: { fontSize: 11, lineHeight: 14 },
+
+    ticket: { borderWidth: 1, borderRadius: 14, overflow: "hidden" },
+    ticketHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 13, paddingVertical: 9 },
+    ticketBrand: { color: "#1A1A1A", fontSize: 12, fontWeight: "800", letterSpacing: 2 },
+    ticketRef: { color: "rgba(26,26,26,0.66)", fontSize: 11, fontWeight: "700" },
+    ticketRoute: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 13, paddingTop: 13, paddingBottom: 10 },
+    ticketCode: { fontSize: 26, fontWeight: "800", letterSpacing: -0.5 },
+    ticketCity: { fontSize: 11 },
+    ticketMid: { flex: 1, alignItems: "center", justifyContent: "center" },
+    ticketDash: { position: "absolute", left: 0, right: 0, top: "50%", borderTopWidth: 1, borderStyle: "dashed" },
+    ticketRow: { flexDirection: "row", alignItems: "center", borderTopWidth: 1, paddingHorizontal: 13, paddingVertical: 10, gap: 10 },
+    ticketKey: { fontSize: 11, fontWeight: "700", letterSpacing: 0.6 },
+    ticketValue: { fontSize: 13, fontWeight: "600" },
+    ticketSub: { fontSize: 11, marginTop: 1 },
+    perfRow: { flexDirection: "row", alignItems: "center" },
+    perfNotch: { width: 14, height: 14, borderRadius: 7, marginVertical: -7 },
+    perfDash: { flex: 1, borderTopWidth: 1, borderStyle: "dashed" },
+    ticketStub: { flexDirection: "row", alignItems: "center", gap: 9, paddingHorizontal: 13, paddingVertical: 11 },
+    stubSpark: { width: 24, height: 24, borderRadius: 7, alignItems: "center", justifyContent: "center" },
+    stubText: { fontSize: 12, flex: 1 },
+    stubCredits: { fontSize: 11, fontWeight: "700" },
+
+    stepFooter: { borderTopWidth: 1, paddingHorizontal: 16, paddingTop: 12, paddingBottom: 14, gap: 8 },
+    primaryCta: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, borderRadius: 14, paddingVertical: 16 },
+    primaryCtaText: { fontSize: 16, fontWeight: "700" },
+    footNote: { fontSize: 11, textAlign: "center" },
 });

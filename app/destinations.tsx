@@ -19,6 +19,7 @@ import { ImageWithAttribution } from "@/components/ImageWithAttribution";
 import { LinearGradient } from "expo-linear-gradient";
 import { useTheme } from "@/lib/ThemeContext";
 import { useTranslation } from "react-i18next";
+import { useTrackMarketing } from "@/lib/trackMarketing";
 
 /** Most destinations we'll fetch a header image for. */
 const IMAGE_LIMIT = 60;
@@ -68,6 +69,7 @@ function DestinationsError({ error, retry }: { error: Error; retry: () => Promis
 
 export default function DestinationsScreen() {
   const router = useRouter();
+  const trackMarketing = useTrackMarketing();
   const { token, isLoading: tokenLoading } = useToken();
   const { colors, isDarkMode } = useTheme();
   const { t } = useTranslation();
@@ -277,14 +279,17 @@ export default function DestinationsScreen() {
             <TouchableOpacity
               key={index}
               style={styles.destinationCard}
-              onPress={() => router.push({
-                pathname: "/destination-preview",
-                params: {
-                  destination: destination.destination,
-                  avgBudget: destination.avgBudget.toString(),
-                  count: destination.count.toString(),
-                }
-              })}
+              onPress={() => {
+                trackMarketing("destination_click", "app-destinations");
+                router.push({
+                  pathname: "/destination-preview",
+                  params: {
+                    destination: destination.destination,
+                    avgBudget: destination.avgBudget.toString(),
+                    count: destination.count.toString(),
+                  }
+                });
+              }}
               activeOpacity={0.9}
             >
               <View style={styles.cardImageContainer}>

@@ -1838,6 +1838,41 @@ export default defineSchema({
             productsPending: v.float64(),
         })),
 
+        // ---- Marketing funnel ----
+        // The four numbers the marketing side actually asks about: destination
+        // clicks, itinerary creation, onboarding completion and conversion.
+        // Clicks come from the `marketingEvents` day buckets; the rest are
+        // re-cuts of counts this cron already computes, exposed here so the
+        // funnel reads as one panel instead of four numbers scattered across
+        // the dashboard.
+        marketing: v.optional(v.object({
+            destinationClicks7d: v.float64(),
+            destinationClicks30d: v.float64(),
+            tripsCreated7d: v.float64(),
+            tripsCreated30d: v.float64(),
+            signups7d: v.float64(),
+            signups30d: v.float64(),
+            onboardingStarted: v.float64(),        // = total users (onboarding follows signup)
+            onboardingCompleted: v.float64(),
+            onboardingCompletionRatePct: v.float64(),
+            premiumConversionRatePct: v.float64(),
+            payingConversionRatePct: v.float64(),
+            // Clicks -> trips, the one ratio that says whether the destination
+            // surfaces actually feed the product. 0 while clicks are untracked.
+            clickToTripRatePct: v.float64(),
+        })),
+        marketingDaily: v.optional(v.array(v.object({
+            date: v.string(),                      // "YYYY-MM-DD" (UTC)
+            destinationClicks: v.float64(),
+            tripsCreated: v.float64(),
+            signups: v.float64(),
+        }))),
+        // Breakdowns of the raw event buckets over the same 30-day window.
+        marketingByEvent: v.optional(v.array(v.object({ key: v.string(), count: v.float64() }))),
+        marketingBySurface: v.optional(v.array(v.object({ key: v.string(), count: v.float64() }))),
+        // Populated once an A/B variant is passed to `marketingEvents.track`.
+        marketingByVariant: v.optional(v.array(v.object({ key: v.string(), count: v.float64() }))),
+
         // ---- Time series: last 30 days ----
         daily: v.optional(v.array(v.object({
             date: v.string(),         // "YYYY-MM-DD" (UTC)
@@ -1846,6 +1881,33 @@ export default defineSchema({
             completedTrips: v.float64(),
         }))),
     }),
+
+    // Day-bucketed marketing/product event counters.
+    //
+    // Deliberately NOT an append-only click log: the questions marketing asks
+    // ("how many destination clicks last week", "did variant B get more taps")
+    // only ever need a count, and one row per (day, event, surface, variant)
+    // keeps this table in the low hundreds of tiny rows a year instead of
+    // millions. Like `socialShareLinkClicks`, it holds NO visitor data - no
+    // user id, no IP, no user agent - because counting taps does not require
+    // knowing who tapped.
+    //
+    // `variant` is the A/B hook: ship two versions of a tile, pass different
+    // variant strings, and the KPI cron splits the counts without any further
+    // plumbing. Written by the public `marketingEvents.track` mutation and read
+    // by the `recompute-admin-kpis` cron (see adminKpis.ts).
+    marketingEvents: defineTable({
+        day: v.string(),                  // "YYYY-MM-DD" (UTC)
+        event: v.string(),                // allowlisted in marketingEvents.ts
+        surface: v.string(),              // "web-explore", "app-home", ...
+        variant: v.optional(v.string()),  // A/B bucket, absent when not testing
+        count: v.float64(),
+        lastAt: v.float64(),
+    })
+        // Upsert key. `variant` is last so the optional field never blocks the
+        // (day, event, surface) prefix scans the cron does.
+        .index("by_day_event_surface_variant", ["day", "event", "surface", "variant"])
+        .index("by_day", ["day"]),
 
     // Newsletter funnel subscribers (double opt-in + drip sequence).
     // Captured from the marketing site and in-app opt-in card.
@@ -2435,6 +2497,12 @@ export default defineSchema({
         lastOpenedAt: v.optional(v.float64()),
         lastClickedAt: v.optional(v.float64()),
 
+        // Last DNS verification of the address's domain (see
+        // `verifyPendingLeads`). Set even when the domain checks out, so a
+        // resumed pass never re-resolves the same 283 domains.
+        mxCheckedAt: v.optional(v.float64()),
+        mxHost: v.optional(v.string()),
+
         notes: v.optional(v.string()),
         importedAt: v.float64(),
     })
@@ -2478,6 +2546,10 @@ export default defineSchema({
         windowSent: v.float64(),
         windowBounced: v.float64(),
         windowComplained: v.float64(),
+        // Soft/transient failures. Tracked separately and NOT fed to the
+        // breaker: a queue that expired is not a dead mailbox, and scoring it
+        // like one is what paused the first run at a fake 10%.
+        windowSoftBounced: v.optional(v.float64()),
         // Convex file storage id for the partnership deck. Attached only where
         // an attachment is appropriate (see agencyOutreach.ts).
         deckStorageId: v.optional(v.id("_storage")),

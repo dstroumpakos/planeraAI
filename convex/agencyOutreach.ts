@@ -54,6 +54,7 @@ import { internal as _internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { assertAdmin } from "./admin";
 import { renderOutreachEmail, type Lang } from "./agencyOutreachCopy";
+import { classifyBounce } from "./emailBounceCodes";
 
 // Cross-file internal references need the same escape hatch the rest of the
 // codebase uses until `convex dev` regenerates types. Results are hand-typed.
@@ -507,16 +508,32 @@ export const resetHealthWindow = mutation({
   returns: v.null(),
   handler: async (ctx, args) => {
     await requireAdmin(ctx, args.token);
-    const state = await ensureState(ctx);
-    await ctx.db.patch(state._id, {
-      windowSent: 0,
-      windowBounced: 0,
-      windowComplained: 0,
-      updatedAt: Date.now(),
-    });
+    await resetWindowCore(ctx);
     return null;
   },
 });
+
+/** Same, reachable from the CLI without a login — the other half of the
+ *  stop/start pair that `pauseCampaignAdmin` and `startCampaignAdmin` form. */
+export const resetHealthWindowAdmin = internalMutation({
+  args: {},
+  returns: v.null(),
+  handler: async (ctx) => {
+    await resetWindowCore(ctx);
+    return null;
+  },
+});
+
+async function resetWindowCore(ctx: any): Promise<void> {
+  const state = await ensureState(ctx);
+  await ctx.db.patch(state._id, {
+    windowSent: 0,
+    windowBounced: 0,
+    windowComplained: 0,
+    windowSoftBounced: 0,
+    updatedAt: Date.now(),
+  });
+}
 
 export const setLeadStatus = mutation({
   args: {
@@ -622,6 +639,9 @@ async function overviewCore(ctx: any) {
       windowSent,
       bounceRate: windowSent ? (state?.windowBounced ?? 0) / windowSent : 0,
       complaints: state?.windowComplained ?? 0,
+      // Shown next to the ratio it is deliberately excluded from, so a run
+      // full of transient failures is visible rather than merely absent.
+      softBounces: state?.windowSoftBounced ?? 0,
     },
     total: leads.length,
     byStatus,
@@ -649,6 +669,296 @@ export const listLeads = query({
         .take(limit);
     }
     return await ctx.db.query("agencyOutreachLeads").order("desc").take(limit);
+  },
+});
+
+// ---------------------------------------------------------------------------
+// List hygiene (DNS verification)
+// ---------------------------------------------------------------------------
+//
+// A scraped directory is mostly dead weight at the edges: agencies that closed,
+// domains that lapsed, addresses typed into a listing form years ago. Postmark
+// will happily try all of them, and the resulting hard bounces are the single
+// metric that gets a sending domain blocked — the first run tripped the breaker
+// at 7.5% on exactly this.
+//
+// Resolving the domain first catches the cheap half of that (a domain with no
+// MX and no address record cannot receive mail from anyone, ever) without
+// sending anything. It does NOT prove a specific mailbox exists: that needs
+// SMTP probing, which is itself reputation-damaging, so the remaining risk is
+// deliberately left to the circuit breaker.
+
+/** DNS-over-HTTPS, because a Convex action has fetch and nothing else. */
+const DOH_PRIMARY = "https://dns.google/resolve";
+const DOH_FALLBACK = "https://cloudflare-dns.com/dns-query";
+const DOH_TIMEOUT_MS = 6000;
+/** Domains resolved in parallel. Polite to the resolver, fast enough for 283. */
+const DNS_CONCURRENCY = 8;
+/** Leads per invocation. Bounded so a pass never nears the action time limit. */
+const VERIFY_BATCH = 250;
+
+/** `ok: null` means the resolver failed — verdict unknown, try again later. */
+type DomainVerdict =
+  | { ok: true; host?: string }
+  | { ok: false; reason: string }
+  | { ok: null; reason: string };
+
+async function dohQuery(name: string, type: "MX" | "A" | "AAAA"): Promise<any | null> {
+  for (const base of [DOH_PRIMARY, DOH_FALLBACK]) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), DOH_TIMEOUT_MS);
+    try {
+      const res = await fetch(`${base}?name=${encodeURIComponent(name)}&type=${type}`, {
+        headers: { accept: "application/dns-json" },
+        signal: controller.signal,
+      });
+      if (!res.ok) continue;
+      return await res.json();
+    } catch {
+      // Try the other resolver before giving up: a single provider hiccup must
+      // never be allowed to mark a live domain dead.
+      continue;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return null;
+}
+
+/** At least one answer of the requested record type. */
+function hasAnswer(json: any, rrType: number): boolean {
+  const answers = Array.isArray(json?.Answer) ? json.Answer : [];
+  return answers.some((a: any) => a?.type === rrType);
+}
+
+/** DNS RCODEs: 0 NOERROR, 3 NXDOMAIN. Anything else is the resolver failing,
+ *  not an answer — SERVFAIL on a live domain is common and must never read as
+ *  "this address is dead". */
+function isUsable(json: any): boolean {
+  return json?.Status === 0 || json?.Status === 3;
+}
+
+export async function resolveMailDomain(domain: string): Promise<DomainVerdict> {
+  const mx = await dohQuery(domain, "MX");
+  if (mx === null) return { ok: null, reason: "resolver_unavailable" };
+  if (!isUsable(mx)) return { ok: null, reason: `dns_status_${mx.Status}` };
+
+  // NXDOMAIN is the cleanest verdict there is: the domain does not exist.
+  if (mx.Status === 3) return { ok: false, reason: "nxdomain" };
+
+  if (hasAnswer(mx, 15)) {
+    const records = (mx.Answer as any[])
+      .filter((a) => a?.type === 15 && typeof a.data === "string")
+      .map((a) => String(a.data).trim());
+    const hosts = records
+      .map((r) => {
+        const parts = r.split(/\s+/);
+        return { pref: Number(parts[0]), host: (parts[1] ?? "").replace(/\.$/, "") };
+      })
+      .filter((r) => r.host)
+      .sort((a, b) => a.pref - b.pref);
+    // RFC 7505 "null MX": a single "0 ." record is the domain stating in
+    // public that it accepts no mail at all.
+    if (hosts.length === 0) return { ok: false, reason: "null_mx" };
+    return { ok: true, host: hosts[0].host };
+  }
+
+  // No MX is not fatal: RFC 5321 falls back to the address record.
+  const a = await dohQuery(domain, "A");
+  if (a === null) return { ok: null, reason: "resolver_unavailable" };
+  if (!isUsable(a)) return { ok: null, reason: `dns_status_${a.Status}` };
+  if (hasAnswer(a, 1)) return { ok: true, host: domain };
+
+  const aaaa = await dohQuery(domain, "AAAA");
+  if (aaaa === null) return { ok: null, reason: "resolver_unavailable" };
+  if (!isUsable(aaaa)) return { ok: null, reason: `dns_status_${aaaa.Status}` };
+  if (hasAnswer(aaaa, 28)) return { ok: true, host: domain };
+
+  return { ok: false, reason: "no_mx" };
+}
+
+export const pendingUnverifiedLeads = internalQuery({
+  args: { limit: v.optional(v.float64()) },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    const limit = Math.min(args.limit ?? VERIFY_BATCH, 500);
+    const rows = await ctx.db
+      .query("agencyOutreachLeads")
+      .withIndex("by_status", (q) => q.eq("status", "new" as const))
+      .collect();
+    const pending = rows.filter((r) => r.mxCheckedAt === undefined);
+    return {
+      leads: pending.slice(0, limit).map((r) => ({ leadId: r._id, email: r.email })),
+      remaining: Math.max(0, pending.length - limit),
+    };
+  },
+});
+
+export const applyMxVerification = internalMutation({
+  args: {
+    results: v.array(
+      v.object({
+        leadId: v.id("agencyOutreachLeads"),
+        ok: v.boolean(),
+        reason: v.optional(v.string()),
+        host: v.optional(v.string()),
+      })
+    ),
+  },
+  returns: v.object({ kept: v.float64(), skipped: v.float64() }),
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    let kept = 0;
+    let skipped = 0;
+    for (const r of args.results) {
+      const lead = await ctx.db.get(r.leadId);
+      // Anything that moved on while the DNS pass ran (a send, a reply, an
+      // opt-out) outranks a verification computed before it.
+      if (!lead || lead.status !== "new") continue;
+      if (r.ok) {
+        await ctx.db.patch(r.leadId, { mxCheckedAt: now, mxHost: r.host });
+        kept++;
+      } else {
+        await ctx.db.patch(r.leadId, {
+          status: "skipped" as const,
+          skipReason: r.reason ?? "no_mx",
+          mxCheckedAt: now,
+        });
+        skipped++;
+      }
+    }
+    return { kept, skipped };
+  },
+});
+
+interface VerifyResult {
+  checked: number;
+  kept: number;
+  skipped: number;
+  unresolved: number;
+  remaining: number;
+}
+
+async function verifyPendingCore(ctx: any, limit?: number): Promise<VerifyResult> {
+  const batch: any = await ctx.runQuery(internal.agencyOutreach.pendingUnverifiedLeads, {
+    limit,
+  });
+  const leads: Array<{ leadId: Id<"agencyOutreachLeads">; email: string }> = batch.leads ?? [];
+  if (leads.length === 0) {
+    return { checked: 0, kept: 0, skipped: 0, unresolved: 0, remaining: 0 };
+  }
+
+  // One lookup per DOMAIN, not per lead: a directory of Greek agencies is full
+  // of shared hosts, and 507 addresses are only 283 domains.
+  const domains = Array.from(
+    new Set(leads.map((l) => l.email.split("@")[1]).filter(Boolean))
+  );
+  const verdicts = new Map<string, DomainVerdict>();
+  let cursor = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(DNS_CONCURRENCY, domains.length) }, async () => {
+      while (cursor < domains.length) {
+        const domain = domains[cursor++];
+        verdicts.set(domain, await resolveMailDomain(domain));
+      }
+    })
+  );
+
+  const results: Array<{
+    leadId: Id<"agencyOutreachLeads">;
+    ok: boolean;
+    reason?: string;
+    host?: string;
+  }> = [];
+  let unresolved = 0;
+  for (const lead of leads) {
+    if (!isPlausibleEmail(lead.email)) {
+      results.push({ leadId: lead.leadId, ok: false, reason: "invalid_email" });
+      continue;
+    }
+    const domain = lead.email.split("@")[1];
+    const verdict = verdicts.get(domain);
+    // An unknown verdict leaves the lead untouched and unverified so the next
+    // pass picks it up. Never skip a lead because DNS was having a bad minute.
+    if (!verdict || verdict.ok === null) {
+      unresolved++;
+      continue;
+    }
+    results.push(
+      verdict.ok
+        ? { leadId: lead.leadId, ok: true, host: verdict.host }
+        : { leadId: lead.leadId, ok: false, reason: verdict.reason }
+    );
+  }
+
+  const applied: any = await ctx.runMutation(internal.agencyOutreach.applyMxVerification, {
+    results,
+  });
+  return {
+    checked: results.length,
+    kept: applied.kept,
+    skipped: applied.skipped,
+    unresolved,
+    remaining: batch.remaining + unresolved,
+  };
+}
+
+const verifyResultValidator = v.object({
+  checked: v.float64(),
+  kept: v.float64(),
+  skipped: v.float64(),
+  unresolved: v.float64(),
+  remaining: v.float64(),
+});
+
+/**
+ * Verifies one batch of never-contacted leads and skips the undeliverable
+ * ones. Safe to call repeatedly: `remaining` is how many are still unchecked.
+ */
+export const verifyPendingLeads = action({
+  args: { token: v.string(), limit: v.optional(v.float64()) },
+  returns: verifyResultValidator,
+  handler: async (ctx, args): Promise<VerifyResult> => {
+    await ctx.runQuery(internal.agencyOutreach.assertAdminToken, { token: args.token });
+    return await verifyPendingCore(ctx, args.limit);
+  },
+});
+
+export const verifyPendingLeadsAdmin = internalAction({
+  args: { limit: v.optional(v.float64()) },
+  returns: verifyResultValidator,
+  handler: async (ctx, args): Promise<VerifyResult> => await verifyPendingCore(ctx, args.limit),
+});
+
+/**
+ * One-off repair for leads mislabelled before the SubscriptionChange fix: a
+ * hard bounce that Postmark auto-suppressed was recorded as "opted_out", which
+ * reads as "they asked to leave" in every funnel number.
+ */
+export const backfillBounceStatusesAdmin = internalMutation({
+  args: {},
+  returns: v.object({ relabelled: v.float64() }),
+  handler: async (ctx) => {
+    const leads = await ctx.db
+      .query("agencyOutreachLeads")
+      .withIndex("by_status", (q) => q.eq("status", "opted_out" as const))
+      .collect();
+    let relabelled = 0;
+    for (const lead of leads) {
+      const suppression = await ctx.db
+        .query("emailSuppressions")
+        .withIndex("by_email", (q: any) => q.eq("email", lead.email))
+        .unique();
+      if (!suppression) continue;
+      if (suppression.reason === "hard_bounce") {
+        await ctx.db.patch(lead._id, { status: "bounced" as const, optedOutAt: undefined });
+        relabelled++;
+      } else if (suppression.reason === "spam_complaint") {
+        await ctx.db.patch(lead._id, { status: "complained" as const, optedOutAt: undefined });
+        relabelled++;
+      }
+    }
+    return { relabelled };
   },
 });
 
@@ -1083,7 +1393,16 @@ export const assertAdminToken = internalQuery({
  */
 export async function applyOutreachEmailEvent(
   ctx: any,
-  opts: { email: string; recordType: string }
+  opts: {
+    email: string;
+    recordType: string;
+    typeCode?: number;
+    bounceType?: string;
+    inactive?: boolean;
+    description?: string;
+    suppressionReason?: string;
+    suppressSending?: boolean;
+  }
 ): Promise<void> {
   const email = normalizeEmail(opts.email);
   const lead = await ctx.db
@@ -1094,35 +1413,98 @@ export async function applyOutreachEmailEvent(
 
   const now = Date.now();
   const state = await readState(ctx);
+  const note = (opts.description ?? opts.bounceType ?? "").slice(0, 200) || undefined;
+
+  /** Terminal verdicts about the ADDRESS, as opposed to the person's wishes. */
+  const alreadyDead = lead.status === "bounced" || lead.status === "complained";
 
   switch (opts.recordType) {
     case "Bounce": {
-      await ctx.db.patch(lead._id, {
-        status: "bounced" as const,
-        followUpAt: undefined,
-      });
-      if (state) {
-        await ctx.db.patch(state._id, {
-          windowBounced: (state.windowBounced ?? 0) + 1,
-          updatedAt: now,
-        });
+      switch (classifyBounce(opts)) {
+        // An auto-responder or an address-change notice is not a delivery
+        // failure. Counting one against the breaker paused a healthy campaign.
+        case "ignored":
+          return;
+
+        // The recipient unsubscribed at their ISP. Same intent as the link in
+        // the footer, so it lands in the same bucket.
+        case "unsubscribe": {
+          if (alreadyDead) return;
+          await ctx.db.patch(lead._id, {
+            status: "opted_out" as const,
+            optedOutAt: now,
+            followUpAt: undefined,
+          });
+          return;
+        }
+
+        case "complaint": {
+          await markComplained(ctx, lead, state, now);
+          return;
+        }
+
+        case "hard": {
+          await ctx.db.patch(lead._id, {
+            status: "bounced" as const,
+            followUpAt: undefined,
+            lastError: note,
+          });
+          if (state) {
+            await ctx.db.patch(state._id, {
+              windowBounced: (state.windowBounced ?? 0) + 1,
+              updatedAt: now,
+            });
+          }
+          return;
+        }
+
+        // Soft/transient: a full mailbox, a greylist, a queue that expired.
+        // Recorded so it is visible, but deliberately NOT counted against the
+        // hard-bounce ratio the breaker trips on and NOT treated as a dead
+        // address — the mailbox is probably alive and worth the follow-up.
+        case "soft": {
+          await ctx.db.patch(lead._id, { lastError: note });
+          if (state) {
+            await ctx.db.patch(state._id, {
+              windowSoftBounced: (state.windowSoftBounced ?? 0) + 1,
+              updatedAt: now,
+            });
+          }
+          return;
+        }
       }
       return;
     }
+
     case "SpamComplaint": {
-      await ctx.db.patch(lead._id, {
-        status: "complained" as const,
-        followUpAt: undefined,
-      });
-      if (state) {
-        await ctx.db.patch(state._id, {
-          windowComplained: (state.windowComplained ?? 0) + 1,
-          updatedAt: now,
-        });
-      }
+      await markComplained(ctx, lead, state, now);
       return;
     }
+
     case "SubscriptionChange": {
+      // Postmark suppresses an address the moment it hard-bounces or files a
+      // complaint, and then fires SubscriptionChange for that suppression.
+      // Relabelling the lead "opted_out" here would erase the reason the
+      // campaign stopped and report three dead mailboxes as three people who
+      // asked to leave.
+      if (opts.suppressSending === false) return; // reactivation, not a departure
+      const reason = opts.suppressionReason ?? "";
+      if (reason === "HardBounce") {
+        // Only the status, never the counters: the Bounce event owns the
+        // window, and double-counting one address would trip the breaker at
+        // half the real rate.
+        if (!alreadyDead) {
+          await ctx.db.patch(lead._id, { status: "bounced" as const, followUpAt: undefined });
+        }
+        return;
+      }
+      if (reason === "SpamComplaint") {
+        if (!alreadyDead) {
+          await ctx.db.patch(lead._id, { status: "complained" as const, followUpAt: undefined });
+        }
+        return;
+      }
+      if (alreadyDead) return;
       await ctx.db.patch(lead._id, {
         status: "opted_out" as const,
         optedOutAt: now,
@@ -1130,6 +1512,7 @@ export async function applyOutreachEmailEvent(
       });
       return;
     }
+
     case "Open": {
       await ctx.db.patch(lead._id, {
         openCount: (lead.openCount ?? 0) + 1,
@@ -1137,6 +1520,7 @@ export async function applyOutreachEmailEvent(
       });
       return;
     }
+
     case "Click": {
       await ctx.db.patch(lead._id, {
         clickCount: (lead.clickCount ?? 0) + 1,
@@ -1144,7 +1528,23 @@ export async function applyOutreachEmailEvent(
       });
       return;
     }
+
     default:
       return;
+  }
+}
+
+async function markComplained(ctx: any, lead: any, state: any, now: number): Promise<void> {
+  if (lead.status !== "complained") {
+    await ctx.db.patch(lead._id, {
+      status: "complained" as const,
+      followUpAt: undefined,
+    });
+  }
+  if (state) {
+    await ctx.db.patch(state._id, {
+      windowComplained: (state.windowComplained ?? 0) + 1,
+      updatedAt: now,
+    });
   }
 }

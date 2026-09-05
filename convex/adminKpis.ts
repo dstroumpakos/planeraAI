@@ -703,6 +703,68 @@ export const recomputeAdminKpis = internalAction({
       });
     }
 
+    // ---------- MARKETING FUNNEL ----------
+    // Destination clicks come from the `marketingEvents` day buckets (see
+    // marketingEvents.ts); everything else is a re-cut of counts already
+    // computed above, grouped here so the dashboard can show the funnel as one
+    // panel. The whole window is tens of rows, so this is a single query.
+    const sinceDay = utcDay(now - (DAILY_WINDOW - 1) * DAY_MS);
+    let eventBuckets: {
+      day: string; event: string; surface: string; variant: string | null; count: number;
+    }[] = [];
+    try {
+      eventBuckets = (await ctx.runQuery(internal.marketingEvents._bucketsSince, {
+        sinceDay,
+      })) as typeof eventBuckets;
+    } catch (e) {
+      // The table is new: a prod deploy that hasn't picked it up yet must not
+      // take the whole KPI run down with it.
+      console.error("[admin-kpis] marketingEvents unavailable:", e);
+    }
+
+    const dailyDestClicks = new Array(DAILY_WINDOW).fill(0);
+    const eventTotals = new Map<string, number>();
+    const surfaceTotals = new Map<string, number>();
+    const variantTotals = new Map<string, number>();
+    // day string -> index, so bucket rows map onto the same 0 = today axis the
+    // trip/signup series uses.
+    const dayToIndex = new Map<string, number>();
+    for (let i = 0; i < DAILY_WINDOW; i++) dayToIndex.set(utcDay(now - i * DAY_MS), i);
+
+    for (const b of eventBuckets) {
+      eventTotals.set(b.event, (eventTotals.get(b.event) || 0) + b.count);
+      surfaceTotals.set(b.surface, (surfaceTotals.get(b.surface) || 0) + b.count);
+      if (b.variant) {
+        variantTotals.set(b.variant, (variantTotals.get(b.variant) || 0) + b.count);
+      }
+      if (b.event === "destination_click") {
+        const di = dayToIndex.get(b.day);
+        if (di !== undefined) dailyDestClicks[di] += b.count;
+      }
+    }
+
+    const sumWindow = (arr: number[], days: number) =>
+      arr.slice(0, days).reduce((a, n) => a + n, 0);
+
+    const destClicks7d = sumWindow(dailyDestClicks, 7);
+    const destClicks30d = sumWindow(dailyDestClicks, DAILY_WINDOW);
+    const tripsCreated7d = sumWindow(dailyTrips, 7);
+    const tripsCreated30d = sumWindow(dailyTrips, DAILY_WINDOW);
+    const signups7d = sumWindow(dailySignups, 7);
+    const signups30d = sumWindow(dailySignups, DAILY_WINDOW);
+
+    const marketingDaily: {
+      date: string; destinationClicks: number; tripsCreated: number; signups: number;
+    }[] = [];
+    for (let i = DAILY_WINDOW - 1; i >= 0; i--) {
+      marketingDaily.push({
+        date: utcDay(now - i * DAY_MS),
+        destinationClicks: dailyDestClicks[i],
+        tripsCreated: dailyTrips[i],
+        signups: dailySignups[i],
+      });
+    }
+
     const data = {
       computedAt: now,
       durationMs: Date.now() - startedAt,
@@ -762,6 +824,26 @@ export const recomputeAdminKpis = internalAction({
       radar: radarBroadcast.radar,
       itineraries: webPartner.itineraries,
       partnerApi: webPartner.partnerApi,
+      marketing: {
+        destinationClicks7d: destClicks7d,
+        destinationClicks30d: destClicks30d,
+        tripsCreated7d,
+        tripsCreated30d,
+        signups7d,
+        signups30d,
+        // Onboarding follows signup for every account, so total users is the
+        // honest denominator for "how many finished setup".
+        onboardingStarted: users.total,
+        onboardingCompleted: users.onboardingCompleted,
+        onboardingCompletionRatePct: pct(users.onboardingCompleted, users.total),
+        premiumConversionRatePct: pct(subs.premium, users.total),
+        payingConversionRatePct: pct(subs.premiumPaying, users.total),
+        clickToTripRatePct: pct(tripsCreated30d, destClicks30d),
+      },
+      marketingDaily,
+      marketingByEvent: toSortedArray(eventTotals),
+      marketingBySurface: toSortedArray(surfaceTotals),
+      marketingByVariant: toSortedArray(variantTotals),
       daily,
     };
 
