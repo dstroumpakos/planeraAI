@@ -456,6 +456,9 @@ export const setProductStatus = mutation({
  * Invite a partner from the admin dashboard: create (or re-issue) their portal
  * account and email a signup link. Optionally tied to an application, which is
  * marked "invited" on success. Gated by the standalone PARTNER_ADMIN_TOKEN.
+ *
+ * `kind` picks the account type — "api" (default) mints API keys, "supplier"
+ * lists products for review. See `partnerAdminApp.invitePartner`.
  */
 export const invitePartner = action({
   args: {
@@ -463,6 +466,7 @@ export const invitePartner = action({
     email: v.string(),
     partnerName: v.string(),
     partnerRef: v.optional(v.string()),
+    kind: v.optional(v.union(v.literal("api"), v.literal("supplier"))),
     rateLimitPerMin: v.optional(v.float64()),
     dailyCap: v.optional(v.float64()),
     monthlyCap: v.optional(v.float64()),
@@ -471,7 +475,13 @@ export const invitePartner = action({
   handler: async (
     ctx,
     args
-  ): Promise<{ ok: boolean; email: string; signupUrl: string; emailSent: boolean }> => {
+  ): Promise<{
+    ok: boolean;
+    email: string;
+    kind: "api" | "supplier";
+    signupUrl: string;
+    emailSent: boolean;
+  }> => {
     assertAdmin(args.adminToken);
 
     const email = args.email.trim().toLowerCase();
@@ -484,10 +494,13 @@ export const invitePartner = action({
       args.partnerRef?.trim() ||
       email.split("@")[0].replace(/[^a-z0-9]+/g, "-");
 
+    const kind = args.kind ?? "api";
+
     const invite = await ctx.runMutation(internal.partnerPortal.createInvite, {
       email,
       partnerName,
       partnerRef,
+      kind,
       rateLimitPerMin: args.rateLimitPerMin ?? DEFAULTS.rateLimitPerMin,
       dailyCap: args.dailyCap ?? DEFAULTS.dailyCap,
       monthlyCap: args.monthlyCap ?? DEFAULTS.monthlyCap,
@@ -495,18 +508,25 @@ export const invitePartner = action({
     });
 
     const signupUrl = `${PORTAL_BASE_URL}/partners/signup?token=${invite.rawToken}`;
-    const html = inviteEmailHtml({ partnerName, signupUrl });
+    const html = inviteEmailHtml({ partnerName, signupUrl, kind });
     const text =
-      `You've been invited to the Planera AI Partner API.\n\n` +
-      `Create your account and password here (link valid 7 days):\n${signupUrl}\n\n` +
-      `Once signed in you can generate your own API key and start building.\n\n` +
-      `Docs: ${PORTAL_BASE_URL}/partners/docs`;
+      kind === "supplier"
+        ? `You've been invited to list your tours, stays and experiences on Planera AI.\n\n` +
+          `Create your account and password here (link valid 7 days):\n${signupUrl}\n\n` +
+          `Once signed in you can add your products — we review each listing before it goes live.`
+        : `You've been invited to the Planera AI Partner API.\n\n` +
+          `Create your account and password here (link valid 7 days):\n${signupUrl}\n\n` +
+          `Once signed in you can generate your own API key and start building.\n\n` +
+          `Docs: ${PORTAL_BASE_URL}/partners/docs`;
 
     let emailSent = false;
     try {
       const res = await ctx.runAction(internal.postmark.sendRawEmail, {
         to: email,
-        subject: "Your Planera AI Partner API invitation",
+        subject:
+          kind === "supplier"
+            ? "Your Planera AI partner invitation"
+            : "Your Planera AI Partner API invitation",
         html,
         text,
       });
@@ -523,29 +543,42 @@ export const invitePartner = action({
       });
     }
 
-    return { ok: true, email, signupUrl, emailSent };
+    return { ok: true, email, kind, signupUrl, emailSent };
   },
 });
 
-function inviteEmailHtml(opts: { partnerName: string; signupUrl: string }): string {
+function inviteEmailHtml(opts: {
+  partnerName: string;
+  signupUrl: string;
+  kind: "api" | "supplier";
+}): string {
   const esc = (s: string) =>
     s
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
-  const { partnerName, signupUrl } = opts;
+  const { partnerName, signupUrl, kind } = opts;
+  const isSupplier = kind === "supplier";
+  const heading = isSupplier
+    ? "You're invited to partner with Planera AI"
+    : "You're invited to the Planera AI Partner API";
+  const body = isSupplier
+    ? `Hi ${esc(partnerName)}, an account has been created for you. Set your
+        password to get started — then list your tours, stays and experiences so
+        they reach travellers planning trips to your destination.`
+    : `Hi ${esc(partnerName)}, an account has been created for you. Set your
+        password to get started — then generate your own API key and start
+        building AI travel itineraries into your product.`;
   return `<!DOCTYPE html><html><body style="margin:0;background:#0b0b0f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
   <div style="max-width:520px;margin:0 auto;padding:40px 24px;">
     <div style="text-align:center;margin-bottom:28px;">
       <img src="${PORTAL_BASE_URL}/logo.png" alt="Planera AI" width="150" style="display:inline-block;width:150px;height:auto;border:0;outline:none;text-decoration:none;" />
     </div>
     <div style="background:#16161c;border:1px solid #26262e;border-radius:16px;border-top:4px solid #FFE500;padding:32px;">
-      <h1 style="margin:0 0 12px;color:#fff;font-size:22px;">You're invited to the Planera AI Partner API</h1>
+      <h1 style="margin:0 0 12px;color:#fff;font-size:22px;">${heading}</h1>
       <p style="margin:0 0 20px;color:#b8b8c4;font-size:15px;line-height:1.6;">
-        Hi ${esc(partnerName)}, an account has been created for you. Set your
-        password to get started — then generate your own API key and start
-        building AI travel itineraries into your product.
+        ${body}
       </p>
       <div style="text-align:center;margin:28px 0;">
         <a href="${signupUrl}" style="display:inline-block;background:#FFE500;color:#111;text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:10px;">Create your account</a>

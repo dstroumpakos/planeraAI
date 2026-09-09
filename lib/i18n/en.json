@@ -2080,6 +2080,16 @@
     "promptDoneBody": "Your first deals are on the way to your inbox."
   },
   "reservations": {
+    "manageBooking": "Manage booking",
+    "manageTitle": "Manage booking",
+    "currentlyOn": "Currently on your {{destination}} trip",
+    "changeTrip": "Change trip",
+    "moveToTrip": "Move this booking to",
+    "removeFromTrip": "Remove from trip",
+    "delete": "Delete booking",
+    "deleteTitle": "Delete this booking?",
+    "deleteBody": "It will be removed from your trip and your bookings list. This cannot be undone.",
+    "deleteConfirm": "Delete",
     "title": "Bookings",
     "menuSubtitle": "Forward confirmations to your trips",
     "forwardLabel": "FORWARD CONFIRMATIONS TO",

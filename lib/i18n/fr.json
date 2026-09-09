@@ -2080,6 +2080,16 @@
     "promptDoneBody": "Vos premières offres arrivent dans votre boîte mail."
   },
   "reservations": {
+    "manageBooking": "Gérer la réservation",
+    "manageTitle": "Gérer la réservation",
+    "currentlyOn": "Actuellement sur votre voyage à {{destination}}",
+    "changeTrip": "Changer de voyage",
+    "moveToTrip": "Déplacer cette réservation vers",
+    "removeFromTrip": "Retirer du voyage",
+    "delete": "Supprimer la réservation",
+    "deleteTitle": "Supprimer cette réservation ?",
+    "deleteBody": "Elle sera retirée de votre voyage et de votre liste de réservations. Cette action est irréversible.",
+    "deleteConfirm": "Supprimer",
     "title": "Réservations",
     "menuSubtitle": "Transférez vos confirmations vers vos voyages",
     "forwardLabel": "TRANSFÉREZ VOS CONFIRMATIONS À",

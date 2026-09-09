@@ -443,23 +443,38 @@ export const listAccounts = query({
 
 /**
  * Invite a partner: create (or re-invite) their portal account and email them
- * a signup link. The partner then sets a password and self-manages API keys.
- * Gated by the app admin session.
+ * a signup link. Gated by the app admin session.
+ *
+ * `kind` picks the account type — and therefore which portal they land in:
+ *   - "api" (default): API consumer, sets a password and mints their own keys.
+ *   - "supplier": tour/hotel operator, sets a password and lists products for
+ *     operator review. No API keys, so the rate/cap args are ignored.
+ * Most "Become a partner" applications (tours, hotels, DMOs) are suppliers.
  */
 export const invitePartner = action({
   args: {
     token: v.string(),
     email: v.string(),
     partnerName: v.string(),
-    partnerRef: v.string(),
+    // Optional: derived from the email when omitted (applications don't carry one).
+    partnerRef: v.optional(v.string()),
+    kind: v.optional(v.union(v.literal("api"), v.literal("supplier"))),
     rateLimitPerMin: v.optional(v.float64()),
     dailyCap: v.optional(v.float64()),
     monthlyCap: v.optional(v.float64()),
+    // When the invite comes from the application queue, mark it "invited".
+    applicationId: v.optional(v.id("partnerApplications")),
   },
   handler: async (
     ctx,
     args
-  ): Promise<{ ok: boolean; email: string; signupUrl: string; emailSent: boolean }> => {
+  ): Promise<{
+    ok: boolean;
+    email: string;
+    kind: "api" | "supplier";
+    signupUrl: string;
+    emailSent: boolean;
+  }> => {
     const isAdmin = await ctx.runQuery(api.admin.isAdmin, { token: args.token });
     if (!isAdmin) throw new ConvexError("Unauthorized.");
 
@@ -469,14 +484,17 @@ export const invitePartner = action({
     }
     const partnerName = args.partnerName.trim();
     const partnerRef =
-      args.partnerRef.trim() ||
+      args.partnerRef?.trim() ||
       email.split("@")[0].replace(/[^a-z0-9]+/g, "-");
     if (!partnerName) throw new ConvexError("Partner name is required.");
+
+    const kind = args.kind ?? "api";
 
     const invite = await ctx.runMutation(internal.partnerPortal.createInvite, {
       email,
       partnerName,
       partnerRef,
+      kind,
       rateLimitPerMin: args.rateLimitPerMin ?? DEFAULTS.rateLimitPerMin,
       dailyCap: args.dailyCap ?? DEFAULTS.dailyCap,
       monthlyCap: args.monthlyCap ?? DEFAULTS.monthlyCap,
@@ -484,18 +502,25 @@ export const invitePartner = action({
     });
 
     const signupUrl = `${PORTAL_BASE_URL}/partners/signup?token=${invite.rawToken}`;
-    const html = invitePartnerEmailHtml({ partnerName, signupUrl });
+    const html = invitePartnerEmailHtml({ partnerName, signupUrl, kind });
     const text =
-      `You've been invited to the Planera AI Partner API.\n\n` +
-      `Create your account and password here (link valid 7 days):\n${signupUrl}\n\n` +
-      `Once signed in you can generate your own API key and start building.\n\n` +
-      `Docs: ${PORTAL_BASE_URL}/partners/docs`;
+      kind === "supplier"
+        ? `You've been invited to list your tours, stays and experiences on Planera AI.\n\n` +
+          `Create your account and password here (link valid 7 days):\n${signupUrl}\n\n` +
+          `Once signed in you can add your products — we review each listing before it goes live.`
+        : `You've been invited to the Planera AI Partner API.\n\n` +
+          `Create your account and password here (link valid 7 days):\n${signupUrl}\n\n` +
+          `Once signed in you can generate your own API key and start building.\n\n` +
+          `Docs: ${PORTAL_BASE_URL}/partners/docs`;
 
     let emailSent = false;
     try {
       const res = await ctx.runAction(internal.postmark.sendRawEmail, {
         to: email,
-        subject: "Your Planera AI Partner API invitation",
+        subject:
+          kind === "supplier"
+            ? "Your Planera AI partner invitation"
+            : "Your Planera AI Partner API invitation",
         html,
         text,
       });
@@ -504,23 +529,222 @@ export const invitePartner = action({
       console.error("[invitePartner] email send failed:", e);
     }
 
-    return { ok: true, email, signupUrl, emailSent };
+    if (args.applicationId) {
+      await ctx.runMutation(api.partnerAdminApp.setApplicationStatus, {
+        token: args.token,
+        id: args.applicationId,
+        status: "invited",
+      });
+    }
+
+    return { ok: true, email, kind, signupUrl, emailSent };
   },
 });
 
-function invitePartnerEmailHtml(opts: { partnerName: string; signupUrl: string }): string {
-  const { partnerName, signupUrl } = opts;
+// ---------------------------------------------------------------------------
+// Partner applications ("Become a partner" form) — in-app review queue
+//
+// Mirrors partnerApiAdmin.listApplications / setApplicationStatus, but gated
+// by the app admin session so the whole review flow lives in /admin instead of
+// the standalone PARTNER_ADMIN_TOKEN dashboard.
+// ---------------------------------------------------------------------------
+
+const APPLICATION_STATUS = v.union(
+  v.literal("new"),
+  v.literal("invited"),
+  v.literal("dismissed")
+);
+
+const PRODUCT_STATUS = v.union(
+  v.literal("pending"),
+  v.literal("approved"),
+  v.literal("rejected"),
+  v.literal("archived")
+);
+
+/** List inbound partner applications (newest first), optionally by status. */
+export const listApplications = query({
+  args: {
+    token: v.string(),
+    status: v.optional(APPLICATION_STATUS),
+  },
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx, args.token);
+    const status = args.status;
+    const apps = status
+      ? await ctx.db
+          .query("partnerApplications")
+          .withIndex("by_status_created", (q) => q.eq("status", status))
+          .order("desc")
+          .take(200)
+      : await ctx.db
+          .query("partnerApplications")
+          .withIndex("by_created")
+          .order("desc")
+          .take(200);
+
+    return apps.map((a) => ({
+      id: a._id,
+      companyName: a.companyName,
+      website: a.website ?? null,
+      contactName: a.contactName,
+      email: a.email,
+      partnershipTypes: a.partnershipTypes,
+      monthlyVolume: a.monthlyVolume ?? null,
+      message: a.message ?? null,
+      status: a.status,
+      createdAt: a.createdAt,
+      reviewedAt: a.reviewedAt ?? null,
+    }));
+  },
+});
+
+/** Update an application's review status (dismiss / re-open / mark invited). */
+export const setApplicationStatus = mutation({
+  args: {
+    token: v.string(),
+    id: v.id("partnerApplications"),
+    status: APPLICATION_STATUS,
+  },
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx, args.token);
+    const application = await ctx.db.get(args.id);
+    if (!application) throw new ConvexError("Application not found.");
+    await ctx.db.patch(args.id, {
+      status: args.status,
+      reviewedAt: Date.now(),
+    });
+    return { ok: true };
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Supplier product listings — in-app review queue
+// ---------------------------------------------------------------------------
+
+/** List supplier product listings for review (defaults to "pending"). */
+export const listProducts = query({
+  args: {
+    token: v.string(),
+    status: v.optional(PRODUCT_STATUS),
+  },
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx, args.token);
+    const status = args.status ?? "pending";
+    const products = await ctx.db
+      .query("partnerProducts")
+      .withIndex("by_status_created", (q) => q.eq("status", status))
+      .order("desc")
+      .take(200);
+
+    const out = [];
+    for (const p of products) {
+      const account = await ctx.db.get(p.accountId);
+      out.push({
+        id: p._id,
+        partnerName: account?.partnerName ?? p.partnerRef,
+        partnerEmail: account?.email ?? null,
+        type: p.type,
+        title: p.title,
+        description: p.description ?? null,
+        destination: p.destination ?? null,
+        city: p.city ?? null,
+        country: p.country ?? null,
+        price: p.price ?? null,
+        currency: p.currency ?? null,
+        bookingUrl: p.bookingUrl ?? null,
+        imageUrls: p.imageUrls ?? [],
+        status: p.status,
+        rejectionReason: p.rejectionReason ?? null,
+        createdAt: p.createdAt,
+        updatedAt: p.updatedAt,
+      });
+    }
+    return out;
+  },
+});
+
+/** Approve / reject / re-queue / archive a supplier product listing. */
+export const setProductStatus = mutation({
+  args: {
+    token: v.string(),
+    productId: v.id("partnerProducts"),
+    status: PRODUCT_STATUS,
+    rejectionReason: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx, args.token);
+    const product = await ctx.db.get(args.productId);
+    if (!product) throw new ConvexError("Product not found.");
+    await ctx.db.patch(args.productId, {
+      status: args.status,
+      rejectionReason:
+        args.status === "rejected"
+          ? args.rejectionReason?.trim() || undefined
+          : undefined,
+      reviewedAt: Date.now(),
+      updatedAt: Date.now(),
+    });
+    return { ok: true };
+  },
+});
+
+/**
+ * Small counts query for the admin tab badges: how many partner applications
+ * are still unreviewed and how many supplier products await approval.
+ */
+export const getReviewCounts = query({
+  args: { token: v.string() },
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx, args.token);
+    const newApplications = await ctx.db
+      .query("partnerApplications")
+      .withIndex("by_status_created", (q) => q.eq("status", "new"))
+      .take(200);
+    const pendingProducts = await ctx.db
+      .query("partnerProducts")
+      .withIndex("by_status_created", (q) => q.eq("status", "pending"))
+      .take(200);
+    const accounts = await ctx.db.query("partnerAccounts").collect();
+    return {
+      newApplications: newApplications.length,
+      pendingProducts: pendingProducts.length,
+      pendingAccounts: accounts.filter(
+        (a) => a.status === "invited" || a.status === "pending_verification"
+      ).length,
+    };
+  },
+});
+
+function invitePartnerEmailHtml(opts: {
+  partnerName: string;
+  signupUrl: string;
+  kind: "api" | "supplier";
+}): string {
+  const { partnerName, signupUrl, kind } = opts;
+  const isSupplier = kind === "supplier";
+  const heading = isSupplier
+    ? "You're invited to partner with Planera AI"
+    : "You're invited to the Planera AI Partner API";
+  const body = isSupplier
+    ? `Hi ${escapeHtml(partnerName)}, an account has been created for you. Set your
+        password to get started — then list your tours, stays and experiences so
+        they reach travellers planning trips to your destination.`
+    : `Hi ${escapeHtml(partnerName)}, an account has been created for you. Set your
+        password to get started — then generate your own API key and start
+        building AI travel itineraries into your product.`;
+  const footer = isSupplier
+    ? "We review every listing before it goes live — usually within one business day."
+    : `Read the developer docs at ${PORTAL_BASE_URL}/partners/docs`;
   return `<!DOCTYPE html><html><body style="margin:0;background:#0b0b0f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
   <div style="max-width:520px;margin:0 auto;padding:40px 24px;">
     <div style="text-align:center;margin-bottom:28px;">
       <img src="${PORTAL_BASE_URL}/logo.png" alt="Planera AI" width="150" style="display:inline-block;width:150px;height:auto;border:0;outline:none;text-decoration:none;" />
     </div>
     <div style="background:#16161c;border:1px solid #26262e;border-radius:16px;border-top:4px solid #FFE500;padding:32px;">
-      <h1 style="margin:0 0 12px;color:#fff;font-size:22px;">You're invited to the Planera AI Partner API</h1>
+      <h1 style="margin:0 0 12px;color:#fff;font-size:22px;">${heading}</h1>
       <p style="margin:0 0 20px;color:#b8b8c4;font-size:15px;line-height:1.6;">
-        Hi ${escapeHtml(partnerName)}, an account has been created for you. Set your
-        password to get started — then generate your own API key and start
-        building AI travel itineraries into your product.
+        ${body}
       </p>
       <div style="text-align:center;margin:28px 0;">
         <a href="${signupUrl}" style="display:inline-block;background:#FFE500;color:#111;text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:10px;">Create your account</a>
@@ -532,7 +756,7 @@ function invitePartnerEmailHtml(opts: { partnerName: string; signupUrl: string }
       <p style="margin:0;word-break:break-all;color:#FFE500;font-size:12px;">${signupUrl}</p>
     </div>
     <p style="text-align:center;margin:24px 0 0;color:#6a6a76;font-size:12px;">
-      Read the developer docs at ${PORTAL_BASE_URL}/partners/docs
+      ${footer}
     </p>
   </div></body></html>`;
 }

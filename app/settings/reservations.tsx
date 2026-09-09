@@ -52,11 +52,17 @@ export default function Reservations() {
     const confirmReservation = useAuthenticatedMutation(api.reservations.confirmReservation as any);
     const rejectReservation = useAuthenticatedMutation(api.reservations.rejectReservation as any);
     const assignToTrip = useAuthenticatedMutation(api.reservations.assignToTrip as any);
+    const deleteReservation = useAuthenticatedMutation(api.reservations.deleteReservation as any);
 
     const [address, setAddress] = useState<string | null>(null);
     const [copied, setCopied] = useState(false);
     const [busyId, setBusyId] = useState<string | null>(null);
     const [pickerFor, setPickerFor] = useState<any | null>(null);
+    // The picker serves two flows: "confirm" is the review step (pick a trip,
+    // then approve the booking); "move" only re-points an already-reviewed
+    // booking at a different trip and must leave its status alone.
+    const [pickerMode, setPickerMode] = useState<"confirm" | "move">("confirm");
+    const [manageFor, setManageFor] = useState<any | null>(null);
 
     const trips = useQuery(api.trips.list as any, token ? { token } : "skip");
 
@@ -92,6 +98,7 @@ export default function Reservations() {
         try {
             if (group.legs.some((leg: any) => !leg.tripId)) {
                 // Nothing to attach it to yet — ask where it belongs first.
+                setPickerMode("confirm");
                 setPickerFor(group);
                 return;
             }
@@ -145,6 +152,7 @@ export default function Reservations() {
      */
     const handlePlanTrip = useCallback((group: any) => {
         setPickerFor(null);
+        setManageFor(null);
         setBusyId(null);
         const params: Record<string, string> = {};
         if (group?.destination) params.prefilledDestination = group.destination;
@@ -169,11 +177,19 @@ export default function Reservations() {
 
     const handlePickTrip = useCallback(async (tripId: string | null) => {
         const group = pickerFor;
+        const mode = pickerMode;
         setPickerFor(null);
         if (!group) return;
+        setBusyId(group.key);
         try {
             for (const leg of group.legs) {
-                if (tripId) {
+                if (mode === "move") {
+                    // The user already reviewed this one: only the trip link
+                    // moves, the status they decided on stays as it is.
+                    await assignToTrip(
+                        tripId ? { reservationId: leg._id, tripId } : { reservationId: leg._id }
+                    );
+                } else if (tripId) {
                     await confirmReservation({ reservationId: leg._id, tripId });
                 } else {
                     // Confirm as a standalone booking, unattached to any trip.
@@ -187,7 +203,74 @@ export default function Reservations() {
         } finally {
             setBusyId(null);
         }
-    }, [pickerFor, confirmReservation, assignToTrip, t]);
+    }, [pickerFor, pickerMode, confirmReservation, assignToTrip, t]);
+
+    /**
+     * Manage sheet. A booking is never stuck where the parser — or an earlier
+     * tap — put it: the trip it belongs to stays editable for as long as the
+     * booking exists, in every status.
+     */
+    const handleChangeTrip = useCallback((group: any) => {
+        setManageFor(null);
+        setPickerMode("move");
+        setPickerFor(group);
+    }, []);
+
+    const handleDetach = useCallback(async (group: any) => {
+        setManageFor(null);
+        setBusyId(group.key);
+        try {
+            for (const leg of group.legs) {
+                await assignToTrip({ reservationId: leg._id });
+            }
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        } catch (e: any) {
+            Alert.alert(t("common.error"), e?.message ?? "Could not update this booking.");
+        } finally {
+            setBusyId(null);
+        }
+    }, [assignToTrip, t]);
+
+    // Deleting drops the dedupe row with it, so a re-forwarded confirmation
+    // comes back as new. That is the point — this is the "not mine" exit.
+    const handleDelete = useCallback((group: any) => {
+        setManageFor(null);
+        Alert.alert(
+            t("reservations.deleteTitle", { defaultValue: "Delete this booking?" }),
+            t("reservations.deleteBody", {
+                defaultValue: "It will be removed from your trip and your bookings list. This cannot be undone.",
+            }),
+            [
+                { text: t("common.cancel", { defaultValue: "Cancel" }), style: "cancel" },
+                {
+                    text: t("reservations.deleteConfirm", { defaultValue: "Delete" }),
+                    style: "destructive",
+                    onPress: async () => {
+                        setBusyId(group.key);
+                        try {
+                            for (const leg of group.legs) {
+                                await deleteReservation({ reservationId: leg._id });
+                            }
+                            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                        } catch (e: any) {
+                            Alert.alert(t("common.error"), e?.message ?? "Could not delete this booking.");
+                        } finally {
+                            setBusyId(null);
+                        }
+                    },
+                },
+            ]
+        );
+    }, [deleteReservation, t]);
+
+    // Legs of one booking share a trip, so the first linked leg speaks for the
+    // whole group in both sheets.
+    const groupTrip = useCallback(
+        (group: any) => group?.legs?.find((leg: any) => leg.trip)?.trip ?? null,
+        []
+    );
+    const manageTrip = useMemo(() => groupTrip(manageFor), [manageFor, groupTrip]);
+    const pickerTripId = useMemo(() => groupTrip(pickerFor)?._id ?? null, [pickerFor, groupTrip]);
 
     const items = data?.items ?? [];
     // Group within a status, never across one: a cancelled outbound must not be
@@ -240,6 +323,19 @@ export default function Reservations() {
                             <Text style={styles.unverifiedText}>{t("reservations.unverified", { defaultValue: "Unverified sender" })}</Text>
                         </View>
                     )}
+                    {/* Offered in every status: a confirmed booking sitting on
+                        the wrong trip is exactly the case that needs fixing. */}
+                    <TouchableOpacity
+                        style={styles.manageBtn}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        accessibilityLabel={t("reservations.manageBooking", { defaultValue: "Manage booking" })}
+                        onPress={() => {
+                            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                            setManageFor(group);
+                        }}
+                    >
+                        <Ionicons name="ellipsis-horizontal" size={18} color={colors.textMuted} />
+                    </TouchableOpacity>
                 </View>
 
                 {/* One row per leg, so a round trip reads as an itinerary. */}
@@ -444,28 +540,35 @@ export default function Reservations() {
                 <View style={{ height: 40 }} />
             </ScrollView>
 
-            {/* Trip picker */}
+            {/* Trip picker — used both to place a new booking and to move an
+                existing one. */}
             <Modal visible={!!pickerFor} transparent animationType="slide" onRequestClose={() => { setPickerFor(null); setBusyId(null); }}>
                 <View style={styles.modalBackdrop}>
                     <View style={[styles.modalSheet, { backgroundColor: colors.card }]}>
                         <Text style={[styles.modalTitle, { color: colors.text }]}>
-                            {t("reservations.whichTrip", { defaultValue: "Which trip is this for?" })}
+                            {pickerMode === "move"
+                                ? t("reservations.moveToTrip", { defaultValue: "Move this booking to" })
+                                : t("reservations.whichTrip", { defaultValue: "Which trip is this for?" })}
                         </Text>
                         <ScrollView style={{ maxHeight: 320 }}>
-                            {(trips ?? []).map((trip: any) => (
-                                <TouchableOpacity
-                                    key={trip._id}
-                                    style={[styles.tripOption, { borderBottomColor: colors.border }]}
-                                    onPress={() => handlePickTrip(trip._id)}
-                                >
-                                    <Text style={[styles.tripOptionText, { color: colors.text }]} numberOfLines={1}>
-                                        {trip.destination}
-                                    </Text>
-                                    <Text style={[styles.tripOptionDate, { color: colors.textMuted }]}>
-                                        {new Date(trip.startDate).toLocaleDateString(undefined, { day: "numeric", month: "short" })}
-                                    </Text>
-                                </TouchableOpacity>
-                            ))}
+                            {(trips ?? []).map((trip: any) => {
+                                const current = String(trip._id) === String(pickerTripId ?? "");
+                                return (
+                                    <TouchableOpacity
+                                        key={trip._id}
+                                        style={[styles.tripOption, { borderBottomColor: colors.border }]}
+                                        onPress={() => handlePickTrip(trip._id)}
+                                    >
+                                        {current && <Ionicons name="checkmark-circle" size={16} color="#10B981" />}
+                                        <Text style={[styles.tripOptionText, { color: colors.text }]} numberOfLines={1}>
+                                            {trip.destination}
+                                        </Text>
+                                        <Text style={[styles.tripOptionDate, { color: colors.textMuted }]}>
+                                            {new Date(trip.startDate).toLocaleDateString(undefined, { day: "numeric", month: "short" })}
+                                        </Text>
+                                    </TouchableOpacity>
+                                );
+                            })}
                         </ScrollView>
                         {/* None of the listed trips fit — the way out is a new one. */}
                         <TouchableOpacity
@@ -484,10 +587,71 @@ export default function Reservations() {
                         </TouchableOpacity>
                         <TouchableOpacity style={styles.modalSecondary} onPress={() => handlePickTrip(null)}>
                             <Text style={[styles.modalSecondaryText, { color: colors.textMuted }]}>
-                                {t("reservations.keepStandalone", { defaultValue: "Keep as a standalone booking" })}
+                                {pickerMode === "move"
+                                    ? t("reservations.removeFromTrip", { defaultValue: "Remove from trip" })
+                                    : t("reservations.keepStandalone", { defaultValue: "Keep as a standalone booking" })}
                             </Text>
                         </TouchableOpacity>
                         <TouchableOpacity style={styles.modalCancel} onPress={() => { setPickerFor(null); setBusyId(null); }}>
+                            <Text style={[styles.modalCancelText, { color: colors.text }]}>
+                                {t("common.cancel", { defaultValue: "Cancel" })}
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* Manage booking */}
+            <Modal visible={!!manageFor} transparent animationType="slide" onRequestClose={() => setManageFor(null)}>
+                <View style={styles.modalBackdrop}>
+                    <View style={[styles.modalSheet, { backgroundColor: colors.card }]}>
+                        <Text style={[styles.modalTitle, { color: colors.text }]} numberOfLines={2}>
+                            {manageFor?.label ?? t("reservations.manageTitle", { defaultValue: "Manage booking" })}
+                        </Text>
+                        {!!manageTrip && (
+                            <Text style={[styles.manageSubtitle, { color: colors.textMuted }]} numberOfLines={1}>
+                                {t("reservations.currentlyOn", {
+                                    destination: manageTrip.destination,
+                                    defaultValue: "Currently on your {{destination}} trip",
+                                })}
+                            </Text>
+                        )}
+
+                        <TouchableOpacity
+                            style={[styles.manageRow, { borderBottomColor: colors.border }]}
+                            onPress={() => handleChangeTrip(manageFor)}
+                        >
+                            <Ionicons name="swap-horizontal-outline" size={18} color={colors.text} />
+                            <Text style={[styles.manageRowText, { color: colors.text }]}>
+                                {manageTrip
+                                    ? t("reservations.changeTrip", { defaultValue: "Change trip" })
+                                    : t("reservations.addToTrip", { defaultValue: "Add to trip" })}
+                            </Text>
+                        </TouchableOpacity>
+
+                        {!!manageTrip && (
+                            <TouchableOpacity
+                                style={[styles.manageRow, { borderBottomColor: colors.border }]}
+                                onPress={() => handleDetach(manageFor)}
+                            >
+                                <Ionicons name="unlink-outline" size={18} color={colors.text} />
+                                <Text style={[styles.manageRowText, { color: colors.text }]}>
+                                    {t("reservations.removeFromTrip", { defaultValue: "Remove from trip" })}
+                                </Text>
+                            </TouchableOpacity>
+                        )}
+
+                        <TouchableOpacity
+                            style={[styles.manageRow, { borderBottomColor: colors.border }]}
+                            onPress={() => handleDelete(manageFor)}
+                        >
+                            <Ionicons name="trash-outline" size={18} color="#EF4444" />
+                            <Text style={[styles.manageRowText, { color: "#EF4444" }]}>
+                                {t("reservations.delete", { defaultValue: "Delete booking" })}
+                            </Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity style={styles.modalCancel} onPress={() => setManageFor(null)}>
                             <Text style={[styles.modalCancelText, { color: colors.text }]}>
                                 {t("common.cancel", { defaultValue: "Cancel" })}
                             </Text>
@@ -545,6 +709,7 @@ const styles = StyleSheet.create({
         borderRadius: 6,
     },
     unverifiedText: { fontSize: 10, fontWeight: "600", color: "#B45309" },
+    manageBtn: { width: 28, height: 28, alignItems: "center", justifyContent: "center", marginTop: -2 },
 
     metaRow: { flexDirection: "row", flexWrap: "wrap", gap: 14, marginTop: 10 },
     metaItem: { flexDirection: "row", alignItems: "center", gap: 4 },
@@ -586,10 +751,20 @@ const styles = StyleSheet.create({
     modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "flex-end" },
     modalSheet: { borderTopLeftRadius: 22, borderTopRightRadius: 22, padding: 20, paddingBottom: 34 },
     modalTitle: { fontSize: 17, fontWeight: "700", marginBottom: 12 },
+    manageSubtitle: { fontSize: 13, marginTop: -6, marginBottom: 10 },
+    manageRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+        paddingVertical: 16,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+    },
+    manageRowText: { fontSize: 15, fontWeight: "600" },
     tripOption: {
         flexDirection: "row",
         alignItems: "center",
         justifyContent: "space-between",
+        gap: 8,
         paddingVertical: 14,
         borderBottomWidth: StyleSheet.hairlineWidth,
     },

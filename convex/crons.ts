@@ -162,6 +162,29 @@ crons.monthly(
     {},
 );
 
+// Partner insights digest: the same windows, rendered as the revenue-free
+// subset for the content/marketing agency (see the PARTNER REPORT section of
+// statsReports.ts). Sent to PARTNER_REPORT_TO — while that env var is unset
+// both crons collect, log and send nothing, so deploying this is inert until
+// a partner is actually onboarded.
+//
+// Monday 07:00 UTC (10:00 Athens) lands as the first thing of their work week,
+// covering the seven days that just closed; the monthly follows the internal
+// one on the 1st so a bad number is seen internally first.
+crons.weekly(
+    "weekly-partner-report",
+    { dayOfWeek: "monday", hourUTC: 7, minuteUTC: 0 },
+    internal.statsReports.sendWeeklyPartnerReport,
+    {},
+);
+
+crons.monthly(
+    "monthly-partner-report",
+    { day: 1, hourUTC: 7, minuteUTC: 30 },
+    internal.statsReports.sendMonthlyPartnerReport,
+    {},
+);
+
 // Deliverability safety net. The Postmark webhook is the primary feed for
 // bounces and complaints, but a webhook that was misconfigured, rate-limited,
 // or down while we were sending leaves addresses suppressed on Postmark's side

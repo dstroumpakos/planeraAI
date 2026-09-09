@@ -123,12 +123,38 @@ const SEND_DAYS = new Set([1, 2, 3, 4, 5]);
 const FOLLOW_UP_DELAY_MS = 6 * 24 * 60 * 60 * 1000;
 
 // --- Circuit breaker ---
-/** Rolling window of sends the health ratios are computed over. */
+/**
+ * Rolling window of sends the health ratios are computed over.
+ *
+ * Genuinely rolling: the state carries the ids of the last WINDOW_SIZE leads
+ * contacted and the ratios are recounted from their CURRENT status. The first
+ * version kept running totals that only cleared once a 150-send block filled
+ * up, which made it a tumbling window wearing a rolling window's name — two
+ * bounces early in a block sat in the numerator while the denominator
+ * restarted, so a flawless sending day could not clear the flag, and one did
+ * not: 2026-09-03 sent its full cap with zero bounces and was paused the next
+ * morning by two bounces from the day before.
+ */
 const WINDOW_SIZE = 150;
-/** Minimum sends before the ratios mean anything. */
-const WINDOW_MIN_SAMPLE = 40;
-/** Postmark warns around 5%; stopping at 4% leaves room to fix the list. */
-const MAX_BOUNCE_RATE = 0.04;
+/**
+ * Minimum sends before the ratios mean anything.
+ *
+ * At 40 the ratio moves in 2.5% steps, so the second bounce in a window trips
+ * a 4% ceiling on its own — a coin-flip, not a signal. 100 gives the number
+ * one-percent resolution before it is allowed to stop the campaign.
+ */
+const WINDOW_MIN_SAMPLE = 100;
+/**
+ * Postmark warns around 5% and reviews accounts near 10%.
+ *
+ * 7% is above the ~6% a directory-sourced Greek agency list actually bounces
+ * after DNS cleaning, and below the level that draws attention. Raised from 4%
+ * deliberately (Dionysis, 2026-09-06) once complaints had held at zero across
+ * 83 sends: complaints are the metric that damages a domain, bounces mostly
+ * damage the sending IP's standing, and this list earns none of the former.
+ * If complaints ever appear, MAX_COMPLAINTS below is the guard that matters.
+ */
+const MAX_BOUNCE_RATE = 0.07;
 /** Two complaints in a 150-send window is already an order of magnitude over
  *  the 0.1% threshold Gmail publishes. */
 const MAX_COMPLAINTS = 2;
@@ -224,6 +250,31 @@ function dailyCap(dayIndex: number, override?: number): number {
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
+
+/**
+ * Bounce/complaint counts over the last WINDOW_SIZE sends, recounted from the
+ * leads themselves.
+ *
+ * Derived rather than incremented because a bounce lands minutes to hours
+ * AFTER the send that caused it: any counter-based scheme has to decide what
+ * to do when the send that owns a bounce falls out of the window, and gets it
+ * wrong. Reading ~150 rows once an hour is cheaper than that bug.
+ */
+async function windowHealth(
+  ctx: any,
+  state: any
+): Promise<{ sent: number; bounced: number; complained: number }> {
+  const ids: any[] = state?.recentLeadIds ?? [];
+  let bounced = 0;
+  let complained = 0;
+  for (const id of ids) {
+    const lead = await ctx.db.get(id);
+    if (!lead) continue;
+    if (lead.status === "bounced") bounced++;
+    else if (lead.status === "complained") complained++;
+  }
+  return { sent: ids.length, bounced, complained };
+}
 
 async function readState(ctx: any) {
   return await ctx.db
@@ -527,6 +578,7 @@ export const resetHealthWindowAdmin = internalMutation({
 async function resetWindowCore(ctx: any): Promise<void> {
   const state = await ensureState(ctx);
   await ctx.db.patch(state._id, {
+    recentLeadIds: [],
     windowSent: 0,
     windowBounced: 0,
     windowComplained: 0,
@@ -624,7 +676,8 @@ async function overviewCore(ctx: any) {
     if ((l.clickCount ?? 0) > 0) clicked++;
   }
 
-  const windowSent = state?.windowSent ?? 0;
+  const health = await windowHealth(ctx, state);
+  const windowSent = health.sent;
   return {
     status: state?.status ?? "paused",
     pausedReason: state?.pausedReason,
@@ -637,11 +690,15 @@ async function overviewCore(ctx: any) {
     deckPolicy: state?.deckPolicy ?? "followup",
     health: {
       windowSent,
-      bounceRate: windowSent ? (state?.windowBounced ?? 0) / windowSent : 0,
-      complaints: state?.windowComplained ?? 0,
-      // Shown next to the ratio it is deliberately excluded from, so a run
+      bounceRate: windowSent ? health.bounced / windowSent : 0,
+      bounces: health.bounced,
+      complaints: health.complained,
+      // A running count since the last reset rather than a windowed one, and
+      // shown next to the ratio it is deliberately excluded from, so a run
       // full of transient failures is visible rather than merely absent.
       softBounces: state?.windowSoftBounced ?? 0,
+      maxBounceRate: MAX_BOUNCE_RATE,
+      minSample: WINDOW_MIN_SAMPLE,
     },
     total: leads.length,
     byStatus,
@@ -1026,18 +1083,36 @@ export const claimDueLeads = internalMutation({
     }
 
     // --- Circuit breaker ---------------------------------------------------
-    const windowSent = state.windowSent ?? 0;
+    const health = await windowHealth(ctx, state);
+    const windowSent = health.sent;
+    // Mirrored onto the state so the dashboard and any other reader see the
+    // same numbers the breaker just judged on.
+    await ctx.db.patch(state._id, {
+      windowSent,
+      windowBounced: health.bounced,
+      windowComplained: health.complained,
+    });
     if (windowSent >= WINDOW_MIN_SAMPLE) {
-      const bounceRate = (state.windowBounced ?? 0) / windowSent;
-      const complaints = state.windowComplained ?? 0;
+      const bounceRate = health.bounced / windowSent;
+      const complaints = health.complained;
       if (bounceRate > MAX_BOUNCE_RATE || complaints > MAX_COMPLAINTS) {
+        const pausedReason =
+          bounceRate > MAX_BOUNCE_RATE
+            ? `bounce rate ${(bounceRate * 100).toFixed(1)}% over ${windowSent} sends`
+            : `${complaints} spam complaints in ${windowSent} sends`;
         await ctx.db.patch(state._id, {
           status: "auto_paused" as const,
-          pausedReason:
-            bounceRate > MAX_BOUNCE_RATE
-              ? `bounce rate ${(bounceRate * 100).toFixed(1)}% over ${windowSent} sends`
-              : `${complaints} spam complaints in ${windowSent} sends`,
+          pausedReason,
           updatedAt: now,
+        });
+        // An auto-pause needs a human to clear it, so it has to reach one. The
+        // first trip sat unnoticed from Friday morning to Sunday afternoon and
+        // cost a sending day.
+        await ctx.scheduler.runAfter(0, internal.agencyOutreach.sendPauseAlert, {
+          reason: pausedReason,
+          windowSent,
+          bounced: health.bounced,
+          complained: health.complained,
         });
         return { jobs: [], reason: "auto_paused" };
       }
@@ -1159,15 +1234,17 @@ export const recordSendResult = internalMutation({
       });
 
       const state = await ensureState(ctx);
-      const windowSent = (state.windowSent ?? 0) + 1;
-      const rollover = windowSent > WINDOW_SIZE;
+      // The window is the last WINDOW_SIZE leads contacted, oldest dropped
+      // first. Their statuses — not a counter frozen at send time — are what
+      // the breaker reads, so a bounce arriving an hour later still lands in
+      // the right window and leaves it again when the send ages out.
+      const recentLeadIds = [...(state.recentLeadIds ?? []), args.leadId].slice(-WINDOW_SIZE);
       await ctx.db.patch(state._id, {
         sentToday: (state.sentToday ?? 0) + 1,
         totalSent: (state.totalSent ?? 0) + 1,
         lastSendAt: now,
-        windowSent: rollover ? 1 : windowSent,
-        windowBounced: rollover ? 0 : state.windowBounced ?? 0,
-        windowComplained: rollover ? 0 : state.windowComplained ?? 0,
+        recentLeadIds,
+        windowSent: recentLeadIds.length,
         updatedAt: now,
       });
       return null;
@@ -1282,6 +1359,59 @@ export const outreachTick = internalAction({
     }
 
     return { sent, failed, reason: "ok" };
+  },
+});
+
+/**
+ * Tells the operator the campaign stopped, at the moment it stops.
+ *
+ * Sent with `ignoreSuppression`: this is internal mail to a fixed address, and
+ * an alert that silently suppresses itself is worse than no alert.
+ */
+export const sendPauseAlert = internalAction({
+  args: {
+    reason: v.string(),
+    windowSent: v.float64(),
+    bounced: v.float64(),
+    complained: v.float64(),
+  },
+  returns: v.null(),
+  handler: async (ctx, args): Promise<null> => {
+    const to = process.env.STATS_REPORT_TO || "dstroumpakos@planeraai.app";
+    const overview: any = await ctx.runQuery(internal.agencyOutreach.overviewAdmin, {});
+    const remaining = overview?.remaining ?? 0;
+    const subject = `Agency outreach auto-paused — ${args.reason}`;
+    const lines = [
+      `The travel-agency outreach campaign paused itself.`,
+      ``,
+      `Reason:      ${args.reason}`,
+      `Window:      ${args.bounced} bounces, ${args.complained} complaints in ${args.windowSent} sends`,
+      `Sent so far: ${overview?.totalSent ?? 0}`,
+      `Still to go: ${remaining} leads never contacted`,
+      ``,
+      `It will not resume on its own. Clear the health window and restart it`,
+      `from the admin dashboard, or investigate the bounces first.`,
+    ];
+    const text = lines.join("\n");
+    const html =
+      `<p>The travel-agency outreach campaign paused itself.</p>` +
+      `<table cellpadding="4"><tbody>` +
+      `<tr><td><b>Reason</b></td><td>${args.reason}</td></tr>` +
+      `<tr><td><b>Window</b></td><td>${args.bounced} bounces, ${args.complained} complaints in ${args.windowSent} sends</td></tr>` +
+      `<tr><td><b>Sent so far</b></td><td>${overview?.totalSent ?? 0}</td></tr>` +
+      `<tr><td><b>Still to go</b></td><td>${remaining} leads never contacted</td></tr>` +
+      `</tbody></table>` +
+      `<p>It will not resume on its own — clear the health window and restart it, ` +
+      `or investigate the bounces first.</p>`;
+    await ctx.runAction(internal.postmark.sendRawEmail, {
+      to,
+      subject,
+      html,
+      text,
+      tag: "agency-outreach-alert",
+      ignoreSuppression: true,
+    });
+    return null;
   },
 });
 
@@ -1444,17 +1574,13 @@ export async function applyOutreachEmailEvent(
         }
 
         case "hard": {
+          // No counter to bump: the lead's own status IS the record, and
+          // `windowHealth` recounts from it. See WINDOW_SIZE.
           await ctx.db.patch(lead._id, {
             status: "bounced" as const,
             followUpAt: undefined,
             lastError: note,
           });
-          if (state) {
-            await ctx.db.patch(state._id, {
-              windowBounced: (state.windowBounced ?? 0) + 1,
-              updatedAt: now,
-            });
-          }
           return;
         }
 
@@ -1534,17 +1660,11 @@ export async function applyOutreachEmailEvent(
   }
 }
 
-async function markComplained(ctx: any, lead: any, state: any, now: number): Promise<void> {
+async function markComplained(ctx: any, lead: any, _state: any, _now: number): Promise<void> {
   if (lead.status !== "complained") {
     await ctx.db.patch(lead._id, {
       status: "complained" as const,
       followUpAt: undefined,
-    });
-  }
-  if (state) {
-    await ctx.db.patch(state._id, {
-      windowComplained: (state.windowComplained ?? 0) + 1,
-      updatedAt: now,
     });
   }
 }

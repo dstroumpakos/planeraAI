@@ -100,12 +100,20 @@ const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 // Internal helpers used by the admin invite action
 // ---------------------------------------------------------------------------
 
-/** Create (or re-invite) a partner account. Returns the raw invite token. */
+/**
+ * Create (or re-invite) a partner account. Returns the raw invite token.
+ *
+ * `kind` decides which portal the invitee lands in: "api" (the default) is an
+ * API consumer who mints keys, "supplier" is a tour/hotel operator who lists
+ * products. Suppliers don't call the API, so their key caps are forced to 0 —
+ * same as a self-serve supplier signup.
+ */
 export const createInvite = internalMutation({
   args: {
     email: v.string(),
     partnerName: v.string(),
     partnerRef: v.string(),
+    kind: v.optional(v.union(v.literal("api"), v.literal("supplier"))),
     rateLimitPerMin: v.float64(),
     dailyCap: v.float64(),
     monthlyCap: v.float64(),
@@ -113,6 +121,11 @@ export const createInvite = internalMutation({
   },
   handler: async (ctx, args) => {
     const email = args.email.trim().toLowerCase();
+    const kind = args.kind ?? "api";
+    const isSupplier = kind === "supplier";
+    const rateLimitPerMin = isSupplier ? 0 : args.rateLimitPerMin;
+    const dailyCap = isSupplier ? 0 : args.dailyCap;
+    const monthlyCap = isSupplier ? 0 : args.monthlyCap;
     const rawToken = randomToken();
     const inviteTokenHash = await sha256Hex(rawToken);
     const now = Date.now();
@@ -131,29 +144,31 @@ export const createInvite = internalMutation({
       await ctx.db.patch(existing._id, {
         partnerName: args.partnerName,
         partnerRef: args.partnerRef,
+        kind,
         status: "invited",
         inviteTokenHash,
         inviteExpiresAt,
-        rateLimitPerMin: args.rateLimitPerMin,
-        dailyCap: args.dailyCap,
-        monthlyCap: args.monthlyCap,
+        rateLimitPerMin,
+        dailyCap,
+        monthlyCap,
       });
-      return { accountId: existing._id, email, rawToken };
+      return { accountId: existing._id, email, rawToken, kind };
     }
 
     const accountId = await ctx.db.insert("partnerAccounts", {
       email,
       partnerName: args.partnerName,
       partnerRef: args.partnerRef,
+      kind,
       status: "invited",
       inviteTokenHash,
       inviteExpiresAt,
-      rateLimitPerMin: args.rateLimitPerMin,
-      dailyCap: args.dailyCap,
-      monthlyCap: args.monthlyCap,
+      rateLimitPerMin,
+      dailyCap,
+      monthlyCap,
       createdAt: now,
     });
-    return { accountId, email, rawToken };
+    return { accountId, email, rawToken, kind };
   },
 });
 
@@ -169,6 +184,7 @@ export const listAccountsInternal = internalQuery({
         email: a.email,
         partnerName: a.partnerName,
         partnerRef: a.partnerRef,
+        kind: a.kind ?? "api",
         status: a.status,
         createdAt: a.createdAt,
         activatedAt: a.activatedAt ?? null,
@@ -201,6 +217,8 @@ export const validateInvite = query({
       valid: true as const,
       email: account.email,
       partnerName: account.partnerName,
+      // Lets the signup page show supplier vs API copy before the password is set.
+      kind: account.kind ?? ("api" as const),
     };
   },
 });
@@ -249,7 +267,12 @@ export const acceptInvite = mutation({
       expiresAt: now + SESSION_TTL_MS,
     });
 
-    return { token: sessionToken, partnerName: account.partnerName };
+    return {
+      token: sessionToken,
+      partnerName: account.partnerName,
+      // Suppliers land in /partners/products, API partners in /partners/portal.
+      kind: account.kind ?? ("api" as const),
+    };
   },
 });
 

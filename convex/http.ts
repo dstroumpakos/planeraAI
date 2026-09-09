@@ -270,6 +270,22 @@ http.route({
 });
 
 /**
+ * Origin to advertise back to partners (e.g. in `poll_url`).
+ *
+ * `request.url` already carries the branded host when a partner calls through
+ * the Convex Custom Domain (api.planeraai.app). It does NOT when they call the
+ * raw *.convex.site host directly — and then poll_url would send them back off
+ * the branded domain and expose the deployment name. Setting
+ * PARTNER_API_PUBLIC_ORIGIN in the Convex environment pins the advertised
+ * origin either way. Read from the environment rather than an X-Forwarded-Host
+ * header so no caller can inject the host we echo back.
+ */
+function partnerApiOrigin(request: Request): string {
+  const configured = process.env.PARTNER_API_PUBLIC_ORIGIN?.trim().replace(/\/+$/, "");
+  return configured || new URL(request.url).origin;
+}
+
+/**
  * Authenticate the Bearer key on a request. Returns either the key doc or a
  * ready-to-return error Response.
  */
@@ -383,8 +399,7 @@ http.route({
     const idempotencyKey =
       request.headers.get("Idempotency-Key")?.trim() || undefined;
 
-    const origin = new URL(request.url).origin;
-    const pollUrl = (id: string) => `${origin}/v1/itineraries/${id}`;
+    const pollUrl = (id: string) => `${partnerApiOrigin(request)}/v1/itineraries/${id}`;
 
     // 4) Idempotency: a repeated key returns the same resource.
     if (idempotencyKey) {

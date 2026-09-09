@@ -2080,6 +2080,16 @@
     "promptDoneBody": "Deine ersten Angebote sind schon auf dem Weg in dein Postfach."
   },
   "reservations": {
+    "manageBooking": "Buchung verwalten",
+    "manageTitle": "Buchung verwalten",
+    "currentlyOn": "Derzeit in deiner Reise nach {{destination}}",
+    "changeTrip": "Reise ändern",
+    "moveToTrip": "Diese Buchung verschieben nach",
+    "removeFromTrip": "Aus Reise entfernen",
+    "delete": "Buchung löschen",
+    "deleteTitle": "Diese Buchung löschen?",
+    "deleteBody": "Sie wird aus deiner Reise und aus deiner Buchungsliste entfernt. Das lässt sich nicht rückgängig machen.",
+    "deleteConfirm": "Löschen",
     "title": "Buchungen",
     "menuSubtitle": "Bestätigungen an deine Reisen weiterleiten",
     "forwardLabel": "BESTÄTIGUNGEN WEITERLEITEN AN",

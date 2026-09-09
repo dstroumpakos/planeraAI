@@ -2543,6 +2543,13 @@ export default defineSchema({
         pausedReason: v.optional(v.string()),
         // Rolling health over the last `windowSize` sends. The circuit breaker
         // reads these; Postmark's own dashboard is the slower, coarser mirror.
+        // The last WINDOW_SIZE leads contacted, oldest first. The breaker
+        // recounts bounces from these leads' CURRENT status, which is what
+        // makes the window actually roll: a counter frozen at send time cannot
+        // know that the send owning a bounce has since aged out.
+        recentLeadIds: v.optional(v.array(v.id("agencyOutreachLeads"))),
+        // Mirrors of the derived counts, refreshed on every breaker check so
+        // the dashboard and the breaker never disagree.
         windowSent: v.float64(),
         windowBounced: v.float64(),
         windowComplained: v.float64(),

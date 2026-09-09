@@ -957,3 +957,398 @@ export const sendMonthlyReport = internalAction({
   args: { to: v.optional(v.string()), dryRun: v.optional(v.boolean()) },
   handler: async (ctx, args) => await runReport(ctx, "monthly", args),
 });
+
+// ===========================================================================
+// PARTNER REPORT
+//
+// The same collection pass, rendered for an OUTSIDE reader (the content /
+// marketing agency) instead of the founder. It is a deliberately narrower
+// email, and the narrowing is a business rule, not a style choice:
+//
+//   * Demand-side numbers ship as ABSOLUTES — trips planned, destination
+//     clicks, top destinations, languages, platforms. That is the material a
+//     content team actually plans against, and none of it reveals revenue.
+//   * Audience-size numbers ship as PERCENT CHANGE ONLY — signups, active
+//     users, planners. A reader who has both the user base and a conversion
+//     rate can multiply by the public App Store price and read our MRR off the
+//     page, so the report never carries the base at all.
+//   * Nothing from `monetization`, `subs`, `iap`, `leads`, `partnerApi` or
+//     `health` appears. Not rounded, not approximated — absent.
+//
+// `_saveRun` rows for these use the period keys "weekly-partner" /
+// "monthly-partner" (the column is a plain string, so no schema change). That
+// keeps partner baselines from disturbing the internal report's deltas, and
+// keeps revenue figures out of the doc a partner report diffs against.
+// ===========================================================================
+
+/** A window is at most a calendar month; the cap is a runaway-loop guard. */
+const PARTNER_MAX_DAYS = 40;
+
+function dayKey(ts: number): string {
+  const d = new Date(ts);
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${m}-${day}`;
+}
+
+/**
+ * Marketing event counts for the report window.
+ *
+ * `adminKpis` only keeps rolling 7/30-day marketing sums, which do not line up
+ * with a calendar month, so the partner report reads the day buckets directly.
+ * One indexed query per day over a table holding a handful of tiny rows per day
+ * — cheap enough to do inline, and exact rather than "roughly the month".
+ */
+export const _marketingWindow = internalQuery({
+  args: { since: v.number(), until: v.number() },
+  handler: async (ctx, { since, until }) => {
+    const byEvent = new Map<string, number>();
+    const bySurface = new Map<string, number>();
+    let total = 0;
+
+    let days = 0;
+    for (let t = since; t < until && days < PARTNER_MAX_DAYS; t += DAY_MS, days++) {
+      const rows = await ctx.db
+        .query("marketingEvents")
+        .withIndex("by_day", (q) => q.eq("day", dayKey(t)))
+        .collect();
+      for (const r of rows) {
+        total += r.count;
+        byEvent.set(r.event, (byEvent.get(r.event) || 0) + r.count);
+        bySurface.set(r.surface, (bySurface.get(r.surface) || 0) + r.count);
+      }
+    }
+
+    const get = (k: string) => byEvent.get(k) || 0;
+    return {
+      total,
+      destinationClicks: get("destination_click"),
+      destinationViews: get("destination_view"),
+      tripStarts: get("trip_start"),
+      byEvent: toSorted(byEvent),
+      bySurface: toSorted(bySurface),
+    };
+  },
+});
+
+type MarketingWindow = {
+  total: number;
+  destinationClicks: number;
+  destinationViews: number;
+  tripStarts: number;
+  byEvent: { key: string; count: number }[];
+  bySurface: { key: string; count: number }[];
+};
+
+/**
+ * The partner-safe projection of a period. This is both what gets rendered and
+ * what gets stored: a partner run's baseline doc must not contain a number the
+ * partner report is not allowed to print.
+ */
+function partnerMetrics(cur: PeriodMetrics, snap: SnapshotMetrics, mk: MarketingWindow) {
+  return {
+    trips: {
+      created: cur.trips.created,
+      completed: cur.trips.completed,
+      successRatePct: cur.trips.successRatePct,
+      avgDurationDays: cur.trips.avgDurationDays,
+      avgTravelers: cur.trips.avgTravelers,
+      avgBudgetEur: cur.trips.avgBudgetEur,
+      deal: cur.trips.deal,
+      multiCity: cur.trips.multiCity,
+      topDestinations: cur.trips.topDestinations,
+      byLanguage: cur.trips.byLanguage,
+      byPlatform: cur.trips.byPlatform,
+    },
+    // Kept for percent-change maths only — never rendered as an absolute.
+    audience: {
+      signups: cur.users.new,
+      activeUsers: cur.activity.activeUsers,
+      planners: cur.activity.planners,
+      onboardingCompletionRatePct: pct(cur.users.onboarded, cur.users.new),
+      pushTapRatePct: cur.radar.tapRatePct,
+    },
+    marketing: {
+      totalEvents: mk.total,
+      destinationClicks: mk.destinationClicks,
+      destinationViews: mk.destinationViews,
+      tripStarts: mk.tripStarts,
+      clickToTripRatePct: pct(cur.trips.created, mk.destinationClicks),
+      byEvent: mk.byEvent,
+      bySurface: mk.bySurface,
+    },
+    content: {
+      insightsPosted: cur.insights.created,
+      publishedItineraries: snap.publishedItineraries,
+      activeDeals: snap.activeDeals,
+    },
+    truncated: cur.truncated,
+  };
+}
+
+type PartnerMetrics = ReturnType<typeof partnerMetrics>;
+
+/**
+ * Percent change with no absolute anywhere in the output — the whole point of
+ * the audience section. "—" when there is no usable baseline, because an
+ * invented 100% is worse than an admitted gap.
+ */
+function growthValue(cur: number, prev: number | null): string {
+  if (prev === null || prev <= 0) return "—";
+  const change = Math.round(((cur - prev) / prev) * 1000) / 10;
+  if (change === 0) return "±0%";
+  return `${change > 0 ? "+" : "−"}${Math.abs(change)}%`;
+}
+
+/** Just the arrow: the size of the move is already in the value column. */
+function growthTint(cur: number, prev: number | null): string {
+  if (prev === null || prev <= 0) return "";
+  const diff = cur - prev;
+  if (diff === 0) return `<span style="color:${MUTED};font-size:12px;">flat</span>`;
+  return `<span style="color:${diff > 0 ? GOOD : BAD};font-size:12px;font-weight:600;">${diff > 0 ? "▲" : "▼"}</span>`;
+}
+
+/** Exported so a local harness can render the partner email without sending. */
+export function renderPartnerReport(opts: {
+  period: Period;
+  label: string;
+  since: number;
+  until: number;
+  cur: PartnerMetrics;
+  prev: any | null;
+}): { subject: string; html: string; text: string } {
+  const { period, label, cur, prev } = opts;
+  const prevMetrics = prev?.metrics ?? null;
+  const p = (path: string) => prevNum(prevMetrics, `period.${path}`);
+  const periodWord = period === "weekly" ? "week" : "month";
+  const title = period === "weekly" ? "Weekly insights" : "Monthly insights";
+
+  const subject =
+    `Planera ${periodWord}ly insights · ${label} · ` +
+    `${fmtInt(cur.trips.created)} trips planned`;
+
+  const sections: string[] = [];
+
+  sections.push(
+    section("Travel demand", [
+      row("Trips planned", fmtInt(cur.trips.created), deltaHtml(cur.trips.created, p("trips.created"))),
+      row("Avg trip length", `${cur.trips.avgDurationDays} d`, deltaHtml(cur.trips.avgDurationDays, p("trips.avgDurationDays"))),
+      row("Avg party size", `${cur.trips.avgTravelers}`, deltaHtml(cur.trips.avgTravelers, p("trips.avgTravelers")), "travellers per trip"),
+      row("Avg stated budget", fmtEur(cur.trips.avgBudgetEur), deltaHtml(cur.trips.avgBudgetEur, p("trips.avgBudgetEur")), "what travellers plan to spend on the trip"),
+      row("Multi-city trips", fmtInt(cur.trips.multiCity), deltaHtml(cur.trips.multiCity, p("trips.multiCity"))),
+      row("Planned off a fare deal", fmtInt(cur.trips.deal), deltaHtml(cur.trips.deal, p("trips.deal")), "started from a Low-Fare Radar alert"),
+    ]),
+  );
+
+  sections.push(
+    section("Where people want to go", [
+      listRow("Top destinations", cur.trips.topDestinations.length
+        ? cur.trips.topDestinations.map((d) => `${esc(d.destination)} ${fmtInt(d.count)}`).join(" · ")
+        : "—"),
+      listRow("By language", listLine(cur.trips.byLanguage, 6)),
+      listRow("By platform", listLine(cur.trips.byPlatform)),
+    ]),
+  );
+
+  sections.push(
+    section("Content & campaign signals", [
+      row("Destination clicks", fmtInt(cur.marketing.destinationClicks), deltaHtml(cur.marketing.destinationClicks, p("marketing.destinationClicks"))),
+      row("Destination views", fmtInt(cur.marketing.destinationViews), deltaHtml(cur.marketing.destinationViews, p("marketing.destinationViews"))),
+      row("Click to trip rate", fmtPct(cur.marketing.clickToTripRatePct), deltaHtml(cur.marketing.clickToTripRatePct, p("marketing.clickToTripRatePct")), "destination clicks that turned into a planned trip"),
+      row("Traveller tips posted", fmtInt(cur.content.insightsPosted), deltaHtml(cur.content.insightsPosted, p("content.insightsPosted")), "user-generated, moderated"),
+      row("Published guides live", fmtInt(cur.content.publishedItineraries), deltaHtml(cur.content.publishedItineraries, p("content.publishedItineraries"))),
+      row("Live fare deals", fmtInt(cur.content.activeDeals), deltaHtml(cur.content.activeDeals, p("content.activeDeals"))),
+      listRow("Clicks by surface", listLine(cur.marketing.bySurface, 6)),
+    ]),
+  );
+
+  // Percent change only — see the header note on why the base never ships.
+  sections.push(
+    section(`Audience momentum (vs previous ${periodWord})`, [
+      row("New signups", growthValue(cur.audience.signups, p("audience.signups")), growthTint(cur.audience.signups, p("audience.signups"))),
+      row("Active users", growthValue(cur.audience.activeUsers, p("audience.activeUsers")), growthTint(cur.audience.activeUsers, p("audience.activeUsers"))),
+      row("Users who planned a trip", growthValue(cur.audience.planners, p("audience.planners")), growthTint(cur.audience.planners, p("audience.planners"))),
+      row("Onboarding completion", fmtPct(cur.audience.onboardingCompletionRatePct), deltaHtml(cur.audience.onboardingCompletionRatePct, p("audience.onboardingCompletionRatePct")), "share of new signups that finished setup"),
+      row("Trip generation success", fmtPct(cur.trips.successRatePct), deltaHtml(cur.trips.successRatePct, p("trips.successRatePct"))),
+      row("Push tap-through", fmtPct(cur.audience.pushTapRatePct), deltaHtml(cur.audience.pushTapRatePct, p("audience.pushTapRatePct")), "benchmark for campaign messaging"),
+    ]),
+  );
+
+  const footNotes: string[] = [];
+  footNotes.push(
+    prev
+      ? `Comparisons are against the previous ${periodWord}'s report (${fmtDateTime(prev.sentAt)}).`
+      : `First ${periodWord}ly insights email — no previous period to compare against yet.`,
+  );
+  footNotes.push(
+    "Audience momentum is reported as period-over-period change. Aggregate product data only — no personal data and no individual user records are shared.",
+  );
+  if (cur.truncated.length) {
+    footNotes.push(`Note: partial scan for ${cur.truncated.join(", ")} — those figures are a floor, not a total.`);
+  }
+
+  const topDest = cur.trips.topDestinations[0];
+
+  const html = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="x-apple-disable-message-reformatting" />
+<meta name="color-scheme" content="light" />
+<meta name="supported-color-schemes" content="light" />
+<title>Planera ${esc(title)} — ${esc(label)}</title>
+<!--[if mso]><style>table,td,div,h1,p{font-family:Arial,sans-serif!important}</style><![endif]-->
+</head>
+<body style="margin:0;padding:0;background:#FAF9F6;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;visibility:hidden;mso-hide:all;font-size:1px;color:#FAF9F6;line-height:1px;">
+${fmtInt(cur.trips.created)} trips planned · ${fmtInt(cur.marketing.destinationClicks)} destination clicks · top: ${esc(topDest?.destination || "—")}
+</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FAF9F6;">
+  <tr><td align="center" style="padding:28px 12px;">
+    <table role="presentation" width="640" cellpadding="0" cellspacing="0" border="0" style="max-width:640px;width:100%;background:#FFFFFF;border-radius:20px;box-shadow:0 4px 24px rgba(26,26,26,0.06);overflow:hidden;">
+      <tr><td style="padding:30px 32px 0;">
+        <a href="${BASE_URL}" style="text-decoration:none;display:inline-block;"><img src="${BASE_URL}/logo.png" alt="Planera" width="120" style="display:block;width:120px;max-width:120px;height:auto;border:0;outline:none;text-decoration:none;" /></a>
+      </td></tr>
+      <tr><td style="padding:20px 32px 0;font-family:${FONT};">
+        <p style="margin:0 0 6px;font-size:12px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:${MUTED};">${esc(title)}</p>
+        <h1 style="margin:0 0 6px;font-size:30px;line-height:1.15;font-weight:800;color:${INK};letter-spacing:-1px;">${esc(label)}</h1>
+        <p style="margin:0;font-size:13px;color:${MUTED};">Planera AI — aggregate travel-demand data for content planning</p>
+      </td></tr>
+      <tr><td style="padding:18px 26px 0;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+          <tr>
+            ${tile("Trips planned", fmtInt(cur.trips.created), `${fmtPct(cur.trips.successRatePct)} completed`)}
+            ${tile("Destination clicks", fmtInt(cur.marketing.destinationClicks), `${fmtPct(cur.marketing.clickToTripRatePct)} became a trip`)}
+          </tr>
+          <tr>
+            ${tile("Top destination", esc(topDest?.destination || "—"), `${fmtInt(topDest?.count || 0)} trips this ${periodWord}`)}
+            ${tile("Traveller profile", `${cur.trips.avgDurationDays} d`, `${cur.trips.avgTravelers} travellers · ${fmtEur(cur.trips.avgBudgetEur)} budget`)}
+          </tr>
+        </table>
+      </td></tr>${sections.join("")}
+      <tr><td style="padding:26px 32px 30px;font-family:${FONT};">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="border-radius:12px;background:#1A1A1A;">
+          <a href="${BASE_URL}/explore" style="display:inline-block;padding:13px 26px;font-family:${FONT};font-size:15px;font-weight:700;color:#FFFFFF;text-decoration:none;border-radius:12px;">See what is live on Planera</a>
+        </td></tr></table>
+      </td></tr>
+      <tr><td style="padding:20px 32px 30px;border-top:1px solid #F0EEE9;font-family:${FONT};">
+        ${footNotes.map((n) => `<p style="margin:0 0 6px;font-size:11px;line-height:1.6;color:#9A9A9A;">${esc(n)}</p>`).join("")}
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>`;
+
+  const text = [
+    `PLANERA ${title.toUpperCase()} — ${label}`,
+    "",
+    `Trips planned: ${fmtInt(cur.trips.created)} (${fmtPct(cur.trips.successRatePct)} completed)`,
+    `Traveller profile: ${cur.trips.avgDurationDays} days · ${cur.trips.avgTravelers} travellers · ${fmtEur(cur.trips.avgBudgetEur)} stated budget`,
+    `Multi-city: ${fmtInt(cur.trips.multiCity)} · from a fare deal: ${fmtInt(cur.trips.deal)}`,
+    `Top destinations: ${cur.trips.topDestinations.map((d) => `${d.destination} ${d.count}`).join(", ") || "—"}`,
+    `By language: ${listLine(cur.trips.byLanguage, 6)}`,
+    `By platform: ${listLine(cur.trips.byPlatform)}`,
+    "",
+    `Destination clicks: ${fmtInt(cur.marketing.destinationClicks)} · views ${fmtInt(cur.marketing.destinationViews)} · click-to-trip ${fmtPct(cur.marketing.clickToTripRatePct)}`,
+    `Clicks by surface: ${listLine(cur.marketing.bySurface, 6)}`,
+    `Traveller tips posted: ${fmtInt(cur.content.insightsPosted)} · published guides ${fmtInt(cur.content.publishedItineraries)} · live fare deals ${fmtInt(cur.content.activeDeals)}`,
+    "",
+    `Audience momentum vs previous ${periodWord}: signups ${growthValue(cur.audience.signups, p("audience.signups"))} · active users ${growthValue(cur.audience.activeUsers, p("audience.activeUsers"))} · planners ${growthValue(cur.audience.planners, p("audience.planners"))}`,
+    `Onboarding completion: ${fmtPct(cur.audience.onboardingCompletionRatePct)} · trip success ${fmtPct(cur.trips.successRatePct)} · push tap-through ${fmtPct(cur.audience.pushTapRatePct)}`,
+    "",
+    ...footNotes,
+  ].join("\n");
+
+  return { subject, html, text };
+}
+
+async function runPartnerReport(
+  ctx: any,
+  period: Period,
+  args: { to?: string; dryRun?: boolean },
+): Promise<{
+  period: string;
+  to: string | null;
+  subject: string;
+  sent: boolean;
+  skipped?: boolean;
+  error?: string;
+  preview?: string;
+}> {
+  const now = Date.now();
+  const { since, until, label } = windowFor(period, now);
+  const runKey = `${period}-partner`;
+
+  // No fallback to DEFAULT_TO on purpose: an unset env var means "no partner is
+  // subscribed yet", and the right answer is to send nothing rather than mail
+  // the founder a second, worse copy of their own report.
+  const to = args.to || process.env.PARTNER_REPORT_TO || null;
+
+  const cur: PeriodMetrics = await collectPeriod(ctx, since, until);
+  const kpi = await ctx.runQuery(internal.statsReports._kpiSnapshot, {});
+  const snap = extractSnapshot(kpi);
+  const mk: MarketingWindow = await ctx.runQuery(internal.statsReports._marketingWindow, { since, until });
+  const metrics = partnerMetrics(cur, snap, mk);
+  const prev = await ctx.runQuery(internal.statsReports._previousRun, { period: runKey });
+
+  const { subject, html, text } = renderPartnerReport({
+    period, label, since, until, cur: metrics, prev,
+  });
+
+  if (!to) {
+    console.warn(`[partner-report] PARTNER_REPORT_TO is unset - skipping ${runKey}`);
+    return { period: runKey, to: null, subject, sent: false, skipped: true, preview: text };
+  }
+
+  let sent = false;
+  let error: string | undefined;
+  if (args.dryRun) {
+    console.log(`[partner-report] dry run (${runKey}) - would send to ${to}: ${subject}`);
+  } else {
+    const res: { success: boolean; error?: string } = await ctx.runAction(
+      internal.postmark.sendRawEmail,
+      {
+        to,
+        subject,
+        html,
+        text,
+        tag: "partner-stats-report",
+        replyTo: process.env.PARTNER_REPORT_REPLY_TO || DEFAULT_TO,
+      },
+    );
+    sent = res.success;
+    error = res.error;
+    if (!res.success) console.error(`[partner-report] send failed: ${res.error}`);
+  }
+
+  // Same rule as the internal report: persist even on a send failure, never on
+  // a dry run, so the next report's comparisons stay truthful either way.
+  if (!args.dryRun) {
+    await ctx.runMutation(internal.statsReports._saveRun, {
+      period: runKey,
+      periodStart: since,
+      periodEnd: until,
+      sentAt: now,
+      to,
+      emailSent: sent,
+      emailError: error,
+      metrics: { period: metrics },
+    });
+  }
+
+  return { period: runKey, to, subject, sent, error, preview: args.dryRun ? text : undefined };
+}
+
+/** Cron: Monday morning, covering the 7 days that just ended. */
+export const sendWeeklyPartnerReport = internalAction({
+  args: { to: v.optional(v.string()), dryRun: v.optional(v.boolean()) },
+  handler: async (ctx, args) => await runPartnerReport(ctx, "weekly", args),
+});
+
+/** Cron: the 1st of the month, covering the whole previous calendar month. */
+export const sendMonthlyPartnerReport = internalAction({
+  args: { to: v.optional(v.string()), dryRun: v.optional(v.boolean()) },
+  handler: async (ctx, args) => await runPartnerReport(ctx, "monthly", args),
+});

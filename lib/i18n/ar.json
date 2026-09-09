@@ -2080,6 +2080,16 @@
     "promptDoneBody": "عروضك الأولى في طريقها إلى بريدك."
   },
   "reservations": {
+    "manageBooking": "إدارة الحجز",
+    "manageTitle": "إدارة الحجز",
+    "currentlyOn": "حاليًا ضمن رحلتك إلى {{destination}}",
+    "changeTrip": "تغيير الرحلة",
+    "moveToTrip": "نقل هذا الحجز إلى",
+    "removeFromTrip": "إزالة من الرحلة",
+    "delete": "حذف الحجز",
+    "deleteTitle": "هل تريد حذف هذا الحجز؟",
+    "deleteBody": "ستتم إزالته من رحلتك ومن قائمة حجوزاتك. لا يمكن التراجع عن هذا الإجراء.",
+    "deleteConfirm": "حذف",
     "title": "الحجوزات",
     "menuSubtitle": "أعد توجيه رسائل التأكيد إلى رحلاتك",
     "forwardLabel": "أعد توجيه التأكيدات إلى",
