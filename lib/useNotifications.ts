@@ -130,6 +130,16 @@ export function useNotifications() {
         const handleNotificationTap = async (data: any) => {
             console.log("[Notifications] User tapped notification:", data);
             try {
+                // Retention KPI: which push types actually bring people back.
+                // `type` is stamped into every payload by sendPushNotification;
+                // morning briefings carry the day number, so collapse that.
+                if (data?.type) {
+                    const type = String(data.type).replace(/_day\d+$/, "").replace(/^collab_joined_.*/, "collab_joined");
+                    convex
+                        .mutation((api as any).marketingEvents.track, { event: "notification_open", surface: type })
+                        .catch(() => {});
+                }
+
                 // Fire-and-forget tap analytics for deal broadcasts
                 if (data?.broadcastId && token) {
                     convex
@@ -146,6 +156,18 @@ export function useNotifications() {
                 }
                 if (data?.screen === "create-trip") {
                     router.push("/create-trip" as any);
+                    return;
+                }
+                if (data?.screen === "trip-recap" && data?.tripId) {
+                    router.push({ pathname: "/trip-recap", params: { tripId: data.tripId } } as any);
+                    return;
+                }
+                if (data?.screen === "destinations") {
+                    router.push("/destinations" as any);
+                    return;
+                }
+                if (data?.screen === "home") {
+                    router.push("/(tabs)" as any);
                     return;
                 }
                 if (data?.screen === "deal-trip" && data?.dealId) {

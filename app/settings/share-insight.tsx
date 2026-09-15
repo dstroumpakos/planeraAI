@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
     View,
     Text,
@@ -11,7 +11,7 @@ import {
     StatusBar,
     KeyboardAvoidingView,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useQuery } from "convex/react";
@@ -57,6 +57,14 @@ export default function ShareInsightPage() {
     
     const [step, setStep] = useState<"trip" | "category" | "content">("trip");
     const [selectedTrip, setSelectedTrip] = useState<CompletedTrip | null>(null);
+    // Deep link from the recap screen / "This month" card: land straight on
+    // the category step for that trip instead of making the user pick it again.
+    const { tripId: preselectTripId } = useLocalSearchParams<{ tripId?: string }>();
+    useEffect(() => {
+        if (!preselectTripId || selectedTrip || !completedTrips) return;
+        const match = completedTrips.find((tr) => String(tr._id) === String(preselectTripId));
+        if (match) { setSelectedTrip(match); setStep("category"); }
+    }, [preselectTripId, completedTrips, selectedTrip]);
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
     const [content, setContent] = useState("");
     const [isSubmitting, setIsSubmitting] = useState(false);

@@ -1782,7 +1782,7 @@ export default function CreateTripScreen() {
                                                         {typeof item.avgTripSpend === "number" && item.avgTripSpend > 0 && (
                                                             <View style={styles.stampDenom}>
                                                                 <Text style={styles.stampDenomText}>
-                                                                    {formatMoney(Math.round(item.avgTripSpend))}{t("createTrip.perDaySuffix")}
+                                                                    {formatMoney(Math.round(item.avgTripSpend))}{t("createTrip.perTripSuffix")}
                                                                 </Text>
                                                             </View>
                                                         )}

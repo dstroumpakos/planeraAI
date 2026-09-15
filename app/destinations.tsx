@@ -20,6 +20,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useTheme } from "@/lib/ThemeContext";
 import { useTranslation } from "react-i18next";
 import { useTrackMarketing } from "@/lib/trackMarketing";
+import { resolveIATA } from "@/lib/destinationAirports";
 
 /** Most destinations we'll fetch a header image for. */
 const IMAGE_LIMIT = 60;
@@ -98,7 +99,8 @@ export default function DestinationsScreen() {
     if (watchedSet.has(normalized)) {
       await unwatchMutation({ token, destination: destinationName });
     } else {
-      await watchMutation({ token, destination: destinationName });
+      await watchMutation({ token, destination: destinationName, destinationIata: resolveIATA(destinationName) || undefined });
+      trackMarketing("watch_added", "app-destinations");
     }
   };
 

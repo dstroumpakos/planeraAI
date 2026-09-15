@@ -28,6 +28,7 @@ import * as Location from "expo-location";
 import { useLocationNotifications } from "@/lib/useLocationNotifications";
 import { TripGuideTooltip, GuideStep } from "@/components/FirstTripGuide";
 import ShareTripCard, { ShareTripCardHandle } from "@/components/ShareTripCard";
+import TripNudges from "@/components/TripNudges";
 import PackageCard from "@/components/PackageCard";
 import PackageInquiryModal from "@/components/PackageInquiryModal";
 import ActivityActionSheet from "@/components/ActivityActionSheet";
@@ -2888,6 +2889,22 @@ export default function TripDetails() {
                         <Text style={[styles.viewMapText, { color: colors.text }]}>{t('tripDetail.exploreRoute')}</Text>
                     </TouchableOpacity>
                 </View>
+
+                {/* Retention nudges: plan together / add to calendar / recap */}
+                <TripNudges
+                    trip={trip}
+                    collaborators={collaborators as any[] | undefined}
+                    isOwner={!userSettings?.userId || trip.userId === userSettings.userId}
+                    onInvite={async () => {
+                        try {
+                            const result = await createInviteMut({ tripId: trip._id, role: "viewer" });
+                            const inviteUrl = `https://planeraai.app/invite/${result.inviteToken}`;
+                            await Share.share({ message: `${t('tripDetail.joinMyTrip', { destination: trip.destination })}\n${inviteUrl}` });
+                        } catch (err) {
+                            console.error("Invite failed:", err);
+                        }
+                    }}
+                />
 
                 {/* Trip detail guide — Map tooltip */}
                 {currentDetailGuideKey === 'map' && (

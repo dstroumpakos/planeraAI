@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   View,
   Text,
@@ -26,7 +26,9 @@ import { useHideTabBarOnScroll } from "@/lib/tabBarVisibility";
 import { LanguagePickerModal } from "@/components/LanguagePickerModal";
 import { FirstTripPopup } from "@/components/FirstTripGuide";
 import { LowFareRadar } from "@/components/LowFareRadar";
-import StreakWidget from "@/components/StreakWidget";
+import WatchedFaresRow from "@/components/WatchedFaresRow";
+import ThisMonthCard from "@/components/ThisMonthCard";
+import TodayCard, { pickLiveTrip } from "@/components/TodayCard";
 import AchievementUnlocked from "@/components/AchievementUnlocked";
 import AirplaneIntro from "@/components/AirplaneIntro";
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, withSequence, Easing } from "react-native-reanimated";
@@ -103,6 +105,8 @@ export default function HomeScreen() {
 
   const userPlan = useQuery(api.users.getPlan as any, { token: token || "skip" });
   const trips = useQuery(api.trips.list as any, { token: token || "skip" });
+  // In-trip "Today" mode: a trip in progress, or one starting within 7 days.
+  const liveTrip = useMemo(() => pickLiveTrip(trips as any[]), [trips]);
   const trendingDestinations = useQuery(api.trips.getTrendingDestinations);
   const lowFareData = useQuery(api.lowFareRadar.getDealsForUser as any, { token: token || "skip" });
   const lowFareDeals = lowFareData?.deals || (Array.isArray(lowFareData) ? lowFareData : []);
@@ -291,7 +295,6 @@ export default function HomeScreen() {
               <View style={[styles.onlineBadge, { backgroundColor: colors.primary, borderColor: colors.background }]} />
             </View>
             <View style={styles.headerRight}>
-              <StreakWidget />
               <TouchableOpacity 
                 style={styles.creditContainer}
                 onPress={() => router.push("/subscription")}
@@ -301,8 +304,13 @@ export default function HomeScreen() {
             </View>
           </View>
           <Text style={[styles.greetingSub, { color: colors.textMuted }]}>{getGreeting()}</Text>
-          <Text style={[styles.greetingMain, { color: colors.text }]}>{t("home.readyForJourney")}</Text>
+          <Text style={[styles.greetingMain, { color: colors.text }]}>
+            {liveTrip ? (liveTrip.mode === "live" ? t("today.greetingLive") : t("today.greetingSoon")) : t("home.readyForJourney")}
+          </Text>
         </View>
+
+        {/* Today mode — the hero while a trip is live or about to start */}
+        {liveTrip && <TodayCard live={liveTrip} />}
 
         {/* Search Bar */}
         <TouchableOpacity
@@ -482,6 +490,12 @@ export default function HomeScreen() {
             </Text>
           </TouchableOpacity>
         </ScrollView>
+
+        {/* Watched fares — the between-trips reason to open the app */}
+        <WatchedFaresRow />
+
+        {/* This month — replaces the daily streak */}
+        <ThisMonthCard trips={trips as any[]} userPlan={userPlan} />
 
         {/* Explore destinations ("Where can I go?") */}
         <TouchableOpacity

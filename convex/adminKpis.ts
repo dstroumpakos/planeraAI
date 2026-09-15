@@ -129,6 +129,7 @@ export const _tripsPage = internalQuery({
 });
 
 interface UserRow {
+  userId: string;
   platform: string;
   authProvider: string;
   onboardingCompleted: boolean;
@@ -141,6 +142,7 @@ export const _usersPage = internalQuery({
   handler: async (ctx, { cursor, numItems }) => {
     const res = await ctx.db.query("userSettings").paginate({ cursor, numItems });
     const rows: UserRow[] = res.page.map((u: any) => ({
+      userId: u.userId,
       platform: u.platform || "unknown",
       authProvider: u.authProvider || "unknown",
       onboardingCompleted: u.onboardingCompleted === true,
@@ -233,6 +235,46 @@ export const _pushTokensPage = internalQuery({
     const res = await ctx.db.query("pushTokens").paginate({ cursor, numItems });
     const rows: { userId: string }[] = res.page.map((t: any) => ({ userId: t.userId }));
     return { rows, isDone: res.isDone, continueCursor: res.continueCursor };
+  },
+});
+
+// Retention inputs (see retention.ts). Activity days are bounded by
+// DAU x RETENTION_WINDOW; the cron prunes anything older.
+export const _activityDaysPage = internalQuery({
+  args: { cursor: v.union(v.string(), v.null()), numItems: v.number(), sinceDay: v.string() },
+  handler: async (ctx, { cursor, numItems, sinceDay }) => {
+    const res = await ctx.db
+      .query("userActivityDays")
+      .withIndex("by_day", (q) => q.gte("day", sinceDay))
+      .paginate({ cursor, numItems });
+    const rows = res.page.map((r: any) => ({
+      userId: r.userId as string,
+      day: r.day as string,
+      platform: (r.platform as string | undefined) || "unknown",
+      tripActive: r.tripActive === true,
+    }));
+    return { rows, isDone: res.isDone, continueCursor: res.continueCursor };
+  },
+});
+
+export const _watchersPage = internalQuery({
+  args: { cursor: v.union(v.string(), v.null()), numItems: v.number() },
+  handler: async (ctx, { cursor, numItems }) => {
+    const res = await ctx.db.query("watchedDestinations").paginate({ cursor, numItems });
+    const rows = res.page.map((r: any) => ({ userId: r.userId as string }));
+    return { rows, isDone: res.isDone, continueCursor: res.continueCursor };
+  },
+});
+
+export const _pruneActivityDays = internalMutation({
+  args: { beforeDay: v.string(), limit: v.float64() },
+  handler: async (ctx, { beforeDay, limit }) => {
+    const stale = await ctx.db
+      .query("userActivityDays")
+      .withIndex("by_day", (q) => q.lt("day", beforeDay))
+      .take(limit);
+    for (const row of stale) await ctx.db.delete(row._id);
+    return { deleted: stale.length };
   },
 });
 
@@ -547,6 +589,9 @@ export const recomputeAdminKpis = internalAction({
     const users = { total: 0, onboardingCompleted: 0, aiConsent: 0 };
     const userPlatform = new Map<string, number>();
     const userProvider = new Map<string, number>();
+    // userId -> (signup time, platform) for the retention cohorts below. One
+    // small entry per user; fine at the current scale, revisit past ~1M users.
+    const signupOf = new Map<string, { at: number; platform: string }>();
     await scanAll<UserRow>(
       (cursor) =>
         ctx.runQuery(internal.adminKpis._usersPage, { cursor, numItems: 500 }) as Promise<{
@@ -561,6 +606,7 @@ export const recomputeAdminKpis = internalAction({
           userProvider.set(u.authProvider, (userProvider.get(u.authProvider) || 0) + 1);
           const di = dayIndex(u.creationTime);
           if (di >= 0) dailySignups[di]++;
+          if (u.userId) signupOf.set(u.userId, { at: u.creationTime, platform: u.platform });
         }
       },
     );
@@ -765,6 +811,170 @@ export const recomputeAdminKpis = internalAction({
       });
     }
 
+    // ---------- RETENTION ----------
+    // Classic cohort retention off `userActivityDays` (one row per user-day,
+    // written by retention.touchActive). DN = the user had a session on
+    // calendar day N after signup. Cohorts are signup weeks (ISO Monday).
+    const RETENTION_WINDOW = 60; // days of activity rows kept
+    const activitySinceDay = utcDay(now - RETENTION_WINDOW * DAY_MS);
+    const activeDaysOf = new Map<string, Set<string>>();     // userId -> days
+    const tripActiveDays = new Map<string, Set<string>>();   // userId -> days flagged trip-active
+    const platformOf = new Map<string, string>();
+    const dailyActiveCount = new Map<string, number>();
+    try {
+      await scanAll<{ userId: string; day: string; platform: string; tripActive: boolean }>(
+        (cursor) =>
+          ctx.runQuery(internal.adminKpis._activityDaysPage, {
+            cursor, numItems: 1000, sinceDay: activitySinceDay,
+          }) as Promise<{ rows: any[]; isDone: boolean; continueCursor: string }>,
+        (rows) => {
+          for (const r of rows) {
+            let set = activeDaysOf.get(r.userId);
+            if (!set) { set = new Set(); activeDaysOf.set(r.userId, set); }
+            set.add(r.day);
+            if (r.tripActive) {
+              let ta = tripActiveDays.get(r.userId);
+              if (!ta) { ta = new Set(); tripActiveDays.set(r.userId, ta); }
+              ta.add(r.day);
+            }
+            if (r.platform !== "unknown") platformOf.set(r.userId, r.platform);
+            dailyActiveCount.set(r.day, (dailyActiveCount.get(r.day) || 0) + 1);
+          }
+        },
+        "activityDays",
+      );
+    } catch (e) {
+      // Table is new — a prod deploy that hasn't picked it up yet must not
+      // take the whole KPI run down with it (same treatment as marketingEvents).
+      console.error("[admin-kpis] userActivityDays unavailable:", e);
+    }
+
+    const dayStrsBack = (n: number) => {
+      const out = new Set<string>();
+      for (let i = 0; i < n; i++) out.add(utcDay(now - i * DAY_MS));
+      return out;
+    };
+    const last1 = dayStrsBack(1), last7 = dayStrsBack(7), last30 = dayStrsBack(30);
+    const activeWithin = (days: Set<string>, window: Set<string>) => {
+      for (const d of days) if (window.has(d)) return true;
+      return false;
+    };
+
+    let dau = 0, wau = 0, mau = 0, wauTripActive = 0;
+    const wauByPlatform = new Map<string, number>();
+    for (const [uid, days] of activeDaysOf) {
+      if (activeWithin(days, last1)) dau++;
+      if (activeWithin(days, last30)) mau++;
+      if (activeWithin(days, last7)) {
+        wau++;
+        const ta = tripActiveDays.get(uid);
+        if (ta && activeWithin(ta, last7)) wauTripActive++;
+        const p = platformOf.get(uid) || signupOf.get(uid)?.platform || "unknown";
+        wauByPlatform.set(p, (wauByPlatform.get(p) || 0) + 1);
+      }
+    }
+
+    // Cohorts: signups in the last 8 ISO weeks.
+    const isoMonday = (ts: number) => {
+      const d = new Date(ts);
+      const dow = (d.getUTCDay() + 6) % 7; // Monday = 0
+      return utcDay(ts - dow * DAY_MS);
+    };
+    interface Cohort { size: number; d1: number; d7: number; d30: number; d1Eligible: number; d7Eligible: number; d30Eligible: number; }
+    const cohorts = new Map<string, Cohort>();
+    const platformD7 = new Map<string, { hit: number; eligible: number }>();
+    let d1Hit = 0, d1El = 0, d7Hit = 0, d7El = 0, d30Hit = 0, d30El = 0;
+    const cohortStart = now - 8 * 7 * DAY_MS;
+    for (const [uid, su] of signupOf) {
+      if (su.at < cohortStart) continue;
+      const week = isoMonday(su.at);
+      let c = cohorts.get(week);
+      if (!c) { c = { size: 0, d1: 0, d7: 0, d30: 0, d1Eligible: 0, d7Eligible: 0, d30Eligible: 0 }; cohorts.set(week, c); }
+      c.size++;
+      const days = activeDaysOf.get(uid);
+      const ageDays = Math.floor((now - su.at) / DAY_MS);
+      const activeOn = (n: number) => !!days && days.has(utcDay(su.at + n * DAY_MS));
+      if (ageDays >= 1) { c.d1Eligible++; d1El++; if (activeOn(1)) { c.d1++; d1Hit++; } }
+      if (ageDays >= 7) {
+        c.d7Eligible++; d7El++;
+        const hit = activeOn(7);
+        if (hit) { c.d7++; d7Hit++; }
+        const pp = platformD7.get(su.platform) || { hit: 0, eligible: 0 };
+        pp.eligible++; if (hit) pp.hit++;
+        platformD7.set(su.platform, pp);
+      }
+      if (ageDays >= 30) { c.d30Eligible++; d30El++; if (activeOn(30)) { c.d30++; d30Hit++; } }
+    }
+    const cohortRows = Array.from(cohorts.entries())
+      .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+      .map(([week, c]) => ({
+        week,
+        size: c.size,
+        d1: c.d1Eligible ? pct(c.d1, c.d1Eligible) : null,
+        d7: c.d7Eligible ? pct(c.d7, c.d7Eligible) : null,
+        d30: c.d30Eligible ? pct(c.d30, c.d30Eligible) : null,
+      }));
+
+    // Watches: how many users hold >=1, and — the leading indicator — how
+    // many of the last 30 days' signups left onboarding with one.
+    const watchers = new Set<string>();
+    try {
+      await scanAll<{ userId: string }>(
+        (cursor) =>
+          ctx.runQuery(internal.adminKpis._watchersPage, { cursor, numItems: 1000 }) as Promise<{
+            rows: { userId: string }[]; isDone: boolean; continueCursor: string;
+          }>,
+        (rows) => { for (const r of rows) watchers.add(r.userId); },
+        "watchers",
+      );
+    } catch (e) {
+      console.error("[admin-kpis] watchedDestinations unavailable:", e);
+    }
+    let newUsers30d = 0, newUsersWithWatch30d = 0;
+    for (const [uid, su] of signupOf) {
+      if (now - su.at <= 30 * DAY_MS) { newUsers30d++; if (watchers.has(uid)) newUsersWithWatch30d++; }
+    }
+
+    // Notification opens come from the marketing buckets already loaded
+    // above (event = notification_open, surface = push type).
+    const notifOpensByType = new Map<string, number>();
+    let notificationOpens7d = 0;
+    for (const b of eventBuckets) {
+      if (b.event !== "notification_open") continue;
+      notifOpensByType.set(b.surface, (notifOpensByType.get(b.surface) || 0) + b.count);
+      if (last7.has(b.day)) notificationOpens7d += b.count;
+    }
+
+    const dailyActive: { date: string; active: number }[] = [];
+    for (let i = DAILY_WINDOW - 1; i >= 0; i--) {
+      const d = utcDay(now - i * DAY_MS);
+      dailyActive.push({ date: d, active: dailyActiveCount.get(d) || 0 });
+    }
+
+    const retention = {
+      dau, wau, mau,
+      stickinessPct: pct(dau, mau),
+      wauTripActive,
+      wauBrowsing: Math.max(0, wau - wauTripActive),
+      usersWithWatch: watchers.size,
+      newUsersWithWatch30d,
+      newUsersWithWatchRatePct: pct(newUsersWithWatch30d, newUsers30d),
+      d1Pct: pct(d1Hit, d1El),
+      d7Pct: pct(d7Hit, d7El),
+      d30Pct: pct(d30Hit, d30El),
+      cohorts: cohortRows,
+      byPlatform: Array.from(new Set([...wauByPlatform.keys(), ...platformD7.keys()]))
+        .map((key) => ({
+          key,
+          wau: wauByPlatform.get(key) || 0,
+          d7Pct: pct(platformD7.get(key)?.hit || 0, platformD7.get(key)?.eligible || 0),
+        }))
+        .sort((a, b) => b.wau - a.wau),
+      notificationOpens7d,
+      notificationOpensByType: toSortedArray(notifOpensByType),
+      dailyActive,
+    };
+
     const data = {
       computedAt: now,
       durationMs: Date.now() - startedAt,
@@ -844,6 +1054,7 @@ export const recomputeAdminKpis = internalAction({
       marketingByEvent: toSortedArray(eventTotals),
       marketingBySurface: toSortedArray(surfaceTotals),
       marketingByVariant: toSortedArray(variantTotals),
+      retention,
       daily,
     };
 
@@ -882,6 +1093,16 @@ export const recomputeAdminKpis = internalAction({
         );
         pruned += res.deleted;
         if (res.deleted < ACTIVITY_PRUNE_CHUNK) break;
+      }
+
+      // Activity days older than the retention window are dead weight — the
+      // D30 cohort only ever needs 30 days + 8 weeks of signups, and 60 covers it.
+      for (let i = 0; i < 50; i++) {
+        const res: { deleted: number } = await ctx.runMutation(
+          internal.adminKpis._pruneActivityDays,
+          { beforeDay: utcDay(now - RETENTION_WINDOW * DAY_MS), limit: 500 },
+        ).catch(() => ({ deleted: 0 }));
+        if (res.deleted < 500) break;
       }
       console.log(
         `[admin-kpis] user activity: wrote ${activityRows.length} rows, pruned ${pruned}`,

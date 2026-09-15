@@ -104,6 +104,7 @@ import type * as lib_appleRootCerts from "../lib/appleRootCerts.js";
 import type * as lib_countryFacts from "../lib/countryFacts.js";
 import type * as lib_geocoding from "../lib/geocoding.js";
 import type * as lib_mapbox from "../lib/mapbox.js";
+import type * as lib_quietHours from "../lib/quietHours.js";
 import type * as lib_searchApiAccommodations from "../lib/searchApiAccommodations.js";
 import type * as lib_searchApiExplore from "../lib/searchApiExplore.js";
 import type * as lib_searchApiExploreDestination from "../lib/searchApiExploreDestination.js";
@@ -150,6 +151,7 @@ import type * as publishedItinerariesActions from "../publishedItinerariesAction
 import type * as referrals from "../referrals.js";
 import type * as reservations from "../reservations.js";
 import type * as reservationsInbound from "../reservationsInbound.js";
+import type * as retention from "../retention.js";
 import type * as routeAlertEmails from "../routeAlertEmails.js";
 import type * as routePriceAlerts from "../routePriceAlerts.js";
 import type * as shareCards from "../shareCards.js";
@@ -171,6 +173,7 @@ import type * as tripsActions from "../tripsActions.js";
 import type * as unwtoCountryStats from "../unwtoCountryStats.js";
 import type * as users from "../users.js";
 import type * as watchedDestinations from "../watchedDestinations.js";
+import type * as weather from "../weather.js";
 import type * as wishlist from "../wishlist.js";
 import type * as worldPrint from "../worldPrint.js";
 
@@ -277,6 +280,7 @@ declare const fullApi: ApiFromModules<{
   "lib/countryFacts": typeof lib_countryFacts;
   "lib/geocoding": typeof lib_geocoding;
   "lib/mapbox": typeof lib_mapbox;
+  "lib/quietHours": typeof lib_quietHours;
   "lib/searchApiAccommodations": typeof lib_searchApiAccommodations;
   "lib/searchApiExplore": typeof lib_searchApiExplore;
   "lib/searchApiExploreDestination": typeof lib_searchApiExploreDestination;
@@ -323,6 +327,7 @@ declare const fullApi: ApiFromModules<{
   referrals: typeof referrals;
   reservations: typeof reservations;
   reservationsInbound: typeof reservationsInbound;
+  retention: typeof retention;
   routeAlertEmails: typeof routeAlertEmails;
   routePriceAlerts: typeof routePriceAlerts;
   shareCards: typeof shareCards;
@@ -344,6 +349,7 @@ declare const fullApi: ApiFromModules<{
   unwtoCountryStats: typeof unwtoCountryStats;
   users: typeof users;
   watchedDestinations: typeof watchedDestinations;
+  weather: typeof weather;
   wishlist: typeof wishlist;
   worldPrint: typeof worldPrint;
 }>;

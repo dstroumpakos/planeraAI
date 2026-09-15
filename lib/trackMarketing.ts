@@ -22,7 +22,12 @@ export type MarketingEvent =
   | "onboarding_start"
   | "onboarding_complete"
   | "upgrade_view"
-  | "signup_start";
+  | "signup_start"
+  // Retention (see convex/retention.ts)
+  | "app_open"
+  | "notification_open"
+  | "watch_added"
+  | "recap_view";
 
 export function useTrackMarketing() {
   // `as any`: the generated api types lag a `npx convex codegen`. The runtime

@@ -59,6 +59,9 @@ export default function Profile() {
         (api as any).admin.isAdmin,
         token ? { token } : "skip"
     );
+    // "Next badge" progress — makes the next unlock visible instead of a surprise.
+    const achievementData = useQuery(api.achievements.getUserAchievements as any, token ? { token } : "skip");
+    const nextBadge = achievementData?.next || null;
 
     // Live backend identity check — proves which Convex deployment answers
     const backendWhoami = useQuery((api as any).ping.whoami, {});
@@ -369,7 +372,13 @@ export default function Profile() {
         },
         {
             title: t('achievements.title'),
-            subtitle: t('achievements.viewBadges'),
+            subtitle: nextBadge
+                ? t('achievements.nextBadge', {
+                    current: nextBadge.current,
+                    total: nextBadge.threshold,
+                    name: t(nextBadge.titleKey),
+                })
+                : t('achievements.viewBadges'),
             icon: "trophy-outline",
             iconBg: isDarkMode ? "#3D2E00" : "#FEF3C7",
             iconColor: "#F59E0B",

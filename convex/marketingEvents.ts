@@ -27,6 +27,13 @@ const EVENTS = new Set([
   "onboarding_complete",
   "upgrade_view",        // the paywall was shown
   "signup_start",
+  // Retention (see retention.ts). `surface` carries the platform for app_open
+  // and the push `type` for notification_open, so the KPI cron can say which
+  // notifications actually bring people back.
+  "app_open",
+  "notification_open",
+  "watch_added",         // a destination fare watch was created (surface = where)
+  "recap_view",          // the post-trip recap screen was opened
 ]);
 
 // Surfaces are free-form (new pages appear all the time) but normalised and

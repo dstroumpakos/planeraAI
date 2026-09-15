@@ -11,6 +11,8 @@ import { ConvexNativeAuthProvider } from "@/lib/ConvexAuthProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { authClient } from "@/lib/auth-client";
 import { useNotifications } from "@/lib/useNotifications";
+import { useActivityPing } from "@/lib/useActivityPing";
+import { useTripWidgets } from "@/lib/useTripWidgets";
 import "@/lib/i18n"; // Initialize i18n
 
 // Prevent splash screen from auto-hiding before app is ready
@@ -97,6 +99,8 @@ function LoadingScreen() {
 // Notification registration - lives inside provider tree so it can use Convex
 function NotificationInitializer() {
     useNotifications();
+    useActivityPing();
+    useTripWidgets();
     return null;
 }
 

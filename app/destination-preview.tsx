@@ -17,6 +17,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { BlurView } from "expo-blur";
 import { useDestinationImage } from "@/lib/useImages";
+import { useTrackMarketing } from "@/lib/trackMarketing";
 import { ImageWithAttribution } from "@/components/ImageWithAttribution";
 import { useAction, useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
@@ -649,6 +650,7 @@ export default function DestinationPreviewScreen() {
     }, [destination, sightsData, token, i18n.language]);
 
     // Watch destination state
+    const trackMarketing = useTrackMarketing();
     const isWatching = useQuery(api.watchedDestinations.isWatching as any,
         token ? { token, destination: destination || "" } : "skip"
     );
@@ -660,7 +662,8 @@ export default function DestinationPreviewScreen() {
         if (isWatching) {
             await unwatchMutation({ destination });
         } else {
-            await watchMutation({ destination });
+            await watchMutation({ destination, destinationIata: resolveIATA(destination) || undefined });
+            trackMarketing("watch_added", "app-destination-preview");
         }
     };
     

@@ -1059,6 +1059,47 @@ export const getUser = query({
     },
 });
 
+/**
+ * Read-only view of one trip, for the admin user detail panel.
+ *
+ * `trips.get` is the traveller-facing query: it joins the *caller's* plan onto
+ * the row and is meant to be read by the trip's owner, so it is the wrong shape
+ * for support work. This returns the stored document as-is plus who owns it,
+ * and writes nothing.
+ */
+export const getUserTrip = query({
+    args: {
+        token: v.string(),
+        tripId: v.id("trips"),
+    },
+    returns: v.any(),
+    handler: async (ctx, args) => {
+        const userId = await getUserIdFromToken(ctx, args.token);
+        if (!userId) throw new Error("Unauthorized");
+        await assertAdmin(ctx, userId);
+
+        const trip = await ctx.db.get(args.tripId);
+        if (!trip) return null;
+
+        const ownerId = (trip as any).userId as string | undefined;
+        const settings = ownerId
+            ? await ctx.db
+                .query("userSettings")
+                .withIndex("by_user", (q: any) => q.eq("userId", ownerId))
+                .first()
+            : null;
+
+        return {
+            ...trip,
+            owner: {
+                userId: ownerId || null,
+                name: settings?.name || null,
+                email: settings?.email || null,
+            },
+        };
+    },
+});
+
 export const banUser = mutation({
     args: { 
         token: v.string(),

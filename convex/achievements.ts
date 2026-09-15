@@ -1,5 +1,6 @@
 import { authQuery, authMutation } from "./functions";
 import { internalMutation } from "./_generated/server";
+import type { QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 import { ACHIEVEMENT_DEFINITIONS } from "./helpers/achievements";
 
@@ -17,21 +18,33 @@ export const getUserAchievements = authQuery({
     const unlockedMap = new Map(unlocked.map((a: any) => [a.achievementId, a]));
     const unseenCount = unlocked.filter((a: any) => !a.seen).length;
 
+    const stats = await computeAchievementStats(ctx, userId);
+
     const achievements = ACHIEVEMENT_DEFINITIONS.map((def) => {
       const record: any = unlockedMap.get(def.id);
+      const current = Math.min(stats[def.statField] || 0, def.threshold);
       return {
         ...def,
         unlocked: !!record,
         unlockedAt: record?.unlockedAt || null,
         seen: record?.seen ?? true,
+        current,
+        progress: def.threshold > 0 ? current / def.threshold : 0,
       };
     });
+
+    // The closest locked badge (highest progress, ties → lowest threshold)
+    // is what the profile's "next badge" row shows.
+    const next = achievements
+      .filter((a) => !a.unlocked && a.progress > 0)
+      .sort((a, b) => b.progress - a.progress || a.threshold - b.threshold)[0] || null;
 
     return {
       achievements,
       totalUnlocked: unlocked.length,
       totalAvailable: ACHIEVEMENT_DEFINITIONS.length,
       unseenCount,
+      next,
     };
   },
 });
@@ -71,11 +84,13 @@ export const markAllSeen = authMutation({
 });
 
 // Internal mutation — called by triggers after key events
-export const checkAndUnlock = internalMutation({
-  args: { userId: v.string() },
-  handler: async (ctx, args) => {
-    const { userId } = args;
-
+/**
+ * The stat each badge is measured against, for one user. Shared by the
+ * unlock check and by `getUserAchievements`, which reports progress toward
+ * the next badge so the profile can say "2 of 5 trips" instead of surprising
+ * the user with an unlock.
+ */
+async function computeAchievementStats(ctx: { db: QueryCtx["db"] }, userId: string): Promise<Record<string, number>> {
     // Gather stats for evaluation
     const allTrips = await ctx.db
       .query("trips")
@@ -144,6 +159,16 @@ export const checkAndUnlock = internalMutation({
       longestStreak: streakDoc?.longestStreak || 0,
       isSubscriber,
     };
+
+    return statMap;
+}
+
+export const checkAndUnlock = internalMutation({
+  args: { userId: v.string() },
+  handler: async (ctx, args) => {
+    const { userId } = args;
+
+    const statMap = await computeAchievementStats(ctx, userId);
 
     // Get already unlocked achievements
     const existing = await ctx.db

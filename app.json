@@ -17,6 +17,7 @@
       "supportsTablet": false,
       "newArchEnabled": true,
       "bundleIdentifier": "com.dstroump.planeraaitravelplanner",
+      "appleTeamId": "97G74KAACL",
       "associatedDomains": [
         "applinks:planeraai.app",
         "applinks:www.planeraai.app"
@@ -110,7 +111,29 @@
       "expo-localization",
       "@react-native-community/datetimepicker",
       "expo-image",
-      "expo-sharing"
+      "expo-sharing",
+      [
+        "expo-widgets",
+        {
+          "bundleIdentifier": "com.dstroump.planeraaitravelplanner.widgets",
+          "groupIdentifier": "group.com.dstroump.planeraaitravelplanner",
+          "enablePushNotifications": false,
+          "frequentUpdates": false,
+          "widgets": [
+            {
+              "name": "TripCountdownWidget",
+              "displayName": "Trip countdown",
+              "description": "Days until your next trip, and today's next stop while you're away.",
+              "supportedFamilies": [
+                "systemSmall",
+                "systemMedium",
+                "accessoryRectangular"
+              ],
+              "contentMarginsDisabled": false
+            }
+          ]
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

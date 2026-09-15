@@ -1,6 +1,7 @@
 import { query } from "./_generated/server";
 import { v } from "convex/values";
 import { authQuery, authMutation } from "./functions";
+import { internal } from "./_generated/api";
 
 function generateInviteToken(): string {
     // 144 bits of entropy via WebCrypto, base64url-encoded.
@@ -81,6 +82,14 @@ export const acceptInvite = authMutation({
             userId: ctx.user.userId,
             inviteToken: undefined,
             joinedAt: Date.now(),
+        });
+
+        // Tell the owner someone joined — the concrete moment a shared trip
+        // pulls its creator back in. Fire-and-forget; `as any` because
+        // retention.ts postdates the generated api.
+        await ctx.scheduler.runAfter(0, (internal as any).retention.notifyCollaboratorJoined, {
+            tripId: invite.tripId,
+            joinerId: ctx.user.userId,
         });
 
         return { tripId: invite.tripId, role: invite.role };

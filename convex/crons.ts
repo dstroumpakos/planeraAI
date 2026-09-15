@@ -178,6 +178,26 @@ crons.weekly(
     {},
 );
 
+// ── Retention (see retention.ts + the Retention Playbook) ──
+// 1st of the month, 09:30 UTC: +1 trip credit to free users below the cap,
+// with a push. The one thing a free user who spent their credits returns for.
+crons.monthly(
+    "monthly-free-credit",
+    { day: 1, hourUTC: 9, minuteUTC: 30 },
+    internal.retention.grantMonthlyCredits,
+    {},
+);
+
+// Daily 09:00 UTC (late morning across Europe — no per-user timezone exists):
+// the dormancy ladder. Day 3 / 7 / 21 since last activity, each rung with a
+// different concrete reason to open the app; silent after day 45.
+crons.daily(
+    "dormancy-ladder",
+    { hourUTC: 9, minuteUTC: 0 },
+    internal.retention.dormancyTick,
+    {},
+);
+
 crons.monthly(
     "monthly-partner-report",
     { day: 1, hourUTC: 7, minuteUTC: 30 },

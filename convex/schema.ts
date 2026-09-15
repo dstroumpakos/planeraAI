@@ -268,10 +268,56 @@ export default defineSchema({
         // this account, which is why inbound parses land in "needs_review"
         // and unverified senders never auto-attach to a trip.
         reservationAlias: v.optional(v.string()),
+        // Retention: last time any app/web session pinged (see retention.ts).
+        // Written at most once per ACTIVITY_PING_MIN_GAP per user, so it is a
+        // coarse "last seen", not a session log. The dormancy ladder walks
+        // `by_lastActiveAt` to find users who went quiet.
+        lastActiveAt: v.optional(v.float64()),
+        lastActivePlatform: v.optional(v.string()), // "ios" | "android" | "web"
+        // IANA zone from the device (Intl.resolvedOptions().timeZone), sent with
+        // the activity ping. Quiet hours for pushes key off it; users who never
+        // pinged fall back to their home airport's country (notifications.ts).
+        timezone: v.optional(v.string()),
     })
         .index("by_user", ["userId"])
         .index("by_referralCode", ["referralCode"])
-        .index("by_reservationAlias", ["reservationAlias"]),
+        .index("by_reservationAlias", ["reservationAlias"])
+        .index("by_lastActiveAt", ["lastActiveAt"]),
+
+    // Open-Meteo forecasts keyed by ~1 km grid cell, so every user on the same
+    // trip (and the morning-briefing cron) shares one upstream call. Rows are
+    // refreshed after WEATHER_TTL_MS in weather.ts and pruned by the same job.
+    weatherCache: defineTable({
+        key: v.string(),                 // "lat2,lng2" rounded to 2 dp
+        fetchedAt: v.float64(),
+        timezone: v.optional(v.string()),
+        days: v.array(v.object({
+            date: v.string(),            // "YYYY-MM-DD" local to the place
+            code: v.float64(),           // WMO weather code
+            tMax: v.float64(),
+            tMin: v.float64(),
+            precipMm: v.optional(v.float64()),
+            precipProb: v.optional(v.float64()),
+        })),
+    })
+        .index("by_key", ["key"])
+        .index("by_fetchedAt", ["fetchedAt"]),
+
+    // One row per (user, UTC day) with at least one session. This is what
+    // makes classic D1/D7/D30 cohort retention computable: `lastActiveAt`
+    // alone only says whether someone is active NOW, not whether they came
+    // back on day 7. Bounded by DAU x days retained; pruned past 60 days by
+    // the KPI cron.
+    userActivityDays: defineTable({
+        userId: v.string(),
+        day: v.string(),          // "YYYY-MM-DD" (UTC)
+        platform: v.optional(v.string()),
+        // True when the user had a trip in progress or starting within 30 days
+        // on that day — lets retention split "trip-active" from "browsing".
+        tripActive: v.optional(v.boolean()),
+    })
+        .index("by_user_day", ["userId", "day"])
+        .index("by_day", ["day"]),
 
     insights: defineTable({
         userId: v.string(),
@@ -1845,6 +1891,35 @@ export default defineSchema({
         // re-cuts of counts this cron already computes, exposed here so the
         // funnel reads as one panel instead of four numbers scattered across
         // the dashboard.
+        // Retention (see retention.ts + the RETENTION section of adminKpis.ts).
+        // Cohorts are keyed by signup week; DN = active on calendar day N after
+        // signup (classic, unbounded). Rates are null-safe: a cohort younger
+        // than N days reports `dN: null` rather than a misleading 0.
+        retention: v.optional(v.object({
+            dau: v.float64(),
+            wau: v.float64(),
+            mau: v.float64(),
+            stickinessPct: v.float64(),           // DAU / MAU
+            wauTripActive: v.float64(),           // WAU with a trip live or <=30d away
+            wauBrowsing: v.float64(),             // WAU without one
+            usersWithWatch: v.float64(),          // users holding >=1 watched destination
+            newUsersWithWatch30d: v.float64(),    // of signups in last 30d, how many left with a watch
+            newUsersWithWatchRatePct: v.float64(),
+            d1Pct: v.float64(),                   // blended over cohorts old enough
+            d7Pct: v.float64(),
+            d30Pct: v.float64(),
+            cohorts: v.array(v.object({
+                week: v.string(),                 // ISO Monday "YYYY-MM-DD"
+                size: v.float64(),
+                d1: v.union(v.float64(), v.null()),
+                d7: v.union(v.float64(), v.null()),
+                d30: v.union(v.float64(), v.null()),
+            })),
+            byPlatform: v.array(v.object({ key: v.string(), wau: v.float64(), d7Pct: v.float64() })),
+            notificationOpens7d: v.float64(),
+            notificationOpensByType: v.array(v.object({ key: v.string(), count: v.float64() })),
+            dailyActive: v.array(v.object({ date: v.string(), active: v.float64() })),
+        })),
         marketing: v.optional(v.object({
             destinationClicks7d: v.float64(),
             destinationClicks30d: v.float64(),

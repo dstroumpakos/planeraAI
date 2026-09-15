@@ -3,6 +3,8 @@ import { mutation, query, action, internalMutation, internalQuery, internalActio
 import { internal as _internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { authMutation, authQuery } from "./functions";
+import { quietHoursDelayMs, resolveUserTimezone } from "./lib/quietHours";
+import { describeWeatherCode } from "./weather";
 
 // Type assertion: `internal.notifications` won't exist until `npx convex dev` regenerates types
 const internal = _internal as any;
@@ -219,10 +221,12 @@ export const _notifTripsWindowPage = internalQuery({
                 : null;
 
             let today: { activityCount: number; firstTime: string; firstTitle: string } | null = null;
+            // First geocoded stop of the day (else of the trip) — the point the
+            // morning briefing's weather line is fetched for.
+            let coords: { lat: number; lng: number } | null = null;
             if (currentDay !== null) {
-                const dayData = trip.itinerary?.dayByDayItinerary?.find(
-                    (d: any) => d.day === currentDay,
-                );
+                const days: any[] = trip.itinerary?.dayByDayItinerary || [];
+                const dayData = days.find((d: any) => d.day === currentDay);
                 if (dayData) {
                     const first = dayData.activities?.[0];
                     today = {
@@ -230,6 +234,10 @@ export const _notifTripsWindowPage = internalQuery({
                         firstTime: first?.startTime || first?.time || "morning",
                         firstTitle: first?.title || "your first stop",
                     };
+                }
+                for (const d of dayData ? [dayData, ...days] : days) {
+                    const a = (d.activities || []).find((x: any) => typeof x?.lat === "number" && typeof x?.lng === "number");
+                    if (a) { coords = { lat: a.lat, lng: a.lng }; break; }
                 }
             }
 
@@ -245,6 +253,7 @@ export const _notifTripsWindowPage = internalQuery({
                 daysSinceEnd: Math.ceil((now - trip.endDate) / dayMs),
                 currentDay,
                 today,
+                coords,
             };
         });
 
@@ -253,6 +262,18 @@ export const _notifTripsWindowPage = internalQuery({
 });
 
 // ─── Internal action: Send push notification via Expo Push API ───
+// Pushes whose moment is the point (a countdown, a morning briefing, an
+// admin test) are sent as-is. Everything else respects the user's local quiet
+// hours and is rescheduled for the morning instead of buzzing at 3 am.
+function isTimeCritical(type: string): boolean {
+    return (
+        type.startsWith("countdown") ||
+        type.startsWith("morning_briefing") ||
+        type === "admin_test_push" ||
+        type.startsWith("location_")
+    );
+}
+
 export const sendPushNotification = internalAction({
     args: {
         userId: v.string(),
@@ -261,6 +282,9 @@ export const sendPushNotification = internalAction({
         data: v.optional(v.any()),
         tripId: v.optional(v.id("trips")),
         type: v.string(),
+        // Set when this call was rescheduled by the quiet-hours gate, so a
+        // user whose clock never leaves the window can't loop forever.
+        deferred: v.optional(v.boolean()),
     },
     handler: async (ctx, args) => {
         // 1. Check user preferences
@@ -274,6 +298,20 @@ export const sendPushNotification = internalAction({
         if (settings.pushNotifications === false) {
             console.log(`🔕 Push notifications disabled for user ${args.userId}`);
             return;
+        }
+
+        // Quiet hours (see lib/quietHours.ts)
+        if (!args.deferred && !isTimeCritical(args.type)) {
+            const tz = resolveUserTimezone(settings);
+            const delay = quietHoursDelayMs(tz);
+            if (delay > 0) {
+                console.log(`🌙 Deferring ${args.type} for ${args.userId} by ${Math.round(delay / 60000)} min (${tz})`);
+                await ctx.scheduler.runAfter(delay, internal.notifications.sendPushNotification, {
+                    ...args,
+                    deferred: true,
+                });
+                return;
+            }
         }
 
         // Check specific preference types
@@ -314,12 +352,14 @@ export const sendPushNotification = internalAction({
         }
 
         // 4. Send via Expo Push API
+        // `type` rides along in the payload so the client can log a
+        // `notification_open` marketing event per push type (retention KPIs).
         const messages = tokens.map((t: any) => ({
             to: t.token,
             sound: "default",
             title: args.title,
             body: args.body,
-            data: args.data || {},
+            data: { ...(args.data || {}), type: args.type },
         }));
 
         try {
@@ -550,6 +590,8 @@ const NOTIF_TRANSLATIONS: Record<string, Record<string, string>> = {
         post_trip_body: "It's been a week since your trip! We'd love to hear how it went. Share a travel insight to help other travelers.",
         plan_next_title: "Where to next? 🗺️",
         plan_next_body: "Missing {{dest}}? Start planning your next adventure — it only takes 30 seconds!",
+        recap_title: "Your {{dest}} recap is ready 📸",
+        recap_body: "{{dest}}, day by day: every stop, the distance you covered, and a card to share. Take a look.",
         anniversary_title: "1 year since {{dest}}! 🎉",
         anniversary_body: "Remember your trip? Relive the memories or plan a return visit!",
     },
@@ -567,6 +609,8 @@ const NOTIF_TRANSLATIONS: Record<string, Record<string, string>> = {
         post_trip_body: "Πέρασε μία εβδομάδα από το ταξίδι σας! Μοιραστείτε τις εμπειρίες σας για να βοηθήσετε άλλους ταξιδιώτες.",
         plan_next_title: "Πού θα πάτε μετά; 🗺️",
         plan_next_body: "Σας λείπει το {{dest}}; Ξεκινήστε να σχεδιάζετε την επόμενη περιπέτειά σας — χρειάζεται μόνο 30 δευτερόλεπτα!",
+        recap_title: "Η ανασκόπηση του ταξιδιού σας στο {{dest}} είναι έτοιμη 📸",
+        recap_body: "{{dest}}, μέρα με τη μέρα: κάθε στάση, η απόσταση που καλύψατε και μια κάρτα για να μοιραστείτε.",
         anniversary_title: "1 χρόνος από το {{dest}}! 🎉",
         anniversary_body: "Θυμάστε το ταξίδι σας; Ξαναζήστε τις αναμνήσεις ή σχεδιάστε μια επιστροφή!",
     },
@@ -584,6 +628,8 @@ const NOTIF_TRANSLATIONS: Record<string, Record<string, string>> = {
         post_trip_body: "¡Ha pasado una semana desde tu viaje! Comparte tus experiencias para ayudar a otros viajeros.",
         plan_next_title: "¿A dónde ahora? 🗺️",
         plan_next_body: "¿Extrañas {{dest}}? Empieza a planificar tu próxima aventura — ¡solo toma 30 segundos!",
+        recap_title: "Tu resumen de {{dest}} está listo 📸",
+        recap_body: "{{dest}}, día a día: cada parada, la distancia recorrida y una tarjeta para compartir.",
         anniversary_title: "¡1 año desde {{dest}}! 🎉",
         anniversary_body: "¿Recuerdas tu viaje? ¡Revive los recuerdos o planifica una visita de regreso!",
     },
@@ -601,6 +647,8 @@ const NOTIF_TRANSLATIONS: Record<string, Record<string, string>> = {
         post_trip_body: "Cela fait une semaine depuis votre voyage ! Partagez vos impressions pour aider d'autres voyageurs.",
         plan_next_title: "Quelle est la prochaine destination ? 🗺️",
         plan_next_body: "{{dest}} vous manque ? Commencez à planifier votre prochaine aventure — ça ne prend que 30 secondes !",
+        recap_title: "Votre récap de {{dest}} est prêt 📸",
+        recap_body: "{{dest}}, jour par jour : chaque étape, la distance parcourue et une carte à partager.",
         anniversary_title: "1 an depuis {{dest}} ! 🎉",
         anniversary_body: "Vous vous souvenez de votre voyage ? Revivez les souvenirs ou planifiez un retour !",
     },
@@ -618,6 +666,8 @@ const NOTIF_TRANSLATIONS: Record<string, Record<string, string>> = {
         post_trip_body: "Es ist eine Woche seit Ihrer Reise! Teilen Sie Ihre Erfahrungen, um anderen Reisenden zu helfen.",
         plan_next_title: "Wohin als Nächstes? 🗺️",
         plan_next_body: "Vermissen Sie {{dest}}? Planen Sie Ihr nächstes Abenteuer — es dauert nur 30 Sekunden!",
+        recap_title: "Dein {{dest}}-Rückblick ist fertig 📸",
+        recap_body: "{{dest}}, Tag für Tag: jeder Stopp, die zurückgelegte Strecke und eine Karte zum Teilen.",
         anniversary_title: "1 Jahr seit {{dest}}! 🎉",
         anniversary_body: "Erinnern Sie sich an Ihre Reise? Erleben Sie die Erinnerungen noch einmal oder planen Sie eine Rückkehr!",
     },
@@ -635,6 +685,8 @@ const NOTIF_TRANSLATIONS: Record<string, Record<string, string>> = {
         post_trip_body: "مر أسبوع على رحلتك! شارك تجربتك لمساعدة المسافرين الآخرين.",
         plan_next_title: "إلى أين بعد ذلك؟ 🗺️",
         plan_next_body: "تفتقد {{dest}}؟ ابدأ بالتخطيط لمغامرتك القادمة — لا يستغرق الأمر سوى 30 ثانية!",
+        recap_title: "ملخص رحلتك إلى {{dest}} جاهز 📸",
+        recap_body: "{{dest}} يومًا بيوم: كل محطة، والمسافة التي قطعتها، وبطاقة للمشاركة.",
         anniversary_title: "مر عام على {{dest}}! 🎉",
         anniversary_body: "هل تتذكر رحلتك؟ أعد عيش الذكريات أو خطط لزيارة العودة!",
     },
@@ -674,6 +726,7 @@ export const processScheduledNotifications = internalAction({
             daysSinceEnd: number;
             currentDay: number | null;
             today: { activityCount: number; firstTime: string; firstTitle: string } | null;
+            coords: { lat: number; lng: number } | null;
         };
 
         // Pinned once so every page of every window walks an identical index
@@ -791,9 +844,28 @@ export const processScheduledNotifications = internalAction({
                 const lang = userSettings?.language || 'en';
 
                 const title = getNotifText(lang, 'morning_title', { day: currentDay, dest: trip.destination });
-                const body = activityCount > 0
+                let body = activityCount > 0
                     ? getNotifText(lang, 'morning_body_activities', { count: activityCount, first: firstTitle, time: firstTime })
                     : getNotifText(lang, 'morning_body_free', { dest: trip.destination });
+
+                // Weather line — language-neutral (emoji + temperatures), so no
+                // extra translations. Skipped silently when there's no
+                // geocoded stop or the provider is down.
+                if (trip.coords) {
+                    try {
+                        const wx: any = await ctx.runAction(internal.weather.forecastForPoint, trip.coords);
+                        const todayLocal = wx?.timezone
+                            ? new Intl.DateTimeFormat("en-CA", { timeZone: wx.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date())
+                            : new Date().toISOString().slice(0, 10);
+                        const day = wx?.days?.find((d: any) => d.date === todayLocal) || wx?.days?.[0];
+                        if (day) {
+                            const w = describeWeatherCode(day.code);
+                            body += ` ${w.emoji} ${Math.round(day.tMax)}°/${Math.round(day.tMin)}°`;
+                        }
+                    } catch (e) {
+                        console.warn("[notifications] weather line skipped", e);
+                    }
+                }
 
                 await ctx.runAction(internal.notifications.sendPushNotification, {
                     userId: trip.userId,
@@ -814,14 +886,19 @@ export const processScheduledNotifications = internalAction({
             });
             const lang = userSettings?.language || 'en';
 
-            if (trip.daysSinceEnd >= 6 && trip.daysSinceEnd <= 8) {
+            // Trip recap, 2-4 days after the end. Replaces the older generic
+            // "how was it?" push: the recap screen (app/trip-recap.tsx) carries
+            // the share card and the "leave one tip" CTA, so the same tap does
+            // both jobs. Type stays distinct from post_trip_review so trips that
+            // already received the old push don't get a second one.
+            if (trip.daysSinceEnd >= 2 && trip.daysSinceEnd <= 4) {
                 await ctx.runAction(internal.notifications.sendPushNotification, {
                     userId: trip.userId,
-                    title: getNotifText(lang, 'post_trip_title', { dest: trip.destination }),
-                    body: getNotifText(lang, 'post_trip_body', { dest: trip.destination }),
+                    title: getNotifText(lang, 'recap_title', { dest: trip.destination }),
+                    body: getNotifText(lang, 'recap_body', { dest: trip.destination }),
                     tripId: trip._id,
-                    type: "post_trip_review",
-                    data: { screen: "trip", tripId: trip._id },
+                    type: "trip_recap",
+                    data: { screen: "trip-recap", tripId: trip._id },
                 });
             }
 
