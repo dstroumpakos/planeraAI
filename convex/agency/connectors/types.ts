@@ -13,8 +13,8 @@
  *    and the interface has no field for one.
  *  - Search results are NOT guaranteed prices → `revalidate()` exists and is the
  *    only source of a bookable price.
- *  - Booking is out of MVP scope: `createBooking` etc. are optional and gated by
- *    capability flags (all false in MVP connectors).
+ *  - Booking is optional and gated by the `createBooking` capability — only
+ *    connectors whose order API is implemented declare it.
  */
 
 import type { NormalizedOffer } from "../model/types";
@@ -141,10 +141,56 @@ export interface SupplierConnector {
 
   getCancellationTerms?(creds: SupplierCredentials, revalidationToken: string): Promise<string>;
 
-  // ── Booking phase (post-MVP). Present only if capability is declared true. ──
-  createBooking?(...args: unknown[]): Promise<never>;
-  retrieveBooking?(...args: unknown[]): Promise<never>;
-  cancelBooking?(...args: unknown[]): Promise<never>;
+  /**
+   * Create a REAL order with the supplier, on the agency's own account. Present
+   * only where `supports.createBooking` is true. Called once per explicit agent
+   * action, never retried automatically: a retry after a lost response is how
+   * a client gets two tickets.
+   */
+  createBooking?(creds: SupplierCredentials, req: BookingRequest): Promise<BookingResult>;
+}
+
+export interface BookingPassenger {
+  type: "adult" | "child" | "infant";
+  title: "mr" | "ms" | "mrs" | "miss";
+  givenName: string;
+  familyName: string;
+  bornOn: string;
+  gender: "m" | "f";
+}
+
+export interface BookingRequest {
+  /** The provider-locked handle, freshest one we hold. */
+  revalidationToken: string;
+  offer: NormalizedOffer;
+  passengers: BookingPassenger[];
+  contact: { email: string; phone: string };
+  /** The agency's own file reference, carried to the supplier where it has a field. */
+  clientReference: string;
+  /** Rooms the hotel was priced for. */
+  rooms?: number;
+  /** Trip start (YYYY-MM-DD) — hotels want each child's age on arrival. */
+  travelDate?: string;
+  /**
+   * The supplier total the quote was sold on (base + taxes, minor units). A
+   * connector that learns the price ROSE refuses to book: the agency would pay
+   * more than it charged, and the client was never told.
+   */
+  expectedTotal?: import("../model/types").Money;
+}
+
+export interface BookingResult {
+  /**
+   * "unknown" is reserved for the caller (a timeout after sending). A connector
+   * that got an answer says what the answer was.
+   */
+  status: "confirmed" | "ticketed" | "requested" | "failed";
+  supplierReference?: string;
+  supplierBookingId?: string;
+  documents?: string[];
+  deadlineISO?: string;
+  amountCharged?: import("../model/types").Money;
+  message?: string;
 }
 
 /** Guard used by the orchestrator before invoking any method. */

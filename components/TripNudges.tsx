@@ -6,7 +6,6 @@ import { useTranslation } from "react-i18next";
 import * as SecureStore from "expo-secure-store";
 import * as Haptics from "expo-haptics";
 import { useTheme } from "@/lib/ThemeContext";
-import { shareTripCalendar } from "@/lib/calendarExport";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const dismissKey = (tripId: string) => `planTogetherDismissed:${tripId}`;
@@ -16,8 +15,6 @@ const dismissKey = (tripId: string) => `planTogetherDismissed:${tripId}`;
  *
  *  - "Plan this together" once, for a trip with 2+ travellers and no
  *    collaborator yet (the invite deep-link already opens the app).
- *  - "Add to calendar" for any trip that hasn't ended — keeps the trip
- *    present outside the app.
  *  - "See your recap" for a trip that has ended.
  */
 export default function TripNudges({
@@ -32,7 +29,6 @@ export default function TripNudges({
     const { t } = useTranslation();
     const { colors } = useTheme();
     const [dismissed, setDismissed] = useState<boolean | null>(null);
-    const [exporting, setExporting] = useState(false);
 
     useEffect(() => {
         let alive = true;
@@ -52,13 +48,6 @@ export default function TripNudges({
     const dismiss = async () => {
         setDismissed(true);
         try { await SecureStore.setItemAsync(dismissKey(String(trip._id)), "1"); } catch {}
-    };
-
-    const exportCalendar = async () => {
-        haptic();
-        setExporting(true);
-        try { await shareTripCalendar(trip); } catch (e) { console.warn("[calendar] export failed", e); }
-        finally { setExporting(false); }
     };
 
     return (
@@ -88,8 +77,8 @@ export default function TripNudges({
                 </View>
             )}
 
-            <View style={styles.row}>
-                {ended ? (
+            {ended && (
+                <View style={styles.row}>
                     <TouchableOpacity
                         style={[styles.chip, { backgroundColor: colors.card, borderColor: colors.border }]}
                         onPress={() => { haptic(); router.push({ pathname: "/trip-recap", params: { tripId: trip._id } } as any); }}
@@ -97,19 +86,8 @@ export default function TripNudges({
                         <Ionicons name="images-outline" size={16} color={colors.text} />
                         <Text style={[styles.chipText, { color: colors.text }]}>{t("tripNudges.seeRecap")}</Text>
                     </TouchableOpacity>
-                ) : (
-                    <TouchableOpacity
-                        style={[styles.chip, { backgroundColor: colors.card, borderColor: colors.border }]}
-                        onPress={exportCalendar}
-                        disabled={exporting}
-                    >
-                        <Ionicons name="calendar-outline" size={16} color={colors.text} />
-                        <Text style={[styles.chipText, { color: colors.text }]}>
-                            {exporting ? t("tripNudges.preparing") : t("tripNudges.addToCalendar")}
-                        </Text>
-                    </TouchableOpacity>
-                )}
-            </View>
+                </View>
+            )}
         </View>
     );
 }

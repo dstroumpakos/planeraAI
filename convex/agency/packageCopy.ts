@@ -92,6 +92,15 @@ function describePackage(pkg: CustomerPackage): Record<string, unknown> {
         return { type: "activity", title: o.title, durationMinutes: o.durationMinutes };
       case "transfer":
         return { type: "transfer", mode: o.mode, from: o.fromLabel, to: o.toLabel };
+      case "service":
+        // Added by the agent. Title and description are the agent's own words,
+        // so the model may use them — they are facts the agency stated.
+        return {
+          type: o.category,
+          title: o.title,
+          description: o.description,
+          refundable: o.conditions.refundable,
+        };
     }
   });
 
@@ -238,11 +247,12 @@ interface CopyContext {
   packages: TravelPackage[];
   searchParams: unknown;
   language: string;
+  revision: number;
 }
 
 /** Load what the generator needs. Internal: never exposed to a client. */
 export const _loadForCopy = internalMutation({
-  args: { quoteId: v.string(), agencyId: v.id("agencies") },
+  args: { quoteId: v.string(), agencyId: v.id("agencies"), revision: v.optional(v.float64()) },
   handler: async (ctx, args): Promise<CopyContext | null> =>
     guard("packageCopy.load", async () => {
       const row = await ctx.db
@@ -252,10 +262,16 @@ export const _loadForCopy = internalMutation({
       // Re-derive the tenant from the row rather than trusting the caller.
       if (!row || row.agencyId !== args.agencyId) return null;
 
+      // A later edit superseded this run: skip it, the run for that edit follows.
+      if (args.revision !== undefined && args.revision !== (row.copyRevision ?? 0)) return null;
+
       const agency = await ctx.db.get(row.agencyId);
       return {
         quoteRowId: row._id,
-        packages: (row.packages ?? []) as TravelPackage[],
+        revision: row.copyRevision ?? 0,
+        // Hidden options are not on the client's document, so they must not be
+        // in the paragraph that introduces it either.
+        packages: ((row.packages ?? []) as TravelPackage[]).filter((p) => !p.hidden),
         searchParams: row.searchParams,
         language: agency?.branding?.quoteLanguage || "Greek",
       };
@@ -263,11 +279,19 @@ export const _loadForCopy = internalMutation({
 });
 
 export const _saveCopy = internalMutation({
-  args: { quoteRowId: v.id("quotes"), agencyId: v.id("agencies"), copy: v.any() },
+  args: {
+    quoteRowId: v.id("quotes"),
+    agencyId: v.id("agencies"),
+    copy: v.any(),
+    revision: v.optional(v.float64()),
+  },
   handler: async (ctx, args): Promise<null> =>
     guard("packageCopy.save", async () => {
       const row = await ctx.db.get(args.quoteRowId);
       if (!row || row.agencyId !== args.agencyId) throw notFound("quote");
+      // The quote was edited while the model was writing: this copy describes
+      // lines that are no longer there. The newer run will write its own.
+      if (args.revision !== undefined && args.revision !== (row.copyRevision ?? 0)) return null;
       await ctx.db.patch(args.quoteRowId, { aiCopy: args.copy, updatedAt: Date.now() });
       return null;
     }),
@@ -275,13 +299,13 @@ export const _saveCopy = internalMutation({
 
 const loadRef = makeFunctionReference<
   "mutation",
-  { quoteId: string; agencyId: Id<"agencies"> },
+  { quoteId: string; agencyId: Id<"agencies">; revision?: number },
   CopyContext | null
 >("agency/packageCopy:_loadForCopy");
 
 const saveRef = makeFunctionReference<
   "mutation",
-  { quoteRowId: Id<"quotes">; agencyId: Id<"agencies">; copy: unknown },
+  { quoteRowId: Id<"quotes">; agencyId: Id<"agencies">; copy: unknown; revision?: number },
   null
 >("agency/packageCopy:_saveCopy");
 
@@ -291,11 +315,12 @@ const saveRef = makeFunctionReference<
  * a complete, sendable quote.
  */
 export const generate = internalAction({
-  args: { quoteId: v.string(), agencyId: v.id("agencies") },
+  args: { quoteId: v.string(), agencyId: v.id("agencies"), revision: v.optional(v.float64()) },
   handler: async (ctx, args): Promise<null> => {
     const context = await ctx.runMutation(loadRef, {
       quoteId: args.quoteId,
       agencyId: args.agencyId,
+      revision: args.revision,
     });
     if (!context) return null;
 
@@ -310,6 +335,7 @@ export const generate = internalAction({
       quoteRowId: context.quoteRowId,
       agencyId: args.agencyId,
       copy,
+      revision: context.revision,
     });
     return null;
   },

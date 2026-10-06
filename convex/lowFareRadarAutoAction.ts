@@ -12,7 +12,7 @@
  *      call SerpApi again to fetch return options. Cheapest return wins.
  *   2. Take the resulting `booking_token` (one-way: from cheapest option,
  *      round-trip: from cheapest return option) and call booking options
- *      to grab provider URL + baggage info from `extensions[]`.
+ *      to grab provider URL + baggage info from `baggage_prices[]`.
  *
  * If any step fails or the API returns nothing useful, we fall back to
  * the outbound-only data we already have. Errors are swallowed — this is
@@ -28,6 +28,7 @@ import {
   normalizePriceInsights,
 } from "./lib/serpApiFlights";
 import { SEARCHAPI_FLIGHTS_ENDPOINT } from "./lib/searchApiFlightSearch";
+import { parseBaggagePrices, type DealBaggage } from "./lib/baggage";
 
 const SERPAPI_ENDPOINT = "https://serpapi.com/search.json";
 
@@ -70,34 +71,6 @@ async function callSearchApi(params: URLSearchParams): Promise<any | null> {
   } catch {
     return null;
   }
-}
-
-/**
- * Pull a baggage hint out of the booking option's `extensions[]` array.
- * SerpApi surfaces strings like:
- *   "Carry-on bag included"
- *   "1 checked bag included"
- *   "Carry-on bag for a fee"
- * We do a light-touch regex match — anything fancier needs the
- * `baggage_prices` array which has a different shape per provider.
- */
-function parseBaggage(extensions: string[] | undefined): {
-  cabinBaggage?: string;
-  checkedBaggage?: string;
-} {
-  if (!Array.isArray(extensions)) return {};
-  const result: { cabinBaggage?: string; checkedBaggage?: string } = {};
-  for (const ext of extensions) {
-    if (typeof ext !== "string") continue;
-    const lower = ext.toLowerCase();
-    if (!result.cabinBaggage && /carry[- ]?on|cabin/.test(lower)) {
-      result.cabinBaggage = ext;
-    }
-    if (!result.checkedBaggage && /checked/.test(lower)) {
-      result.checkedBaggage = ext;
-    }
-  }
-  return result;
 }
 
 export const enrichAndSeedDeal = internalAction({
@@ -184,8 +157,7 @@ export const enrichAndSeedDeal = internalAction({
     // Step 2 — booking options fetch (URL + baggage).
     let bookingUrl: string | undefined;
     let bookingRequest: { url: string; postData: string } | undefined;
-    let cabinBaggage: string | undefined;
-    let checkedBaggage: string | undefined;
+    let baggage: DealBaggage | undefined;
     if (bookingToken) {
       // SerpApi's booking_options endpoint needs the full route + dates
       // alongside the token. Passing only `booking_token` returns an
@@ -235,9 +207,8 @@ export const enrichAndSeedDeal = internalAction({
             return {
               price:
                 typeof leg.price === "number" ? leg.price : Number(leg.price),
-              extensions: Array.isArray(leg.extensions)
-                ? leg.extensions
-                : undefined,
+              // Baggage lives in `baggage_prices`, not `extensions`.
+              baggagePrices: leg.baggage_prices,
               bookingRequest: {
                 url: String(br.url),
                 postData: String(br.post_data),
@@ -246,7 +217,7 @@ export const enrichAndSeedDeal = internalAction({
           })
           .filter(Boolean) as Array<{
           price: number;
-          extensions?: string[];
+          baggagePrices?: unknown;
           bookingRequest: { url: string; postData: string };
         }>;
 
@@ -262,9 +233,7 @@ export const enrichAndSeedDeal = internalAction({
           // to the real provider URL at click-time (mirrors the regular trip
           // flight booking flow).
           bookingRequest = pick.bookingRequest;
-          const bag = parseBaggage(pick.extensions);
-          cabinBaggage = bag.cabinBaggage;
-          checkedBaggage = bag.checkedBaggage;
+          baggage = parseBaggagePrices(pick.baggagePrices);
           if (totalPrice == null && Number.isFinite(pick.price)) {
             totalPrice = pick.price;
           }
@@ -310,8 +279,7 @@ export const enrichAndSeedDeal = internalAction({
           returnOption: returnOption ?? undefined,
           bookingUrl,
           bookingRequest,
-          cabinBaggage,
-          checkedBaggage,
+          baggage,
           totalPrice,
           adults,
           dealTag: args.dealTag,

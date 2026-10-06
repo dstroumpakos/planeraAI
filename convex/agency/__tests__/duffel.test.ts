@@ -89,7 +89,7 @@ test("normalises a Duffel offer into the canonical model", async () => {
       }),
   );
 
-  assert.match(seenUrl, /\/air\/offer_requests\?return_offers=true/);
+  assert.match(seenUrl, /\/air\/offer_requests\?return_offers=false/);
   assert.equal(seenBody.data.passengers.length, 3, "2 adults + 1 child");
   assert.deepEqual(seenBody.data.passengers[2], { age: 7 });
 
@@ -257,8 +257,42 @@ test("a healthy credential reports healthy; a rejected one reports why", async (
   assert.match(bad.message ?? "", /rejected this access token/);
 });
 
-test("booking capabilities stay off — the agency remains the seller", () => {
-  assert.equal(duffelConnector.capabilities.supports.createBooking, false);
+test("Duffel books on the agency's own account; cancellation stays with the agency", () => {
+  // Orders are created only on an explicit agent action, paid from the
+  // AGENCY's Duffel balance — the agency is still the seller.
+  assert.equal(duffelConnector.capabilities.supports.createBooking, true);
+  assert.equal(typeof duffelConnector.createBooking, "function");
   assert.equal(duffelConnector.capabilities.supports.cancelBooking, false);
-  assert.equal(duffelConnector.createBooking, undefined);
+});
+
+
+test("a busy route is paged in sorted, never downloaded whole", async () => {
+  const urls: string[] = [];
+  const cheap = { ...OFFER, id: "off_cheap" };
+  const fast = { ...OFFER, id: "off_fast" };
+  const offers = await withFetch(
+    async (url) => {
+      urls.push(url);
+      if (url.includes("/air/offer_requests")) return respond({ data: { id: "orq_1" } });
+      if (url.includes("sort=total_amount")) return respond({ data: [cheap, fast] });
+      if (url.includes("sort=total_duration")) return respond({ data: [fast] });
+      return respond({}, 404);
+    },
+    () =>
+      duffelConnector.search(sandboxCreds, {
+        kind: "flight",
+        originIata: "ATH",
+        destinationIata: "FCO",
+        departDate: "2026-10-10",
+        adults: 1,
+        childrenAges: [],
+        sellCurrency: "EUR",
+      }),
+  );
+  assert.ok(urls.some((u) => u.includes("offer_request_id=orq_1") && u.includes("limit=50")));
+  assert.deepEqual(
+    offers.map((o) => o.supplierOfferId).sort(),
+    ["off_cheap", "off_fast"],
+    "deduplicated across the two lists",
+  );
 });

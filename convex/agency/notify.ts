@@ -213,7 +213,7 @@ export const quoteEvent = internalAction({
   args: {
     agencyId: v.id("agencies"),
     quoteId: v.string(),
-    event: v.union(v.literal("viewed"), v.literal("accepted")),
+    event: v.union(v.literal("viewed"), v.literal("accepted"), v.literal("travellers")),
     tier: v.optional(v.string()),
     note: v.optional(v.string()),
   },
@@ -223,6 +223,31 @@ export const quoteEvent = internalAction({
       quoteId: args.quoteId,
     });
     if (!info?.to) return null;
+
+    if (args.event === "travellers") {
+      const res: { success: boolean; error?: string } = await ctx.runAction(
+        internal.postmark.sendRawEmail,
+        {
+          to: info.to,
+          subject: `Traveller details received — ${info.route}`,
+          html: `
+<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:#111">
+  <p style="margin:0 0 14px">Your client entered the travellers' names and dates of birth for ${esc(info.route)}.</p>
+  <p style="margin:0 0 14px;color:#666">Departing ${esc(info.departDate)} · quote ${esc(args.quoteId)}</p>
+  <p style="margin:0 0 14px;color:#444">You can now book the services from the quote's Booking section.</p>
+</div>`.trim(),
+          text: [
+            `Your client entered the travellers' details for ${info.route}.`,
+            `Departing ${info.departDate} · quote ${args.quoteId}`,
+            "You can now book the services from the quote's Booking section.",
+          ].join(NEWLINE),
+          tag: "agency-quote-event",
+          ...(info.replyTo ? { replyTo: info.replyTo } : {}),
+        },
+      );
+      if (!res.success) console.error(`[agency-quote-event] send failed: ${res.error}`);
+      return null;
+    }
 
     const accepted = args.event === "accepted";
     const subject = accepted

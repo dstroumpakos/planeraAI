@@ -4185,10 +4185,11 @@ const ITINERARY_LANGUAGE_NAMES: Record<string, string> = {
 };
 
 /**
- * Generate ONE new activity for a day's open slot and insert it at `insertIndex`.
- * The prompt is given every title already in the trip with a hard "do NOT
- * suggest any of these" instruction so it can't introduce a duplicate; the
- * de-dup guardrail runs afterwards as a backstop.
+ * Add ONE activity to a day, driven by what the user typed ("a rooftop bar with
+ * a view", "the Acropolis Museum", "somewhere for souvlaki"). The model resolves
+ * the request to a real, specific place in the destination — preferring one near
+ * the day's other stops — and it's slotted in by time. Without a request it falls
+ * back to a fresh suggestion that avoids every venue already in the trip.
  */
 export const addActivityAI = internalAction({
     args: {
@@ -4196,12 +4197,17 @@ export const addActivityAI = internalAction({
         dayIndex: v.number(),
         insertIndex: v.number(),
         language: v.optional(v.string()),
+        request: v.optional(v.string()),
+        preferredTime: v.optional(v.string()),
     },
     returns: v.null(),
     handler: async (ctx, args) => {
         const { tripId, dayIndex, insertIndex, language } = args;
         const lang = language || "en";
         const langName = ITINERARY_LANGUAGE_NAMES[lang] || "English";
+        const request = (args.request || "").trim().slice(0, 300);
+        const rawTime = (args.preferredTime || "").trim();
+        const preferredTime = /^\d{1,2}:\d{2}$/.test(rawTime) ? rawTime.padStart(5, "0") : "";
 
         const trip = await ctx.runQuery(internal.trips.getTripDetails, { tripId });
         if (!trip) throw new Error("Trip not found");
@@ -4219,29 +4225,51 @@ export const addActivityAI = internalAction({
             .filter(Boolean)
             .join(", ");
 
+        // The day's current plan, so the pick lands near where the traveler already is.
+        const dayPlan = activities
+            .filter((a: any) => a?.title)
+            .map((a: any) => `- ${a.startTime || a.time || "?"}${a.endTime ? `–${a.endTime}` : ""} ${a.title}${a.address ? ` (${a.address})` : ""}`)
+            .join("\n");
+
         const prevActivity = clampedInsert > 0 ? activities[clampedInsert - 1] : null;
         const nextActivity = clampedInsert < activities.length ? activities[clampedInsert] : null;
         const fallbackTime =
+            preferredTime ||
             (prevActivity?.endTime || prevActivity?.time) ||
             (nextActivity?.startTime || nextActivity?.time) ||
             "12:00";
 
-        const prompt = `You are a travel itinerary planner for ${trip.destination}.
-Add ONE new activity to this day. It MUST be different from — and must NOT repeat — any of these existing trip activities: ${allTitles || "(none)"}.
+        const requestBlock = request
+            ? `The traveler asked to add: "${request}"
+- Find ONE real, specific, currently operating place or experience in ${trip.destination} that best matches this request (a named venue with its real address, not a generic idea).
+- If they named a specific place, use exactly that place.
+- If several places match, choose the one closest to the other stops of this day.
+- Only if the request is impossible in ${trip.destination}, pick the closest reasonable alternative that is.
+- Avoid repeating these existing trip activities unless the traveler explicitly named one of them: ${allTitles || "(none)"}.`
+            : `Add ONE new activity to this day. It MUST be different from — and must NOT repeat — any of these existing trip activities: ${allTitles || "(none)"}.`;
 
-Slot context:
-- It will be placed between: ${prevActivity ? `"${prevActivity.title}" (ends ${prevActivity.endTime || prevActivity.time || "?"} at ${prevActivity.address || prevActivity.title})` : "the start of the day"} AND ${nextActivity ? `"${nextActivity.title}" (starts ${nextActivity.startTime || nextActivity.time || "?"} at ${nextActivity.address || nextActivity.title})` : "the end of the day"}
-- Pick a realistic start time that fits the slot${prevActivity || nextActivity ? "" : ` (around ${fallbackTime})`}
+        const timeRule = preferredTime
+            ? `- The traveler wants it at ${preferredTime}; use that as startTime unless the venue is closed then, in which case use the nearest opening time`
+            : `- Pick a realistic start time that fits the day and the venue's opening hours${prevActivity || nextActivity ? ` (a good slot is after "${prevActivity?.title || "the start of the day"}" and before "${nextActivity?.title || "the end of the day"}")` : ` (around ${fallbackTime})`}`;
+
+        const prompt = `You are a travel itinerary planner for ${trip.destination}.
+${requestBlock}
+
+This day's current plan:
+${dayPlan || "(empty)"}
+
+Rules:
+${timeRule}
 - Must be in ${trip.destination}
-- Include realistic travelFromPrevious walking time from the previous location${prevActivity ? "" : " (use null — it will be the first activity)"}
+- Include realistic travelFromPrevious walking time from the previous activity in the day's timeline (use null if it will be the first activity)
 ${lang !== "en" ? `- Write ALL text content (title, description, tips, address) in ${langName}` : ""}
 
-Return a single JSON object (NOT an array):
+Return a single JSON object (NOT an array, NOT wrapped in another key):
 {
   "time": "${fallbackTime}",
   "startTime": "${fallbackTime}",
   "endTime": "",
-  "title": "New activity name",
+  "title": "Name of the place",
   "description": "Brief description",
   "address": "Full address, ${trip.destination}",
   "type": "attraction|museum|restaurant|tour|free|local-experience",
@@ -4253,7 +4281,7 @@ Return a single JSON object (NOT an array):
   "duration": "1 hour",
   "tips": "Useful tip",
   "isLocalExperience": false,
-  "travelFromPrevious": ${prevActivity ? '{"walkingMinutes": 10, "distanceKm": 0.8, "description": "Short walk"}' : "null"},
+  "travelFromPrevious": {"walkingMinutes": 10, "distanceKm": 0.8, "description": "Short walk"},
   "culinaryMoment": null,
   "culinaryType": null,
   "whyThisFits": null,
@@ -4265,22 +4293,49 @@ Return a single JSON object (NOT an array):
         if (!process.env.OPENAI_API_KEY) throw new Error("OpenAI API key not configured");
 
         const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-        const completion = await openai.chat.completions.create({
-            messages: [
-                { role: "system", content: `You are a travel planner. Return only valid JSON for a single activity.${lang !== "en" ? ` Write all content in ${langName}.` : ""}` },
-                { role: "user", content: prompt },
-            ],
-            model: "gpt-5.6-terra",
-            response_format: { type: "json_object" },
-            max_completion_tokens: 1000,
-            // All data for this single activity is supplied in the prompt; skip
-            // hidden reasoning for max speed since the user is waiting on the insert.
-            reasoning_effort: "none",
-        } as any);
+        const messages = [
+            { role: "system" as const, content: `You are a travel planner who knows real venues. Return only valid JSON for a single activity.${lang !== "en" ? ` Write all content in ${langName}.` : ""}` },
+            { role: "user" as const, content: prompt },
+        ];
 
-        const content = completion.choices[0]?.message?.content;
-        if (!content) throw new Error("No response from AI");
-        const newActivity = JSON.parse(content);
+        // Primary model first; if it errors or returns something unusable, retry
+        // once on a stable model so the user's add never silently dies.
+        const attempts: any[] = [
+            // All data is in the prompt; skip hidden reasoning since the user is waiting.
+            { model: "gpt-5.6-terra", reasoning_effort: "none", max_completion_tokens: 1000 },
+            { model: "gpt-4.1", max_tokens: 1000 },
+        ];
+        let newActivity: any = null;
+        let lastError: unknown = null;
+        for (const opts of attempts) {
+            try {
+                const completion = await openai.chat.completions.create({
+                    messages,
+                    response_format: { type: "json_object" },
+                    ...opts,
+                } as any);
+                const content = (completion as any).choices[0]?.message?.content;
+                if (!content) throw new Error("No response from AI");
+                let parsed = JSON.parse(content);
+                // Models occasionally wrap the object ({"activity": {...}}) or return a list.
+                if (Array.isArray(parsed)) parsed = parsed[0];
+                if (parsed && !parsed.title && parsed.activity) parsed = parsed.activity;
+                if (!parsed || typeof parsed.title !== "string" || !parsed.title.trim()) {
+                    throw new Error("AI returned an activity without a title");
+                }
+                newActivity = parsed;
+                break;
+            } catch (err) {
+                lastError = err;
+                console.error(`addActivityAI: ${opts.model} failed`, err);
+            }
+        }
+        if (!newActivity) throw lastError instanceof Error ? lastError : new Error("AI add failed");
+
+        const start = newActivity.startTime || newActivity.time || fallbackTime;
+        newActivity.startTime = start;
+        newActivity.time = start;
+        if (!newActivity.type) newActivity.type = "attraction";
 
         // Insert, re-sequence the day by time, then run the guardrail.
         const updatedDays = [...days];

@@ -20,12 +20,20 @@
 
 import { v } from "convex/values";
 import { makeFunctionReference } from "convex/server";
-import { action, internalMutation, internalQuery, mutation, query } from "../_generated/server";
+import {
+  action,
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+  type ActionCtx,
+} from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
 import { iataToCountry } from "../lib/airportCountry";
+import { cityForIata } from "../lib/radarDestinations";
 import { getConnector } from "./connectors/factory";
 import { getRegistryEntry } from "./connectors/registry";
-import type { SupplierCredentials } from "./connectors/types";
+import type { SupplierConnector, SupplierCredentials } from "./connectors/types";
 import {
   pickBestDestination,
   type DestinationCandidate,
@@ -33,6 +41,7 @@ import {
 } from "./destinations";
 import { guard, invalid } from "./errors";
 import { buildBindings, type StoredConnectionRow } from "./runtime";
+import type { ConnectorBinding } from "./orchestrator";
 import {
   assertTenant,
   audit,
@@ -341,6 +350,198 @@ export interface ResolveOutcome {
  * down must not stop the others from mapping. Providers with no public feed are
  * reported as `no_feed` — they are mapped by hand, not by guesswork.
  */
+/** The city an airport code serves, when we know it; never the bare code. */
+function knownCity(iata: string): string | undefined {
+  const city = cityForIata(iata);
+  return city && city.toUpperCase() !== iata ? city : undefined;
+}
+
+/**
+ * What a destination is matched against: the airport, the city it serves and
+ * its country.
+ */
+export function destinationTarget(iata: string, cityName?: string): DestinationTarget {
+  return {
+    iata,
+    // Fall back to the city the airport serves. Providers do not always list an
+    // airport's own code (Viator files Rome under the city code, not FCO), and
+    // with no name either the matcher had nothing to go on — an agent who left
+    // "City" empty got "no matching destination" for Rome.
+    cityName: cityName?.trim() || knownCity(iata),
+    // The country is what stops us mapping Paris, Texas. `destinations.ts`
+    // halves the confidence of a candidate in the wrong country, but that rail
+    // only engages when the target HAS a country — so derive it from the
+    // airport rather than leaving the check inert.
+    countryCode: iataToCountry(iata),
+  };
+}
+
+type ResolveResult = ResolveOutcome["results"][number];
+
+/**
+ * Pull one supplier's locations feed, pick the destination, and persist the
+ * outcome. A confident match and a declined one are both cached; a feed that
+ * could not be read is not, so a transient outage never becomes permanent.
+ */
+async function resolveForConnector(
+  ctx: ActionCtx,
+  args: {
+    agencyId: Id<"agencies">;
+    iata: string;
+    target: DestinationTarget;
+    connector: SupplierConnector;
+    creds: SupplierCredentials;
+  },
+): Promise<ResolveResult> {
+  const { agencyId, iata, target, connector, creds } = args;
+  const connectorId = connector.id;
+
+  if (!connector.listDestinations) {
+    return {
+      connectorId,
+      status: "no_feed",
+      reason: "this supplier publishes no locations feed — pin the destination by hand",
+    };
+  }
+
+  try {
+    const candidates: DestinationCandidate[] = await connector.listDestinations(creds, target);
+    const picked = pickBestDestination(candidates, target);
+
+    if (picked.match) {
+      await ctx.runMutation(saveRef, {
+        agencyId,
+        connectorId,
+        iata,
+        status: "resolved",
+        destinationId: picked.match.candidate.id,
+        destinationName: picked.match.candidate.name,
+        countryCode: picked.match.candidate.countryCode,
+        source: "feed",
+        confidence: picked.match.confidence,
+        reason: picked.match.reason,
+        alternatives: picked.alternatives.map((a) => ({
+          id: a.candidate.id,
+          name: a.candidate.name,
+          countryCode: a.candidate.countryCode,
+          confidence: a.confidence,
+        })),
+      });
+      return {
+        connectorId,
+        status: "resolved",
+        destinationId: picked.match.candidate.id,
+        destinationName: picked.match.candidate.name,
+        confidence: picked.match.confidence,
+        reason: picked.match.reason,
+      };
+    }
+
+    // Cache the failure so the next search does not re-pull the feed,
+    // and keep the runners-up so a human can pin one in a click.
+    const reason =
+      picked.problem === "ambiguous"
+        ? "several destinations matched equally well — pin the right one"
+        : picked.problem === "below_threshold"
+          ? "no destination matched closely enough to be safe"
+          : "this supplier lists no matching destination";
+
+    await ctx.runMutation(saveRef, {
+      agencyId,
+      connectorId,
+      iata,
+      status: "unresolved",
+      destinationId: "",
+      source: "feed",
+      reason,
+      alternatives: picked.alternatives.map((a) => ({
+        id: a.candidate.id,
+        name: a.candidate.name,
+        countryCode: a.candidate.countryCode,
+        confidence: a.confidence,
+      })),
+    });
+    return { connectorId, status: "unresolved", reason };
+  } catch (e) {
+    // A feed being down is transient — do NOT cache it as unresolved,
+    // or a five-minute outage becomes a permanent missing supplier.
+    return {
+      connectorId,
+      status: "error",
+      reason: String((e as Error)?.message ?? "the locations feed could not be read").slice(
+        0,
+        300,
+      ),
+    };
+  }
+}
+
+/**
+ * A search can outlive a slow locations feed by this much before it gives up on
+ * resolving and searches without that supplier. The feed is not cached as a
+ * failure, so the next search tries again.
+ */
+const AUTO_RESOLVE_BUDGET_MS = 25_000;
+
+/**
+ * Resolve, during a search, the suppliers that have never been mapped to this
+ * destination. Without it a supplier connected after a destination was first
+ * mapped is silently skipped by every quote until someone visits Settings.
+ *
+ * Only connectors with NO mapping row are tried: a cached "unresolved" is a
+ * decision (no safe match), and re-pulling the feed on every search to reach
+ * it again would be wasted calls. Returns `destinationIds` with the new ids
+ * added.
+ */
+export async function autoResolveMissing(
+  ctx: ActionCtx,
+  args: {
+    agencyId: Id<"agencies">;
+    iata: string;
+    bindings: ConnectorBinding[];
+    /** Connectors that already have a mapping row for this IATA, either status. */
+    mappedConnectorIds: string[];
+    /** Kinds this search will run; a flight-only search needs no ids. */
+    kinds: string[];
+    destinationIds: Record<string, string>;
+  },
+): Promise<Record<string, string>> {
+  const mapped = new Set(args.mappedConnectorIds);
+  const wanted = args.bindings.filter(
+    ({ connector }) =>
+      !mapped.has(connector.id) &&
+      !!connector.listDestinations &&
+      connector.capabilities.kinds.some((k) => k !== "flight" && args.kinds.includes(k)),
+  );
+  if (!wanted.length) return args.destinationIds;
+
+  const target = destinationTarget(args.iata);
+  const out = { ...args.destinationIds };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((r) => {
+    timer = setTimeout(() => r(null), AUTO_RESOLVE_BUDGET_MS);
+  });
+
+  await Promise.all(
+    wanted.map(async ({ connector, creds }) => {
+      const result = await Promise.race([
+        resolveForConnector(ctx, {
+          agencyId: args.agencyId,
+          iata: args.iata,
+          target,
+          connector,
+          creds: creds as SupplierCredentials,
+        }),
+        timeout,
+      ]);
+      if (result?.status === "resolved" && result.destinationId) {
+        out[connector.id] = result.destinationId;
+      }
+    }),
+  ).finally(() => clearTimeout(timer));
+  return out;
+}
+
 export const resolve = action({
   args: { token: v.string(), iata: v.string(), cityName: v.optional(v.string()), force: v.optional(v.boolean()) },
   handler: async (ctx, args): Promise<ResolveOutcome> =>
@@ -349,15 +550,7 @@ export const resolve = action({
       const context = await ctx.runMutation(beginResolveRef, { token: args.token, iata });
 
       const { bindings } = await buildBindings(vaultMasterKey(), context.connections);
-      // The country is what stops us mapping Paris, Texas. `destinations.ts`
-      // halves the confidence of a candidate in the wrong country, but that
-      // rail only engages when the target HAS a country — so derive it from the
-      // airport rather than leaving the check inert.
-      const target: DestinationTarget = {
-        iata,
-        cityName: args.cityName,
-        countryCode: iataToCountry(iata),
-      };
+      const target = destinationTarget(iata, args.cityName);
       const results: ResolveOutcome["results"] = [];
 
       await Promise.all(
@@ -374,89 +567,15 @@ export const resolve = action({
             return;
           }
 
-          if (!connector.listDestinations) {
-            results.push({
-              connectorId,
-              status: "no_feed",
-              reason: "this supplier publishes no locations feed — pin the destination by hand",
-            });
-            return;
-          }
-
-          try {
-            const candidates: DestinationCandidate[] = await connector.listDestinations(
-              creds as SupplierCredentials,
-              target,
-            );
-            const picked = pickBestDestination(candidates, target);
-
-            if (picked.match) {
-              await ctx.runMutation(saveRef, {
-                agencyId: context.agencyId,
-                connectorId,
-                iata,
-                status: "resolved",
-                destinationId: picked.match.candidate.id,
-                destinationName: picked.match.candidate.name,
-                countryCode: picked.match.candidate.countryCode,
-                source: "feed",
-                confidence: picked.match.confidence,
-                reason: picked.match.reason,
-                alternatives: picked.alternatives.map((a) => ({
-                  id: a.candidate.id,
-                  name: a.candidate.name,
-                  countryCode: a.candidate.countryCode,
-                  confidence: a.confidence,
-                })),
-              });
-              results.push({
-                connectorId,
-                status: "resolved",
-                destinationId: picked.match.candidate.id,
-                destinationName: picked.match.candidate.name,
-                confidence: picked.match.confidence,
-                reason: picked.match.reason,
-              });
-              return;
-            }
-
-            // Cache the failure so the next search does not re-pull the feed,
-            // and keep the runners-up so a human can pin one in a click.
-            const reason =
-              picked.problem === "ambiguous"
-                ? "several destinations matched equally well — pin the right one"
-                : picked.problem === "below_threshold"
-                  ? "no destination matched closely enough to be safe"
-                  : "this supplier lists no matching destination";
-
-            await ctx.runMutation(saveRef, {
+          results.push(
+            await resolveForConnector(ctx, {
               agencyId: context.agencyId,
-              connectorId,
               iata,
-              status: "unresolved",
-              destinationId: "",
-              source: "feed",
-              reason,
-              alternatives: picked.alternatives.map((a) => ({
-                id: a.candidate.id,
-                name: a.candidate.name,
-                countryCode: a.candidate.countryCode,
-                confidence: a.confidence,
-              })),
-            });
-            results.push({ connectorId, status: "unresolved", reason });
-          } catch (e) {
-            // A feed being down is transient — do NOT cache it as unresolved,
-            // or a five-minute outage becomes a permanent missing supplier.
-            results.push({
-              connectorId,
-              status: "error",
-              reason: String((e as Error)?.message ?? "the locations feed could not be read").slice(
-                0,
-                300,
-              ),
-            });
-          }
+              target,
+              connector,
+              creds: creds as SupplierCredentials,
+            }),
+          );
         }),
       );
 

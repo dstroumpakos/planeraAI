@@ -23,10 +23,26 @@ import { makeFunctionReference } from "convex/server";
 import { action, internalMutation, mutation, query } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
 import type { NormalizedOffer, TravelPackage } from "./model/types";
-import { buildQuote, revalidatedExpiry, type PricingRuleRow } from "./quote";
+import {
+  applyRefreshed,
+  buildQuote,
+  priceLines,
+  revalidatedExpiry,
+  type PricingRuleRow,
+} from "./quote";
+import { lineQuality, pickPool, POOL_CAP, type AlternativesPool } from "./quoteEdit";
+import { fulfilmentStage, toCustomerBooking, type Fulfilment, type TravellerDetails } from "./fulfilment";
 import { searchForQuote, revalidateSelected, type ConnectorRunResult } from "./orchestrator";
 import { bindingsById, buildBindings, type StoredConnectionRow } from "./runtime";
-import { scrubForStorage, selectedOffers, toAgentPackages, toCustomerPackages } from "./quoteView";
+import { autoResolveMissing } from "./destinationMap";
+import { isBookable } from "./connectors/factory";
+import {
+  scrubForStorage,
+  scrubOffer,
+  selectedOffers,
+  toAgentPackages,
+  toCustomerPackages,
+} from "./quoteView";
 import { AgencyError, guard, invalid, notFound } from "./errors";
 import { newToken, sha256Hex } from "./crypto";
 import {
@@ -104,6 +120,8 @@ interface SearchContext {
   searchHash: string;
   /** Resolved provider destination ids, keyed by connector id. */
   destinationIds: Record<string, string>;
+  /** Connectors with any mapping row for the destination, resolved or not. */
+  mappedConnectorIds: string[];
 }
 
 /**
@@ -208,9 +226,11 @@ export const beginSearch = internalMutation({
       // each needs its own id for this trip. Only ALREADY-RESOLVED mappings are
       // read here: resolving pulls a locations feed, which is a network call
       // and cannot happen inside a mutation. An unmapped supplier is skipped by
-      // the orchestrator with `no_destination_mapping`, and the agent resolves
-      // it from Settings — which is far better than silently dropping it.
+      // the orchestrator with `no_destination_mapping`. A supplier with no row
+      // at all is resolved by the search action before it runs (see
+      // `autoResolveMissing`), so it is reported here as unmapped.
       const destinationIds: Record<string, string> = {};
+      const mappedConnectorIds: string[] = [];
       for (const c of connections) {
         const mapping = await ctx.db
           .query("agencyDestinationMappings")
@@ -221,6 +241,7 @@ export const beginSearch = internalMutation({
               .eq("iata", destinationIata),
           )
           .unique();
+        if (mapping) mappedConnectorIds.push(c.connectorId);
         if (mapping?.status === "resolved" && mapping.destinationId) {
           destinationIds[c.connectorId] = mapping.destinationId;
         }
@@ -235,6 +256,7 @@ export const beginSearch = internalMutation({
         ttlMs: agency.quoteTtlMs ?? DEFAULT_QUOTE_TTL_MS,
         searchHash: await sha256Hex(JSON.stringify(params)),
         destinationIds,
+        mappedConnectorIds,
       };
     });
   },
@@ -251,6 +273,8 @@ export const saveQuote = internalMutation({
     diagnostics: v.any(),
     clientName: v.optional(v.string()),
     clientReference: v.optional(v.string()),
+    requestText: v.optional(v.string()),
+    alternatives: v.optional(v.any()),
     searchHash: v.string(),
     searchedAt: v.float64(),
     expiresAt: v.float64(),
@@ -267,6 +291,8 @@ export const saveQuote = internalMutation({
         diagnostics: args.diagnostics,
         clientName: args.clientName,
         clientReference: args.clientReference,
+        requestText: args.requestText,
+        alternatives: args.alternatives,
         searchHash: args.searchHash,
         status: "draft",
         searchedAt: args.searchedAt,
@@ -299,7 +325,7 @@ const notifyQuoteEventRef = makeFunctionReference<
   {
     agencyId: Id<"agencies">;
     quoteId: string;
-    event: "viewed" | "accepted";
+    event: "viewed" | "accepted" | "travellers";
     tier?: string;
     note?: string;
   },
@@ -345,6 +371,8 @@ const saveQuoteRef = makeFunctionReference<
     diagnostics: unknown;
     clientName?: string;
     clientReference?: string;
+    requestText?: string;
+    alternatives?: unknown;
     searchHash: string;
     searchedAt: number;
     expiresAt: number;
@@ -383,6 +411,8 @@ export const search = action({
     kinds: v.optional(v.array(searchKind)),
     clientName: v.optional(v.string()),
     clientReference: v.optional(v.string()),
+    /** The client's request as received — kept on the quote for the agent. */
+    requestText: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<SearchResult> =>
     guard("quotes.search", async () => {
@@ -405,6 +435,14 @@ export const search = action({
 
       const { bindings, skipped } = await buildBindings(vaultMasterKey(), context.connections);
       const p = context.params;
+      const destinationIds = await autoResolveMissing(ctx, {
+        agencyId: context.agencyId,
+        iata: p.destinationIata,
+        bindings,
+        mappedConnectorIds: context.mappedConnectorIds,
+        kinds: p.kinds,
+        destinationIds: context.destinationIds,
+      });
 
       const found = bindings.length
         ? await searchForQuote(bindings, {
@@ -419,7 +457,7 @@ export const search = action({
             sellCurrency: p.currency,
           },
           undefined,
-          context.destinationIds,
+          destinationIds,
           p.kinds)
         : { flights: [], hotels: [], activities: [], transfers: [], diagnostics: [] };
 
@@ -478,6 +516,25 @@ export const search = action({
       }
 
       const packages = scrubForStorage(built.packages);
+
+      // Everything else that came back, priced by the same rules, so the agent
+      // can swap a line without paying for another supplier round trip.
+      const pricing = {
+        travelers: p.travelers,
+        currency: p.currency,
+        destinationIata: p.destinationIata,
+      };
+      const pool = (offers: NormalizedOffer[], kind: keyof typeof POOL_CAP) =>
+        pickPool(priceLines(offers, context.rules, pricing), POOL_CAP[kind], lineQuality).map(
+          (l) => ({ ...l, offer: scrubOffer(l.offer, true) }),
+        );
+      const alternatives: AlternativesPool = {
+        flight: pool(flights, "flight"),
+        hotel: pool(found.hotels, "hotel"),
+        activity: pool(found.activities, "activity"),
+        transfer: pool(found.transfers, "transfer"),
+      };
+
       await ctx.runMutation(saveQuoteRef, {
         agencyId: context.agencyId,
         createdByUserId: context.userId,
@@ -488,6 +545,8 @@ export const search = action({
         diagnostics,
         clientName: p.clientName,
         clientReference: p.clientReference,
+        requestText: args.requestText?.trim().slice(0, 8000) || undefined,
+        alternatives,
         searchHash: context.searchHash,
         searchedAt,
         expiresAt: built.expiresAt,
@@ -549,6 +608,7 @@ export const list = query({
           lastRevalidatedAt: r.lastRevalidatedAt ?? null,
           sentAt: r.sentAt ?? null,
           acceptedAt: r.acceptedAt ?? null,
+          fulfilmentStage: r.fulfilment ? fulfilmentStage(r.fulfilment as Fulfilment) : null,
           tiers: packages.map((p) => ({
             tier: p.tier,
             total: p.totals?.internal?.customerPrice ?? null,
@@ -598,6 +658,17 @@ export const get = query({
         customerLinkActive:
           !!row!.customerLinkTokenHash &&
           (row!.customerLinkExpiresAt ?? 0) > Date.now(),
+        requestText: row!.requestText ?? null,
+        alternatives: (row!.alternatives ?? {}) as AlternativesPool,
+        // Personal data, on the agent's authenticated read only.
+        travellers: (row!.travellers ?? null) as TravellerDetails | null,
+        fulfilment: (row!.fulfilment ?? null) as Fulfilment | null,
+        fulfilmentStage: row!.fulfilment ? fulfilmentStage(row!.fulfilment as Fulfilment) : null,
+        // Which suppliers on this quote Planera can book directly; the rest are
+        // booked in the agency's own system and recorded by hand.
+        bookableConnectors: [
+          ...new Set(packages.flatMap((p) => p.lines.map((l) => l.offer.connectorId))),
+        ].filter(isBookable),
       };
     }),
 });
@@ -690,8 +761,34 @@ export const recordRevalidation = internalMutation({
       // its old expiry and stays expired.
       const agency = await ctx.db.get(args.agencyId);
 
+      // Apply what the suppliers said to the CURRENT row (not a snapshot the
+      // action carried), so an edit made while the suppliers were being asked
+      // is not overwritten.
+      const { refreshed = [], ...stored } = (args.outcome ?? {}) as {
+        refreshed?: Parameters<typeof applyRefreshed>[1];
+      } & Record<string, unknown>;
+      const rules = (
+        await ctx.db
+          .query("agencyPricingRules")
+          .withIndex("by_agency", (q) => q.eq("agencyId", args.agencyId))
+          .collect()
+      ).map((r) => ({
+        scope: r.scope,
+        selector: r.selector,
+        rule: r.rule,
+        active: r.active,
+      })) as PricingRuleRow[];
+      const sp = (row.searchParams ?? {}) as { travelers?: number; destinationIata?: string };
+      const packages = applyRefreshed((row.packages ?? []) as TravelPackage[], refreshed, {
+        rules,
+        travelers: sp.travelers ?? 1,
+        currency: row.currency,
+        destinationIata: sp.destinationIata,
+      });
+
       await ctx.db.patch(args.quoteRowId, {
-        revalidation: args.outcome,
+        packages,
+        revalidation: stored,
         lastRevalidatedAt: now,
         status,
         expiresAt: revalidatedExpiry({
@@ -762,7 +859,10 @@ export const revalidate = action({
         outcome,
         stillValid: outcome.quoteStillValid,
       });
-      return outcome;
+      // The fresh handles went onto the quote; the client of this call only
+      // needs the verdict.
+      const { refreshed: _refreshed, ...visible } = outcome;
+      return visible;
     }),
 });
 
@@ -875,7 +975,13 @@ export const markAccepted = mutation({
       }
 
       const now = Date.now();
-      await ctx.db.patch(row!._id, { status: "accepted", acceptedAt: now, updatedAt: now });
+      // The tier is the whole point: the booking record is opened for it.
+      await ctx.db.patch(row!._id, {
+        status: "accepted",
+        acceptedAt: now,
+        acceptedTier: args.tier,
+        updatedAt: now,
+      });
       await audit(ctx, {
         agencyId: access.agencyId,
         actorUserId: access.userId,
@@ -942,10 +1048,20 @@ export const resolveCustomerLink = internalMutation({
         currency: row.currency,
         status: row.status,
         searchParams: row.searchParams,
-        packages: toCustomerPackages((row.packages ?? []) as TravelPackage[]),
+        packages: toCustomerPackages(
+          ((row.packages ?? []) as TravelPackage[]).filter((p) => !p.hidden),
+        ),
         aiCopy: row.aiCopy ?? null,
         expiresAt: row.expiresAt,
         expired: Date.now() >= row.expiresAt,
+        acceptedTier: row.acceptedTier ?? null,
+        // Never the travellers themselves — a link can be forwarded — only
+        // whether they have been sent, so the page knows which step to show.
+        booking: toCustomerBooking(
+          row.fulfilment as Fulfilment | undefined,
+          !!row.travellers,
+          (row.searchParams as { travelers?: number })?.travelers ?? 1,
+        ),
         agency: {
           name: agency.branding?.legalName ?? agency.name,
           primaryColor: agency.branding?.primaryColor ?? null,
@@ -1013,7 +1129,9 @@ export const acceptFromLink = mutation({
 
       const tier = String(args.tier);
       const packages = (row.packages ?? []) as TravelPackage[];
-      if (!packages.some((p) => p.tier === tier)) throw invalid("unknown package");
+      if (!packages.some((p) => p.tier === tier && !p.hidden && p.lines.length > 0)) {
+        throw invalid("unknown package");
+      }
 
       // Already accepted: answer success rather than an error. A traveller who
       // double-taps has done nothing wrong, and the agent already has the

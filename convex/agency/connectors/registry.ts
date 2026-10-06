@@ -144,7 +144,7 @@ export const CONNECTOR_REGISTRY: RegistryEntry[] = [
     id: "duffel",
     displayName: "Duffel",
     category: "air",
-    kinds: ["flight"],
+    kinds: ["flight", "hotel"],
     credentialScheme: "api_key",
     credentialFields: apiKeyOnly("Starts duffel_test_ or duffel_live_"),
     enabled: true,
@@ -154,7 +154,7 @@ export const CONNECTOR_REGISTRY: RegistryEntry[] = [
     requiresCertification: false,
     docsUrl: "https://duffel.com/docs/api/overview/making-requests",
     notes:
-      "Bearer token; self-serve test tokens (verified). Server-side only. FULLY WIRED: search + revalidate. Booking intentionally off in MVP.",
+      "Bearer token; self-serve test tokens (verified). Server-side only. Flights: search + revalidate + orders, verified. Hotels via Duffel Stays on the same token: search + quote + booking built from Duffel's docs, not yet run live — and Stays must be enabled for the account by Duffel (request access).",
   },
 
   // ── Hotels / ground ──
@@ -295,12 +295,12 @@ export const CONNECTOR_REGISTRY: RegistryEntry[] = [
     credentialFields: apiKeyOnly("Your Viator partner API key"),
     enabled: true,
     status: "sandbox",
-    capabilities: { search: true, healthCheck: true },
+    capabilities: { search: true, revalidate: true, healthCheck: true },
     searchVerified: false,
     requiresCertification: false,
     docsUrl: "https://docs.viator.com/partner-api/technical/",
     notes:
-      "exp-api-key header, pinned to Accept: application/json;version=2.0 — the response schema is version-dependent. Destination ids resolve through destinationMap.ts. SEARCH IS BUILT from the public partner docs (products/search) and is UNVERIFIED against a live account. Prices are per person and commissionable, so the offer is multiplied by traveller count and markup is forbidden.",
+      "exp-api-key header, pinned to Accept: application/json;version=2.0 — the response schema is version-dependent. Destination ids resolve through destinationMap.ts. Request/response shapes CHECKED against Viator's OpenAPI spec (Partner API 2.0, 2026-09-30) — which caught `iataCodes` being an array — but still never run against a live account. Search: products/search, per person × travellers; a merchant account's partnerNetFromPrice is bought NET (markup allowed), otherwise the retail price is commissionable (markup forbidden). Re-pricing: availability/check for one date inside the trip. Booking is NOT through Planera (it needs per-product booking questions): the agency books in Viator and records the reference.",
   },
   {
     id: "tiqets",
@@ -314,9 +314,9 @@ export const CONNECTOR_REGISTRY: RegistryEntry[] = [
     capabilities: { search: true, healthCheck: true },
     searchVerified: false,
     requiresCertification: false,
-    docsUrl: "https://developers.tiqets.com",
+    docsUrl: "https://developers.tiqets.dev",
     notes:
-      "Authorization: Token <key>. City ids resolve through destinationMap.ts. SEARCH IS BUILT from the public distributor docs (/v2/products) and is UNVERIFIED against a live account; the price mapper accepts all three shapes Tiqets has used. Per-ticket and commissionable, so it is multiplied by traveller count and markup is forbidden.",
+      "Authorization: Token <key>. City ids resolve through destinationMap.ts. SEARCH is CHECKED against developers.tiqets.dev (2026-10-01: city_id filter, sale_status available|unavailable, test host api.api-tiqt-test.steq.it) but still UNVERIFIED against a live account; the price mapper accepts all three shapes Tiqets has used. Per-ticket and commissionable, so it is multiplied by traveller count and markup is forbidden.",
   },
 
   // ── Test doubles ──

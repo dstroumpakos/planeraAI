@@ -33,7 +33,13 @@ export const zeroMoney = (currency: CurrencyCode): Money => money(0, currency);
 // Offer primitives
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type OfferKind = "flight" | "hotel" | "activity" | "transfer";
+export type OfferKind = "flight" | "hotel" | "activity" | "transfer" | "service";
+
+/** Kinds a supplier can be SEARCHED for. "service" only ever comes from an agent's hand. */
+export type SearchableOfferKind = Exclude<OfferKind, "service">;
+
+/** connectorId carried by every line an agent typed in rather than searched. */
+export const MANUAL_CONNECTOR_ID = "manual";
 
 /**
  * How the supplier price is expressed. Drives whether markup / commission are
@@ -168,11 +174,39 @@ export interface NormalizedTransferOffer extends OfferBase {
   toLabel: string;
 }
 
+/**
+ * A line the AGENT added by hand: a hotel from the agency's own contract, a
+ * ferry, insurance, a car, a guide. Tailor-made agencies sell many things no
+ * connected API returns, and a quote that could only hold API results would
+ * send them back to Word for the rest.
+ *
+ * Its price is whatever the agent typed. It is never revalidated against a
+ * supplier (there is none to ask) — the agent vouches for it, and the UI says so.
+ */
+export interface NormalizedServiceOffer extends OfferBase {
+  kind: "service";
+  title: string;
+  description?: string;
+  category:
+    | "flight"
+    | "hotel"
+    | "transfer"
+    | "activity"
+    | "ferry"
+    | "car"
+    | "insurance"
+    | "guide"
+    | "other";
+  /** Who the agency buys it from, e.g. "Anek Lines", "own contract". Agent-only. */
+  supplierName?: string;
+}
+
 export type NormalizedOffer =
   | NormalizedFlightOffer
   | NormalizedHotelOffer
   | NormalizedActivityOffer
-  | NormalizedTransferOffer;
+  | NormalizedTransferOffer
+  | NormalizedServiceOffer;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Packages & quotes
@@ -204,6 +238,15 @@ export interface PackageLine {
   kind: OfferKind;
   offer: NormalizedOffer;
   financials: InternalFinancials;
+  /**
+   * True once the agent typed this line's customer price by hand. A later
+   * re-pricing then keeps the price the client was shown and lets the margin
+   * absorb the supplier's move, instead of silently changing a number the
+   * agent chose.
+   */
+  priceOverridden?: boolean;
+  /** Shown to the client under the line, e.g. "Sea-view room on request". */
+  clientNote?: string;
 }
 
 export interface TravelPackage {
@@ -218,6 +261,16 @@ export interface TravelPackage {
   };
   /** 0..1 composite score that won this offer set for this tier. */
   score: number;
+  /**
+   * The agent's own name for this option ("Πρόταση Α", "Με Σαντορίνη"). A
+   * tailor-made proposal is often ONE option, or two that differ by island,
+   * not a cheap/middle/expensive ladder — so the tier label has to be optional.
+   */
+  customTitle?: string;
+  /** Hidden from the client. The agent keeps it to switch back later. */
+  hidden?: boolean;
+  /** True once the agent changed any line — the engine's score no longer applies. */
+  edited?: boolean;
 }
 
 export interface Quote {

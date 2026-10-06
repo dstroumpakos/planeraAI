@@ -11,12 +11,44 @@ import type {
 } from "../model/types";
 import { money } from "../model/types";
 import type {
+  BookingRequest,
+  BookingResult,
   HealthStatus,
   RevalidateResult,
   SearchQuery,
   SupplierConnector,
   SupplierCredentials,
 } from "./types";
+
+/** A deterministic six-letter reference, so a demo shows something PNR-shaped. */
+function mockReference(seed: string): string {
+  let h = 0;
+  for (const ch of seed) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  const A = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  let out = "";
+  for (let i = 0; i < 6; i++) {
+    out += A[h % A.length];
+    h = Math.floor(h / A.length) + 7 * (i + 1);
+  }
+  return out;
+}
+
+async function mockBook(req: BookingRequest, kind: "flight" | "hotel"): Promise<BookingResult> {
+  const ref = mockReference(`${req.revalidationToken}:${req.clientReference}`);
+  return kind === "flight"
+    ? {
+        status: "ticketed",
+        supplierReference: ref,
+        supplierBookingId: `mock-ord-${ref}`,
+        documents: req.passengers.map((_, i) => `999-${String(1234567890 + i)}`),
+        message: "mock order (sandbox — nothing was really booked)",
+      }
+    : {
+        status: "confirmed",
+        supplierReference: `MH-${ref}`,
+        message: "mock booking (sandbox — nothing was really booked)",
+      };
+}
 
 function isoAt(dateYMD: string, hour: number): string {
   return `${dateYMD}T${String(hour).padStart(2, "0")}:00:00`;
@@ -27,7 +59,7 @@ export const mockAirConnector: SupplierConnector = {
   displayName: "Mock Air (sandbox)",
   capabilities: {
     kinds: ["flight"],
-    supports: { search: true, retrieveOffer: false, revalidate: true, createBooking: false, retrieveBooking: false, cancelBooking: false, getCancellationTerms: false, healthCheck: true },
+    supports: { search: true, retrieveOffer: false, revalidate: true, createBooking: true, retrieveBooking: false, cancelBooking: false, getCancellationTerms: false, healthCheck: true },
   },
   async healthCheck(creds: SupplierCredentials): Promise<HealthStatus> {
     return { healthy: true, environment: creds.environment, latencyMs: 12 };
@@ -65,6 +97,7 @@ export const mockAirConnector: SupplierConnector = {
   async revalidate(_creds, token: string): Promise<RevalidateResult> {
     return { stillAvailable: true, message: `mock revalidate ok for ${token}`, priceChanged: false };
   },
+  createBooking: (_creds, req) => mockBook(req, "flight"),
 };
 
 export const mockHotelConnector: SupplierConnector = {
@@ -72,7 +105,7 @@ export const mockHotelConnector: SupplierConnector = {
   displayName: "Mock Hotel (sandbox)",
   capabilities: {
     kinds: ["hotel"],
-    supports: { search: true, retrieveOffer: false, revalidate: true, createBooking: false, retrieveBooking: false, cancelBooking: false, getCancellationTerms: false, healthCheck: true },
+    supports: { search: true, retrieveOffer: false, revalidate: true, createBooking: true, retrieveBooking: false, cancelBooking: false, getCancellationTerms: false, healthCheck: true },
   },
   async healthCheck(creds: SupplierCredentials): Promise<HealthStatus> {
     return { healthy: true, environment: creds.environment, latencyMs: 15 };
@@ -109,4 +142,5 @@ export const mockHotelConnector: SupplierConnector = {
   async revalidate(_creds, token: string): Promise<RevalidateResult> {
     return { stillAvailable: true, message: `mock revalidate ok for ${token}`, priceChanged: false };
   },
+  createBooking: (_creds, req) => mockBook(req, "hotel"),
 };

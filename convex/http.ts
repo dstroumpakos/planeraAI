@@ -633,6 +633,10 @@ http.route({
       imageUrls: Array.isArray(p?.imageUrls)
         ? p.imageUrls.filter((u: any) => typeof u === "string")
         : undefined,
+      // Home-airport IATA codes, e.g. ["ATH","SKG"]; ["*"] = everyone.
+      markets: Array.isArray(p?.markets)
+        ? p.markets.filter((m: any) => typeof m === "string")
+        : undefined,
     }));
 
     const result = await ctx.runMutation(internal.partnerProducts.ingestForAccount, {

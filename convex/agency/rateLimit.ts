@@ -62,6 +62,16 @@ export const LIMITS = {
   /** Accepting a quote from a customer link. */
   acceptQuote: { limit: 20, windowMs: 60 * 60_000 },
   mfa: { limit: 10, windowMs: 15 * 60_000 },
+  /** Hand edits to a quote — generous, an agent tweaking a proposal clicks a lot. */
+  quoteEdit: { limit: 600, windowMs: 60 * 60_000 },
+  /** Supplementary searches that feed a quote's alternatives. */
+  addOnSearch: { limit: 60, windowMs: 60 * 60_000 },
+  /** Creating a real order with a supplier. Low: each one can spend money. */
+  book: { limit: 30, windowMs: 60 * 60_000 },
+  /** A traveller submitting passenger details from the customer link. */
+  travellers: { limit: 10, windowMs: 60 * 60_000 },
+  /** AI reading of a client's request into a search. */
+  parseRequest: { limit: 60, windowMs: 60 * 60_000 },
 } as const satisfies Record<string, RateLimitSpec>;
 
 export type LimitName = keyof typeof LIMITS;

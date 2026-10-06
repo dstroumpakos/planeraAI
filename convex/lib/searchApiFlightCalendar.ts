@@ -151,6 +151,11 @@ export interface CalendarOptions {
   includeReturns?: boolean;
   /** Cap on returns kept per departure when includeReturns is set. */
   maxReturnsPerDate?: number;
+  /**
+   * Windows fetched at once (default 1, i.e. sequential). A window is ~5–30s,
+   * so a multi-month scan needs this to fit inside an action's time budget.
+   */
+  windowConcurrency?: number;
 
   /**
    * Passenger + fare filters, forwarded verbatim to the engine.
@@ -172,6 +177,9 @@ export interface CalendarOptions {
 // Each window spans this many days; derived from the base window so the two
 // constants above stay the single source of truth.
 const WINDOW_LEN_DAYS = OUT_END - OUT_START + 1; // 14
+
+/** Most windows one scan may stack: 13 × 14 days ≈ six months of departures. */
+export const MAX_CALENDAR_WINDOWS = 13;
 
 type DepartureInfo = {
   price: number;
@@ -291,7 +299,7 @@ export async function fetchFlightCalendar(
     : rawArrival;
   const currency = (q.currency || "EUR").toUpperCase();
 
-  const windows = Math.max(1, Math.min(opts?.windows ?? 1, 6));
+  const windows = Math.max(1, Math.min(opts?.windows ?? 1, MAX_CALENDAR_WINDOWS));
   const maxDates = opts?.maxDates ?? MAX_DATES;
   const spacing = opts?.spacingDays ?? MIN_SPACING_DAYS;
   // Never look at departures sooner than the base lead time.
@@ -304,21 +312,29 @@ export async function fetchFlightCalendar(
       : RET_START - OUT_START;
   const baseRet = baseOut + gap;
 
+  // Windows are independent and each merges into `perDeparture` synchronously
+  // after its fetch resolves, so running a few at once is safe.
   const perDeparture = new Map<string, DepartureInfo>();
-  for (let i = 0; i < windows; i++) {
-    const shift = i * WINDOW_LEN_DAYS;
-    await fillWindow(
-      key,
-      departureId,
-      arrivalId,
-      currency,
-      baseOut + shift,
-      baseRet + shift,
-      perDeparture,
-      opts?.includeReturns,
-      opts
-    );
-  }
+  const concurrency = Math.max(1, Math.min(opts?.windowConcurrency ?? 1, windows));
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: concurrency }, async () => {
+      while (next < windows) {
+        const shift = next++ * WINDOW_LEN_DAYS;
+        await fillWindow(
+          key,
+          departureId,
+          arrivalId,
+          currency,
+          baseOut + shift,
+          baseRet + shift,
+          perDeparture,
+          opts?.includeReturns,
+          opts
+        );
+      }
+    })
+  );
 
   if (perDeparture.size === 0) return null;
 

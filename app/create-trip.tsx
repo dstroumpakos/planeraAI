@@ -17,6 +17,7 @@ import { TripGuideTooltip, GuideStep } from "@/components/FirstTripGuide";
 import { CITY_TRANSLATIONS, COUNTRY_TRANSLATIONS, normalizeDestinationToEnglish } from "@/lib/destinationTranslations";
 import { canonicalHomeAirport, resolveHomeIata, airportCityName } from "@/lib/homeAirport";
 import { resolveAirport } from "@/lib/destinationAirports";
+import { isSameOriginDestination, SAME_ROUTE_ERROR } from "@/lib/sameRoute";
 import { countTripDays, maxEndDate, MAX_TRIP_DAYS } from "@/lib/tripDays";
 
 import logoImage from "@/assets/images/appicon-1024x1024-01-1vb1vx.png";
@@ -1383,6 +1384,12 @@ export default function CreateTripScreen() {
             return;
         }
 
+        // Origin and destination must be different places (also enforced server-side).
+        if (isSameOriginDestination(formData.origin, formData.destination)) {
+            Alert.alert(t('common.error'), t('createTrip.sameOriginDestination'));
+            return;
+        }
+
         // Check AI data consent before proceeding (Apple guideline 5.1.1/5.1.2)
         if (!options?.skipConsentCheck && userSettings && userSettings.aiDataConsent !== true) {
             setShowAiConsentModal(true);
@@ -1482,10 +1489,14 @@ export default function CreateTripScreen() {
                                cleanMessage.toLowerCase().includes("premium") ||
                                cleanMessage.toLowerCase().includes("purchase");
             
+            const isSameRoute = cleanMessage.includes(SAME_ROUTE_ERROR);
+
             setIsCreditsError(isNoCredits);
             setErrorMessage(isNoCredits 
                 ? t('createTrip.usedAllCredits')
-                : cleanMessage
+                : isSameRoute
+                    ? t('createTrip.sameOriginDestination')
+                    : cleanMessage
             );
             setLoading(false);
             setShowLoadingScreen(false);

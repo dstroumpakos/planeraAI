@@ -26,7 +26,10 @@ export function scrubOffer<T extends NormalizedOffer>(offer: T, keepToken: boole
   const { raw: _raw, ...rest } = offer as NormalizedOffer & { raw?: unknown };
   const scrubbed = rest as T;
   if (!keepToken) {
-    return { ...scrubbed, revalidationToken: undefined };
+    // Outward-facing: also drop who the agency buys a hand-added service from.
+    // That is the agency's sourcing, not the client's business.
+    const { supplierName: _supplier, ...outward } = scrubbed as T & { supplierName?: string };
+    return { ...(outward as T), revalidationToken: undefined };
   }
   return scrubbed;
 }
@@ -50,10 +53,12 @@ export interface CustomerLine {
   offer: NormalizedOffer;
   /** The only money a traveller sees for this line. */
   price: Money;
+  clientNote?: string;
 }
 
 export interface CustomerPackage {
   tier: PackageTier;
+  customTitle?: string;
   lines: CustomerLine[];
   foodBudget?: TravelPackage["foodBudget"];
   total: Money;
@@ -72,7 +77,9 @@ export function toCustomerPackages(packages: TravelPackage[]): CustomerPackage[]
       kind: l.kind,
       offer: scrubOffer(l.offer, false),
       price: l.financials.customerPrice,
+      clientNote: l.clientNote,
     })),
+    customTitle: p.customTitle,
     foodBudget: p.foodBudget,
     total: p.totals.internal.customerPrice,
     payAtProperty: p.totals.payAtProperty,

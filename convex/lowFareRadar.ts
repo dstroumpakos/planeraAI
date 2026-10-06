@@ -3,6 +3,13 @@ import { authQuery } from "./functions";
 import { internal as _internal } from "./_generated/api";
 import { ConvexError, v } from "convex/values";
 import { airportCityName, resolveHomeIata } from "../lib/homeAirport";
+import { dealBaggageValidator } from "./lib/baggage";
+import {
+  aggregateSavedDestinations,
+  buildDemandRoutes,
+  collectSavedDestinations,
+  savedDestinationAudience,
+} from "./lib/savedDestinations";
 
 // Type assertion: internal references won't exist until `npx convex dev` regenerates types
 const internal = _internal as any;
@@ -118,6 +125,7 @@ export const listActivePublic = query({
         // Baggage
         cabinBaggage: d.cabinBaggage,
         checkedBaggage: d.checkedBaggage,
+        baggage: d.baggage,
         // Presentation
         isRecommended: d.isRecommended,
         dealTag: d.dealTag,
@@ -795,26 +803,41 @@ export const getHomeAirports = query({
   },
 });
 
-/** Get aggregated wishlist destinations from all users (admin only) */
+/**
+ * Aggregated saved destinations across all users — wishlist entries and
+ * watched destinations merged, counted by distinct user (admin only).
+ */
 export const getWishlistStats = query({
   args: {
     adminKey: v.string(),
   },
   handler: async (ctx, args) => {
     validateAdminKey(args.adminKey);
-    const allWishlist = await ctx.db.query("wishlist").collect();
+    return aggregateSavedDestinations(await collectSavedDestinations(ctx));
+  },
+});
 
-    const destMap: Record<string, { destination: string; country: string | null; count: number }> = {};
-
-    for (const w of allWishlist) {
-      const key = w.destination.toLowerCase();
-      if (!destMap[key]) {
-        destMap[key] = { destination: w.destination, country: (w as any).country || null, count: 0 };
-      }
-      destMap[key].count++;
-    }
-
-    return Object.values(destMap).sort((a, b) => b.count - a.count);
+/**
+ * Saved-destination demand as concrete ROUTES: (home airport → saved city),
+ * one row per distinct pair, counting the users behind it. Admin only.
+ *
+ * Both kinds of save feed this — wishlist entries and watched destinations —
+ * because a user who tapped "watch Paris" in onboarding wants the same search
+ * run as one who wishlisted it. See `buildDemandRoutes` for the pairing rules.
+ */
+export const getWishlistRoutes = query({
+  args: { adminKey: v.string() },
+  handler: async (ctx, args) => {
+    validateAdminKey(args.adminKey);
+    const [saved, settings, deals] = await Promise.all([
+      collectSavedDestinations(ctx),
+      ctx.db.query("userSettings").collect(),
+      ctx.db
+        .query("lowFareRadar")
+        .withIndex("by_active", (q) => q.eq("active", true))
+        .collect(),
+    ]);
+    return buildDemandRoutes(saved, settings, deals, Date.now());
   },
 });
 
@@ -985,6 +1008,8 @@ export const applyPriceRefresh = internalMutation({
     // Persisted on the deal so downstream surfaces (newsletter deal cards) can
     // show "X% below typical" without another API call. Omitted → left as-is.
     typicalPrice: v.optional(v.float64()),
+    // Parsed baggage allowance, sent only when backfilling a deal without one.
+    baggage: v.optional(dealBaggageValidator),
   },
   handler: async (ctx, args) => {
     const existing = await ctx.db.get(args.id);
@@ -1006,6 +1031,7 @@ export const applyPriceRefresh = internalMutation({
       args.typicalPrice != null && args.typicalPrice > 0
         ? { typicalPrice: Math.round(args.typicalPrice) }
         : {};
+    const baggagePatch = args.baggage ? { baggage: args.baggage } : {};
 
     // Preserve a multi-passenger total by scaling it proportionally with the
     // per-person price (deals store `price` as per-person, `totalPrice` as the
@@ -1044,6 +1070,7 @@ export const applyPriceRefresh = internalMutation({
         changeCount: ((existing as any).changeCount || 0) + 1,
         changeLog: [...prevLog, entry],
         ...typicalPatch,
+        ...baggagePatch,
       });
       return {
         changed: priceChanged,
@@ -1056,7 +1083,11 @@ export const applyPriceRefresh = internalMutation({
 
     if (!priceChanged) {
       // No change — record that we checked so admins can see it's fresh.
-      await ctx.db.patch(args.id, { updatedAt: Date.now(), ...typicalPatch });
+      await ctx.db.patch(args.id, {
+        updatedAt: Date.now(),
+        ...typicalPatch,
+        ...baggagePatch,
+      });
       return { changed: false as const, expired: false as const };
     }
 
@@ -1069,6 +1100,7 @@ export const applyPriceRefresh = internalMutation({
       changeCount: ((existing as any).changeCount || 0) + 1,
       changeLog: [...prevLog, entry],
       ...typicalPatch,
+      ...baggagePatch,
     });
 
     // Notify watchers on a genuine drop (same behavior as the admin update).
@@ -1308,7 +1340,8 @@ type BroadcastRecipient = {
   userId: string;
   language: string | undefined;
   homeAirport: string | null;
-  viaWishlist: boolean;
+  /** Reached because they saved this destination, not because of their home airport. */
+  viaSavedDestination: boolean;
   tokens: Array<{ tokenId: any; token: string }>;
 };
 
@@ -1320,7 +1353,12 @@ type BroadcastAudience = {
   deliverable: number;
   skipReasons: { noToken: number; optedOut: number; frequencyCapped: number };
   byAirport: Array<{ code: string; matched: number; deliverable: number }>;
+  /** Distinct users who wishlisted the destination. */
   wishlistMatched: number;
+  /** Distinct users who are watching it. */
+  watchMatched: number;
+  /** Distinct users reached by either — a user who did both counts once. */
+  savedMatched: number;
 };
 
 /**
@@ -1342,8 +1380,11 @@ async function resolveDealAudienceImpl(
   ctx: any,
   args: {
     origins: string[];
-    /** Also include users who wishlisted this destination, any home airport. */
-    wishlistDestination?: string;
+    /**
+     * Also include users who SAVED this destination — wishlisted it or are
+     * watching it — whatever their home airport.
+     */
+    savedDestination?: string;
     /** Skip users pushed a deal within this many days. 0 disables. */
     frequencyCapDays?: number;
     /** Deal alerts respect `dealAlerts`; onboarding nudges only respect the master toggle. */
@@ -1354,7 +1395,10 @@ async function resolveDealAudienceImpl(
   const allSettings = await ctx.db.query("userSettings").collect();
 
   // userId → candidate
-  const candidates = new Map<string, { settings: any; homeAirport: string | null; viaWishlist: boolean }>();
+  const candidates = new Map<
+    string,
+    { settings: any; homeAirport: string | null; viaSavedDestination: boolean }
+  >();
   const settingsByUser = new Map<string, any>();
 
   for (const s of allSettings) {
@@ -1362,32 +1406,29 @@ async function resolveDealAudienceImpl(
     settingsByUser.set(s.userId, s);
     const code = extractIata(s.homeAirport);
     if (code && wanted.has(code)) {
-      candidates.set(s.userId, { settings: s, homeAirport: code, viaWishlist: false });
+      candidates.set(s.userId, { settings: s, homeAirport: code, viaSavedDestination: false });
     }
   }
 
-  // Wishlist widening: users who saved this destination are the warmest
+  // Saved-destination widening: users who saved this place are the warmest
   // audience for it, but were previously unreachable — targeting was
-  // home-airport only.
-  let wishlistMatched = 0;
-  if (args.wishlistDestination) {
-    const needle = args.wishlistDestination.trim().toLowerCase();
-    if (needle.length >= 3) {
-      const wishes = await ctx.db.query("wishlist").collect();
-      for (const w of wishes) {
-        const dest = (w.destination || "").toLowerCase();
-        if (!dest) continue;
-        if (dest !== needle && !dest.includes(needle) && !needle.includes(dest)) continue;
-        const settings = settingsByUser.get(w.userId);
-        if (!settings) continue; // no settings row → no prefs, no tokens
-        wishlistMatched++;
-        if (!candidates.has(w.userId)) {
-          candidates.set(w.userId, {
-            settings,
-            homeAirport: extractIata(settings.homeAirport),
-            viaWishlist: true,
-          });
-        }
+  // home-airport only. Both kinds of save count: a wishlist entry and the
+  // watch toggle in onboarding / destination preview mean the same intent.
+  const wishlistIds = new Set<string>();
+  const watchIds = new Set<string>();
+  if (args.savedDestination) {
+    const saved = await collectSavedDestinations(ctx);
+    for (const [userId, how] of savedDestinationAudience(saved, args.savedDestination)) {
+      const settings = settingsByUser.get(userId);
+      if (!settings) continue; // no settings row → no prefs, no tokens
+      if (how.wishlist) wishlistIds.add(userId);
+      if (how.watch) watchIds.add(userId);
+      if (!candidates.has(userId)) {
+        candidates.set(userId, {
+          settings,
+          homeAirport: extractIata(settings.homeAirport),
+          viaSavedDestination: true,
+        });
       }
     }
   }
@@ -1442,7 +1483,7 @@ async function resolveDealAudienceImpl(
       userId,
       language: s.language,
       homeAirport: cand.homeAirport,
-      viaWishlist: cand.viaWishlist,
+      viaSavedDestination: cand.viaSavedDestination,
       tokens,
     });
   }
@@ -1453,14 +1494,16 @@ async function resolveDealAudienceImpl(
     deliverable: recipients.length,
     skipReasons,
     byAirport: Array.from(airportStats.values()).sort((a, b) => b.matched - a.matched),
-    wishlistMatched,
+    wishlistMatched: wishlistIds.size,
+    watchMatched: watchIds.size,
+    savedMatched: new Set([...wishlistIds, ...watchIds]).size,
   };
 }
 
 export const resolveDealAudience = internalQuery({
   args: {
     origins: v.array(v.string()),
-    wishlistDestination: v.optional(v.string()),
+    savedDestination: v.optional(v.string()),
     frequencyCapDays: v.optional(v.float64()),
     requireDealAlerts: v.optional(v.boolean()),
   },
@@ -1475,6 +1518,9 @@ export const getBroadcastReach = query({
   args: {
     adminKey: v.string(),
     origins: v.array(v.string()),
+    /** Widen to everyone who saved this destination. `wishlistDestination` is
+     *  the old name for the same thing; the widget may still send it. */
+    savedDestination: v.optional(v.string()),
     wishlistDestination: v.optional(v.string()),
     frequencyCapDays: v.optional(v.float64()),
   },
@@ -1482,7 +1528,7 @@ export const getBroadcastReach = query({
     validateAdminKey(args.adminKey);
     const audience = await resolveDealAudienceImpl(ctx, {
       origins: args.origins,
-      wishlistDestination: args.wishlistDestination,
+      savedDestination: args.savedDestination ?? args.wishlistDestination,
       frequencyCapDays: args.frequencyCapDays ?? DEFAULT_DEAL_FREQUENCY_CAP_DAYS,
       requireDealAlerts: true,
     });
@@ -1493,6 +1539,8 @@ export const getBroadcastReach = query({
       skipReasons: audience.skipReasons,
       byAirport: audience.byAirport,
       wishlistMatched: audience.wishlistMatched,
+      watchMatched: audience.watchMatched,
+      savedMatched: audience.savedMatched,
     };
   },
 });
@@ -1500,7 +1548,7 @@ export const getBroadcastReach = query({
 /**
  * Admin action: send a deal-alert push notification to every user whose home
  * airport matches the deal's origin (or any of the optional `originsOverride`),
- * optionally widened to users who wishlisted the destination.
+ * optionally widened to users who saved the destination (wishlist or watch).
  *
  * Supports dry-run (count only) and scheduling. The actual sending happens in
  * `executeBroadcast` so that immediate and scheduled sends share one code path.
@@ -1518,7 +1566,8 @@ export const broadcastDealToHomeAirports = action({
     customBody: v.optional(v.string()),
     // Count the audience and return without sending or logging a broadcast.
     dryRun: v.optional(v.boolean()),
-    // Also target users who wishlisted this deal's destination.
+    // Also target users who SAVED this deal's destination — wishlisted it or
+    // are watching it. (Name kept for the params of already-scheduled sends.)
     includeWishlist: v.optional(v.boolean()),
     // Skip users already sent a deal alert within N days (0 disables).
     frequencyCapDays: v.optional(v.float64()),
@@ -1556,7 +1605,9 @@ export const broadcastDealToHomeAirports = action({
     ).map((o: string) => o.toUpperCase());
 
     const frequencyCapDays = args.frequencyCapDays ?? DEFAULT_DEAL_FREQUENCY_CAP_DAYS;
-    const wishlistDestination = args.includeWishlist
+    // `includeWishlist` keeps its name so broadcasts scheduled before this
+    // widening still fire correctly; it now means "everyone who saved it".
+    const savedDestination = args.includeWishlist
       ? (finalDeal.destinationCity || finalDeal.destination)
       : undefined;
 
@@ -1564,7 +1615,7 @@ export const broadcastDealToHomeAirports = action({
     if (args.dryRun) {
       const audience: BroadcastAudience = await ctx.runQuery(internal.lowFareRadar.resolveDealAudience, {
         origins,
-        wishlistDestination,
+        savedDestination,
         frequencyCapDays,
         requireDealAlerts: true,
       });
@@ -1694,7 +1745,7 @@ export const executeBroadcast = internalAction({
     // between scheduling and firing should be respected.
     const audience: BroadcastAudience = await ctx.runQuery(internal.lowFareRadar.resolveDealAudience, {
       origins: p.origins || [],
-      wishlistDestination: p.includeWishlist ? (deal.destinationCity || deal.destination) : undefined,
+      savedDestination: p.includeWishlist ? (deal.destinationCity || deal.destination) : undefined,
       frequencyCapDays: p.frequencyCapDays ?? DEFAULT_DEAL_FREQUENCY_CAP_DAYS,
       requireDealAlerts: true,
     });

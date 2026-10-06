@@ -1,8 +1,16 @@
 import { v } from "convex/values";
 import { ConvexError } from "convex/values";
-import { mutation, query, action } from "./_generated/server";
+import {
+  mutation,
+  query,
+  action,
+  internalAction,
+  internalMutation,
+} from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { sha256Hex } from "./partnerApiAuth";
+import { clickStats } from "./partnerProducts";
+import { searchUnsplashPhotos, pingUnsplashDownload } from "./lib/unsplashSearch";
 import { assertAdmin } from "./admin";
 import {
   CURATED_CITIES as PREGEN_CITIES,
@@ -583,19 +591,38 @@ export const listApplications = query({
           .order("desc")
           .take(200);
 
-    return apps.map((a) => ({
-      id: a._id,
-      companyName: a.companyName,
-      website: a.website ?? null,
-      contactName: a.contactName,
-      email: a.email,
-      partnershipTypes: a.partnershipTypes,
-      monthlyVolume: a.monthlyVolume ?? null,
-      message: a.message ?? null,
-      status: a.status,
-      createdAt: a.createdAt,
-      reviewedAt: a.reviewedAt ?? null,
-    }));
+    // The application row itself stops at "invited" — whether the partner
+    // actually finished signup lives on their partnerAccounts row, so join it
+    // by email to tell "invited, waiting" apart from "joined".
+    const out = [];
+    for (const a of apps) {
+      const account = await ctx.db
+        .query("partnerAccounts")
+        .withIndex("by_email", (q) => q.eq("email", a.email.trim().toLowerCase()))
+        .first();
+      out.push({
+        id: a._id,
+        companyName: a.companyName,
+        website: a.website ?? null,
+        contactName: a.contactName,
+        email: a.email,
+        partnershipTypes: a.partnershipTypes,
+        monthlyVolume: a.monthlyVolume ?? null,
+        message: a.message ?? null,
+        status: a.status,
+        createdAt: a.createdAt,
+        reviewedAt: a.reviewedAt ?? null,
+        account: account
+          ? {
+              status: account.status,
+              kind: account.kind ?? "api",
+              activatedAt: account.activatedAt ?? null,
+              lastLoginAt: account.lastLoginAt ?? null,
+            }
+          : null,
+      });
+    }
+    return out;
   },
 });
 
@@ -654,6 +681,9 @@ export const listProducts = query({
         currency: p.currency ?? null,
         bookingUrl: p.bookingUrl ?? null,
         imageUrls: p.imageUrls ?? [],
+        imageCredit: p.imageCredit ?? null,
+        markets: p.markets ?? [],
+        clicks: await clickStats(ctx, p._id),
         status: p.status,
         rejectionReason: p.rejectionReason ?? null,
         createdAt: p.createdAt,
@@ -676,16 +706,219 @@ export const setProductStatus = mutation({
     await requireAdmin(ctx, args.token);
     const product = await ctx.db.get(args.productId);
     if (!product) throw new ConvexError("Product not found.");
+    // Every live card needs a real picture — pick one from Unsplash first.
+    if (args.status === "approved" && !product.imageUrls?.length) {
+      throw new ConvexError("Add an image before approving this product.");
+    }
+    // …and a market, so the right home airports see it.
+    if (args.status === "approved" && !product.markets?.length) {
+      throw new ConvexError("Pick the markets (home airports) before approving this product.");
+    }
+    const rejectionReason =
+      args.status === "rejected"
+        ? args.rejectionReason?.trim() || undefined
+        : undefined;
     await ctx.db.patch(args.productId, {
       status: args.status,
-      rejectionReason:
-        args.status === "rejected"
-          ? args.rejectionReason?.trim() || undefined
-          : undefined,
+      rejectionReason,
       reviewedAt: Date.now(),
       updatedAt: Date.now(),
     });
+
+    // Tell the supplier when a review decision lands. Only on an actual
+    // transition, so re-saving an approved listing doesn't re-send.
+    if (
+      (args.status === "approved" || args.status === "rejected") &&
+      product.status !== args.status
+    ) {
+      const account = await ctx.db.get(product.accountId);
+      if (account?.email) {
+        await ctx.scheduler.runAfter(
+          0,
+          internal.partnerAdminApp.sendProductReviewEmail,
+          {
+            to: account.email,
+            partnerName: account.partnerName,
+            productTitle: product.title,
+            status: args.status,
+            rejectionReason,
+          }
+        );
+      }
+    }
     return { ok: true };
+  },
+});
+
+/** Email a supplier the outcome of a product listing review. */
+export const sendProductReviewEmail = internalAction({
+  args: {
+    to: v.string(),
+    partnerName: v.string(),
+    productTitle: v.string(),
+    status: v.union(v.literal("approved"), v.literal("rejected")),
+    rejectionReason: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const approved = args.status === "approved";
+    const productsUrl = `${PORTAL_BASE_URL}/partners/products`;
+    const subject = approved
+      ? `Your listing "${args.productTitle}" is live on Planera AI`
+      : `Your listing "${args.productTitle}" needs changes`;
+    const text = approved
+      ? `Hi ${args.partnerName},\n\n` +
+        `Good news — "${args.productTitle}" has been approved and is now live for ` +
+        `travellers on Planera AI.\n\nManage your listings: ${productsUrl}`
+      : `Hi ${args.partnerName},\n\n` +
+        `We reviewed "${args.productTitle}" and couldn't publish it yet.` +
+        (args.rejectionReason ? `\n\nReason: ${args.rejectionReason}` : "") +
+        `\n\nYou can edit the listing and resubmit it here: ${productsUrl}`;
+    try {
+      await ctx.runAction(internal.postmark.sendRawEmail, {
+        to: args.to,
+        subject,
+        html: productReviewEmailHtml({ ...args, productsUrl }),
+        text,
+      });
+    } catch (e) {
+      console.error("[sendProductReviewEmail] email send failed:", e);
+    }
+  },
+});
+
+const IATA_RE = /^[A-Z]{3}$/;
+
+/**
+ * Set which home-airport markets a product is shown to. `markets` is a list of
+ * IATA codes, or ["*"] for everyone. Required before approval.
+ */
+export const setProductMarkets = mutation({
+  args: {
+    token: v.string(),
+    productId: v.id("partnerProducts"),
+    markets: v.array(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx, args.token);
+    const product = await ctx.db.get(args.productId);
+    if (!product) throw new ConvexError("Product not found.");
+    const cleaned = Array.from(
+      new Set(args.markets.map((m) => m.trim().toUpperCase()).filter(Boolean))
+    );
+    const markets = cleaned.includes("*") ? ["*"] : cleaned;
+    const bad = markets.filter((m) => m !== "*" && !IATA_RE.test(m));
+    if (bad.length) throw new ConvexError(`Not an airport code: ${bad.join(", ")}`);
+    if (markets.length === 0 && product.status === "approved") {
+      throw new ConvexError("A live product needs at least one market.");
+    }
+    await ctx.db.patch(args.productId, {
+      markets: markets.length ? markets : undefined,
+      updatedAt: Date.now(),
+    });
+    return { ok: true, markets };
+  },
+});
+
+/** CLI backfill: `npx convex run partnerAdminApp:setProductMarketsInternal '{...}'`. */
+export const setProductMarketsInternal = internalMutation({
+  args: { productId: v.id("partnerProducts"), markets: v.array(v.string()) },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.productId, { markets: args.markets, updatedAt: Date.now() });
+    return null;
+  },
+});
+
+/**
+ * Search Unsplash with free text for the admin product-image picker.
+ * Returns small thumbs for the grid plus a 1200px URL to store on the product.
+ */
+export const searchUnsplash = action({
+  args: {
+    token: v.string(),
+    query: v.string(),
+    page: v.optional(v.number()),
+  },
+  handler: async (
+    ctx,
+    args
+  ): Promise<{
+    total: number;
+    totalPages: number;
+    results: Array<{
+      id: string;
+      thumbUrl: string;
+      imageUrl: string;
+      description: string | null;
+      photographer: string;
+      photographerUrl: string;
+      downloadLocation: string;
+    }>;
+  }> => {
+    const isAdmin = await ctx.runQuery(api.admin.isAdmin, { token: args.token });
+    if (!isAdmin) throw new ConvexError("Unauthorized.");
+    const accessKey = process.env.UNSPLASH_ACCESS_KEY;
+    if (!accessKey) throw new ConvexError("Unsplash is not configured.");
+    try {
+      return await searchUnsplashPhotos(accessKey, args.query, args.page ?? 1);
+    } catch (e) {
+      throw new ConvexError(e instanceof Error ? e.message : "Image search failed.");
+    }
+  },
+});
+
+/**
+ * Set the chosen Unsplash photo as a product's cover (first image), keeping any
+ * supplier images after it, and record the photographer credit. Also pings
+ * Unsplash's download endpoint, which their API terms require on use.
+ */
+export const setProductImage = action({
+  args: {
+    token: v.string(),
+    productId: v.id("partnerProducts"),
+    imageUrl: v.string(),
+    photographer: v.string(),
+    photographerUrl: v.optional(v.string()),
+    downloadLocation: v.optional(v.string()),
+  },
+  handler: async (ctx, args): Promise<{ ok: boolean }> => {
+    await ctx.runMutation(internal.partnerAdminApp.applyProductImage, {
+      token: args.token,
+      productId: args.productId,
+      imageUrl: args.imageUrl,
+      photographer: args.photographer,
+      photographerUrl: args.photographerUrl,
+    });
+    await pingUnsplashDownload(process.env.UNSPLASH_ACCESS_KEY, args.downloadLocation);
+    return { ok: true };
+  },
+});
+
+export const applyProductImage = internalMutation({
+  args: {
+    token: v.string(),
+    productId: v.id("partnerProducts"),
+    imageUrl: v.string(),
+    photographer: v.string(),
+    photographerUrl: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await requireAdmin(ctx, args.token);
+    const product = await ctx.db.get(args.productId);
+    if (!product) throw new ConvexError("Product not found.");
+    const rest = (product.imageUrls ?? []).filter((u) => u !== args.imageUrl);
+    // Replace a previously picked Unsplash cover rather than stacking them.
+    const previousPick = product.imageCredit?.imageUrl;
+    const kept = previousPick ? rest.filter((u) => u !== previousPick) : rest;
+    await ctx.db.patch(args.productId, {
+      imageUrls: [args.imageUrl, ...kept].slice(0, 10),
+      imageCredit: {
+        imageUrl: args.imageUrl,
+        photographer: args.photographer,
+        photographerUrl: args.photographerUrl,
+      },
+      updatedAt: Date.now(),
+    });
+    return null;
   },
 });
 
@@ -758,6 +991,46 @@ function invitePartnerEmailHtml(opts: {
     <p style="text-align:center;margin:24px 0 0;color:#6a6a76;font-size:12px;">
       ${footer}
     </p>
+  </div></body></html>`;
+}
+
+function productReviewEmailHtml(opts: {
+  partnerName: string;
+  productTitle: string;
+  status: "approved" | "rejected";
+  rejectionReason?: string;
+  productsUrl: string;
+}): string {
+  const { partnerName, productTitle, status, rejectionReason, productsUrl } = opts;
+  const approved = status === "approved";
+  const title = escapeHtml(productTitle);
+  const heading = approved ? "Your listing is live" : "Your listing needs changes";
+  const body = approved
+    ? `Hi ${escapeHtml(partnerName)}, good news — <strong style="color:#fff;">${title}</strong>
+        has been approved and is now visible to travellers planning trips on Planera AI.`
+    : `Hi ${escapeHtml(partnerName)}, we reviewed <strong style="color:#fff;">${title}</strong>
+        and couldn't publish it yet. Update the listing and resubmit it for review.`;
+  const reason =
+    !approved && rejectionReason
+      ? `<div style="margin:0 0 20px;padding:14px 16px;background:#1f1f27;border-left:3px solid #FFE500;border-radius:8px;color:#d8d8e0;font-size:14px;line-height:1.6;">
+        <strong style="color:#fff;">Reason:</strong> ${escapeHtml(rejectionReason)}
+      </div>`
+      : "";
+  return `<!DOCTYPE html><html><body style="margin:0;background:#0b0b0f;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <div style="max-width:520px;margin:0 auto;padding:40px 24px;">
+    <div style="text-align:center;margin-bottom:28px;">
+      <img src="${PORTAL_BASE_URL}/logo.png" alt="Planera AI" width="150" style="display:inline-block;width:150px;height:auto;border:0;outline:none;text-decoration:none;" />
+    </div>
+    <div style="background:#16161c;border:1px solid #26262e;border-radius:16px;border-top:4px solid #FFE500;padding:32px;">
+      <h1 style="margin:0 0 12px;color:#fff;font-size:22px;">${heading}</h1>
+      <p style="margin:0 0 20px;color:#b8b8c4;font-size:15px;line-height:1.6;">
+        ${body}
+      </p>
+      ${reason}
+      <div style="text-align:center;margin:28px 0 0;">
+        <a href="${productsUrl}" style="display:inline-block;background:#FFE500;color:#111;text-decoration:none;font-weight:700;font-size:15px;padding:14px 28px;border-radius:10px;">${approved ? "View your listings" : "Edit your listing"}</a>
+      </div>
+    </div>
   </div></body></html>`;
 }
 

@@ -21,6 +21,7 @@ import type {
   NormalizedOffer,
   NormalizedTransferOffer,
 } from "./model/types";
+import { MANUAL_CONNECTOR_ID } from "./model/types";
 import type { SearchQuery, SupplierConnector, SupplierCredentials } from "./connectors/types";
 
 export interface ConnectorBinding {
@@ -30,6 +31,8 @@ export interface ConnectorBinding {
 
 export interface ConnectorRunResult {
   connectorId: string;
+  /** Which search this row is about — one supplier answers per kind. */
+  kind?: NormalizedOffer["kind"];
   ok: boolean;
   count: number;
   ms: number;
@@ -150,7 +153,7 @@ export async function runSearch(
     }
   });
 
-  return { offers, byConnector };
+  return { offers, byConnector: byConnector.map((r) => ({ ...r, kind: query.kind })) };
 }
 
 export interface MultiKindSearch {
@@ -225,7 +228,25 @@ export interface RevalidationOutcome {
   anyPriceChanged: boolean;
   lines: RevalidationLine[];
   revalidatedAt: number;
+  /**
+   * What the suppliers said NOW, per offer: the fresh handle and cost. Kept
+   * out of the stored outcome (the caller strips it) — it is applied to the
+   * quote's lines instead. Without it, Hotelbeds' checkrates spent the only
+   * rateKey the quote held, and the second revalidation (or the booking) of
+   * the same hotel always failed.
+   */
+  refreshed?: RefreshedOffer[];
 }
+
+export interface RefreshedOffer {
+  offerId: string;
+  revalidationToken?: string;
+  cost?: NormalizedOffer["cost"];
+  conditions?: NormalizedOffer["conditions"];
+}
+
+const costTotal = (o: Pick<NormalizedOffer, "cost">): number =>
+  o.cost.base.amountMinor + o.cost.taxes.amountMinor;
 
 /**
  * Re-check each selected offer against the SAME connector that produced it.
@@ -240,8 +261,16 @@ export async function revalidateSelected(
   timeoutMs: number = DEFAULT_CONNECTOR_TIMEOUT_MS,
 ): Promise<RevalidationOutcome> {
   const lines: RevalidationLine[] = [];
+  const refreshed: RefreshedOffer[] = [];
 
   for (const offer of selectedOffers) {
+    // A line the agent typed in has no supplier to ask. The agent vouches for
+    // it — and saying "unverifiable" would make every quote containing a
+    // ferry or an insurance line permanently un-sendable.
+    if (offer.connectorId === MANUAL_CONNECTOR_ID) {
+      lines.push({ offerId: offer.offerId, connectorId: offer.connectorId, stillAvailable: true, priceChanged: false, message: "priced by the agent" });
+      continue;
+    }
     const b = bindingsById.get(offer.connectorId);
     if (!b || !b.connector.capabilities.supports.revalidate || !offer.revalidationToken) {
       lines.push({ offerId: offer.offerId, connectorId: offer.connectorId, stillAvailable: false, priceChanged: false, unverifiable: true, message: "connector cannot revalidate this offer" });
@@ -253,7 +282,21 @@ export async function revalidateSelected(
         timeoutMs,
         b.connector.id,
       );
-      lines.push({ offerId: offer.offerId, connectorId: offer.connectorId, stillAvailable: r.stillAvailable, priceChanged: !!r.priceChanged, message: r.message });
+      // Connectors cannot tell whether the price moved — only we hold the
+      // quoted cost — so compare here rather than trusting their flag alone.
+      const moved =
+        !!r.offer &&
+        r.offer.cost.base.currency === offer.cost.base.currency &&
+        costTotal(r.offer) !== costTotal(offer);
+      lines.push({ offerId: offer.offerId, connectorId: offer.connectorId, stillAvailable: r.stillAvailable, priceChanged: !!r.priceChanged || moved, message: r.message });
+      if (r.stillAvailable && r.offer) {
+        refreshed.push({
+          offerId: offer.offerId,
+          revalidationToken: r.offer.revalidationToken,
+          cost: moved ? r.offer.cost : undefined,
+          conditions: r.offer.conditions,
+        });
+      }
     } catch (e) {
       // A timeout/error is NOT treated as "unavailable" data — it's unverifiable.
       lines.push({ offerId: offer.offerId, connectorId: offer.connectorId, stillAvailable: false, priceChanged: false, unverifiable: true, message: String((e as Error)?.message ?? e) });
@@ -261,5 +304,5 @@ export async function revalidateSelected(
   }
 
   const quoteStillValid = lines.length > 0 && lines.every((l) => l.stillAvailable && !l.unverifiable);
-  return { quoteStillValid, anyPriceChanged: lines.some((l) => l.priceChanged), lines, revalidatedAt: now };
+  return { quoteStillValid, anyPriceChanged: lines.some((l) => l.priceChanged), lines, revalidatedAt: now, refreshed };
 }

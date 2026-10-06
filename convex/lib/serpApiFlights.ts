@@ -143,14 +143,32 @@ export function normalizeFlightSegment(raw: any): NormalizedFlightSegment {
   };
 }
 
+/**
+ * Google's typical price range as `[low, high]`, or null when absent/malformed.
+ * SerpApi sends `[low, high]`; searchapi.io sends `{ low_price, high_price }`
+ * (verified live 2026-10-01). Accepting only the array silently dropped the
+ * range on every searchapi.io search.
+ */
+export function parseTypicalPriceRange(raw: any): [number, number] | null {
+  const pair = Array.isArray(raw)
+    ? raw.length === 2
+      ? [raw[0], raw[1]]
+      : null
+    : raw && typeof raw === "object"
+      ? [raw.low_price, raw.high_price]
+      : null;
+  if (!pair) return null;
+  const lo = toNumberOrNull(pair[0]);
+  const hi = toNumberOrNull(pair[1]);
+  return lo != null && hi != null && lo > 0 && hi >= lo ? [lo, hi] : null;
+}
+
 export function normalizePriceInsights(raw: any): PriceInsights | null {
   if (!raw || typeof raw !== "object") return null;
   return {
     lowestPrice: toNumberOrNull(raw.lowest_price),
     priceLevel: raw.price_level ?? null,
-    typicalPriceRange: Array.isArray(raw.typical_price_range)
-      ? raw.typical_price_range
-      : undefined,
+    typicalPriceRange: parseTypicalPriceRange(raw.typical_price_range) ?? undefined,
     priceHistory: Array.isArray(raw.price_history) ? raw.price_history : undefined,
   };
 }

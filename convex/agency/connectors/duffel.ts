@@ -6,9 +6,10 @@
  * and pastes it in. No certification, no per-tenant contract with us. See
  * `planeraai-web/docs/agency-portal/provider-onboarding-matrix.md`.
  *
- * Scope: search + revalidate + health check. Booking is deliberately NOT
- * implemented — the MVP is quote-first and the agency remains the seller and
- * ticketer, so nothing here can create an order.
+ * Scope: search + revalidate + health check + ORDER CREATION. An order is
+ * created only on an explicit agent action, on the agency's own Duffel account,
+ * paid from that account's Duffel balance — the agency stays the seller and
+ * collects from its client itself. Planera never holds or moves the money.
  *
  * Token handling: the agency's key arrives decrypted from the vault, is used
  * for one request, and is never logged. `fetchJson` errors never include
@@ -22,6 +23,8 @@ import type {
 } from "../model/types";
 import { money } from "../model/types";
 import type {
+  BookingRequest,
+  BookingResult,
   HealthStatus,
   RevalidateResult,
   SearchQuery,
@@ -29,6 +32,7 @@ import type {
   SupplierCredentials,
 } from "./types";
 import { decimalToMinor, fetchJson, isoDurationToMinutes, SupplierHttpError } from "./http";
+import { bookStay, isStaysToken, revalidateStay, searchStays } from "./duffelStays";
 
 const BASE_URL = "https://api.duffel.com";
 const DUFFEL_VERSION = "v2";
@@ -95,6 +99,12 @@ interface DuffelOffer {
   expires_at?: string;
   owner?: { iata_code?: string; name?: string };
   slices?: DuffelSlice[];
+  /** Offer-scoped passenger ids — an order must name each one. */
+  passengers?: Array<{ id: string; type?: string; age?: number }>;
+  payment_requirements?: {
+    requires_instant_payment?: boolean;
+    payment_required_by?: string | null;
+  };
   conditions?: {
     refund_before_departure?: DuffelConditionsLeg | null;
     change_before_departure?: DuffelConditionsLeg | null;
@@ -195,19 +205,47 @@ function normaliseOffer(offer: DuffelOffer, now: number): NormalizedFlightOffer 
   };
 }
 
+/** Offers per listing call. Two calls, so a quote sees up to ~2x this many. */
+export const OFFER_PAGE = 50;
+
+/**
+ * Page in the offers a quote can actually use: the CHEAPEST (what Basic is
+ * built from) and the FASTEST (what Comfort and Premium favour — direct and
+ * short). Both lists are small, and together they cover the ladder far better
+ * than the first N of an unsorted set would.
+ */
+async function listOffers(creds: SupplierCredentials, offerRequestId: string): Promise<DuffelOffer[]> {
+  const list = (sort: string) =>
+    fetchJson<{ data?: DuffelOffer[] }>(
+      `${BASE_URL}/air/offers?offer_request_id=${encodeURIComponent(offerRequestId)}&sort=${sort}&limit=${OFFER_PAGE}`,
+      { method: "GET", headers: authHeaders(creds) },
+      { connectorId: CONNECTOR_ID, timeoutMs: 6000, retries: 1 },
+    )
+      .then((r) => r.data ?? [])
+      // One list failing must not lose the other.
+      .catch(() => [] as DuffelOffer[]);
+  const [cheapest, fastest] = await Promise.all([list("total_amount"), list("total_duration")]);
+  const byId = new Map<string, DuffelOffer>();
+  for (const o of [...cheapest, ...fastest]) if (o?.id && !byId.has(o.id)) byId.set(o.id, o);
+  return [...byId.values()];
+}
+
 // ── Connector ───────────────────────────────────────────────────────────────
 
 export const duffelConnector: SupplierConnector = {
   id: CONNECTOR_ID,
   displayName: "Duffel",
   capabilities: {
-    kinds: ["flight"],
+    // Hotels via Duffel Stays, on the same token — see duffelStays.ts. Stays
+    // must be switched on by Duffel for the account; until then hotel
+    // searches fail with a message saying exactly that.
+    kinds: ["flight", "hotel"],
     supports: {
       search: true,
       retrieveOffer: true,
       revalidate: true,
-      // Quote-first MVP: the agency books and ticks in its own Duffel account.
-      createBooking: false,
+      // Instant orders, paid from the agency's own Duffel balance.
+      createBooking: true,
       retrieveBooking: false,
       cancelBooking: false,
       getCancellationTerms: false,
@@ -239,6 +277,7 @@ export const duffelConnector: SupplierConnector = {
   },
 
   async search(creds: SupplierCredentials, q: SearchQuery): Promise<NormalizedOffer[]> {
+    if (q.kind === "hotel") return searchStays(authHeaders(creds), q);
     if (q.kind !== "flight") return [];
     if (!q.originIata || !q.destinationIata || !q.departDate) {
       throw new Error("Duffel needs an origin, a destination and a departure date");
@@ -270,16 +309,22 @@ export const duffelConnector: SupplierConnector = {
       },
     };
 
-    const res = await fetchJson<{ data?: { offers?: DuffelOffer[] } }>(
+    // return_offers=false: a busy route returns HUNDREDS of offers, and the
+    // whole set in one body blew past our 8 MB response cap ("supplier
+    // response too large") — the search failed outright on ATH-FCO in test
+    // mode. We create the request, then page in only what a quote can use.
+    const res = await fetchJson<{ data?: { id?: string; offers?: DuffelOffer[] } }>(
       // `supplier_timeout` caps how long Duffel waits on the airlines themselves,
-      // keeping this call inside our own per-connector deadline.
-      `${BASE_URL}/air/offer_requests?return_offers=true&supplier_timeout=9000`,
+      // keeping this call — plus the two listing calls — inside our deadline.
+      `${BASE_URL}/air/offer_requests?return_offers=false&supplier_timeout=8000`,
       { method: "POST", headers: authHeaders(creds), body: JSON.stringify(body) },
-      { connectorId: CONNECTOR_ID, timeoutMs: 11_000, retries: 1 },
+      { connectorId: CONNECTOR_ID, timeoutMs: 10_000, retries: 0 },
     );
 
+    const raw = res.data?.offers ?? (res.data?.id ? await listOffers(creds, res.data.id) : []);
+
     const now = Date.now();
-    const offers = res.data?.offers ?? [];
+    const offers = raw;
     const normalised: NormalizedFlightOffer[] = [];
     for (const offer of offers) {
       try {
@@ -294,6 +339,7 @@ export const duffelConnector: SupplierConnector = {
   },
 
   async revalidate(creds: SupplierCredentials, revalidationToken: string): Promise<RevalidateResult> {
+    if (isStaysToken(revalidationToken)) return revalidateStay(authHeaders(creds), revalidationToken);
     try {
       const res = await fetchJson<{ data?: DuffelOffer }>(
         `${BASE_URL}/air/offers/${encodeURIComponent(revalidationToken)}?return_available_services=false`,
@@ -319,4 +365,140 @@ export const duffelConnector: SupplierConnector = {
       throw err;
     }
   },
+
+  async createBooking(creds: SupplierCredentials, req: BookingRequest): Promise<BookingResult> {
+    if (isStaysToken(req.revalidationToken)) return bookStay(authHeaders(creds), req);
+    // 1. Re-read the offer. It carries the passenger ids the order has to name,
+    //    and the CURRENT total — an order must pay exactly that, and paying a
+    //    stale amount is rejected by Duffel anyway.
+    const fresh = await fetchJson<{ data?: DuffelOffer }>(
+      `${BASE_URL}/air/offers/${encodeURIComponent(req.revalidationToken)}?return_available_services=false`,
+      { method: "GET", headers: authHeaders(creds) },
+      { connectorId: CONNECTOR_ID, timeoutMs: 9000, retries: 1 },
+    );
+    const offer = fresh.data;
+    if (!offer?.total_amount || !offer.total_currency) {
+      return { status: "failed", message: "Duffel no longer holds this fare — search again" };
+    }
+    if (offer.expires_at && Date.parse(offer.expires_at) <= Date.now()) {
+      return { status: "failed", message: "this fare has expired — search again" };
+    }
+
+    if (req.expectedTotal && req.expectedTotal.currency === offer.total_currency) {
+      const now = decimalToMinor(offer.total_amount, offer.total_currency);
+      if (now > req.expectedTotal.amountMinor) {
+        return {
+          status: "failed",
+          message: `the fare rose from ${(req.expectedTotal.amountMinor / 100).toFixed(2)} to ${offer.total_amount} ${offer.total_currency} — revalidate the quote and agree the new price with the client first`,
+        };
+      }
+    }
+
+    const passengers = assignDuffelPassengers(offer.passengers ?? [], req);
+
+    // 2. Create the order. retries: 0 — a POST that timed out may still have
+    //    created an order, and a second one would ticket the client twice. The
+    //    caller turns a lost response into "unknown", never into a retry.
+    const res = await fetchJson<{ data?: DuffelOrder }>(
+      `${BASE_URL}/air/orders`,
+      {
+        method: "POST",
+        headers: authHeaders(creds),
+        body: JSON.stringify({
+          data: {
+            type: "instant",
+            selected_offers: [offer.id],
+            passengers,
+            payments: [
+              { type: "balance", currency: offer.total_currency, amount: offer.total_amount },
+            ],
+            metadata: { agency_reference: req.clientReference.slice(0, 50) },
+          },
+        }),
+      },
+      { connectorId: CONNECTOR_ID, timeoutMs: 30_000, retries: 0 },
+    );
+
+    const order = res.data;
+    if (!order?.id) return { status: "failed", message: "Duffel did not return an order" };
+    const tickets = (order.documents ?? [])
+      .filter((d) => d.type === "electronic_ticket" && d.unique_identifier)
+      .map((d) => d.unique_identifier as string);
+
+    return {
+      status: tickets.length ? "ticketed" : "confirmed",
+      supplierReference: order.booking_reference ?? undefined,
+      supplierBookingId: order.id,
+      documents: tickets,
+      amountCharged:
+        order.total_amount && order.total_currency
+          ? money(decimalToMinor(order.total_amount, order.total_currency), order.total_currency)
+          : undefined,
+      message: order.booking_reference
+        ? `Duffel order ${order.id}`
+        : "order created — the airline has not issued a reference yet",
+    };
+  },
 };
+
+interface DuffelOrder {
+  id: string;
+  booking_reference?: string | null;
+  total_amount?: string;
+  total_currency?: string;
+  documents?: Array<{ type?: string; unique_identifier?: string }>;
+}
+
+/**
+ * Match our travellers to the offer's passenger ids.
+ *
+ * Duffel issues one id per passenger it priced, typed adult / child (by age)
+ * / infant_without_seat. We fill them in type order — the search sent adults
+ * first, then children by age — and an infant is attached to an adult via
+ * `infant_passenger_id`, which Duffel requires.
+ */
+export function assignDuffelPassengers(
+  offerPassengers: Array<{ id: string; type?: string; age?: number }>,
+  req: Pick<BookingRequest, "passengers" | "contact">,
+): Array<Record<string, string>> {
+  if (offerPassengers.length !== req.passengers.length) {
+    throw new Error(
+      `the fare is for ${offerPassengers.length} passengers but ${req.passengers.length} were entered`,
+    );
+  }
+  const bucket = (t: string | undefined) =>
+    t === "infant_without_seat" ? "infant" : t === "adult" || t === undefined ? "adult" : "child";
+  const ids = { adult: [] as string[], child: [] as string[], infant: [] as string[] };
+  for (const p of offerPassengers) ids[bucket(p.type)].push(p.id);
+
+  const used = { adult: 0, child: 0, infant: 0 };
+  const out: Array<Record<string, string>> = [];
+  const adultsOut: Array<Record<string, string>> = [];
+  for (const t of req.passengers) {
+    const pool = ids[t.type];
+    const id = pool[used[t.type]++];
+    if (!id) {
+      throw new Error(`the fare has no ${t.type} seat for ${t.givenName} ${t.familyName}`);
+    }
+    const row: Record<string, string> = {
+      id,
+      title: t.title,
+      gender: t.gender,
+      given_name: t.givenName,
+      family_name: t.familyName,
+      born_on: t.bornOn,
+      email: req.contact.email,
+      phone_number: req.contact.phone,
+    };
+    if (t.type === "adult") adultsOut.push(row);
+    out.push(row);
+  }
+  // Each infant rides on one adult's lap.
+  let lap = 0;
+  for (const infant of out.filter((r) => ids.infant.includes(r.id))) {
+    const adult = adultsOut[lap++];
+    if (!adult) throw new Error("each infant must travel with an adult");
+    adult.infant_passenger_id = infant.id;
+  }
+  return out;
+}

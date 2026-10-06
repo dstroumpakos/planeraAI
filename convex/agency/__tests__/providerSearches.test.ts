@@ -491,7 +491,7 @@ test("Tiqets reads a price in every shape the distributor API has used", async (
   const { stub } = sequence([
     {
       products: [
-        { id: 1, title: "Bare number", price: 20, currency: "EUR", sale_status: "open" },
+        { id: 1, title: "Bare number", price: 20, currency: "EUR", sale_status: "available" },
         { id: 2, title: "Decimal string", price: "18.50", currency: "EUR" },
         { id: 3, title: "Nested object", price: { amount: "15.00", currency: "EUR" } },
         { id: 4, title: "Minimum only", min_price: "10.00", currency: "EUR" },
@@ -518,8 +518,8 @@ test("Tiqets drops a sold-out product instead of quoting a dead checkout", async
   const { stub } = sequence([
     {
       products: [
-        { id: 1, title: "Sold out", price: "20.00", currency: "EUR", sale_status: "sold_out" },
-        { id: 2, title: "On sale", price: "20.00", currency: "EUR", sale_status: "open" },
+        { id: 1, title: "Sold out", price: "20.00", currency: "EUR", sale_status: "unavailable" },
+        { id: 2, title: "On sale", price: "20.00", currency: "EUR", sale_status: "available" },
       ],
     },
   ]);
@@ -543,8 +543,22 @@ test("Tiqets asks for the mapped city, not the IATA code", async () => {
       providerDestinationId: "266696",
     }),
   );
-  assert.match(urls[0], /city_ids=266696/);
+  assert.match(urls[0], /city_id=266696/);
   assert.ok(!urls[0].includes("CDG"), "an IATA code means nothing to Tiqets");
+});
+
+test("Tiqets pages through the city feed at the documented page size", async () => {
+  const { urls, stub } = sequence([
+    { cities: [{ id: "1", name: "Athens" }], pagination: { total: 150, page: 1, page_size: 100 } },
+    { cities: [{ id: "2", name: "Paris" }], pagination: { total: 150, page: 2, page_size: 100 } },
+  ]);
+  const cities = await withFetch(stub, () =>
+    getConnector("tiqets")!.listDestinations!(creds({ apiKey: "k" }), { iata: "CDG", cityName: "Paris" }),
+  );
+  assert.equal(urls.length, 2, "stops once page × page_size covers the total");
+  assert.ok(urls.every((u) => u.includes("page_size=100")));
+  assert.match(urls[1], /page=2/);
+  assert.deepEqual(cities.map((c) => c.id), ["1", "2"]);
 });
 
 // ── Expedia Rapid ──────────────────────────────────────────────────────────

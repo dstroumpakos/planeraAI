@@ -5,7 +5,9 @@ import {
   query,
   internalMutation,
   internalQuery,
+  type QueryCtx,
 } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { sha256Hex } from "./partnerApiAuth";
 
@@ -95,6 +97,38 @@ function randomSecret(prefix: string): string {
 }
 
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
+
+/**
+ * Version of the Partner Terms (/partners/terms) + Privacy Policy a partner
+ * accepts. Bump it whenever either document materially changes: acceptance of
+ * an older version no longer counts, so the partner is asked again.
+ */
+export const PARTNER_TERMS_VERSION = "2026-06";
+
+/**
+ * When this partner already accepted the current terms — on their account row
+ * or on the "Become a partner" application they submitted with the same
+ * email — so the invite/signup step doesn't ask a second time. Null if never.
+ */
+async function priorTermsAcceptance(
+  ctx: QueryCtx,
+  email: string,
+  account?: Doc<"partnerAccounts"> | null
+): Promise<number | null> {
+  if (account?.acceptedTermsAt && account.termsVersion === PARTNER_TERMS_VERSION) {
+    return account.acceptedTermsAt;
+  }
+  const applications = await ctx.db
+    .query("partnerApplications")
+    .withIndex("by_email", (q) => q.eq("email", email))
+    .collect();
+  for (const app of applications) {
+    if (app.acceptedTermsAt && app.termsVersion === PARTNER_TERMS_VERSION) {
+      return app.acceptedTermsAt;
+    }
+  }
+  return null;
+}
 
 // ---------------------------------------------------------------------------
 // Internal helpers used by the admin invite action
@@ -219,19 +253,24 @@ export const validateInvite = query({
       partnerName: account.partnerName,
       // Lets the signup page show supplier vs API copy before the password is set.
       kind: account.kind ?? ("api" as const),
+      // Already accepted the current terms (usually on the apply form) — the
+      // signup page hides the checkbox instead of asking again.
+      termsAccepted:
+        (await priorTermsAcceptance(ctx, account.email, account)) !== null,
     };
   },
 });
 
 /** Accept an invite: set password, activate, return a session token. */
 export const acceptInvite = mutation({
-  args: { token: v.string(), password: v.string(), acceptedTerms: v.boolean() },
+  args: {
+    token: v.string(),
+    password: v.string(),
+    // Omitted/false is fine when the partner already accepted the current
+    // terms on their application — checked below.
+    acceptedTerms: v.optional(v.boolean()),
+  },
   handler: async (ctx, args) => {
-    if (!args.acceptedTerms) {
-      throw new ConvexError(
-        "You must accept the Partner API Terms to create an account."
-      );
-    }
     if (args.password.length < 8) {
       throw new ConvexError("Password must be at least 8 characters.");
     }
@@ -247,8 +286,15 @@ export const acceptInvite = mutation({
       throw new ConvexError("This invite link has expired. Ask for a new one.");
     }
 
-    const passwordHash = await hashPassword(args.password);
     const now = Date.now();
+    const priorAcceptedAt = await priorTermsAcceptance(ctx, account.email, account);
+    if (priorAcceptedAt === null && !args.acceptedTerms) {
+      throw new ConvexError(
+        "You must accept the Partner Terms and Privacy Policy to create an account."
+      );
+    }
+
+    const passwordHash = await hashPassword(args.password);
     await ctx.db.patch(account._id, {
       passwordHash,
       status: "active",
@@ -256,7 +302,8 @@ export const acceptInvite = mutation({
       inviteExpiresAt: undefined,
       activatedAt: now,
       lastLoginAt: now,
-      acceptedTermsAt: now,
+      acceptedTermsAt: priorAcceptedAt ?? now,
+      termsVersion: PARTNER_TERMS_VERSION,
     });
 
     const sessionToken = randomSecret("ps_");
@@ -315,10 +362,6 @@ export const signup = mutation({
     if (args.password.length < 8) {
       throw new ConvexError("Password must be at least 8 characters.");
     }
-    if (!args.acceptedTerms) {
-      throw new ConvexError("You must accept the Partner Terms to continue.");
-    }
-
     const existing = await ctx.db
       .query("partnerAccounts")
       .withIndex("by_email", (q) => q.eq("email", email))
@@ -330,6 +373,13 @@ export const signup = mutation({
     }
 
     const now = Date.now();
+    const priorAcceptedAt = await priorTermsAcceptance(ctx, email, existing);
+    if (priorAcceptedAt === null && !args.acceptedTerms) {
+      throw new ConvexError(
+        "You must accept the Partner Terms and Privacy Policy to continue."
+      );
+    }
+    const acceptedTermsAt = priorAcceptedAt ?? now;
     const passwordHash = await hashPassword(args.password);
     const rawToken = randomToken();
     const emailVerifyTokenHash = await sha256Hex(rawToken);
@@ -344,7 +394,8 @@ export const signup = mutation({
         status: "pending_verification",
         emailVerifyTokenHash,
         emailVerifyExpiresAt,
-        acceptedTermsAt: now,
+        acceptedTermsAt,
+        termsVersion: PARTNER_TERMS_VERSION,
       });
     } else {
       await ctx.db.insert("partnerAccounts", {
@@ -360,7 +411,8 @@ export const signup = mutation({
         dailyCap: 0,
         monthlyCap: 0,
         createdAt: now,
-        acceptedTermsAt: now,
+        acceptedTermsAt,
+        termsVersion: PARTNER_TERMS_VERSION,
       });
     }
 
@@ -741,8 +793,17 @@ export const submitApplication = mutation({
     partnershipTypes: v.array(v.string()),
     monthlyVolume: v.optional(v.string()),
     message: v.optional(v.string()),
+    // Partner Terms + Privacy Policy. Optional in the validator only so an
+    // older cached web bundle gets a readable error instead of a validator
+    // failure; the handler still requires it to be true.
+    acceptedTerms: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
+    if (!args.acceptedTerms) {
+      throw new ConvexError(
+        "Please accept the Partner Terms and Privacy Policy to continue."
+      );
+    }
     const companyName = args.companyName.trim();
     const contactName = args.contactName.trim();
     const email = args.email.trim().toLowerCase();
@@ -771,6 +832,8 @@ export const submitApplication = mutation({
       message,
       status: "new",
       createdAt: now,
+      acceptedTermsAt: now,
+      termsVersion: PARTNER_TERMS_VERSION,
     });
 
     const html = applicationEmailHtml({

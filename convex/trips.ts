@@ -17,6 +17,7 @@ import { getAvgDailySpend, getAvgStay, SPEND_CURRENCY } from "./destinationSpend
 import { normalizeDestinationKey } from "./partnerApiAuth";
 import { UNWTO_COUNTRY_STATS } from "./unwtoCountryStats";
 import { toEnglishName } from "../lib/destinationTranslations";
+import { isSameOriginDestination, SAME_ROUTE_ERROR } from "../lib/sameRoute";
 
 /**
  * Resolve a destination's average spend PER TRIP (per person) + typical stay,
@@ -111,6 +112,13 @@ export const create = authMutation({
  // V1 validation: budgetTotal must be positive
         if (args.budgetTotal <= 0) {
             throw new Error("Budget must be greater than 0");
+        }
+
+        // Origin and destination must be different places. Checked before any
+        // credit is consumed — the old guard sat inside the flight search and
+        // fired only after the trip row existed.
+        if (isSameOriginDestination(args.origin, args.destination)) {
+            throw new Error(SAME_ROUTE_ERROR);
         }
         
         // Compute perPersonBudget
@@ -2158,6 +2166,10 @@ export const scheduleAddActivityAI = authMutation({
         dayIndex: v.number(),
         insertIndex: v.number(),
         language: v.optional(v.string()),
+        // What the traveler typed ("a rooftop bar", "the Acropolis Museum").
+        request: v.optional(v.string()),
+        // Optional "HH:MM" the traveler wants it at.
+        preferredTime: v.optional(v.string()),
     },
     handler: async (ctx: any, args: any) => {
         const trip = await ctx.db.get(args.tripId);
@@ -2169,6 +2181,8 @@ export const scheduleAddActivityAI = authMutation({
             dayIndex: args.dayIndex,
             insertIndex: args.insertIndex,
             language: args.language,
+            request: args.request,
+            preferredTime: args.preferredTime,
         });
     },
 });

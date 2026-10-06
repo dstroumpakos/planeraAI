@@ -331,3 +331,20 @@ export function buildHotelLink(
       return airbnbTarget(p);
   }
 }
+
+// ── Tiqets (museum & attraction tickets) ──────────────────────────────────
+// Direct partner program, not CJ: any tiqets.com URL carrying `?partner=`
+// sets a 30-day affiliate cookie. Search deep-links redirect to the city's
+// attractions page with the partner tag preserved.
+export const TIQETS_PARTNER_ID = "dionysios_stroumpakos-190492";
+
+// Tiqets UI languages; anything else (e.g. ar) falls back to en.
+const TIQETS_LANGS = new Set(["en", "el", "de", "es", "fr", "it"]);
+
+/** Tiqets partner link, deep-linked to `query`'s attractions when given. */
+export function buildTiqetsLink(opts: { query?: string; lang?: string } = {}): string {
+  const base = (opts.lang || "en").split("-")[0];
+  const lang = TIQETS_LANGS.has(base) ? base : "en";
+  const q = opts.query ? `q=${encodeURIComponent(opts.query)}&` : "";
+  return `https://www.tiqets.com/${lang}/${opts.query ? "search" : ""}?${q}partner=${TIQETS_PARTNER_ID}`;
+}

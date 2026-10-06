@@ -27,7 +27,9 @@ import { LanguagePickerModal } from "@/components/LanguagePickerModal";
 import { FirstTripPopup } from "@/components/FirstTripGuide";
 import { LowFareRadar } from "@/components/LowFareRadar";
 import WatchedFaresRow from "@/components/WatchedFaresRow";
+import ChristmasRow from "@/components/ChristmasRow";
 import ThisMonthCard from "@/components/ThisMonthCard";
+import PartnerToursRow from "@/components/PartnerToursRow";
 import TodayCard, { pickLiveTrip } from "@/components/TodayCard";
 import AchievementUnlocked from "@/components/AchievementUnlocked";
 import AirplaneIntro from "@/components/AirplaneIntro";
@@ -491,6 +493,9 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </ScrollView>
 
+        {/* Christmas trips — seasonal (mid-Sep → Boxing Day) */}
+        <ChristmasRow deals={lowFareDeals} homeIata={homeIata} />
+
         {/* Watched fares — the between-trips reason to open the app */}
         <WatchedFaresRow />
 
@@ -568,6 +573,9 @@ export default function HomeScreen() {
             }}
           />
         )}
+
+        {/* Tours by local partners — approved supplier products */}
+        <PartnerToursRow />
 
         {/* Trending Destinations Section */}
         {trendingDestinations && trendingDestinations.length > 0 && (

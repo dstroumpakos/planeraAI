@@ -19,6 +19,7 @@ import { api } from "@/convex/_generated/api";
 import { useTheme } from "@/lib/ThemeContext";
 import { useTranslation } from "react-i18next";
 import { AirlineLogo } from "@/components/AirlineLogo";
+import { isChristmasTrip, isWorthBuying } from "@/lib/christmas";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const CARD_WIDTH = SCREEN_WIDTH - 64;
@@ -59,9 +60,13 @@ interface FlightDeal {
   price: number;
   totalPrice?: number;
   originalPrice?: number;
+  /** Route's typical fare from the last refresh — the "worth buying" benchmark. */
+  typicalPrice?: number;
   currency: string;
   cabinBaggage?: string;
   checkedBaggage?: string;
+  /** Parsed from the booked fare (convex/lib/baggage.ts); preferred over the free-text fields. */
+  baggage?: { carryOn?: BagInfo; checked?: BagInfo };
   isRecommended?: boolean;
   dealTag?: string;
   bookingUrl?: string;
@@ -74,6 +79,15 @@ interface FlightDeal {
   matchesWishlist?: boolean;
   isExpired?: boolean;
 }
+
+interface BagInfo {
+  status: "included" | "fee" | "none";
+  count?: number;
+  feeMin?: number;
+  feeMax?: number;
+}
+
+const BAG_TONE = { included: "#34C759", fee: "#FF9500" } as const;
 
 interface WishlistDestination {
   destination: string;
@@ -89,7 +103,11 @@ interface LowFareRadarProps {
   onBookingClick?: (dealId: string) => void;
 }
 
-type Filter = "all" | "recommended" | "wishlist";
+type Filter = "all" | "recommended" | "wishlist" | "christmas";
+
+/** Christmas-dated AND worth buying — the tab only vouches for real deals. */
+const isChristmasDeal = (d: FlightDeal) =>
+  isChristmasTrip(d.outboundDate, d.returnDate) && isWorthBuying(d);
 
 export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip, onPlanFromWishlist, onBookingClick }: LowFareRadarProps) {
   const { colors } = useTheme();
@@ -155,7 +173,9 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
       ? deals.filter((d) => d.isRecommended || d.matchesPreference)
       : filter === "wishlist"
         ? deals.filter((d) => d.matchesWishlist && (!wishlistFilter || d.destinationCity.toLowerCase() === wishlistFilter.toLowerCase()))
-        : deals;
+        : filter === "christmas"
+          ? deals.filter(isChristmasDeal)
+          : deals;
 
   // Apply the destination dropdown filter on top of the active tab.
   const filteredDeals = destFilter
@@ -229,6 +249,37 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
     return symbols[currency] || currency;
   };
 
+  const bagLabel = (kind: "carryOn" | "checked", bag: BagInfo, currency: string) => {
+    const carry = kind === "carryOn";
+    if (bag.status === "included") {
+      if (carry) return t("lowFare.bagCarryOnIncluded", { defaultValue: "Carry-on included" });
+      return (bag.count ?? 1) > 1
+        ? t("lowFare.bagCheckedIncludedMulti", {
+            count: bag.count,
+            defaultValue: "{{count}} checked bags included",
+          })
+        : t("lowFare.bagCheckedIncluded", { defaultValue: "Checked bag included" });
+    }
+    if (bag.status === "none") {
+      return carry
+        ? t("lowFare.bagCarryOnNone", { defaultValue: "Carry-on not included" })
+        : t("lowFare.bagCheckedNone", { defaultValue: "Checked bag not included" });
+    }
+    if (bag.feeMin == null) {
+      return carry
+        ? t("lowFare.bagCarryOnFeeUnknown", { defaultValue: "Carry-on for a fee" })
+        : t("lowFare.bagCheckedFeeUnknown", { defaultValue: "Checked bag for a fee" });
+    }
+    const sym = getCurrencySymbol(currency);
+    const price =
+      bag.feeMax != null && bag.feeMax !== bag.feeMin
+        ? `${sym}${bag.feeMin}–${bag.feeMax}`
+        : `${sym}${bag.feeMin}`;
+    return carry
+      ? t("lowFare.bagCarryOnFee", { price, defaultValue: "Carry-on: +{{price}}" })
+      : t("lowFare.bagCheckedFee", { price, defaultValue: "Checked bag: +{{price}}" });
+  };
+
   const getPriceChange = (deal: FlightDeal) => {
     if (!deal.originalPrice || deal.originalPrice === deal.price) return null;
     const percent = Math.round(
@@ -262,6 +313,7 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
   ).length;
 
   const wishlistCount = deals.filter((d) => d.matchesWishlist).length;
+  const christmasCount = deals.filter(isChristmasDeal).length;
 
   // Build a summary of wishlisted destinations that have deals from homeIata
   const wishlistWithDeals = wishlistDestinations?.filter((w) =>
@@ -425,6 +477,31 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
             >
               {t("lowFare.wishlist", { defaultValue: "Wishlist" })} (
               {wishlistCount})
+            </Text>
+          </TouchableOpacity>
+        )}
+        {christmasCount > 0 && (
+          <TouchableOpacity
+            style={[
+              styles.filterBtn,
+              {
+                backgroundColor:
+                  filter === "christmas" ? "#B91C1C" : colors.card,
+                borderColor:
+                  filter === "christmas" ? "#B91C1C" : colors.border,
+              },
+            ]}
+            onPress={() => { setFilter("christmas"); setWishlistFilter(null); }}
+          >
+            <Text style={{ fontSize: 13 }}>🎄</Text>
+            <Text
+              style={[
+                styles.filterText,
+                { color: filter === "christmas" ? "#FFF" : colors.text },
+              ]}
+            >
+              {t("lowFare.christmas", { defaultValue: "Christmas" })} (
+              {christmasCount})
             </Text>
           </TouchableOpacity>
         )}
@@ -645,6 +722,19 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
                   >
                     <Ionicons name="flame" size={12} color="#FFF" />
                     <Text style={styles.dealTagText}>{deal.dealTag}</Text>
+                  </View>
+                )}
+                {!deal.isExpired && isChristmasDeal(deal) && (
+                  <View
+                    style={[
+                      styles.dealTagBadge,
+                      { backgroundColor: "#B91C1C" },
+                    ]}
+                  >
+                    <Text style={{ fontSize: 11 }}>🎄</Text>
+                    <Text style={styles.dealTagText}>
+                      {t("lowFare.christmas", { defaultValue: "Christmas" })}
+                    </Text>
                   </View>
                 )}
                 {deal.matchesWishlist && (
@@ -984,6 +1074,46 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
                       })}
                     </Text>
                     <View style={styles.baggageRow}>
+                      {deal.baggage
+                        ? (["carryOn", "checked"] as const).map((kind) => {
+                            const bag = deal.baggage?.[kind];
+                            if (!bag) return null;
+                            const tone =
+                              bag.status === "none"
+                                ? colors.textMuted
+                                : BAG_TONE[bag.status];
+                            return (
+                              <View
+                                key={kind}
+                                style={[
+                                  styles.baggageItem,
+                                  { backgroundColor: colors.secondary },
+                                ]}
+                              >
+                                <Ionicons
+                                  name={
+                                    bag.status === "included"
+                                      ? "checkmark-circle"
+                                      : bag.status === "fee"
+                                        ? "cash-outline"
+                                        : "close-circle-outline"
+                                  }
+                                  size={16}
+                                  color={tone}
+                                />
+                                <Text
+                                  style={[
+                                    styles.baggageText,
+                                    { color: colors.text },
+                                  ]}
+                                >
+                                  {bagLabel(kind, bag, deal.currency)}
+                                </Text>
+                              </View>
+                            );
+                          })
+                        : (
+                        <>
                       {deal.cabinBaggage && (
                         <View
                           style={[
@@ -1040,7 +1170,24 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
                           })}
                         </Text>
                       )}
+                        </>
+                      )}
                     </View>
+                    {deal.baggage &&
+                      (deal.baggage.carryOn?.status === "fee" ||
+                        deal.baggage.checked?.status === "fee") && (
+                        <Text
+                          style={[
+                            styles.baggageNote,
+                            { color: colors.textMuted },
+                          ]}
+                        >
+                          {t("lowFare.bagFeeNote", {
+                            defaultValue:
+                              "Bag fees are per person and may change. Confirm when booking.",
+                          })}
+                        </Text>
+                      )}
                   </View>
 
                   {/* Return flight info — styled like outbound */}
@@ -1506,6 +1653,10 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     flex: 1,
     flexShrink: 1,
+  },
+  baggageNote: {
+    fontSize: 11,
+    marginTop: 6,
   },
   returnRow: {
     gap: 4,

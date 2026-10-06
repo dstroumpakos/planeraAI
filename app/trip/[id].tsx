@@ -1,6 +1,6 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useTranslation } from "react-i18next";
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Linking, Platform, Alert, Modal, TextInput, KeyboardAvoidingView, Keyboard, StatusBar, Share } from "react-native";
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Linking, Platform, Alert, Modal, TextInput, KeyboardAvoidingView, Keyboard, StatusBar, Share, useWindowDimensions } from "react-native";
 import { Image } from "expo-image";
 import { useQuery, useMutation, useAction } from "convex/react";
 import { Id } from "@/convex/_generated/dataModel";
@@ -29,11 +29,13 @@ import { useLocationNotifications } from "@/lib/useLocationNotifications";
 import { TripGuideTooltip, GuideStep } from "@/components/FirstTripGuide";
 import ShareTripCard, { ShareTripCardHandle } from "@/components/ShareTripCard";
 import TripNudges from "@/components/TripNudges";
+import { addTripToCalendar } from "@/lib/calendarExport";
 import PackageCard from "@/components/PackageCard";
 import PackageInquiryModal from "@/components/PackageInquiryModal";
 import ActivityActionSheet from "@/components/ActivityActionSheet";
 import EditTimeModal from "@/components/EditTimeModal";
 import AddActivityModal, { ManualActivityInput } from "@/components/AddActivityModal";
+import AddActivityAIModal, { AIActivityRequest } from "@/components/AddActivityAIModal";
 import MoveToDayModal from "@/components/MoveToDayModal";
 import ReorderDayModal from "@/components/ReorderDayModal";
 import { TripFlightProviders } from "@/components/flights/TripFlightProviders";
@@ -45,7 +47,9 @@ import {
     HotelLinkParams,
     FlightPartnerKey,
     HotelPartnerKey,
+    buildTiqetsLink,
 } from "@/lib/affiliateLinks";
+import TiqetsCard from "@/components/TiqetsCard";
 import { normalizeDestinationToEnglish } from "@/lib/destinationTranslations";
 
 // Sanitize location titles for maps deep links by stripping descriptions, ratings, etc.
@@ -796,6 +800,8 @@ export default function TripDetails() {
     const router = useRouter();
     const insets = useSafeAreaInsets();
     const { t, i18n } = useTranslation();
+    // Narrow phones (SE / mini) can't fit every header action plus the badge label.
+    const compactHeader = useWindowDimensions().width < 400;
     const { colors, isDarkMode } = useTheme();
     const { token } = useToken();
     // Offline-first: falls back to the disk snapshot when the live query
@@ -936,6 +942,7 @@ export default function TripDetails() {
     const [actionSheetTarget, setActionSheetTarget] = useState<{ dayIndex: number; actIndex: number } | null>(null);
     const [editTimeTarget, setEditTimeTarget] = useState<{ dayIndex: number; actIndex: number } | null>(null);
     const [addManualTarget, setAddManualTarget] = useState<{ dayIndex: number; insertIndex: number } | null>(null);
+    const [addAITarget, setAddAITarget] = useState<{ dayIndex: number; insertIndex: number } | null>(null);
     const [regeneratingDay, setRegeneratingDay] = useState<number | null>(null);
     const [addingActivity, setAddingActivity] = useState<number | null>(null); // dayIndex with a pending AI/manual add
     const [moveTarget, setMoveTarget] = useState<{ dayIndex: number; actIndex: number } | null>(null);
@@ -982,15 +989,35 @@ export default function TripDetails() {
             });
     }, [addManualTarget, trip?._id]);
 
-    const handleAddAI = useCallback((dayIndex: number, insertIndex: number) => {
-        if (!trip?._id) return;
+    // The AI add runs as a scheduled job, so a failure never reaches the client.
+    // If the itinerary hasn't changed after this long, stop the spinner and say so.
+    useEffect(() => {
+        if (addingActivity === null) return;
+        const timer = setTimeout(() => {
+            setAddingActivity(null);
+            Alert.alert(t('tripDetail.error'), t('tripDetail.aiAddFailed'));
+        }, 75000);
+        return () => clearTimeout(timer);
+    }, [addingActivity]);
+
+    const handleAddAI = useCallback(({ request, preferredTime }: AIActivityRequest) => {
+        if (!addAITarget || !trip?._id) return;
+        const { dayIndex, insertIndex } = addAITarget;
+        setAddAITarget(null);
         setAddingActivity(dayIndex);
-        scheduleAddActivityAIMut({ tripId: trip._id, dayIndex, insertIndex, language: i18n.language })
-            .catch((err: any) => {
-                console.error("Add AI activity failed:", err);
-                setAddingActivity(null);
-            });
-    }, [trip?._id]);
+        scheduleAddActivityAIMut({
+            tripId: trip._id,
+            dayIndex,
+            insertIndex,
+            language: i18n.language,
+            request,
+            preferredTime: preferredTime || undefined,
+        }).catch((err: any) => {
+            console.error("Add AI activity failed:", err);
+            setAddingActivity(null);
+            Alert.alert(t('tripDetail.error'), t('tripDetail.aiAddFailed'));
+        });
+    }, [addAITarget, trip?._id]);
 
     // Move an activity to the END of another day (cross-day move via picker).
     const handleMoveToDay = useCallback((toDayIndex: number) => {
@@ -2838,9 +2865,28 @@ export default function TripDetails() {
                     >
                         <Ionicons name="people-outline" size={20} color="#1A1A1A" />
                     </TouchableOpacity>
+                    {!(typeof trip.endDate === 'number' && trip.endDate < Date.now() - 24 * 60 * 60 * 1000) && (
+                        <TouchableOpacity
+                            style={[styles.iconButton, { backgroundColor: 'rgba(255,255,255,0.9)', borderRadius: 20, marginRight: 8 }]}
+                            accessibilityLabel={t('tripNudges.addToCalendar')}
+                            onPress={async () => {
+                                try {
+                                    const result = await addTripToCalendar(trip);
+                                    if (result === 'unavailable') {
+                                        Alert.alert(t('tripDetail.error'), t('tripNudges.calendarUnavailable'));
+                                    }
+                                } catch (err) {
+                                    console.error("Add to calendar failed:", err);
+                                    Alert.alert(t('tripDetail.error'), t('tripNudges.calendarUnavailable'));
+                                }
+                            }}
+                        >
+                            <Ionicons name="calendar-outline" size={20} color="#1A1A1A" />
+                        </TouchableOpacity>
+                    )}
                     <View style={[styles.aiBadge, { backgroundColor: 'rgba(255,255,255,0.9)' }]}>
                         <Ionicons name="sparkles" size={12} color="#FFE500" />
-                        <Text style={[styles.aiBadgeText, { color: '#1A1A1A' }]}>{t('tripDetail.aiGenerated')}</Text>
+                        {!compactHeader && <Text style={[styles.aiBadgeText, { color: '#1A1A1A' }]}>{t('tripDetail.aiGenerated')}</Text>}
                     </View>
                 </View>
             </SafeAreaView>
@@ -3315,7 +3361,7 @@ export default function TripDetails() {
                                 <View style={styles.addActivityFooter}>
                                     <TouchableOpacity
                                         style={[styles.addActivityBtn, { borderColor: colors.border }]}
-                                        onPress={() => handleAddAI(index, day.activities.length)}
+                                        onPress={() => setAddAITarget({ dayIndex: index, insertIndex: day.activities.length })}
                                         disabled={addingActivity !== null}
                                         activeOpacity={0.7}
                                     >
@@ -4036,6 +4082,12 @@ export default function TripDetails() {
                                     )}
                                 </View>
                             )}
+
+                            {/* Tiqets museum & attraction tickets (partner link) */}
+                            <TiqetsCard
+                                destination={trip.destination}
+                                onPress={() => openPartnerLink(buildTiqetsLink({ query: trip.destination, lang: i18n.language }), 'activity', 'tiqets')}
+                            />
                         </>
                     )}
 
@@ -5395,7 +5447,7 @@ export default function TripDetails() {
                     replaceActivityMut({ tripId: trip._id, dayIndex, activityIndex: actIndex, language: i18n.language })
                         .catch((err: any) => { console.error("Replace activity failed:", err); setReplacingActivity(null); });
                 }}
-                onAddAI={() => actionSheetTarget && handleAddAI(actionSheetTarget.dayIndex, actionSheetTarget.actIndex + 1)}
+                onAddAI={() => actionSheetTarget && setAddAITarget({ dayIndex: actionSheetTarget.dayIndex, insertIndex: actionSheetTarget.actIndex + 1 })}
                 onAddManual={() => actionSheetTarget && setAddManualTarget({ dayIndex: actionSheetTarget.dayIndex, insertIndex: actionSheetTarget.actIndex + 1 })}
                 onMove={() => actionSheetTarget && setMoveTarget(actionSheetTarget)}
                 onRemove={() => {
@@ -5414,6 +5466,13 @@ export default function TripDetails() {
                 nextStart={editTimeTarget && editTimeTarget.actIndex < editTimeDayActivities.length - 1 ? (editTimeDayActivities[editTimeTarget.actIndex + 1]?.startTime || editTimeDayActivities[editTimeTarget.actIndex + 1]?.time) : undefined}
                 onClose={() => setEditTimeTarget(null)}
                 onSave={handleEditTimeSave}
+            />
+
+            <AddActivityAIModal
+                visible={!!addAITarget}
+                dayNumber={addAITarget ? addAITarget.dayIndex + 1 : undefined}
+                onClose={() => setAddAITarget(null)}
+                onSubmit={handleAddAI}
             />
 
             <AddActivityModal

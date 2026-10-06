@@ -68,3 +68,8 @@ export function pendingReason(connectorId: string): string | null {
   if (isSearchable(connectorId)) return null;
   return CONNECTOR_SPECS.find((s) => s.id === connectorId)?.pendingReason ?? null;
 }
+
+/** True when Planera can create a real order with this supplier. */
+export function isBookable(connectorId: string): boolean {
+  return !!getConnector(connectorId)?.capabilities.supports.createBooking;
+}

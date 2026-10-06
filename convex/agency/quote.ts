@@ -181,3 +181,116 @@ export function revalidatedExpiry(input: {
 }): number {
   return input.stillValid ? input.now + input.ttlMs : input.currentExpiresAt;
 }
+
+/**
+ * Write what a revalidation learned back onto the quote.
+ *
+ * Two things change:
+ *  - the provider handle. Hotelbeds' checkrates SPENDS the rateKey it was given
+ *    and returns a new one; keeping the old one meant a second revalidation, or
+ *    the booking itself, always failed on that hotel.
+ *  - the cost, when the supplier's price moved. A line the agency priced by
+ *    rule is re-priced by the same rule. A line whose price the agent TYPED
+ *    keeps that price — it is the number the client was told — and the margin
+ *    absorbs the move, visibly, in the agent's view.
+ */
+export function applyRefreshed(
+  packages: TravelPackage[],
+  refreshed: Array<{
+    offerId: string;
+    revalidationToken?: string;
+    cost?: NormalizedOffer["cost"];
+    conditions?: NormalizedOffer["conditions"];
+  }>,
+  ctx: { rules: PricingRuleRow[]; travelers: number; currency: CurrencyCode; destinationIata?: string },
+): TravelPackage[] {
+  if (!refreshed.length) return packages;
+  const byId = new Map(refreshed.map((r) => [r.offerId, r]));
+
+  const refreshLine = (line: PackageLine): PackageLine => {
+    const r = byId.get(line.offer.offerId);
+    if (!r) return line;
+    const offer = {
+      ...line.offer,
+      revalidationToken: r.revalidationToken ?? line.offer.revalidationToken,
+      conditions: r.conditions ?? line.offer.conditions,
+    } as NormalizedOffer;
+    // A cost in another currency cannot be priced without FX we do not do
+    // here; keep the old numbers and let the revalidation panel flag the move.
+    if (!r.cost || r.cost.base.currency !== ctx.currency || r.cost.taxes.currency !== ctx.currency) {
+      return { ...line, offer };
+    }
+    offer.cost = r.cost;
+    if (line.priceOverridden) {
+      const f = line.financials;
+      const cost = r.cost.base.amountMinor + r.cost.taxes.amountMinor;
+      const margin = f.customerPrice.amountMinor - cost - f.serviceFee.amountMinor;
+      return {
+        ...line,
+        offer,
+        financials: {
+          ...f,
+          supplierCost: money(cost, ctx.currency),
+          markup: money(margin, ctx.currency),
+          expectedGrossProfit: money(
+            margin + f.serviceFee.amountMinor + f.expectedCommission.amountMinor,
+            ctx.currency,
+          ),
+        },
+      };
+    }
+    const rule = resolvePricingRule(ctx.rules, {
+      connectorId: offer.connectorId,
+      destinationIata: ctx.destinationIata,
+    });
+    return {
+      ...line,
+      offer,
+      financials: priceOffer(r.cost, rule, { travelers: ctx.travelers, sellCurrency: ctx.currency }),
+    };
+  };
+
+  return packages.map((p) => {
+    if (!p.lines.some((l) => byId.has(l.offer.offerId))) return p;
+    const lines = p.lines.map(refreshLine);
+    return {
+      ...p,
+      lines,
+      totals: {
+        internal: sumFinancials(lines.map((l) => l.financials), ctx.currency),
+        payAtProperty: lines.flatMap((l) => (l.offer.cost.payAtProperty ?? []).map((c) => c.amount)),
+      },
+    };
+  });
+}
+
+/**
+ * Price a set of offers into ready-to-use lines, exactly as `buildQuote` would
+ * — same rule resolution, same engine — for the alternatives pool and add-on
+ * searches. One pricing path, so a swapped-in hotel cannot be priced by a
+ * different rule than the one it replaces.
+ */
+export function priceLines(
+  offers: NormalizedOffer[],
+  rules: PricingRuleRow[],
+  ctx: { travelers: number; currency: CurrencyCode; destinationIata?: string },
+): PackageLine[] {
+  const out: PackageLine[] = [];
+  for (const offer of offers) {
+    try {
+      const rule = resolvePricingRule(rules, {
+        connectorId: offer.connectorId,
+        destinationIata: ctx.destinationIata,
+      });
+      const financials = priceOffer(offer.cost, rule, {
+        travelers: ctx.travelers,
+        sellCurrency: ctx.currency,
+      });
+      out.push({ kind: offer.kind, offer, financials });
+    } catch {
+      // An offer in a currency we cannot price is left out of the pool rather
+      // than shown at a wrong number.
+    }
+  }
+  return out;
+}

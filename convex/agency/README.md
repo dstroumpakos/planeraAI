@@ -353,3 +353,44 @@ no) caught two things code review would not have:
 
 Both are covered by regression tests. Probe script:
 `scratchpad/probe-hosts.js` — 8/10 endpoints reached on the first run.
+
+## Tailor-made quotes and booking (2026-09-30, web `2026.9.28`, Convex deploy pending)
+
+Built for agencies that compose each trip by hand (first asked for by REVIS
+TRAVEL), not ones that sell fixed packages.
+
+- **Editing** — `quoteEdit.ts` (pure) + `quoteEditing.ts`: swap/add a line from
+  the quote's `alternatives` pool (priced at search time by the same rules),
+  remove/move lines, type a customer price (moves the margin, never the cost),
+  client notes per line, rename/hide/copy an option, and **manual services**
+  (`kind: "service"`, `connectorId: "manual"`) for ferries, insurance, own-contract
+  hotels. `addOnSearch` prices one more kind for any city/dates into the pool
+  (multi-city). Every edit clears the stale revalidation and re-writes the AI copy
+  once, debounced via `copyRevision`.
+- **AI intake** — `requestParse.ts` reads a pasted client email into the search
+  form; the text is stored on the quote as `requestText`.
+- **Revalidation fix** — the orchestrator now returns `refreshed` handles and
+  costs; `applyRefreshed` writes them back, so Hotelbeds' spent rateKey is
+  replaced and a price move is detected even when the connector does not flag it.
+  Manual lines count as agent-confirmed, not unverifiable.
+- **After acceptance** — `fulfilment.ts` (pure) + `bookings.ts`: traveller
+  details (from the client link or the agent), a per-service booking record,
+  API booking (`createBooking` on Duffel, Hotelbeds, mocks) or manual reference
+  entry, the agency's payment note, and a confirmation released to the client's
+  link. A lost booking response becomes `unknown`, which blocks retries until a
+  human checks the supplier. An API booking refuses if the supplier price rose.
+- **Money** — Planera never collects from travellers. API bookings are paid from
+  the agency's own supplier account; `payment` is the agency's own ledger note.
+
+## Duffel Stays (2026-09-30, Convex deploy pending)
+
+Hotels through the agency's existing Duffel token — `connectors/duffelStays.ts`.
+Search by coordinates (the airport's CITY via `/places/suggestions`, 5 km; the
+airport itself at 15 km as a fallback) → `fetch_all_rates` + `/stays/quotes` on
+revalidation → a fresh quote + price-rise check + `/stays/bookings` on booking.
+Tokens: `stays_sr:<search_result_id>` after search, `stays_rate:<rate_id>` after
+revalidation (quotes are short-lived, so they are never stored).
+
+Built from Duffel's docs, NOT yet run live. Stays is off by default: the agency
+must request access from Duffel; until then hotel searches fail with
+"Duffel Stays is not enabled on this Duffel account".

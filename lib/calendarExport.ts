@@ -1,3 +1,5 @@
+import { Linking, Platform } from "react-native";
+import * as Calendar from "expo-calendar";
 import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing";
 
@@ -117,4 +119,85 @@ export async function shareTripCalendar(trip: {
         dialogTitle: trip.destination,
     });
     return true;
+}
+
+type CalendarTrip = {
+    _id: string; destination: string; startDate: number; endDate: number; itinerary?: any;
+};
+
+/** The day-by-day plan as plain text, for the calendar event's notes. */
+function tripNotes(trip: CalendarTrip): string {
+    const days: any[] = trip.itinerary?.dayByDayItinerary || [];
+    const blocks = days.map((day, i) => {
+        const date = new Date(trip.startDate + i * DAY_MS)
+            .toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+        const stops = (day.activities || [])
+            .filter((a: any) => a?.title)
+            .map((a: any) => `• ${[a.startTime || a.time, a.title].filter(Boolean).join(" ")}`)
+            .join("\n");
+        return `Day ${day.day || i + 1} · ${date}${day.title ? ` — ${day.title}` : ""}${stops ? `\n${stops}` : ""}`;
+    });
+    return [...blocks, "Planned with Planera AI · https://planeraai.app"].join("\n\n");
+}
+
+/** Midnight (device-local) on the trip's calendar day — the stored dates are UTC midnight. */
+function localDay(ts: number): Date {
+    const d = new Date(ts);
+    return new Date(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+/** Jump to the trip's first day in the system calendar app. */
+async function openCalendarAt(date: Date) {
+    try {
+        if (Platform.OS === "ios") {
+            // calshow: takes seconds since 2001-01-01 (Apple reference date).
+            const secs = Math.floor((date.getTime() - Date.UTC(2001, 0, 1)) / 1000);
+            await Linking.openURL(`calshow:${secs}`);
+        } else if (Platform.OS === "android") {
+            await Linking.openURL(`content://com.android.calendar/time/${date.getTime()}`);
+        }
+    } catch {}
+}
+
+export type AddTripToCalendarResult = "saved" | "canceled" | "shared" | "unavailable";
+
+/**
+ * Add the trip to the phone's calendar the native way: opens the system
+ * "New Event" editor (Apple Calendar on iOS, the calendar app on Android)
+ * pre-filled with an all-day event spanning the trip and the full day-by-day
+ * plan in its notes. No calendar permission is needed — the user confirms in
+ * the OS UI. On iOS, once saved, it opens Calendar on the trip's first day.
+ * Falls back to the .ics share sheet where the native editor isn't available.
+ */
+export async function addTripToCalendar(trip: CalendarTrip): Promise<AddTripToCalendarResult> {
+    // EventKit all-day events take the last day itself as the end (not the next
+    // midnight, which shows an extra day). Android's insert intent reads the
+    // times through UTC, so use local noon there to keep east-of-UTC zones
+    // from slipping back a day.
+    const start = localDay(trip.startDate);
+    const end = localDay(trip.endDate);
+    if (Platform.OS === "android") {
+        start.setHours(12);
+        end.setHours(12);
+    }
+
+    if (Platform.OS === "ios" || Platform.OS === "android") {
+        try {
+            const result = await Calendar.createEventInCalendarAsync({
+                title: `✈️ ${trip.destination || "Trip"}`,
+                startDate: start,
+                endDate: end,
+                allDay: true,
+                location: trip.destination,
+                notes: tripNotes(trip),
+                url: "https://planeraai.app",
+            });
+            if (result.action === "canceled") return "canceled";
+            if (Platform.OS === "ios" && result.action === "saved") await openCalendarAt(start);
+            return "saved";
+        } catch (e) {
+            console.warn("[calendar] native editor failed, falling back to .ics", e);
+        }
+    }
+    return (await shareTripCalendar(trip)) ? "shared" : "unavailable";
 }

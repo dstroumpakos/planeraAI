@@ -2,6 +2,7 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 // Planera for Travel Agencies — additive, agency-scoped tenant tables.
 import { agencyTables } from "./agency/schema";
+import { dealBaggageValidator } from "./lib/baggage";
 
 export default defineSchema({
     trips: defineTable({
@@ -952,6 +953,10 @@ export default defineSchema({
         // Baggage
         cabinBaggage: v.optional(v.string()),   // "1x 8kg"
         checkedBaggage: v.optional(v.string()),  // "1x 23kg"
+        // Structured allowance parsed from the booked fare's `baggage_prices`
+        // (included / fee + amount / none). Set on auto/seeded deals; the app
+        // prefers it over the free-text fields above.
+        baggage: v.optional(dealBaggageValidator),
         // Metadata
         isRecommended: v.optional(v.boolean()),
         dealTag: v.optional(v.string()),  // "Great price", "Best price"
@@ -1491,8 +1496,11 @@ export default defineSchema({
         createdAt: v.float64(),
         activatedAt: v.optional(v.float64()),
         lastLoginAt: v.optional(v.float64()),
-        // When the partner accepted the Partner API Terms during signup.
+        // When the partner accepted the Partner Terms + Privacy Policy, and
+        // which version (`PARTNER_TERMS_VERSION` in partnerPortal.ts). May be
+        // carried over from their earlier application so they accept only once.
         acceptedTermsAt: v.optional(v.float64()),
+        termsVersion: v.optional(v.string()),
     })
         .index("by_email", ["email"])
         .index("by_inviteTokenHash", ["inviteTokenHash"])
@@ -1618,14 +1626,34 @@ export default defineSchema({
         ),
         createdAt: v.float64(),
         reviewedAt: v.optional(v.float64()),
+        // Partner Terms + Privacy Policy acceptance given on the apply form.
+        // Reused by the invite signup so the partner isn't asked twice.
+        acceptedTermsAt: v.optional(v.float64()),
+        termsVersion: v.optional(v.string()),
     })
         .index("by_status_created", ["status", "createdAt"])
-        .index("by_created", ["createdAt"]),
+        .index("by_created", ["createdAt"])
+        .index("by_email", ["email"]),
 
     // Product / offer listings submitted by self-serve supplier partners
     // (`partnerAccounts.kind === "supplier"`). New/edited listings land in
     // status "pending" and an operator approves them in /partner-admin before
     // they go live. status: "pending" → "approved" | "rejected" | "archived".
+    // One row per tap on a supplier product card (home row, web landing,
+    // web dashboard). `viewerKey` is "u:<userId>" or "v:<anonymous visitor id>"
+    // so unique people can be counted per product.
+    partnerProductClicks: defineTable({
+        productId: v.id("partnerProducts"),
+        accountId: v.id("partnerAccounts"),
+        kind: v.union(v.literal("open"), v.literal("site")),
+        source: v.string(), // "ios" | "android" | "web_landing" | "web_dashboard" | "unknown"
+        viewerKey: v.optional(v.string()),
+        homeIata: v.optional(v.string()),
+        createdAt: v.float64(),
+    })
+        .index("by_product_created", ["productId", "createdAt"])
+        .index("by_account_created", ["accountId", "createdAt"]),
+
     partnerProducts: defineTable({
         accountId: v.id("partnerAccounts"),
         partnerRef: v.string(),
@@ -1655,6 +1683,21 @@ export default defineSchema({
         createdAt: v.float64(),
         updatedAt: v.float64(),
         reviewedAt: v.optional(v.float64()),
+        // Taps on the app home "Tours by local partners" card.
+        homeClicks: v.optional(v.float64()),
+        // Home-airport markets this listing is shown to (IATA codes, e.g.
+        // ["ATH","SKG"]); ["*"] = everyone. Unset = not shown anywhere — an
+        // operator must pick markets before approving.
+        markets: v.optional(v.array(v.string())),
+        // Unsplash credit for an image an operator picked in admin review.
+        // Only valid while `imageUrl` is still imageUrls[0].
+        imageCredit: v.optional(
+            v.object({
+                imageUrl: v.string(),
+                photographer: v.string(),
+                photographerUrl: v.optional(v.string()),
+            })
+        ),
     })
         .index("by_account", ["accountId"])
         .index("by_status_created", ["status", "createdAt"]),
@@ -2646,6 +2689,49 @@ export default defineSchema({
         ),
         updatedAt: v.float64(),
     }).index("by_key", ["key"]),
+
+    // Internal admin tool (/admin/ai-writer on the website): one row per text
+    // generation an admin runs against Planera's OpenAI account. Deep Research
+    // runs are asynchronous on OpenAI's side, so a row is created as
+    // "researching" with the OpenAI response id and completed on a later poll.
+    // Never holds the API key or any request credential.
+    aiWriterGenerations: defineTable({
+        userId: v.string(),
+        kind: v.union(v.literal("standard"), v.literal("deep_research")),
+        model: v.string(),
+        prompt: v.string(),
+        systemInstructions: v.optional(v.string()),
+        reasoningEffort: v.optional(v.string()),
+        temperature: v.optional(v.float64()),
+        status: v.union(
+            v.literal("researching"),
+            v.literal("completed"),
+            v.literal("failed"),
+            v.literal("cancelled"),
+        ),
+        // OpenAI response id — only set for background (Deep Research) runs.
+        responseId: v.optional(v.string()),
+        output: v.optional(v.string()),
+        // url_citation annotations from Deep Research, in output order.
+        citations: v.optional(v.array(v.object({
+            url: v.string(),
+            title: v.string(),
+            startIndex: v.float64(),
+            endIndex: v.float64(),
+        }))),
+        usage: v.optional(v.object({
+            inputTokens: v.float64(),
+            outputTokens: v.float64(),
+            totalTokens: v.float64(),
+            reasoningTokens: v.optional(v.float64()),
+            cachedInputTokens: v.optional(v.float64()),
+        })),
+        error: v.optional(v.string()),
+        createdAt: v.float64(),
+        completedAt: v.optional(v.float64()),
+    })
+        .index("by_user", ["userId", "createdAt"])
+        .index("by_response", ["responseId"]),
 
     // ── Planera for Travel Agencies (agency portal) — additive tenant tables ──
     ...agencyTables,

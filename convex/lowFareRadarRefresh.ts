@@ -32,6 +32,7 @@ import { action, internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { ConvexError, v } from "convex/values";
 import {
+  fetchRadarBaggage,
   fetchRadarFlightOptions,
   matchRadarOption,
   normalizeFlightNumber,
@@ -39,6 +40,7 @@ import {
   type RadarDealCriteria,
   type RadarFlightOptionsResult,
 } from "./lib/searchApiFlights";
+import type { DealBaggage } from "./lib/baggage";
 
 // Upper bound on searchapi.io calls per run — a backstop against runaway quota
 // use, not a pacing device: the whole curated table should fit in one run, or
@@ -302,6 +304,27 @@ export const refreshManualDealPrices = internalAction({
           // route's typical price is unknown we pass no ceiling, so the deal is
           // only re-priced, never expired on thin data.
           const typical = routeTypicalPrice(result);
+
+          // One-time baggage backfill for deals curated before baggage was
+          // captured (costs 1–2 extra calls, so only while it's missing).
+          let baggage: DealBaggage | undefined;
+          if (!deal.baggage) {
+            try {
+              baggage = await fetchRadarBaggage(
+                {
+                  origin: deal.origin,
+                  destination: deal.destination,
+                  outboundDate: deal.outboundDate,
+                  returnDate: deal.returnDate,
+                  currency: deal.currency,
+                },
+                match.option,
+                deal.returnFlightNumber
+              );
+            } catch {
+              // Best-effort — never blocks the price refresh.
+            }
+          }
           const ceiling =
             typical != null ? typical * LOW_FARE_CEILING_RATIO : undefined;
 
@@ -319,6 +342,7 @@ export const refreshManualDealPrices = internalAction({
             ...(ceiling != null ? { ceiling } : {}),
             // Persisted on the deal for the newsletter's "% below typical" badge.
             ...(typical != null ? { typicalPrice: typical } : {}),
+            ...(baggage ? { baggage } : {}),
           });
 
           const changeRow = (): PriceChange => ({

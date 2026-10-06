@@ -132,7 +132,9 @@ test("HONESTY: a connector never declares a capability it cannot perform", () =>
       !!spec.revalidate,
       `${spec.id} misreports its revalidation capability`,
     );
-    assert.equal(c.capabilities.supports.createBooking, false, `${spec.id}`);
+    // Same rule for booking: declared exactly when a booking spec exists.
+    assert.equal(c.capabilities.supports.createBooking, !!spec.book, `${spec.id}`);
+    assert.equal(typeof c.createBooking === "function", !!spec.book, `${spec.id}`);
   }
 });
 

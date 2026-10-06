@@ -17,16 +17,13 @@
 
 import { v } from "convex/values";
 import { internalMutation } from "./_generated/server";
-import { AIRPORTS } from "../lib/airports";
 import { extractHm } from "./lib/searchApiFlights";
+// Shared with the seeder so metro codes (NYC, LON, PAR, TYO) get a real city
+// name instead of being stored as their code.
+import { cityForIata } from "./lib/radarDestinations";
+import { dealBaggageValidator } from "./lib/baggage";
 
 const AUTO_DEAL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-
-function cityForIata(code: string): string {
-  const upper = code.toUpperCase();
-  const hit = AIRPORTS.find((a) => a.code === upper);
-  return hit?.city ?? upper;
-}
 
 function timeOnly(iso?: string | null): string {
   // Providers return "2024-06-10 08:00", a bare "08:00", or an ISO string —
@@ -61,6 +58,7 @@ export const upsertAutoDealFromSerpApi = internalMutation({
     })),
     cabinBaggage: v.optional(v.string()),
     checkedBaggage: v.optional(v.string()),
+    baggage: v.optional(dealBaggageValidator),
     totalPrice: v.optional(v.float64()),
     adults: v.optional(v.float64()),
     // Admin-seeding overrides. Defaults preserve the opportunistic AUTO
@@ -206,6 +204,7 @@ export const upsertAutoDealFromSerpApi = internalMutation({
       travelMonthTo: args.travelMonthTo,
       cabinBaggage: args.cabinBaggage,
       checkedBaggage: args.checkedBaggage,
+      baggage: args.baggage,
       // Always provide a booking link. Fall back to a Google Flights
       // deep-link that lands directly on the results page (legacy
       // `#flt=` hash format), so the deal card "Book" CTA never

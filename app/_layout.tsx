@@ -1,7 +1,7 @@
 // Root Layout - CRITICAL FILE FOR APP STARTUP
 // This file MUST have a default export that renders properly
 
-import { useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { View, Text, StyleSheet, Platform } from "react-native";
 import { ConvexReactClient } from "convex/react";
 import { Stack } from "expo-router";
@@ -9,13 +9,14 @@ import * as SplashScreen from "expo-splash-screen";
 import { ThemeProvider } from "@/lib/ThemeContext";
 import { ConvexNativeAuthProvider } from "@/lib/ConvexAuthProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { AnimatedSplash } from "@/components/AnimatedSplash";
 import { authClient } from "@/lib/auth-client";
 import { useNotifications } from "@/lib/useNotifications";
 import { useActivityPing } from "@/lib/useActivityPing";
 import { useTripWidgets } from "@/lib/useTripWidgets";
 import "@/lib/i18n"; // Initialize i18n
 
-// Prevent splash screen from auto-hiding before app is ready
+// Keep the native splash up until <AnimatedSplash> is on screen to take over
 SplashScreen.preventAutoHideAsync();
 
 // Environment validation - safe at module scope (just reads process.env)
@@ -105,7 +106,7 @@ function NotificationInitializer() {
 }
 
 // Inner app component that handles initialization
-function AppContent() {
+function AppContent({ onReady }: { onReady: () => void }) {
     const [envCheck, setEnvCheck] = useState<{ valid: boolean; errors: string[] } | null>(null);
     const [convex, setConvex] = useState<ConvexReactClient | null>(null);
     const [initError, setInitError] = useState<string | null>(null);
@@ -179,12 +180,12 @@ function AppContent() {
         })();
     }, []);
 
-    // Hide splash screen once app is ready
+    // Let the launch animation know the app underneath can be revealed
     useEffect(() => {
         if (appReady) {
-            SplashScreen.hideAsync();
+            onReady();
         }
-    }, [appReady]);
+    }, [appReady, onReady]);
 
     // Show loading while checking environment
     if (envCheck === null || (envCheck.valid && convex === null && !initError)) {
@@ -214,9 +215,17 @@ function AppContent() {
 
 // CRITICAL: Default export is required for Expo Router
 export default function RootLayout() {
+    const [appReady, setAppReady] = useState(false);
+    const [showSplash, setShowSplash] = useState(true);
+    const handleReady = useCallback(() => setAppReady(true), []);
+    const handleSplashFinish = useCallback(() => setShowSplash(false), []);
+
     return (
-        <ErrorBoundary>
-            <AppContent />
-        </ErrorBoundary>
+        <View style={{ flex: 1 }}>
+            <ErrorBoundary>
+                <AppContent onReady={handleReady} />
+            </ErrorBoundary>
+            {showSplash && <AnimatedSplash appReady={appReady} onFinish={handleSplashFinish} />}
+        </View>
     );
 }

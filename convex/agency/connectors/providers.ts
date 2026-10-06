@@ -369,7 +369,9 @@ const tiqets: ConnectorSpec = {
   id: "tiqets",
   displayName: "Tiqets Distributor API",
   kinds: ["activity"],
-  hosts: { sandbox: "https://api.tiqets.com", production: "https://api.tiqets.com" },
+  // Test host per developers.tiqets.dev "Environments and Testing" (renamed
+  // with an `api.` prefix on 2026-03-05); its keys come from the account manager.
+  hosts: { sandbox: "https://api.api-tiqt-test.steq.it", production: "https://api.tiqets.com" },
   auth: { kind: "apiKeyHeader", header: "Authorization", prefix: "Token " },
   health: { method: "GET", path: "/v2/products?page_size=1" },
 };
@@ -453,22 +455,40 @@ hotelbeds.destinations = {
   },
 };
 
-/** Viator: a flat destination tree with numeric ids. */
+/**
+ * Viator: a flat destination tree with numeric ids. Shapes checked against
+ * Viator's own OpenAPI spec (Partner API 2.0): `iataCodes` is an ARRAY — the
+ * mapper used to read a singular `iataCode`, which does not exist, so no
+ * destination ever matched on its airport code.
+ */
 interface ViatorDestination {
   destinationId?: number | string;
   name?: string;
   type?: string;
-  iataCode?: string;
+  iataCodes?: string[];
   countryCallingCode?: string;
   center?: { latitude?: number; longitude?: number };
 }
 
+/** Every type the spec lists; unknown future values fall back to "city". */
 const VIATOR_TYPE: Record<string, "city" | "region" | "poi"> = {
   CITY: "city",
+  TOWN: "city",
+  VILLAGE: "city",
+  HAMLET: "city",
+  ISLAND: "city",
   REGION: "region",
   COUNTRY: "region",
   STATE: "region",
+  PROVINCE: "region",
+  COUNTY: "region",
+  PENINSULA: "region",
+  "UNION TERRITORY": "region",
+  "NATIONAL PARK": "poi",
+  AREA: "poi",
+  DISTRICT: "poi",
   NEIGHBORHOOD: "poi",
+  WARD: "poi",
 };
 
 viator.destinations = {
@@ -485,7 +505,7 @@ viator.destinations = {
         name: String(d.name),
         // Viator publishes an IATA code on airport-adjacent destinations; when
         // present it is by far the most reliable thing to match on.
-        iataCodes: d.iataCode ? [d.iataCode] : undefined,
+        iataCodes: d.iataCodes?.length ? d.iataCodes.map((c) => String(c).toUpperCase()) : undefined,
         type: VIATOR_TYPE[String(d.type ?? "").toUpperCase()] ?? "city",
         lat: d.center?.latitude,
         lon: d.center?.longitude,
@@ -493,18 +513,22 @@ viator.destinations = {
   },
 };
 
-/** Tiqets: cities, with an ISO country code. */
+/**
+ * Tiqets: cities. The feed carries only Tiqets' own country id and name, no
+ * ISO code, so matching is on the city name alone.
+ */
 interface TiqetsCity {
   id?: number | string;
   name?: string;
-  country_code?: string;
-  country?: { code?: string };
 }
+
+/** The documented maximum for /v2/cities; larger values are not accepted. */
+const TIQETS_CITY_PAGE_SIZE = 100;
 
 tiqets.destinations = {
   request: (_creds, _target, host) => ({
     method: "GET",
-    url: `${host}/v2/cities?page_size=1000`,
+    url: `${host}/v2/cities?page_size=${TIQETS_CITY_PAGE_SIZE}&page=1`,
   }),
   map: (payload) => {
     const raw = payload as { cities?: TiqetsCity[]; data?: TiqetsCity[] };
@@ -514,9 +538,19 @@ tiqets.destinations = {
       .map((c) => ({
         id: String(c.id),
         name: String(c.name),
-        countryCode: c.country_code ?? c.country?.code,
         type: "city" as const,
       }));
+  },
+  nextPage: (payload, url) => {
+    const p = (payload as { pagination?: { total?: number; page?: number; page_size?: number } })
+      ?.pagination;
+    const page = Number(p?.page);
+    const size = Number(p?.page_size) || TIQETS_CITY_PAGE_SIZE;
+    const total = Number(p?.total);
+    if (!Number.isFinite(page) || !Number.isFinite(total) || page * size >= total) return null;
+    const next = new URL(url);
+    next.searchParams.set("page", String(page + 1));
+    return next.toString();
   },
 };
 
@@ -944,6 +978,85 @@ hotelbeds.revalidate = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Hotelbeds booking — POST /bookings.
+//
+// Books the rateKey the quote holds. That key must be the FRESHEST one: a
+// checkrates call spends the old key and mints a new one, which is why the
+// revalidation pass writes the new token back onto the quote.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Age in whole years on a given date. */
+function ageOnDate(bornOn: string, onDate: string): number {
+  const [by, bm, bd] = bornOn.split("-").map(Number);
+  const [ty, tm, td] = onDate.split("-").map(Number);
+  let age = ty - by;
+  if (tm < bm || (tm === bm && td < bd)) age--;
+  return age;
+}
+
+hotelbeds.book = {
+  request: (_creds, req, host) => {
+    const rooms = Math.max(1, Math.min(9, req.rooms ?? 1));
+    const onDate = req.travelDate ?? new Date().toISOString().slice(0, 10);
+    const adults = req.passengers.filter((p) => p.type === "adult");
+    const others = req.passengers.filter((p) => p.type !== "adult");
+    // Spread adults across rooms first so no room is booked with only
+    // children in it, then the children round-robin.
+    const paxes = [
+      ...adults.map((p, i) => ({
+        roomId: (i % rooms) + 1,
+        type: "AD",
+        name: p.givenName,
+        surname: p.familyName,
+      })),
+      ...others.map((p, i) => ({
+        roomId: (i % rooms) + 1,
+        type: "CH",
+        age: Math.max(0, ageOnDate(p.bornOn, onDate)),
+        name: p.givenName,
+        surname: p.familyName,
+      })),
+    ];
+    const lead = adults[0] ?? req.passengers[0];
+    return {
+      method: "POST",
+      url: `${host}/hotel-api/1.0/bookings`,
+      body: {
+        holder: { name: lead.givenName, surname: lead.familyName },
+        rooms: [{ rateKey: req.revalidationToken, paxes }],
+        // Hotelbeds caps this at 20 characters.
+        clientReference: req.clientReference.replace(/[^A-Za-z0-9-]/g, "").slice(0, 20) || "PLANERA",
+        remark: `Contact ${req.contact.phone}`,
+      },
+    };
+  },
+  map: (payload) => {
+    const booking = (payload as {
+      booking?: {
+        reference?: string;
+        status?: string;
+        totalNet?: number | string;
+        currency?: string;
+      };
+    })?.booking;
+    if (!booking?.reference) {
+      return { status: "failed", message: "Hotelbeds did not return a booking reference" };
+    }
+    const status = String(booking.status ?? "").toUpperCase();
+    const currency = booking.currency ?? "EUR";
+    const minor = booking.totalNet !== undefined ? safeMinor(booking.totalNet, currency) : undefined;
+    return {
+      status: status === "CONFIRMED" ? "confirmed" : status === "CANCELLED" ? "failed" : "requested",
+      supplierReference: booking.reference,
+      supplierBookingId: booking.reference,
+      amountCharged: minor !== undefined ? money(minor, currency) : undefined,
+      message: `Hotelbeds ${status || "booking"} ${booking.reference}`,
+    };
+  },
+  timeoutMs: 45_000,
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Activities — Viator and Tiqets
 //
 // Both sell PER TICKET, while the canonical model costs a whole package, so
@@ -965,6 +1078,12 @@ interface ViatorProduct {
   pricing?: {
     summary?: { fromPrice?: number; fromPriceBeforeDiscount?: number };
     currency?: string;
+    /**
+     * Merchant partners on the markup/booking-fee model only: the lowest
+     * per-person amount Viator would INVOICE the agency (booking fee
+     * excluded). When present, the agency is buying net and may mark up.
+     */
+    partnerNetFromPrice?: number;
   };
   reviews?: { combinedAverageRating?: number; totalReviews?: number };
   duration?: {
@@ -1010,12 +1129,14 @@ viator.search = {
 
     for (const product of products) {
       try {
-        const perPerson = product.pricing?.summary?.fromPrice;
+        const net = product.pricing?.partnerNetFromPrice;
+        const perPerson = net ?? product.pricing?.summary?.fromPrice;
         const currency = product.pricing?.currency ?? query.sellCurrency;
         if (!product.productCode || !product.title || perPerson === undefined) continue;
 
         const perPersonMinor = safeMinor(perPerson, currency);
         if (perPersonMinor === undefined || perPersonMinor <= 0) continue;
+        const isNet = net !== undefined;
 
         const freeCancellation = (product.flags ?? []).includes("FREE_CANCELLATION");
         const rating = product.reviews?.combinedAverageRating;
@@ -1025,12 +1146,23 @@ viator.search = {
           offerId: `viator:${product.productCode}`,
           connectorId: "viator",
           supplierOfferId: product.productCode,
-          cost: {
-            rateType: "commissionable",
-            base: money(perPersonMinor * travellers, currency),
-            taxes: money(0, currency),
-            markupForbidden: true,
-          },
+          // Two Viator pricing models, and the response says which one this
+          // account is on: a NET price (merchant, markup/booking-fee model —
+          // the agency sets its own price) or only the RETAIL "from" price
+          // (commission model / affiliate — no markup on a price the client
+          // can look up on viator.com).
+          cost: isNet
+            ? {
+                rateType: "net",
+                base: money(perPersonMinor * travellers, currency),
+                taxes: money(0, currency),
+              }
+            : {
+                rateType: "commissionable",
+                base: money(perPersonMinor * travellers, currency),
+                taxes: money(0, currency),
+                markupForbidden: true,
+              },
           conditions: {
             refundable: freeCancellation,
             changeable: freeCancellation,
@@ -1038,6 +1170,16 @@ viator.search = {
               ? "Free cancellation up to 24 hours before"
               : "Cancellation terms set by the operator",
           },
+          // What /availability/check needs to price this for real: the
+          // product, one travel date inside the trip, and the party by age band.
+          revalidationToken: viatorToken({
+            productCode: product.productCode,
+            travelDate: activityDate(query),
+            paxMix: viatorPaxMix(query),
+            net: isNet,
+            currency,
+            refundable: freeCancellation,
+          }),
           quotedAt: now,
           title: product.title,
           durationMinutes:
@@ -1052,6 +1194,161 @@ viator.search = {
       }
     }
     return out;
+  },
+};
+
+/** What a Viator re-pricing call needs, carried in the offer's token. */
+export interface ViatorToken {
+  productCode: string;
+  travelDate: string;
+  paxMix: Array<{ ageBand: string; numberOfTravelers: number }>;
+  net: boolean;
+  currency: string;
+  /** From the search's FREE_CANCELLATION flag — availability/check does not restate it. */
+  refundable: boolean;
+  productOptionCode?: string;
+  startTime?: string;
+}
+
+const VIATOR_TOKEN_PREFIX = "viator:";
+const viatorToken = (t: ViatorToken) => `${VIATOR_TOKEN_PREFIX}${JSON.stringify(t)}`;
+export function readViatorToken(token: string): ViatorToken {
+  if (!token.startsWith(VIATOR_TOKEN_PREFIX)) throw new Error("not a Viator offer token");
+  return JSON.parse(token.slice(VIATOR_TOKEN_PREFIX.length)) as ViatorToken;
+}
+
+/**
+ * The day an activity is priced for. A search spans the whole stay but a
+ * price check needs one date: the first FULL day (the day after arrival) when
+ * the trip has one, otherwise the arrival day itself.
+ */
+export function activityDate(query: { departDate?: string; returnDate?: string }): string {
+  const start = query.departDate ?? new Date().toISOString().slice(0, 10);
+  if (!query.returnDate) return start;
+  const next = new Date(Date.parse(`${start}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+  return next < query.returnDate ? next : start;
+}
+
+/**
+ * The party in Viator's age bands. Bands are product-specific (a product may
+ * price only TRAVELER, or ADULT+CHILD); ADULT/CHILD/INFANT is the common case,
+ * and a product that rejects it answers with an error the agent sees as
+ * "could not verify", never as a wrong price.
+ */
+export function viatorPaxMix(query: { adults: number; childrenAges: number[] }) {
+  const infants = query.childrenAges.filter((a) => a < 3).length;
+  const children = query.childrenAges.length - infants;
+  return [
+    { ageBand: "ADULT", numberOfTravelers: Math.max(1, query.adults) },
+    ...(children ? [{ ageBand: "CHILD", numberOfTravelers: children }] : []),
+    ...(infants ? [{ ageBand: "INFANT", numberOfTravelers: infants }] : []),
+  ];
+}
+
+interface ViatorPrice {
+  recommendedRetailPrice?: number;
+  partnerNetPrice?: number;
+  bookingFee?: number;
+  commission?: number;
+  partnerTotalPrice?: number;
+}
+
+interface ViatorBookableItem {
+  productOptionCode?: string;
+  startTime?: string;
+  available?: boolean;
+  unavailableReason?: string;
+  totalPrice?: { price?: ViatorPrice };
+}
+
+/**
+ * Viator re-pricing — POST /availability/check, the live price and
+ * availability for one date and party. Checked against Viator's OpenAPI spec.
+ * The cheapest AVAILABLE option/start time wins, and its option code and time
+ * go back into the token so a later check (or booking in Viator) prices the
+ * exact same thing.
+ */
+viator.revalidate = {
+  request: (_creds, token, host) => {
+    const t = readViatorToken(token);
+    return {
+      method: "POST",
+      url: `${host}/partner/availability/check`,
+      body: {
+        productCode: t.productCode,
+        ...(t.productOptionCode ? { productOptionCode: t.productOptionCode } : {}),
+        ...(t.startTime ? { startTime: t.startTime } : {}),
+        travelDate: t.travelDate,
+        currency: t.currency,
+        paxMix: t.paxMix,
+      },
+    };
+  },
+  map: (payload, token) => {
+    const t = readViatorToken(token);
+    const body = payload as { currency?: string; bookableItems?: ViatorBookableItem[] };
+    const currency = body.currency ?? t.currency;
+    const options = (body.bookableItems ?? [])
+      .filter((b) => b.available && b.totalPrice?.price)
+      .map((b) => {
+        const p = b.totalPrice!.price!;
+        // What the agency pays on the net model; the retail price otherwise.
+        const amount = t.net ? (p.partnerTotalPrice ?? p.partnerNetPrice) : p.recommendedRetailPrice;
+        return { b, p, amount };
+      })
+      .filter((o): o is { b: ViatorBookableItem; p: ViatorPrice; amount: number } => typeof o.amount === "number")
+      .sort((a, b) => a.amount - b.amount);
+
+    const best = options[0];
+    if (!best) {
+      const reason = body.bookableItems?.find((b) => !b.available)?.unavailableReason;
+      return {
+        stillAvailable: false,
+        message: `not available on ${t.travelDate}${reason ? ` (${reason})` : ""}`,
+      };
+    }
+
+    const minor = safeMinor(best.amount, currency);
+    if (minor === undefined) {
+      return { stillAvailable: false, message: "Viator returned a price we could not read" };
+    }
+    const rrp = best.p.recommendedRetailPrice;
+    const commissionRate =
+      !t.net && typeof best.p.commission === "number" && rrp ? best.p.commission / rrp : undefined;
+
+    return {
+      stillAvailable: true,
+      message: `available on ${t.travelDate}${best.b.startTime ? ` at ${best.b.startTime}` : ""}`,
+      offer: {
+        kind: "activity",
+        offerId: `viator:${t.productCode}`,
+        connectorId: "viator",
+        supplierOfferId: t.productCode,
+        cost: t.net
+          ? { rateType: "net", base: money(minor, currency), taxes: money(0, currency) }
+          : {
+              rateType: "commissionable",
+              base: money(minor, currency),
+              taxes: money(0, currency),
+              markupForbidden: true,
+              ...(commissionRate ? { commissionRate } : {}),
+            },
+        conditions: {
+          refundable: t.refundable,
+          changeable: t.refundable,
+          summary: t.refundable
+            ? "Free cancellation up to 24 hours before"
+            : "Cancellation terms set by the operator",
+        },
+        revalidationToken: viatorToken({
+          ...t,
+          productOptionCode: best.b.productOptionCode,
+          startTime: best.b.startTime,
+        }),
+        quotedAt: Date.now(),
+        title: "",
+      },
+    };
   },
 };
 
@@ -1096,7 +1393,7 @@ tiqets.search = {
   request: (_creds, query, host) => {
     if (!query.providerDestinationId) return null;
     const params = new URLSearchParams({
-      city_ids: query.providerDestinationId,
+      city_id: query.providerDestinationId,
       page_size: String(ACTIVITY_PAGE_SIZE),
       lang: "en",
       currency: query.sellCurrency,
@@ -1113,9 +1410,10 @@ tiqets.search = {
     for (const product of products) {
       try {
         if (product.id === undefined || !product.title) continue;
-        // Tiqets keeps sold-out products in the catalogue; quoting one would
-        // send an agent to a checkout that cannot complete.
-        if (product.sale_status && product.sale_status.toLowerCase() !== "open") continue;
+        // Tiqets keeps unsellable products in the catalogue (sale_status is
+        // "available" | "unavailable"); quoting one would send an agent to a
+        // checkout that cannot complete.
+        if (product.sale_status && product.sale_status.toLowerCase() !== "available") continue;
 
         const price = tiqetsPrice(product, query.sellCurrency);
         if (!price) continue;

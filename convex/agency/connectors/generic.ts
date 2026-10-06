@@ -29,6 +29,8 @@ import {
 } from "./auth";
 import { fetchJson, SupplierHttpError } from "./http";
 import type {
+  BookingRequest,
+  BookingResult,
   HealthStatus,
   RevalidateResult,
   SearchQuery,
@@ -157,6 +159,16 @@ export interface RevalidateSpec {
 }
 
 /**
+ * How to create a real order. Declared only where the provider's booking
+ * contract is confirmed; a connector without it books outside Planera.
+ */
+export interface BookSpec {
+  request: (creds: SupplierCredentials, req: BookingRequest, host: string) => HttpCall;
+  map: (payload: unknown, req: BookingRequest) => BookingResult;
+  timeoutMs?: number;
+}
+
+/**
  * How to ask a provider's locations feed for destination candidates. Present
  * only where that feed is publicly documented; everything else is mapped by
  * hand, which the resolution layer supports for every provider.
@@ -168,9 +180,17 @@ export interface DestinationSpec {
     host: string,
   ) => { method: "GET" | "POST"; url: string; body?: unknown };
   map: (payload: unknown, target: DestinationTarget) => DestinationCandidate[];
+  /**
+   * For a paged feed: the URL of the page after `payload`, or null when it was
+   * the last. Absent means the feed is a single response.
+   */
+  nextPage?: (payload: unknown, url: string) => string | null;
   /** Feeds are large; give them longer than a search. */
   timeoutMs?: number;
 }
+
+/** A paged destination feed stops here, so a provider that never says "last page" cannot loop us. */
+const MAX_DESTINATION_PAGES = 60;
 
 export interface ConnectorSpec {
   id: string;
@@ -184,6 +204,8 @@ export interface ConnectorSpec {
   search?: SearchSpec;
   /** Absent unless the provider's re-price contract is confirmed. */
   revalidate?: RevalidateSpec;
+  /** Absent unless the provider's booking contract is confirmed. */
+  book?: BookSpec;
   /**
    * Static headers this provider requires on every call beyond authentication —
    * an API version it pins behaviour to, or a caller identity it mandates.
@@ -342,6 +364,7 @@ async function callProvider(
   call: HttpCall,
   timeoutMs: number,
   maxBytes?: number,
+  retries = 1,
 ): Promise<unknown> {
   const headers = await authHeaders(spec, creds, host);
   if (call.body !== undefined) headers["Content-Type"] = "application/json";
@@ -353,7 +376,7 @@ async function callProvider(
       headers,
       ...(call.body !== undefined ? { body: JSON.stringify(call.body) } : {}),
     },
-    { connectorId: spec.id, timeoutMs, retries: 1, ...(maxBytes ? { maxBytes } : {}) },
+    { connectorId: spec.id, timeoutMs, retries, ...(maxBytes ? { maxBytes } : {}) },
   );
 }
 
@@ -404,7 +427,7 @@ export function makeConnector(spec: ConnectorSpec): SupplierConnector {
         // search; declaring it before it exists would let the orchestrator
         // present unverified prices as confirmed.
         revalidate: !!spec.revalidate,
-        createBooking: false,
+        createBooking: !!spec.book,
         retrieveBooking: false,
         cancelBooking: false,
         getCancellationTerms: false,
@@ -571,26 +594,35 @@ export function makeConnector(spec: ConnectorSpec): SupplierConnector {
             const headers = await authHeaders(spec, creds, host);
             if (built.body !== undefined) headers["Content-Type"] = "application/json";
 
-            const payload = await fetchJson<unknown>(
-              built.url,
-              {
-                method: built.method,
-                headers,
-                ...(built.body !== undefined ? { body: JSON.stringify(built.body) } : {}),
-              },
-              {
-                connectorId: spec.id,
-                // Locations feeds are big, and this runs once per destination
-                // and is then cached, so it can afford to be patient.
-                timeoutMs: spec.destinations!.timeoutMs ?? 20_000,
-                retries: 1,
-                maxBytes: 24 * 1024 * 1024,
-              },
-            );
+            const fetchPage = (url: string) =>
+              fetchJson<unknown>(
+                url,
+                {
+                  method: built.method,
+                  headers,
+                  ...(built.body !== undefined ? { body: JSON.stringify(built.body) } : {}),
+                },
+                {
+                  connectorId: spec.id,
+                  // Locations feeds are big, and this runs once per destination
+                  // and is then cached, so it can afford to be patient.
+                  timeoutMs: spec.destinations!.timeoutMs ?? 20_000,
+                  retries: 1,
+                  maxBytes: 24 * 1024 * 1024,
+                },
+              );
 
             try {
-              return spec.destinations!.map(payload, target);
+              const candidates: DestinationCandidate[] = [];
+              let url: string | null = built.url;
+              for (let page = 0; url && page < MAX_DESTINATION_PAGES; page++) {
+                const payload = await fetchPage(url);
+                candidates.push(...spec.destinations!.map(payload, target));
+                url = spec.destinations!.nextPage?.(payload, url) ?? null;
+              }
+              return candidates;
             } catch (e) {
+              if (e instanceof SupplierHttpError) throw e;
               throw new SupplierHttpError(
                 0,
                 spec.id,
@@ -600,6 +632,30 @@ export function makeConnector(spec: ConnectorSpec): SupplierConnector {
                 ),
               );
             }
+          },
+        }
+      : {}),
+
+    ...(spec.book
+      ? {
+          async createBooking(
+            creds: SupplierCredentials,
+            req: BookingRequest,
+          ): Promise<BookingResult> {
+            const host = resolveHost(spec, creds);
+            const call = readPayload(spec, () => spec.book!.request(creds, req, host));
+            // retries = 0. A booking POST that timed out may have succeeded;
+            // the caller records that as "unknown" rather than trying again.
+            const payload = await callProvider(
+              spec,
+              creds,
+              host,
+              call,
+              spec.book!.timeoutMs ?? 30_000,
+              undefined,
+              0,
+            );
+            return readPayload(spec, () => spec.book!.map(payload, req));
           },
         }
       : {}),

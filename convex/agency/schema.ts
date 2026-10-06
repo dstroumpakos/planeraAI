@@ -217,6 +217,28 @@ export const agencyTables = {
      * Optional throughout: a quote is complete and sendable without it.
      */
     aiCopy: v.optional(v.any()),
+    /**
+     * Bumped on every hand edit. A scheduled copy run carries the stamp it was
+     * started for and discards its result if the quote moved on — otherwise a
+     * burst of edits costs a burst of model calls, and a slow earlier one can
+     * overwrite the copy for a later version of the quote.
+     */
+    copyRevision: v.optional(v.float64()),
+    /**
+     * Priced candidates the agent can swap in, per kind (`AlternativesPool` in
+     * quoteEdit.ts). Filled at search time and by add-on searches.
+     */
+    alternatives: v.optional(v.any()),
+    /** The client's request as the agent received it — email text, notes. */
+    requestText: v.optional(v.string()),
+    /**
+     * Passenger names, dates of birth and a contact (`TravellerDetails`).
+     * Personal data: returned ONLY on the agent's authenticated read, never
+     * through the customer link, which can be forwarded.
+     */
+    travellers: v.optional(v.any()),
+    /** The booking record for the accepted option (`Fulfilment`). */
+    fulfilment: v.optional(v.any()),
     createdAt: v.float64(),
     updatedAt: v.optional(v.float64()),
   })

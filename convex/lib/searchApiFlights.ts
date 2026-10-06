@@ -25,6 +25,9 @@
  * existing price untouched.
  */
 
+import { parseTypicalPriceRange } from "./serpApiFlights";
+import { parseBaggagePrices, type DealBaggage } from "./baggage";
+
 const SEARCHAPI_ENDPOINT = "https://www.searchapi.io/api/v1/search";
 
 /**
@@ -132,6 +135,10 @@ export interface RadarFlightOption {
   outboundDepartureTime: string | null;
   /** Outbound stop count (segments - 1). */
   outboundStops: number;
+  /** One-way: resolves to booking options. */
+  bookingToken?: string;
+  /** Round-trip: fetches this outbound's return options. */
+  departureToken?: string;
 }
 
 export interface RadarFlightOptionsResult {
@@ -198,6 +205,8 @@ export async function fetchRadarFlightOptions(
       airline: segs[0]?.airline ?? null,
       outboundDepartureTime: extractHm(segs[0]?.departure_airport?.time),
       outboundStops: Math.max(0, segs.length - 1),
+      bookingToken: opt?.booking_token ?? undefined,
+      departureToken: opt?.departure_token ?? undefined,
     });
   }
 
@@ -208,17 +217,12 @@ export async function fetchRadarFlightOptions(
       ? json.price_insights.price_level
       : null;
 
-  // Google's historical typical price range, e.g. [180, 320]. Guard against
-  // malformed shapes so a bad response can't produce a nonsense benchmark.
-  let typicalPriceRange: [number, number] | null = null;
-  const rawRange = json?.price_insights?.typical_price_range;
-  if (Array.isArray(rawRange) && rawRange.length === 2) {
-    const lo = toNumber(rawRange[0]);
-    const hi = toNumber(rawRange[1]);
-    if (lo !== undefined && hi !== undefined && lo > 0 && hi >= lo) {
-      typicalPriceRange = [lo, hi];
-    }
-  }
+  // Google's historical typical price range as [low, high]. searchapi.io sends
+  // it as { low_price, high_price }; the parser also guards malformed shapes so
+  // a bad response can't produce a nonsense benchmark.
+  const typicalPriceRange = parseTypicalPriceRange(
+    json?.price_insights?.typical_price_range
+  );
 
   return { options, priceLevel, typicalPriceRange };
 }
@@ -283,4 +287,73 @@ export function matchRadarOption(
   }
 
   return null;
+}
+
+/**
+ * Baggage allowance for a matched radar option, from the booking options of
+ * the fare it books (see `lib/baggage.ts`). Round trips first resolve the
+ * return leg — the deal's stored return flight when it is still offered, else
+ * the cheapest — because only the full itinerary has a booking token.
+ * Best-effort: 1–2 extra searchapi.io calls, `undefined` on any failure.
+ */
+export async function fetchRadarBaggage(
+  q: RadarFareQuery,
+  option: RadarFlightOption,
+  returnFlightNumber?: string | null
+): Promise<DealBaggage | undefined> {
+  const key = getSearchApiKey();
+  if (!key) return undefined;
+
+  const base = new URLSearchParams();
+  base.append("engine", "google_flights");
+  base.append("departure_id", q.origin.trim().toUpperCase());
+  base.append("arrival_id", q.destination.trim().toUpperCase());
+  base.append("outbound_date", q.outboundDate);
+  if (q.returnDate) {
+    base.append("flight_type", "round_trip");
+    base.append("return_date", q.returnDate);
+  } else {
+    base.append("flight_type", "one_way");
+  }
+  base.append("currency", (q.currency || "EUR").toUpperCase());
+  base.append("hl", "en");
+
+  let bookingToken = q.returnDate ? undefined : option.bookingToken;
+  if (q.returnDate && option.departureToken) {
+    const p = new URLSearchParams(base);
+    p.append("departure_token", option.departureToken);
+    const json = await callSearchApi(p, key);
+    const rets: any[] = [
+      ...(Array.isArray(json?.best_flights) ? json.best_flights : []),
+      ...(Array.isArray(json?.other_flights) ? json.other_flights : []),
+    ].filter((o) => o?.booking_token && toNumber(o?.price) !== undefined);
+    const wanted = normalizeFlightNumber(returnFlightNumber);
+    const pick =
+      (wanted &&
+        rets.find((o) =>
+          (o.flights ?? []).some(
+            (s: any) => normalizeFlightNumber(s?.flight_number) === wanted
+          )
+        )) ||
+      rets.reduce<any>(
+        (m, o) => (!m || toNumber(o.price)! < toNumber(m.price)! ? o : m),
+        null
+      );
+    bookingToken = pick?.booking_token;
+  }
+  if (!bookingToken) return undefined;
+
+  const p = new URLSearchParams(base);
+  p.append("booking_token", bookingToken);
+  const json = await callSearchApi(p, key);
+  // Cheapest whole-itinerary option — the fare the deal's price reflects.
+  // Split-ticket options (`departure`/`arrival`) cover one leg only.
+  const whole = (Array.isArray(json?.booking_options) ? json.booking_options : [])
+    .map((o: any) => o?.together ?? (o?.departure || o?.arrival ? null : o))
+    .filter((o: any) => o && Array.isArray(o.baggage_prices));
+  if (!whole.length) return undefined;
+  const cheapest = whole.reduce((m: any, o: any) =>
+    (toNumber(o.price) ?? Infinity) < (toNumber(m.price) ?? Infinity) ? o : m
+  );
+  return parseBaggagePrices(cheapest.baggage_prices);
 }

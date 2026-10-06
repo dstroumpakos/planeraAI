@@ -2,16 +2,16 @@
   "expo": {
     "name": "Planera AI Travel Planner",
     "slug": "planera-ai-travel-planner",
-    "version": "1.4.0",
+    "version": "1.4.1",
     "orientation": "portrait",
     "icon": "./assets/images/appicon-1024x1024-01-9h6cls.jpg",
     "scheme": "planeraai",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/images/appicon-1024x1024-01-9h6cls.jpg",
+      "image": "./assets/images/splash-blank.png",
       "resizeMode": "contain",
-      "backgroundColor": "#FAF9F6"
+      "backgroundColor": "#171717"
     },
     "ios": {
       "supportsTablet": false,
@@ -28,9 +28,9 @@
         "NSLocationWhenInUseUsageDescription": "Planera uses your location to verify you've visited destinations and unlock travel achievements, show your position on the trip map, help you navigate to activities, and notify you when you are near a planned stop on your itinerary."
       },
       "splash": {
-        "image": "./assets/images/appicon-1024x1024-01-9h6cls.jpg",
+        "image": "./assets/images/splash-blank.png",
         "resizeMode": "contain",
-        "backgroundColor": "#FAF9F6"
+        "backgroundColor": "#171717"
       }
     },
     "android": {
@@ -41,9 +41,9 @@
       },
       "newArchEnabled": true,
       "splash": {
-        "image": "./assets/images/appicon-1024x1024-01-9h6cls.jpg",
+        "image": "./assets/images/splash-blank.png",
         "resizeMode": "contain",
-        "backgroundColor": "#FAF9F6"
+        "backgroundColor": "#171717"
       },
       "permissions": [
         "android.permission.RECORD_AUDIO",
@@ -83,10 +83,10 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/appicon-1024x1024-01-9h6cls.jpg",
+          "image": "./assets/images/splash-blank.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#FAF9F6"
+          "backgroundColor": "#171717"
         }
       ],
       "expo-secure-store",
@@ -112,6 +112,13 @@
       "@react-native-community/datetimepicker",
       "expo-image",
       "expo-sharing",
+      [
+        "expo-calendar",
+        {
+          "calendarPermission": "Planera adds your trips to your calendar so your travel dates and day-by-day plan are always at hand.",
+          "remindersPermission": "Planera can add reminders for your planned trip activities."
+        }
+      ],
       [
         "expo-widgets",
         {

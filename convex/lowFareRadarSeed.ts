@@ -15,7 +15,12 @@
  *
  * CANDIDATE SOURCE (the `source` arg):
  *
- *   - `"pool"` (default) — the fixed `POPULAR_DESTINATIONS` list below.
+ *   - `"pool"` (default) — the first `poolTop` entries of the shared
+ *     `POPULAR_DESTINATIONS` list (`./lib/radarDestinations`).
+ *   - `"explicit"` — set implicitly when the caller passes `destinations`: only
+ *     those codes are scanned, nothing is added and nothing falls back to the
+ *     pool. This is how wishlist-driven seeding stays confined to the routes
+ *     users actually asked for (home airport → wishlisted city).
  *   - `"explore"` — ask Google Travel Explore (the engine behind the public
  *     "Where can I go?" widget) what is actually cheap FROM this origin, and
  *     keep its cheapest `exploreTop` destinations. One cached call replaces the
@@ -73,8 +78,22 @@ import {
   SEARCHAPI_FLIGHTS_ENDPOINT,
   buildSearchApiSearchParams,
 } from "./lib/searchApiFlightSearch";
-import { fetchFlightCalendar } from "./lib/searchApiFlightCalendar";
-import { AIRPORTS } from "../lib/airports";
+import {
+  MAX_CALENDAR_WINDOWS,
+  fetchFlightCalendar,
+} from "./lib/searchApiFlightCalendar";
+import {
+  DEFAULT_POOL_TOP,
+  POPULAR_DESTINATIONS,
+  calendarAirportFor,
+  cityForIata,
+} from "./lib/radarDestinations";
+import {
+  CHRISTMAS_DESTINATIONS,
+  CHRISTMAS_TRIP_NIGHTS,
+  christmasSeason,
+  isChristmasTrip,
+} from "../lib/christmas";
 import type {
   ExploreDestination,
   FlightCalendar,
@@ -88,37 +107,10 @@ import type {
 const internal = _internal as any;
 
 /**
- * Curated pool of high-demand, well-connected destinations. Kept deliberately
- * global + diverse so that, after excluding the origin itself and any route
- * that already has a live deal, there are comfortably more than `count`
- * candidates to search and rank.
+ * The candidate pool itself lives in `./lib/radarDestinations` so the plain
+ * Convex runtime can use it too (wishlist-name resolution). The `"pool"` source
+ * scans only its first `poolTop` entries — see `DEFAULT_POOL_TOP` there for why.
  */
-const POPULAR_DESTINATIONS: Array<{ code: string; city: string }> = [
-  { code: "LON", city: "London" },
-  { code: "PAR", city: "Paris" },
-  { code: "BCN", city: "Barcelona" },
-  { code: "FCO", city: "Rome" },
-  { code: "AMS", city: "Amsterdam" },
-  { code: "LIS", city: "Lisbon" },
-  { code: "MAD", city: "Madrid" },
-  { code: "BER", city: "Berlin" },
-  { code: "PRG", city: "Prague" },
-  { code: "IST", city: "Istanbul" },
-  { code: "ATH", city: "Athens" },
-  { code: "DXB", city: "Dubai" },
-  { code: "NYC", city: "New York" },
-  { code: "MIA", city: "Miami" },
-  { code: "CUN", city: "Cancún" },
-  { code: "BKK", city: "Bangkok" },
-  { code: "SIN", city: "Singapore" },
-  { code: "HKT", city: "Phuket" },
-  { code: "DPS", city: "Bali" },
-  { code: "TYO", city: "Tokyo" },
-  { code: "MEX", city: "Mexico City" },
-  { code: "RIO", city: "Rio de Janeiro" },
-  { code: "CPT", city: "Cape Town" },
-  { code: "MRU", city: "Mauritius" },
-];
 
 /**
  * Phase-0 scan geometry. `google_flights_calendar` caps a request at 200
@@ -147,13 +139,31 @@ const CALENDAR_WINDOW_DAYS = 14;
 const MIN_HORIZON_DAYS = 60;
 
 /**
- * Windows needed to reach `MIN_HORIZON_DAYS` from a given start offset. Clamped
- * to the same 1–6 range the `calendarWindows` arg accepts.
+ * Horizon for an explicit destination list (saved-destination routes). These
+ * are routes someone asked for, so it is worth looking ~6 months out to find the
+ * cheap season: verified 2026-10-01, DEL→CDG was ~€645 ("high") for November
+ * but €408 for February, under Google's usual €440–550. Explicit lists are
+ * short, so the extra windows cost little quota.
  */
-function windowsForHorizon(startOffsetDays: number): number {
+const EXPLICIT_HORIZON_DAYS = 180;
+
+/** Windows fetched in parallel per destination on a long (explicit) scan. */
+const EXPLICIT_WINDOW_CONCURRENCY = 3;
+
+/**
+ * Windows needed to reach `horizonDays` from a given start offset. Clamped to
+ * the same 1–MAX_CALENDAR_WINDOWS range the `calendarWindows` arg accepts.
+ */
+function windowsForHorizon(
+  startOffsetDays: number,
+  horizonDays = MIN_HORIZON_DAYS
+): number {
   const start = Math.max(startOffsetDays, CALENDAR_MIN_LEAD_DAYS);
-  const span = MIN_HORIZON_DAYS - start + 1;
-  return Math.max(1, Math.min(Math.ceil(span / CALENDAR_WINDOW_DAYS), 6));
+  const span = horizonDays - start + 1;
+  return Math.max(
+    1,
+    Math.min(Math.ceil(span / CALENDAR_WINDOW_DAYS), MAX_CALENDAR_WINDOWS)
+  );
 }
 
 /** How many top-ranked routes get a real (bookable, graded) verify search. */
@@ -219,6 +229,12 @@ const TOTAL_BUDGET_MS = 7 * 60 * 1000;
 /** Fallback trip length when a calendar date has no paired return. */
 const FALLBACK_TRIP_NIGHTS = 7;
 
+/** Whole days from now until a YYYY-MM-DD date (UTC), floored at 0. */
+function daysUntil(date: string): number {
+  const ms = new Date(`${date}T00:00:00Z`).getTime() - Date.now();
+  return Math.max(0, Math.ceil(ms / (24 * 60 * 60 * 1000)));
+}
+
 /** Run `fn` over `items` with bounded concurrency, preserving input order. */
 async function mapWithConcurrency<T, R>(
   items: T[],
@@ -246,14 +262,6 @@ function median(values: number[]): number | null {
   const s = [...values].sort((a, b) => a - b);
   const mid = Math.floor(s.length / 2);
   return s.length % 2 === 1 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
-}
-
-function cityForIata(code: string): string {
-  const upper = code.toUpperCase();
-  const pool = POPULAR_DESTINATIONS.find((d) => d.code === upper);
-  if (pool) return pool.city;
-  const hit = AIRPORTS.find((a) => a.code === upper);
-  return hit?.city ?? upper;
 }
 
 /** YYYY-MM-DD, `daysAhead` from now (UTC). */
@@ -451,7 +459,24 @@ type ScanResult = {
   datesScanned: number;
   /** Calendar came back empty — dates fell back to the fixed window. */
   fellBack: boolean;
+  /**
+   * Long (explicit) scans only: the cheapest pair from other months, tried in
+   * order when Google grades the main pair `high`. A route's cheapest fare is
+   * often flat across months, and the first date carrying it can be a 1-night
+   * hop Google calls high while the same fare in another month is `typical`
+   * (verified 2026-10-01: ATH→DXB €380 was high on 2–3 Nov, typical on 20–27 Jan).
+   */
+  alternates?: Array<{ outboundDate: string; returnDate: string }>;
 };
+
+/** Alternate month-pairs a long scan may verify after a `high` grade. */
+const MAX_DATE_ALTERNATES = 2;
+/** Shortest trip a long scan will pick, so a 1-night hop never wins on price. */
+const MIN_PICK_NIGHTS = 3;
+
+function nightsBetween(out: string, ret: string): number {
+  return Math.round((Date.parse(ret) - Date.parse(out)) / 86400000);
+}
 
 type Candidate = {
   destination: string;
@@ -506,8 +531,9 @@ export const seedDealsForOrigin = action({
     // is tagged by grade ("Great price" for `low` fares, none for `typical`).
     dealTag: v.optional(v.string()),
     // ─ Phase-0 scan controls (all optional; defaults tuned for one press) ─
-    /** ~14-day calendar windows scanned per destination. 1–6. More = wider
-     *  date search and proportionally more quota. */
+    /** ~14-day calendar windows scanned per destination. 1–13. More = wider
+     *  date search and proportionally more quota. Defaults to ~2 months, or
+     *  ~6 months for an explicit `destinations` list. */
     calendarWindows: v.optional(v.float64()),
     /** Days from today where the scan starts (the lib floors this at 8). */
     startOffsetDays: v.optional(v.float64()),
@@ -529,6 +555,22 @@ export const seedDealsForOrigin = action({
     ),
     /** Explore destinations kept as candidates (explore sources only). 1–40. */
     exploreTop: v.optional(v.float64()),
+    /** Pool entries scanned by the `"pool"` source. 1–`POPULAR_DESTINATIONS.length`. */
+    poolTop: v.optional(v.float64()),
+    /**
+     * Exact destination codes (IATA or metro) to scan INSTEAD of any generated
+     * candidate list. Overrides `source`. Used by `seedWishlistRoutes`.
+     */
+    destinations: v.optional(v.array(v.string())),
+    /**
+     * Seasonal campaign. `"christmas"` scans `CHRISTMAS_DESTINATIONS` (or the
+     * explicit `destinations`) ONLY on festive dates (see `lib/christmas.ts`),
+     * treats a route as covered only by an existing Christmas-dated deal, and
+     * keeps only fares worth buying: Google-graded `low`, or `typical` but
+     * strictly under the route's typical midpoint. Holiday fares are high by
+     * default, so a merely-typical Christmas fare is not a deal.
+     */
+    season: v.optional(v.literal("christmas")),
   },
   handler: async (
     ctx,
@@ -540,7 +582,7 @@ export const seedDealsForOrigin = action({
     scanFrom: string;
     scanTo: string;
     /** Generator that actually produced the candidates (falls back to "pool"). */
-    candidateSource: "pool" | "explore" | "explore+calendar";
+    candidateSource: "pool" | "explore" | "explore+calendar" | "explicit";
     /** Destinations explore returned before filtering (0 when unused). */
     exploreReturned: number;
     candidatesSearched: number;
@@ -560,7 +602,29 @@ export const seedDealsForOrigin = action({
     const origin = args.origin.trim().toUpperCase();
     if (!origin) throw new ConvexError("origin is required");
     const currency = (args.currency ?? "EUR").toUpperCase();
-    const count = Math.max(1, Math.min(Math.round(args.count ?? 10), 20));
+    const isChristmas = args.season === "christmas";
+    const season = isChristmas ? christmasSeason() : null;
+    if (season && daysUntil(season.departTo) < CALENDAR_MIN_LEAD_DAYS) {
+      throw new ConvexError(
+        `Christmas season ${season.departFrom}..${season.departTo} is too close to price`
+      );
+    }
+    // Explicit lists are usually short and every entry was asked for, so the
+    // default is "seed everything that qualifies" rather than the pool's top 10.
+    // Christmas without an explicit list scans the whole festive list.
+    const explicitCodes = Array.from(
+      new Set(
+        (args.destinations ??
+          (isChristmas ? CHRISTMAS_DESTINATIONS.map((d) => d.code) : []))
+          .map((c) => String(c).trim().toUpperCase())
+          .filter((c) => /^[A-Z]{3}$/.test(c))
+      )
+    );
+    const isExplicit = explicitCodes.length > 0;
+    const count = Math.max(
+      1,
+      Math.min(Math.round(args.count ?? (isExplicit ? explicitCodes.length : 10)), 20)
+    );
     const adults = typeof args.adults === "number" && args.adults > 0 ? args.adults : 1;
     // Optional tag override applied to every seeded deal. When omitted, the tag
     // is derived per-deal from its grade (a public "Great price" badge for
@@ -569,17 +633,37 @@ export const seedDealsForOrigin = action({
 
     // Offset first: the default window count is derived from it, so that moving
     // the start offset can never silently shorten the horizon.
-    const startOffsetDays = Math.max(
-      0,
-      Math.round(args.startOffsetDays ?? DEFAULT_SCAN_START_OFFSET_DAYS)
-    );
+    //
+    // Christmas pins the scan to the festive departure window instead: start on
+    // its first day (or the lib's minimum lead, once the season has begun) and
+    // stack just enough 14-day windows to reach its last departure.
+    const startOffsetDays = season
+      ? Math.max(CALENDAR_MIN_LEAD_DAYS, daysUntil(season.departFrom))
+      : Math.max(
+          0,
+          Math.round(args.startOffsetDays ?? DEFAULT_SCAN_START_OFFSET_DAYS)
+        );
     const windows = Math.max(
       1,
       Math.min(
-        Math.round(args.calendarWindows ?? windowsForHorizon(startOffsetDays)),
-        6
+        Math.round(
+          args.calendarWindows ??
+            (season
+              ? Math.ceil(
+                  (daysUntil(season.departTo) - startOffsetDays + 1) /
+                    CALENDAR_WINDOW_DAYS
+                )
+              : windowsForHorizon(
+                  startOffsetDays,
+                  isExplicit ? EXPLICIT_HORIZON_DAYS : MIN_HORIZON_DAYS
+                ))
+        ),
+        MAX_CALENDAR_WINDOWS
       )
     );
+    // Long scans fetch a few windows at once so they fit the phase-0 budget.
+    const windowConcurrency =
+      windows > 6 ? EXPLICIT_WINDOW_CONCURRENCY : 1;
     const concurrency = Math.max(
       1,
       Math.min(Math.round(args.concurrency ?? DEFAULT_SCAN_CONCURRENCY), 8)
@@ -588,10 +672,17 @@ export const seedDealsForOrigin = action({
       1,
       Math.round(args.verifyTop ?? count + VERIFY_HEADROOM)
     );
-    const requestedSource = args.source ?? "pool";
+    const requestedSource = isExplicit ? "explicit" : (args.source ?? "pool");
     const exploreTop = Math.max(
       1,
       Math.min(Math.round(args.exploreTop ?? DEFAULT_EXPLORE_TOP), 40)
+    );
+    const poolTop = Math.max(
+      1,
+      Math.min(
+        Math.round(args.poolTop ?? DEFAULT_POOL_TOP),
+        POPULAR_DESTINATIONS.length
+      )
     );
     const startedAt = Date.now();
     let timedOut = false;
@@ -600,40 +691,75 @@ export const seedDealsForOrigin = action({
     // start at its own minimum lead time, so mirror that here.
     let scanFrom = dateAhead(Math.max(startOffsetDays, 8));
     let scanTo = dateAhead(Math.max(startOffsetDays, 8) + windows * 14 - 1);
+    if (season) {
+      if (scanFrom < season.departFrom) scanFrom = season.departFrom;
+      if (scanTo > season.departTo) scanTo = season.departTo;
+    }
 
     // Fixed pair used only when a route's calendar comes back empty, so a thin
     // route degrades to the old behaviour instead of dropping out entirely.
-    const fallbackOutbound = dateAhead(45);
-    const fallbackReturn = dateAhead(52);
+    // Christmas falls back to the week before Christmas Day (or the first
+    // still-priceable festive day once that has passed).
+    const christmasFallbackOut = season
+      ? `${season.departFrom.slice(0, 4)}-12-19`
+      : null;
+    const fallbackOutbound = season
+      ? christmasFallbackOut! >= scanFrom
+        ? christmasFallbackOut!
+        : scanFrom
+      : dateAhead(45);
+    const fallbackReturn = season
+      ? addNights(fallbackOutbound, CHRISTMAS_TRIP_NIGHTS)
+      : dateAhead(52);
 
     // Skip any destination this origin already has a live deal for (AUTO or
     // curated) — `listActive` already filters to active/non-expired/non-deleted.
-    const existing: Array<{ destination: string }> = await ctx.runQuery(
-      api.lowFareRadar.listActive,
-      { origin }
+    // In Christmas mode only a Christmas-dated deal counts: an October Vienna
+    // fare says nothing about December.
+    const existing: Array<{
+      destination: string;
+      outboundDate?: string;
+      returnDate?: string;
+    }> = await ctx.runQuery(api.lowFareRadar.listActive, { origin });
+    const covered = new Set(
+      existing
+        .filter(
+          (d) => !isChristmas || isChristmasTrip(d.outboundDate, d.returnDate)
+        )
+        .map((d) => d.destination.toUpperCase())
     );
-    const covered = new Set(existing.map((d) => d.destination.toUpperCase()));
 
     // Exclude the origin itself, anything already covered, and same-city metro
     // codes (e.g. origin JFK vs destination NYC, both "New York").
     const originCity = cityForIata(origin).toLowerCase();
-    const poolCandidates: SeedCandidate[] = POPULAR_DESTINATIONS.filter(
-      (d) =>
-        d.code !== origin &&
-        !covered.has(d.code) &&
-        d.city.toLowerCase() !== originCity
-    ).map((d) => ({ code: d.code, city: d.city }));
+    const usable = (d: { code: string; city: string }) =>
+      d.code !== origin &&
+      !covered.has(d.code) &&
+      d.city.toLowerCase() !== originCity;
+    const christmasCity = new Map(
+      CHRISTMAS_DESTINATIONS.map((d) => [d.code, d.city])
+    );
+    const poolCandidates: SeedCandidate[] = isExplicit
+      ? explicitCodes
+          .map((code) => ({
+            code,
+            city: (isChristmas && christmasCity.get(code)) || cityForIata(code),
+          }))
+          .filter(usable)
+      : POPULAR_DESTINATIONS.slice(0, poolTop)
+          .filter(usable)
+          .map((d) => ({ code: d.code, city: d.city }));
 
     // Candidate generation. An explore source that comes back empty — API down,
     // or an origin the engine doesn't cover — degrades to the pool, because a
     // press that seeds nothing is strictly worse than one that seeds the
-    // generic list.
-    let candidateSource: "pool" | "explore" | "explore+calendar" =
+    // generic list. An explicit list never widens: it IS the request.
+    let candidateSource: "pool" | "explore" | "explore+calendar" | "explicit" =
       requestedSource;
     let exploreReturned = 0;
     let candidatePool: SeedCandidate[] = poolCandidates;
 
-    if (requestedSource !== "pool") {
+    if (requestedSource !== "pool" && requestedSource !== "explicit") {
       const explored = await exploreCandidates(ctx, {
         origin,
         currency,
@@ -717,9 +843,16 @@ export const seedDealsForOrigin = action({
         try {
           calendarCalls += windows;
           calendar = await fetchFlightCalendar(
-            { departureId: origin, arrivalId: dest.code, currency },
+            // Metro codes (PAR, NYC…) price nothing on the calendar engine;
+            // scan their main airport. Phase 1 still searches the metro code.
+            {
+              departureId: calendarAirportFor(origin),
+              arrivalId: calendarAirportFor(dest.code),
+              currency,
+            },
             {
               windows,
+              windowConcurrency,
               startOffsetDays,
               // Keep every priced date — the median below is only meaningful
               // over the full window, not over a thinned "strip" selection.
@@ -728,37 +861,71 @@ export const seedDealsForOrigin = action({
               // Party size changes which fares are actually bookable, so it
               // must be priced in, not multiplied afterwards.
               adults,
+              // A holiday is a week, not the lib's default 5-night hop.
+              ...(season ? { returnGapDays: CHRISTMAS_TRIP_NIGHTS } : {}),
             }
           );
         } catch {
           console.error(`[radar-seed] calendar failed ${origin}->${dest.code}`);
         }
 
-        const dates = calendar?.dates ?? [];
+        // The last window overshoots the festive range; drop dates outside it
+        // so both the picked date and the median are Christmas-only.
+        const dates = (calendar?.dates ?? []).filter(
+          (d) => !season || isChristmasTrip(d.date, d.returnDate)
+        );
         if (dates.length === 0) {
           calendarEmpty++;
           return fallback;
         }
 
-        const best = dates.reduce((m, d) => (d.price < m.price ? d : m));
+        // The calendar pairs each departure with the return that produced
+        // its cheapest fare; only synthesise one if that's missing.
+        const returnFor = (d: { date: string; returnDate?: string }) =>
+          d.returnDate && d.returnDate > d.date
+            ? d.returnDate
+            : addNights(d.date, FALLBACK_TRIP_NIGHTS);
+
+        // Long scans: skip 1–2 night hops when real trips exist, and keep the
+        // cheapest pair of each other month as fallbacks for phase 1.
+        const longScan = windowConcurrency > 1;
+        const trips = longScan
+          ? dates.filter(
+              (d) => nightsBetween(d.date, returnFor(d)) >= MIN_PICK_NIGHTS
+            )
+          : [];
+        const pickFrom = trips.length > 0 ? trips : dates;
+
+        const best = pickFrom.reduce((m, d) => (d.price < m.price ? d : m));
         const mid = median(dates.map((d) => d.price));
         const calendarDiscount =
           mid && mid > 0 ? Math.max(0, (mid - best.price) / mid) : 0;
+
+        let alternates: ScanResult["alternates"];
+        if (longScan) {
+          const byMonth = new Map<string, (typeof pickFrom)[number]>();
+          for (const d of pickFrom) {
+            const month = d.date.slice(0, 7);
+            if (month === best.date.slice(0, 7)) continue;
+            const seen = byMonth.get(month);
+            if (!seen || d.price < seen.price) byMonth.set(month, d);
+          }
+          alternates = [...byMonth.values()]
+            .sort((a, b) => a.price - b.price)
+            .slice(0, MAX_DATE_ALTERNATES)
+            .map((d) => ({ outboundDate: d.date, returnDate: returnFor(d) }));
+        }
 
         return {
           destination: dest.code,
           city: dest.city,
           outboundDate: best.date,
-          // The calendar pairs each departure with the return that produced
-          // its cheapest fare; only synthesise one if that's missing.
-          returnDate:
-            best.returnDate && best.returnDate > best.date
-              ? best.returnDate
-              : addNights(best.date, FALLBACK_TRIP_NIGHTS),
+          returnDate: returnFor(best),
           calendarPrice: best.price,
           calendarDiscount,
           datesScanned: dates.length,
           fellBack: false,
+          alternates,
         };
       }
     );
@@ -822,66 +989,95 @@ export const seedDealsForOrigin = action({
       }
 
       const dest = { code: scan.destination, city: scan.city };
-      const input: FlightSearchInput = {
-        departureId: origin,
-        arrivalId: dest.code,
-        outboundDate: scan.outboundDate,
-        returnDate: scan.returnDate,
-        type: "round_trip",
-        currency,
-        adults,
-        maxPrice: args.maxPrice,
-      };
-      verifySearches++;
-      try {
-        const raw = await callSearchApi(buildSearchApiSearchParams(input));
-        if (!raw) continue;
-        const priceInsights: PriceInsights | null = normalizePriceInsights(
-          raw?.price_insights
-        );
-        const best = Array.isArray(raw?.best_flights)
-          ? raw.best_flights.map((o: any, i: number) =>
-              normalizeFlightOption(o, "best_flights", i, priceInsights)
-            )
-          : [];
-        const other = Array.isArray(raw?.other_flights)
-          ? raw.other_flights.map((o: any, i: number) =>
-              normalizeFlightOption(o, "other_flights", i, priceInsights)
-            )
-          : [];
-        const cheapest = pickCheapest(best, other);
-        if (!cheapest || cheapest.price == null) continue;
+      // The picked pair first, then (long scans only) other months' cheapest
+      // pairs — stopping at the first that Google grades as a deal.
+      const attempts = [
+        { outboundDate: scan.outboundDate, returnDate: scan.returnDate },
+        ...(scan.alternates ?? []),
+      ];
+      for (let a = 0; a < attempts.length; a++) {
+        const dates = attempts[a];
+        if (a > 0 && Date.now() - startedAt > SCAN_BUDGET_MS) {
+          timedOut = true;
+          break;
+        }
+        const input: FlightSearchInput = {
+          departureId: origin,
+          arrivalId: dest.code,
+          outboundDate: dates.outboundDate,
+          returnDate: dates.returnDate,
+          type: "round_trip",
+          currency,
+          adults,
+          maxPrice: args.maxPrice,
+        };
+        verifySearches++;
+        try {
+          const raw = await callSearchApi(buildSearchApiSearchParams(input));
+          if (!raw) continue;
+          const priceInsights: PriceInsights | null = normalizePriceInsights(
+            raw?.price_insights
+          );
+          const best = Array.isArray(raw?.best_flights)
+            ? raw.best_flights.map((o: any, i: number) =>
+                normalizeFlightOption(o, "best_flights", i, priceInsights)
+              )
+            : [];
+          const other = Array.isArray(raw?.other_flights)
+            ? raw.other_flights.map((o: any, i: number) =>
+                normalizeFlightOption(o, "other_flights", i, priceInsights)
+              )
+            : [];
+          const cheapest = pickCheapest(best, other);
+          if (!cheapest || cheapest.price == null) continue;
 
-        const level = (priceInsights?.priceLevel || "").toLowerCase();
-        // Never promote a fare Google flags as high; only surface real deals.
-        if (level !== "low" && level !== "typical") continue;
+          const level = (priceInsights?.priceLevel || "").toLowerCase();
+          // Never promote a fare Google flags as high; only surface real deals.
+          // Logged so a route that stays red on the admin widget explains itself.
+          if (level !== "low" && level !== "typical") {
+            console.log(
+              `[radar-seed] rejected ${origin}->${dest.code} ${dates.outboundDate}..${dates.returnDate}: €${cheapest.price} graded "${level || "none"}"`
+            );
+            continue;
+          }
 
-        const range = priceInsights?.typicalPriceRange;
-        const mid =
-          Array.isArray(range) && range.length === 2
-            ? (range[0] + range[1]) / 2
-            : null;
-        // Prefer Google's own typical range; fall back to the route-local
-        // calendar discount when this search returned no price insights, so a
-        // verified deal is never ranked as if it had zero discount.
-        const discount =
-          mid && mid > 0
-            ? Math.max(0, (mid - cheapest.price) / mid)
-            : scan.calendarDiscount;
+          const range = priceInsights?.typicalPriceRange;
+          const mid =
+            Array.isArray(range) && range.length === 2
+              ? (range[0] + range[1]) / 2
+              : null;
+          // Christmas: a `typical` holiday fare is still an expensive fare. Keep
+          // it only when it is provably under the route's typical midpoint.
+          if (
+            isChristmas &&
+            level !== "low" &&
+            !(mid != null && cheapest.price < mid)
+          ) {
+            continue;
+          }
+          // Prefer Google's own typical range; fall back to the route-local
+          // calendar discount when this search returned no price insights, so a
+          // verified deal is never ranked as if it had zero discount.
+          const discount =
+            mid && mid > 0
+              ? Math.max(0, (mid - cheapest.price) / mid)
+              : scan.calendarDiscount;
 
-        candidates.push({
-          destination: dest.code,
-          city: dest.city,
-          outboundDate: scan.outboundDate,
-          returnDate: scan.returnDate,
-          option: cheapest,
-          priceLevel: level,
-          price: cheapest.price,
-          discount,
-          typicalMid: mid,
-        });
-      } catch (err) {
-        console.error(`[radar-seed] search failed ${origin}->${dest.code}`);
+          candidates.push({
+            destination: dest.code,
+            city: dest.city,
+            outboundDate: dates.outboundDate,
+            returnDate: dates.returnDate,
+            option: cheapest,
+            priceLevel: level,
+            price: cheapest.price,
+            discount,
+            typicalMid: mid,
+          });
+          break;
+        } catch (err) {
+          console.error(`[radar-seed] search failed ${origin}->${dest.code}`);
+        }
       }
     }
 
@@ -1003,6 +1199,267 @@ export const seedDealsForOrigin = action({
       seeded,
       timedOut,
       deals,
+    };
+  },
+});
+
+/**
+ * Spacing between the per-origin runs `seedWishlistRoutes` schedules. Each run
+ * is its own action (own 10-minute limit, own budget), so this is only about
+ * not hitting searchapi.io with every origin's calendar wave at the same
+ * instant — not about fitting inside one action.
+ */
+const WISHLIST_ORIGIN_STAGGER_MS = 20 * 1000;
+
+/**
+ * Demand-driven seeding: search deals ONLY for routes real users have asked
+ * for, i.e. (their home airport → a city they saved).
+ *
+ * The pairing comes from `lowFareRadar.getWishlistRoutes`, which counts BOTH
+ * kinds of save — wishlist entries and watched destinations, so the watch a
+ * new user taps in onboarding gets searched too. Users without a home airport
+ * contribute nothing, and routes that already have a live deal are skipped.
+ * The remaining routes are grouped by origin and each origin gets one
+ * scheduled `seedDealsForOrigin` run with an explicit `destinations` list —
+ * so ATH scans ATH→NYC because an ATH user saved New York, and never
+ * ATH→Bali unless an ATH user asked for it.
+ *
+ * Fans out via the scheduler rather than looping in-process: a single origin
+ * can legitimately take minutes, and a serial loop over several would hit the
+ * 10-minute action kill and lose the tail. Results land in the radar table as
+ * persistent curated deals; the admin view's coverage flags flip on reload.
+ */
+export const seedWishlistRoutes = action({
+  args: {
+    adminKey: v.string(),
+    /** Report the plan without scheduling any searches. */
+    dryRun: v.optional(v.boolean()),
+    /** Restrict to one origin (e.g. from a per-airport button). */
+    origin: v.optional(v.string()),
+    currency: v.optional(v.string()),
+    adults: v.optional(v.float64()),
+  },
+  handler: async (
+    ctx,
+    args
+  ): Promise<{
+    dryRun: boolean;
+    /** Routes with no live deal, grouped by origin, in schedule order. */
+    origins: Array<{
+      origin: string;
+      originCity: string;
+      destinations: Array<{ code: string; city: string; users: number }>;
+      /** Seconds from now this origin's run starts (0 on dry runs). */
+      startsInSeconds: number;
+    }>;
+    routesTotal: number;
+    routesCovered: number;
+    routesScheduled: number;
+    unresolved: Array<{ destination: string; count: number }>;
+    noHomeAirport: number;
+  }> => {
+    validateAdminKey(args.adminKey);
+    const onlyOrigin = args.origin?.trim().toUpperCase() || undefined;
+
+    const demand: {
+      routes: Array<{
+        origin: string;
+        originCity: string;
+        destination: string;
+        destinationCity: string;
+        users: number;
+        wishlistUsers?: number;
+        watchUsers?: number;
+        sources?: Array<"wishlist" | "watch">;
+        hasLive: boolean;
+      }>;
+      unresolved: Array<{ destination: string; count: number }>;
+      noHomeAirport: number;
+    } = await ctx.runQuery(api.lowFareRadar.getWishlistRoutes, {
+      adminKey: args.adminKey,
+    });
+
+    const relevant = demand.routes.filter(
+      (r) => !onlyOrigin || r.origin === onlyOrigin
+    );
+    const gaps = relevant.filter((r) => !r.hasLive);
+
+    // Group by origin, keeping the query's demand order inside each group.
+    const byOrigin = new Map<
+      string,
+      { originCity: string; destinations: Array<{ code: string; city: string; users: number }> }
+    >();
+    for (const r of gaps) {
+      let g = byOrigin.get(r.origin);
+      if (!g) {
+        g = { originCity: r.originCity, destinations: [] };
+        byOrigin.set(r.origin, g);
+      }
+      g.destinations.push({ code: r.destination, city: r.destinationCity, users: r.users });
+    }
+
+    // Busiest origins first so the most-wanted routes get priced soonest.
+    const ordered = Array.from(byOrigin.entries()).sort(
+      (a, b) =>
+        b[1].destinations.reduce((n, d) => n + d.users, 0) -
+        a[1].destinations.reduce((n, d) => n + d.users, 0)
+    );
+
+    const dryRun = !!args.dryRun;
+    const origins: Array<{
+      origin: string;
+      originCity: string;
+      destinations: Array<{ code: string; city: string; users: number }>;
+      startsInSeconds: number;
+    }> = [];
+
+    for (let i = 0; i < ordered.length; i++) {
+      const [origin, g] = ordered[i];
+      const delayMs = i * WISHLIST_ORIGIN_STAGGER_MS;
+      if (!dryRun) {
+        // Self-reference through the generated api; cast because the file's
+        // own exports aren't typed until codegen runs (same as `internal`).
+        await ctx.scheduler.runAfter(
+          delayMs,
+          (api as any).lowFareRadarSeed.seedDealsForOrigin,
+          {
+            adminKey: args.adminKey,
+            origin,
+            destinations: g.destinations.map((d) => d.code),
+            currency: args.currency,
+            adults: args.adults,
+          }
+        );
+      }
+      origins.push({
+        origin,
+        originCity: g.originCity,
+        destinations: g.destinations,
+        startsInSeconds: dryRun ? 0 : Math.round(delayMs / 1000),
+      });
+    }
+
+    console.log(
+      `[radar-seed] saved-destination ${dryRun ? "plan" : "scheduled"}: ${gaps.length} route(s) across ${origins.length} origin(s); ${relevant.length - gaps.length} already covered; ${demand.unresolved.length} unresolved name(s); ${demand.noHomeAirport} save(s) without a home airport`
+    );
+
+    return {
+      dryRun,
+      origins,
+      routesTotal: relevant.length,
+      routesCovered: relevant.length - gaps.length,
+      routesScheduled: dryRun ? 0 : gaps.length,
+      unresolved: demand.unresolved,
+      noHomeAirport: demand.noHomeAirport,
+    };
+  },
+});
+
+/**
+ * Christmas campaign: run the festive scan (`seedDealsForOrigin` with
+ * `season: "christmas"`) for every home airport that has users, busiest first.
+ *
+ * Same fan-out shape as `seedWishlistRoutes` — one scheduled action per origin,
+ * staggered — because each origin can take minutes. Each run scans the ~25
+ * `CHRISTMAS_DESTINATIONS` over two calendar windows (~50 calendar calls) plus
+ * its verify/enrich searches, so `maxOrigins` is the quota knob: always dry-run
+ * first. Seeded deals are ordinary curated deals, so the refresh cron re-prices
+ * them and expires any that climb back above the route's typical fare.
+ */
+export const seedChristmasDeals = action({
+  args: {
+    adminKey: v.string(),
+    /** Report the plan without scheduling any searches. */
+    dryRun: v.optional(v.boolean()),
+    /** Restrict to one origin. */
+    origin: v.optional(v.string()),
+    /** Busiest N home airports (default 5, max 30). */
+    maxOrigins: v.optional(v.float64()),
+    /** Skip airports with fewer users than this (default 1). */
+    minUsers: v.optional(v.float64()),
+    /** Deals to keep per origin (default 8). */
+    count: v.optional(v.float64()),
+    /** Restrict the festive list to these codes. */
+    destinations: v.optional(v.array(v.string())),
+    currency: v.optional(v.string()),
+    adults: v.optional(v.float64()),
+  },
+  handler: async (
+    ctx,
+    args
+  ): Promise<{
+    dryRun: boolean;
+    season: { departFrom: string; departTo: string };
+    destinations: string[];
+    origins: Array<{
+      origin: string;
+      city: string;
+      users: number;
+      startsInSeconds: number;
+    }>;
+  }> => {
+    validateAdminKey(args.adminKey);
+    const onlyOrigin = args.origin?.trim().toUpperCase() || undefined;
+    const maxOrigins = Math.max(1, Math.min(Math.round(args.maxOrigins ?? 5), 30));
+    const minUsers = Math.max(1, Math.round(args.minUsers ?? 1));
+    const count = Math.max(1, Math.min(Math.round(args.count ?? 8), 20));
+    const destinations =
+      args.destinations && args.destinations.length > 0
+        ? args.destinations.map((c) => c.trim().toUpperCase())
+        : CHRISTMAS_DESTINATIONS.map((d) => d.code);
+
+    const airports: Array<{ code: string; city: string; count: number }> =
+      await ctx.runQuery(api.lowFareRadar.getHomeAirports, {
+        adminKey: args.adminKey,
+      });
+    const picked = onlyOrigin
+      ? [
+          airports.find((a) => a.code === onlyOrigin) ?? {
+            code: onlyOrigin,
+            city: cityForIata(onlyOrigin),
+            count: 0,
+          },
+        ]
+      : airports.filter((a) => a.count >= minUsers).slice(0, maxOrigins);
+
+    const dryRun = !!args.dryRun;
+    const origins = [];
+    for (let i = 0; i < picked.length; i++) {
+      const a = picked[i];
+      const delayMs = i * WISHLIST_ORIGIN_STAGGER_MS;
+      if (!dryRun) {
+        await ctx.scheduler.runAfter(
+          delayMs,
+          (api as any).lowFareRadarSeed.seedDealsForOrigin,
+          {
+            adminKey: args.adminKey,
+            origin: a.code,
+            season: "christmas",
+            destinations,
+            count,
+            currency: args.currency,
+            adults: args.adults,
+          }
+        );
+      }
+      origins.push({
+        origin: a.code,
+        city: a.city,
+        users: a.count,
+        startsInSeconds: dryRun ? 0 : Math.round(delayMs / 1000),
+      });
+    }
+
+    const season = christmasSeason();
+    console.log(
+      `[radar-seed] christmas ${dryRun ? "plan" : "scheduled"}: ${origins.length} origin(s) x ${destinations.length} destination(s), departures ${season.departFrom}..${season.departTo}`
+    );
+
+    return {
+      dryRun,
+      season: { departFrom: season.departFrom, departTo: season.departTo },
+      destinations,
+      origins,
     };
   },
 });
