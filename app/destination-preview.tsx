@@ -1,4 +1,5 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { BrandLoader } from "@/components/BrandLoader";
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
     View,
@@ -901,7 +902,7 @@ export default function DestinationPreviewScreen() {
                     >
                         {loading ? (
                             <View style={[styles.heroFallback, { backgroundColor: "#12121C" }]}>
-                                <ActivityIndicator size="large" color={colors.primary} />
+                                <BrandLoader theme="dark" />
                             </View>
                         ) : image ? (
                             <ImageWithAttribution

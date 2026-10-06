@@ -9,6 +9,7 @@
  */
 
 import React, { useEffect, useMemo, useState, useCallback } from "react";
+import { BrandLoader } from "@/components/BrandLoader";
 import {
   View,
   Text,
@@ -243,7 +244,7 @@ export default function WorldPrintScreen() {
   if (!token || !data) {
     return (
       <View style={[styles.loadingContainer, { backgroundColor: "#050A14" }]}>
-        <ActivityIndicator size="large" color="#F59E0B" />
+        <BrandLoader theme="dark" />
       </View>
     );
   }

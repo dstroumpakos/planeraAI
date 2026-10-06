@@ -1,4 +1,5 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { BrandLoader } from "@/components/BrandLoader";
 import { useTranslation } from "react-i18next";
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Linking, Platform, Alert, Modal, TextInput, KeyboardAvoidingView, Keyboard, StatusBar, Share, useWindowDimensions } from "react-native";
 import { Image } from "expo-image";
@@ -14,6 +15,7 @@ import { useDestinationImage } from "@/lib/useImages";
 import { maybeAskForReview } from "@/lib/reviewPrompt";
 import ActivityCard from "@/components/ActivityCard";
 import TripGenerationView, { EnrichingToast } from "@/components/TripGenerationView";
+import { TripReadyCelebration } from "@/components/TripReadyCelebration";
 import { ImageWithAttribution } from "@/components/ImageWithAttribution";
 import { useTheme } from "@/lib/ThemeContext";
 import { LinearGradient } from "expo-linear-gradient";
@@ -1520,6 +1522,18 @@ export default function TripDetails() {
         return marked;
     };
 
+    // Celebrate when a trip finishes generating while the user is watching it
+    // (not when opening an already-finished trip).
+    const prevTripStatus = useRef<string | undefined>(undefined);
+    const [showTripReady, setShowTripReady] = useState(false);
+    useEffect(() => {
+        const prev = prevTripStatus.current;
+        prevTripStatus.current = trip?.status;
+        if (prev === "generating" && trip?.status && trip.status !== "generating" && trip.status !== "failed") {
+            setShowTripReady(true);
+        }
+    }, [trip?.status]);
+
     // Fetch destination images for loading screen
     useEffect(() => {
         if (trip?.status === "generating" && trip?.destination) {
@@ -1593,7 +1607,7 @@ export default function TripDetails() {
         }
         return (
             <View style={[styles.center, { backgroundColor: colors.background }]}>
-                <ActivityIndicator size="large" color={colors.primary} />
+                <BrandLoader />
             </View>
         );
     }
@@ -2818,6 +2832,7 @@ export default function TripDetails() {
         <View style={[styles.container, { backgroundColor: colors.background }]}>
             <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor="transparent" translucent={true} />
             <EnrichingToast phase={trip.generationProgress?.phase} destination={trip.destination} />
+            {showTripReady && <TripReadyCelebration destination={trip.destination} onDone={() => setShowTripReady(false)} />}
             {tripFromCache && isOffline && (
                 <View style={{ position: "absolute", top: insets.top + 56, alignSelf: "center", zIndex: 20, flexDirection: "row", alignItems: "center", gap: 6, backgroundColor: "rgba(0,0,0,0.75)", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 }}>
                     <Ionicons name="cloud-offline-outline" size={14} color="#FFFFFF" />
@@ -4046,7 +4061,7 @@ export default function TripDetails() {
                                 <View style={[styles.emptySightsContainer, { backgroundColor: colors.card }]}>
                                     {generatingSights ? (
                                         <View style={{ alignItems: 'center', paddingVertical: 32 }}>
-                                            <ActivityIndicator size="large" color={colors.primary} style={{ marginBottom: 20 }} />
+                                            <BrandLoader style={{ marginBottom: 20 }} />
                                             <Text style={[styles.emptySightsTitle, { color: colors.text }]}>{t('tripDetail.generatingSights')}</Text>
                                             <Text style={[styles.emptySightsText, { color: colors.textMuted, marginTop: 8 }]}>
                                                 {t('tripDetail.aiGeneratingSightsDesc', { destination: trip?.destination })}

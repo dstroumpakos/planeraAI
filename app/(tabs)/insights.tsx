@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import { BrandLoader } from "@/components/BrandLoader";
 import {
     View,
     Text,
@@ -918,7 +919,7 @@ export default function AtlasScreen() {
                 <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor="transparent" translucent={true} />
                 <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
                     <View style={styles.loadingContainer}>
-                        <ActivityIndicator size="large" color={colors.primary} />
+                        <BrandLoader />
                         <Text style={[styles.loadingText, { color: colors.textMuted }]}>{t('common.loading')}</Text>
                     </View>
                 </SafeAreaView>

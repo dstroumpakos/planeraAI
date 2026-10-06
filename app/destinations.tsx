@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from "react";
+import { BrandLoader } from "@/components/BrandLoader";
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  ActivityIndicator,
   TextInput,
   StatusBar,
 } from "react-native";
@@ -169,7 +169,7 @@ export default function DestinationsScreen() {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
+          <BrandLoader />
         </View>
       </SafeAreaView>
     );
@@ -265,7 +265,7 @@ export default function DestinationsScreen() {
       >
         {!allDestinations ? (
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={colors.primary} />
+            <BrandLoader />
             <Text style={[styles.loadingText, { color: colors.textMuted }]}>{t('destinations.loadingDestinations')}</Text>
           </View>
         ) : filteredDestinations.length === 0 ? (

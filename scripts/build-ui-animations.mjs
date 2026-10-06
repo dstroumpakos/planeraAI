@@ -1,7 +1,7 @@
 // Generates the in-app Lottie animations into assets/animations/, each in a
 // light and a dark variant (<name>.light.json / <name>.dark.json):
 //
-//   trip-generating     loop      floating globe, rolling continents, plane orbiting, pins + routes
+//   trip-generating     loop      rotating 3D globe; Paris → Rome → Athens pins, route arcs, plane flies it
 //   trip-ready          one-shot  boarding pass swings in, plane crosses it, stamp slams + confetti
 //   premium-unlocked    one-shot  padlock drops, springs open, falls away; crown bursts up
 //   achievement-badge   one-shot  medal swings in on its ribbon, flips, laurels + star + shine
@@ -9,8 +9,10 @@
 //   empty-trips         loop      bags hop into a plane's hold, it takes off, a new one lands
 //   loader-mark         loop      the Planera mark draws, pops and erases; a comet orbits it
 //
-// Brand yellow stays fixed; "ink" (outlines, details) is #1D1D1B on light and
-// #FAF9F6 on dark backgrounds.
+// Brand yellow stays fixed; "ink" is #1D1D1B on light and #FAF9F6 on dark.
+// Dark mode is drawn sticker-style: details on yellow use lineFor(ink) (near
+// black), standalone dark parts use solidFor(ink) (soft grey), and only things
+// that sit on the background itself (sky, grids, trails) keep the cream ink.
 //
 //   node scripts/build-ui-animations.mjs
 
@@ -30,6 +32,8 @@ const INKS = {
     light: [0.114, 0.114, 0.106, 1], // #1D1D1B
     dark: [0.98, 0.976, 0.965, 1], // #FAF9F6
 };
+const lineFor = (ink) => (ink === INKS.dark ? [0.07, 0.07, 0.07, 1] : ink);
+const solidFor = (ink) => (ink === INKS.dark ? [0.34, 0.335, 0.32, 1] : ink);
 
 // ── Properties & keyframes ──────────────────────────────────────────────────
 const val = (k) => ({ a: 0, k });
@@ -258,19 +262,19 @@ const plane = (length, body, outline, outlineW = 3) =>
 // Map pin with its tip at (0,0).
 const pin = (ink) =>
     group("Pin", [
-        group("Hole", [ellipse([0, -30], 13), fill(ink)]),
+        group("Hole", [ellipse([0, -30], 13), fill(lineFor(ink))]),
         group("Body", [
             path([[0, 0], [-17, -30], [0, -48], [17, -30]], {
                 closed: true,
                 i: [[7, -9], [0, 10], [-9.4, 0], [0, -9.4]],
                 o: [[-7, -9], [0, -9.4], [9.4, 0], [0, 10]],
             }),
-            stroke(ink, 4),
+            stroke(lineFor(ink), 4),
             fill(YELLOW),
         ]),
     ]);
 
-const sparkle = (ink, size = 16) => group("Sparkle", [star([0, 0], size, size * 0.28, 4), stroke(ink, 2), fill(YELLOW)]);
+const sparkle = (ink, size = 16) => group("Sparkle", [star([0, 0], size, size * 0.28, 4), stroke(lineFor(ink), 2), fill(YELLOW)]);
 
 // Pop a sparkle in and out at `t0`.
 const sparkleLayer = (ink, nm, pos, t0, size) =>
@@ -281,6 +285,23 @@ const sparkleLayer = (ink, nm, pos, t0, size) =>
     });
 
 // ── Shared builders ─────────────────────────────────────────────────────────
+// The "Planera" wordmark from the brand vectors, one group per letter, centred
+// on `at` with the given cap height. `transform(i)` can animate each letter.
+function wordmarkLetters(color, at, height, transform = () => undefined) {
+    const pts = BRAND.letters.flatMap((sh) => sh.contours.flatMap((c) => c.v));
+    const xs = pts.map((pt) => pt[0]);
+    const ys = pts.map((pt) => pt[1]);
+    const center = [(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2];
+    const k = height / (Math.max(...ys) - Math.min(...ys));
+    const map = ([x, y]) => [at[0] + (x - center[0]) * k, at[1] + (y - center[1]) * k];
+    return BRAND.letters.map((sh, i) =>
+        group(`Letter ${i + 1}`, [
+            ...sh.contours.map((c) => ({ ty: "sh", nm: "Letter", ks: val({ c: c.c, v: c.v.map(map), i: c.i.map((pt) => mul(pt, k)), o: c.o.map((pt) => mul(pt, k)) }) })),
+            fill(color),
+        ], transform(i)),
+    );
+}
+
 // The page background each ink is designed for, and an opaque tint of ink over it.
 const BACKGROUND = { light: [0.98, 0.976, 0.965, 1], dark: [0.09, 0.09, 0.09, 1] };
 const tint = (ink, pct) => {
@@ -306,14 +327,6 @@ function segsData(segs, closed = false) {
     return { c: closed, v, i, o };
 }
 const circleData = (c, r) => segsData(arcSegs(c, r, 0, 360), true);
-
-// Arc of an ellipse rotated by `rotDeg` (angles in degrees from its +x axis).
-function ellipseArc(c, rx, ry, rotDeg, fromDeg, toDeg) {
-    const cos = Math.cos(rad(rotDeg));
-    const sin = Math.sin(rad(rotDeg));
-    const map = ([x, y]) => [c[0] + x * rx * cos - y * ry * sin, c[1] + x * rx * sin + y * ry * cos];
-    return arcSegs([0, 0], 1, fromDeg, toDeg).map((seg) => seg.map(map));
-}
 
 // Pie slice from the centre, angles clockwise from 12 o'clock.
 function wedge(c, r, a0, a1) {
@@ -352,7 +365,7 @@ function confettiBurst(ink, origin, t0, { count = 16, seed = 7, dist = [110, 190
         const piece =
             i % 3 === 0
                 ? group("Piece", [ellipse([0, 0], 10), fill(ink)])
-                : group("Piece", [rect([0, 0], i % 3 === 1 ? [14, 8] : [8, 14], 2), fill(i % 2 ? YELLOW : ink), ...(i % 2 ? [stroke(ink, 1.5)] : [])]);
+                : group("Piece", [rect([0, 0], i % 3 === 1 ? [14, 8] : [8, 14], 2), fill(i % 2 ? YELLOW : ink), ...(i % 2 ? [stroke(lineFor(ink), 1.5)] : [])]);
         const mid = t0 + Math.round(life * 0.5);
         return layer(`Confetti ${i}`, [piece], {
             p: motion([t0, origin, EASE.out, mul(sub(p1, origin), 0.4), [0, 0]], [mid, p1, EASE.in], [t0 + life, p2]),
@@ -363,113 +376,237 @@ function confettiBurst(ink, origin, t0, { count = 16, seed = 7, dist = [110, 190
 }
 
 // ── 1. Trip generating (loop) ───────────────────────────────────────────────
-// A floating globe with continents rolling across it, a plane orbiting it
-// (passing behind and in front), pins popping in and routes joining them.
-function tripGenerating(ink) {
-    const OP = 240;
-    const C = [200, 200];
-    const R = 108;
-    const bobTrack = (amp, base) =>
-        track(...[0, 60, 120, 180, 240].map((t, k) => [t, typeof base === "number" ? base + (k % 2 ? amp : 0) : [base[0], base[1] + (k % 2 ? -amp : 0), 0], EASE.inOut]));
+// A real rotating globe (orthographic projection of simplified continents and
+// a lat/long grid). As Europe turns to face us, Lisbon → Athens → Dubai pop up,
+// a route arcs between them and a plane flies it, then lifts off.
 
-    // Continents: a strip of blobs scrolling under a circular mask; two copies
-    // a strip-width apart make the scroll seamless.
-    const STRIP = 300;
-    const CONTINENTS = [
-        [[-120, -40, 54, 40], [-100, -20, 40, 52], [-118, 6, 26, 30]],
-        [[-40, 30, 64, 38], [-20, 52, 40, 30]],
-        [[20, -58, 58, 30], [44, -40, 30, 30]],
-        [[70, 6, 70, 56], [96, 34, 40, 40], [58, 36, 26, 22]],
-        [[130, -46, 40, 30]],
+// Simplified continent outlines as [lat, lon]. Big landmasses are split into
+// pieces under ~90° of longitude so far-side clipping never inverts a shape;
+// all pieces share one fill drawn over one outline, so the seams don't show.
+const CONTINENTS = {
+    "Europe & W Asia": [
+        [36, -9], [43, -9], [48, -4], [51, 2], [54, 8], [58, 6], [63, 10], [70, 25], [70, 60], [55, 60], [38, 60], [25, 57],
+        [13, 45], [30, 32], [36, 28], [40, 26], [37, 15], [44, 12], [40, 0],
+    ],
+    "Central Asia & India": [
+        [70, 60], [73, 80], [75, 110], [55, 110], [40, 110], [22, 110], [10, 105], [8, 98], [20, 92], [22, 88], [8, 77],
+        [24, 68], [25, 60], [38, 60], [55, 60],
+    ],
+    "East Asia": [
+        [75, 110], [70, 140], [65, 170], [60, 160], [55, 137], [45, 135], [40, 122], [30, 121], [22, 114], [22, 110],
+        [40, 110], [55, 110],
+    ],
+    Africa: [
+        [35, -6], [37, 10], [32, 32], [12, 43], [11, 51], [-4, 40], [-15, 40], [-26, 33], [-34, 26], [-34, 18], [-17, 12],
+        [-5, 12], [4, 8], [5, -4], [5, -10], [10, -15], [15, -17], [21, -17], [28, -12],
+    ],
+    "North America W": [
+        [18, -97], [23, -106], [32, -117], [40, -124], [48, -125], [58, -136], [60, -147], [66, -166], [71, -156],
+        [70, -130], [68, -110], [69, -100], [50, -100], [30, -100], [21, -97],
+    ],
+    "North America E": [
+        [69, -100], [73, -90], [65, -85], [60, -94], [55, -82], [60, -77], [62, -65], [52, -56], [45, -61], [43, -70],
+        [35, -76], [30, -81], [25, -80], [30, -85], [29, -95], [30, -100], [50, -100],
+    ],
+    "Central America": [[8, -78], [15, -88], [18, -97], [21, -97], [19, -91], [21, -87], [15, -83]],
+    "South America": [
+        [12, -72], [10, -62], [5, -52], [-5, -35], [-13, -38], [-23, -42], [-33, -52], [-40, -62], [-52, -68], [-55, -70],
+        [-45, -75], [-30, -71], [-18, -70], [-5, -81], [2, -80], [8, -77],
+    ],
+    Australia: [
+        [-11, 131], [-12, 137], [-17, 141], [-11, 142], [-19, 147], [-28, 153], [-38, 149], [-39, 143], [-35, 136],
+        [-32, 133], [-34, 123], [-34, 115], [-22, 114], [-14, 126],
+    ],
+};
+const CITIES = [
+    ["Lisbon", 38.7, -9.1],
+    ["Athens", 38, 23.7],
+    ["Dubai", 25.2, 55.3],
+];
+
+// CSS-style cubic-bezier easing, evaluated in JS so sampled motion matches Lottie's.
+function cubicBezier([x1, y1, x2, y2]) {
+    const bez = (a, b, t) => 3 * a * t * (1 - t) ** 2 + 3 * b * t * t * (1 - t) + t ** 3;
+    return (x) => {
+        let lo = 0;
+        let hi = 1;
+        for (let k = 0; k < 30; k++) {
+            const mid = (lo + hi) / 2;
+            if (bez(x1, x2, mid) < x) lo = mid;
+            else hi = mid;
+        }
+        return bez(y1, y2, (lo + hi) / 2);
+    };
+}
+
+function tripGenerating(ink) {
+    const OP = 288;
+    const STEP = 12; // shape keyframe spacing (15° of spin)
+    const C = [200, 190];
+    const R = 112;
+    const LAT0 = rad(32); // tilt the globe towards us so Europe sits mid-face
+    const T_FACE = 128; // the Lisbon–Dubai corridor faces the viewer here
+    const spin = (t) => (360 * (t - T_FACE)) / OP - 22;
+    const r1 = (n) => Math.round(n);
+
+    const project = (lat, lon, t) => {
+        const la = rad(lat);
+        const lo = rad(lon + spin(t));
+        return {
+            x: Math.cos(la) * Math.sin(lo),
+            y: -(Math.cos(LAT0) * Math.sin(la) - Math.sin(LAT0) * Math.cos(la) * Math.cos(lo)),
+            z: Math.sin(LAT0) * Math.sin(la) + Math.cos(LAT0) * Math.cos(la) * Math.cos(lo),
+        };
+    };
+    // Far-side points are pinned to the rim, so shapes wrap around the edge
+    // while keeping a constant vertex count for shape keyframes.
+    const toScreen = ({ x, y, z }, lift = 1) => {
+        if (z < 0) {
+            const n = Math.hypot(x, y) || 1;
+            return [r1(C[0] + (x / n) * R), r1(C[1] + (y / n) * R)];
+        }
+        return [r1(C[0] + x * R * lift), r1(C[1] + y * R * lift)];
+    };
+    const times = (step = STEP) => Array.from({ length: OP / step + 1 }, (_, k) => k * step);
+    const shapeTrack = (latLons, closed) =>
+        track(...times().map((t) => [t, pathData(latLons.map(([la, lo]) => toScreen(project(la, lo, t))), { closed })]));
+    const shape = (nm, latLons, closed, maxDeg = 8) => ({ ty: "sh", nm, ks: shapeTrack(densify(latLons, closed, maxDeg), closed) });
+
+    // Great-circle route between two cities, lifted into an arc above the surface.
+    function densify(latLons, closed, maxDeg = 6) {
+        const out = [];
+        const n = latLons.length;
+        for (let k = 0; k < (closed ? n : n - 1); k++) {
+            const a = ["", ...latLons[k]];
+            const b = ["", ...latLons[(k + 1) % n]];
+            const [ua, ub] = [unit(a[1], a[2]), unit(b[1], b[2])];
+            const ang = (Math.acos(Math.min(1, ua.reduce((sum, v, i) => sum + v * ub[i], 0))) * 180) / Math.PI;
+            const steps = Math.max(1, Math.ceil(ang / maxDeg));
+            for (let j = 0; j < steps; j++) {
+                const pt = ang < 1e-6 ? { lat: a[1], lon: a[2] } : routePoint(a, b, j / steps);
+                out.push([pt.lat, pt.lon]);
+            }
+        }
+        if (!closed) out.push(latLons[n - 1]);
+        return out;
+    }
+    const unit = (lat, lon) => [Math.cos(rad(lat)) * Math.cos(rad(lon)), Math.cos(rad(lat)) * Math.sin(rad(lon)), Math.sin(rad(lat))];
+    const routePoint = (a, b, s) => {
+        const [ua, ub] = [unit(a[1], a[2]), unit(b[1], b[2])];
+        const omega = Math.acos(ua.reduce((sum, v, i) => sum + v * ub[i], 0));
+        const k1 = Math.sin((1 - s) * omega) / Math.sin(omega);
+        const k2 = Math.sin(s * omega) / Math.sin(omega);
+        const [x, y, z] = ua.map((v, i) => v * k1 + ub[i] * k2);
+        return { lat: (Math.asin(z) * 180) / Math.PI, lon: (Math.atan2(y, x) * 180) / Math.PI, lift: 1 + 0.16 * Math.sin(Math.PI * s) };
+    };
+    const routeScreen = (a, b, s, t) => {
+        const p = routePoint(a, b, s);
+        return toScreen(project(p.lat, p.lon, t), p.lift);
+    };
+    const visibility = (z) => Math.max(0, Math.min(100, ((z - 0.08) / 0.2) * 100));
+
+    // Flight plan: Paris → Rome, pause, Rome → Athens, then lift off.
+    const LEGS = [
+        { from: CITIES[0], to: CITIES[1], t: [100, 130] },
+        { from: CITIES[1], to: CITIES[2], t: [136, 166] },
     ];
-    const continentSet = (offset) =>
-        CONTINENTS.map((blobs, k) => group(`Continent ${k}`, [...blobs.map(([x, y, w, h]) => ellipse([C[0] + x + offset, C[1] + y], [w, h])), fill(YELLOW)]));
-    const land = layer("Land", [group("Strip", [...continentSet(0), ...continentSet(-STRIP)], { p: track([0, [0, 0]], [OP, [STRIP, 0]]) })], {
-        parent: "Globe",
-        mask: circleData(C, R - 2),
+    const ease = cubicBezier(EASE.inOut);
+    const legProgress = (leg, t) => ease(Math.max(0, Math.min(1, (t - leg.t[0]) / (leg.t[1] - leg.t[0]))));
+
+    const routes = LEGS.map((leg, i) => {
+        const N = 14;
+        const pts = (t) => Array.from({ length: N }, (_, k) => routeScreen(leg.from, leg.to, k / (N - 1), t));
+        const midZ = (t) => {
+            const m = routePoint(leg.from, leg.to, 0.5);
+            return project(m.lat, m.lon, t).z;
+        };
+        return layer(`Route ${i}`, [group("Route", [
+            { ty: "sh", nm: "Arc", ks: track(...times().map((t) => [t, pathData(pts(t))])) },
+            trim(0, track(...times(2).filter((t) => t >= leg.t[0] - 2 && t <= leg.t[1] + 2).map((t) => [t, legProgress(leg, t) * 100]))),
+            stroke(ink, 5, { dash: [0.1, 10] }),
+        ])], { parent: "Globe", o: track(...times().map((t) => [t, visibility(midZ(t))])) });
     });
 
-    // Plane orbit: a tilted ellipse; the lower half passes in front of the globe.
-    const RX = 158;
-    const RY = 40;
-    const TILT = -14;
-    const orbitAt = (phi) => {
-        const [x, y] = [RX * Math.cos(rad(phi)), RY * Math.sin(rad(phi))];
-        const cs = Math.cos(rad(TILT));
-        const sn = Math.sin(rad(TILT));
-        return [C[0] + x * cs - y * sn, C[1] + x * sn + y * cs];
-    };
-    const orbitDir = (phi) => {
-        const [dx, dy] = [-RX * Math.sin(rad(phi)), RY * Math.cos(rad(phi))];
-        const cs = Math.cos(rad(TILT));
-        const sn = Math.sin(rad(TILT));
-        return (Math.atan2(dx * sn + dy * cs, dx * cs - dy * sn) * 180) / Math.PI;
-    };
-    const samples = [];
-    let lastR = null;
-    for (let t = 0; t <= OP; t += 4) {
-        const phi = (360 * t) / OP;
-        let r = orbitDir(phi);
-        if (lastR !== null) while (r - lastR > 180) r -= 360;
-        if (lastR !== null) while (lastR - r > 180) r += 360;
-        lastR = r;
-        samples.push({ t, p: orbitAt(phi), r, s: 84 + 16 * Math.sin(rad(phi)) });
-    }
-    const orbitPlane = (nm, visible) =>
-        layer(nm, [plane(40, YELLOW, ink)], {
+    const pins = CITIES.map(([nm, lat, lon], i) => {
+        const tPop = 72 + i * 18;
+        return layer(`Pin ${nm}`, [pin(ink)], {
             parent: "Globe",
-            p: track(...samples.map(({ t, p }) => [t, [...p, 0]])),
-            r: track(...samples.map(({ t, r }) => [t, r])),
-            s: track(...samples.map(({ t, s }) => [t, [s, s, 100]])),
-            o: visible === "front" ? track([0, 100], [119, 100], [120, 0], [239, 0], [240, 100]) : track([0, 0], [119, 0], [120, 100], [239, 100], [240, 0]),
+            p: track(...times(6).map((t) => [t, [...toScreen(project(lat, lon, t)), 0]])),
+            o: track(...times(6).map((t) => [t, visibility(project(lat, lon, t).z)])),
+            s: scaleTrack([tPop, 0, EASE.out], [tPop + 10, 74, EASE.inOut], [tPop + 18, 60]),
         });
-    const orbitHalf = (nm, from, to) =>
-        layer(nm, [group("Orbit", [curve(ellipseArc(C, RX, RY, TILT, from, to)), stroke(ink, 3, { o: 35, dash: [0.1, 12] })])], { parent: "Globe" });
+    });
 
-    // Pins pop onto the globe one by one and dotted routes join them.
-    const PINS = [[158, 232], [222, 168], [252, 238]];
-    const pinLayer = (pos, i) => {
-        const t = 24 + i * 44;
-        return layer(`Pin ${i}`, [pin(ink)], {
-            parent: "Globe",
-            p: pos,
-            s: scaleTrack([t, 0, EASE.out], [t + 10, 84, EASE.inOut], [t + 18, 70]),
-            o: track([t - 1, 0], [t, 100], [196, 100], [214, 0]),
+    // The plane: sampled along the route (riding the spin), then climbing away.
+    const T_PLANE = [LEGS[0].t[0] - 8, LEGS[1].t[1] + 22];
+    const planeAt = (t) => {
+        if (t <= LEGS[0].t[1]) return routeScreen(LEGS[0].from, LEGS[0].to, legProgress(LEGS[0], t), t);
+        if (t <= LEGS[1].t[1]) return routeScreen(LEGS[1].from, LEGS[1].to, legProgress(LEGS[1], t), t);
+        const q = (t - LEGS[1].t[1]) / (T_PLANE[1] - LEGS[1].t[1]);
+        const end = routeScreen(LEGS[1].from, LEGS[1].to, 1, LEGS[1].t[1]);
+        return add(end, [70 * q * q + 30 * q, -90 * q * q - 20 * q]);
+    };
+    const planeKeys = [];
+    let lastAngle = null;
+    for (let t = T_PLANE[0]; t <= T_PLANE[1]; t += 2) {
+        const p = planeAt(t);
+        const ahead = planeAt(Math.min(t + 2, T_PLANE[1] + 2));
+        let angle = (Math.atan2(ahead[1] - p[1], ahead[0] - p[0]) * 180) / Math.PI;
+        if (Math.hypot(ahead[0] - p[0], ahead[1] - p[1]) < 0.3 && lastAngle !== null) angle = lastAngle;
+        if (lastAngle !== null) {
+            while (angle - lastAngle > 180) angle -= 360;
+            while (lastAngle - angle > 180) angle += 360;
+        }
+        lastAngle = angle;
+        planeKeys.push([t, p, angle]);
+    }
+    const flyer = layer("Plane", [plane(46, ink, lineFor(ink), 2)], {
+        parent: "Globe",
+        p: track(...planeKeys.map(([t, p]) => [t, [...p, 0]])),
+        r: track(...planeKeys.map(([t, , a]) => [t, a])),
+        s: scaleTrack([T_PLANE[0], 0, EASE.out], [T_PLANE[0] + 8, 100], [T_PLANE[1] - 12, 100, EASE.in], [T_PLANE[1], 0]),
+        o: track([T_PLANE[0] - 1, 0], [T_PLANE[0], 100], [T_PLANE[1], 100], [T_PLANE[1] + 1, 0]),
+    });
+
+    // A continent piece fades out once it is mostly behind the globe: far-side
+    // points are pinned to the rim, and near the far pole of view they can swing
+    // across the face between keyframes — hidden pieces can't show that.
+    const landPiece = (nm, pts) => {
+        const dense = densify(pts, true, 10);
+        const depth = (t) => dense.reduce((sum, [la, lo]) => sum + project(la, lo, t).z, 0) / dense.length;
+        return group(nm, [shape(nm, pts, true, 10), fill(YELLOW), stroke(lineFor(ink), 5)], {
+            o: track(...times().map((t) => [t, Math.max(0, Math.min(100, ((depth(t) + 0.15) / 0.2) * 100))])),
         });
     };
-    const route = (a, b, t, i) => {
-        const mid = mul(add(a, b), 0.5);
-        const lift = add(mid, [0, -46]);
-        return layer(`Route ${i}`, [group("Route", [
-            curve([[a, add(a, mul(sub(lift, a), 0.6)), add(b, mul(sub(lift, b), 0.6)), b]]),
-            trim(0, track([t, 0, EASE.inOut], [t + 26, 100])),
-            stroke(ink, 4, { dash: [0.1, 10] }),
-        ])], { parent: "Globe", o: track([0, 100], [196, 100], [214, 0], [OP, 0]) });
-    };
+
+    // Lat/long grid: meridians spin, parallels are rotation-invariant (static).
+    const meridians = Array.from({ length: 4 }, (_, k) => shape(`Meridian ${k}`, Array.from({ length: 9 }, (_, j) => [-90 + j * 22.5, k * 90]), false, 22.5));
+    const parallels = [-50, -20, 10, 40, 65].map((lat) => ({
+        ty: "sh",
+        nm: `Parallel ${lat}`,
+        ks: val(pathData(Array.from({ length: 25 }, (_, j) => toScreen(project(lat, -180 + j * 15, 0))))),
+    }));
+    const bob = (amp) => track(...[0, 72, 144, 216, 288].map((t, k) => [t, [C[0], C[1] - (k % 2 ? amp : 0), 0], EASE.inOut]));
 
     return comp("Trip generating", {
         op: OP,
         layers: [
-            ...[[64, 86], [338, 92], [348, 300], [58, 292]].map((pos, i) => sparkleLayer(ink, `Sparkle ${i}`, pos, 20 + i * 52, i % 2 ? 11 : 15)),
-            nullLayer("Globe", { a: C, p: bobTrack(7, C) }),
-            orbitPlane("Plane (front)", "front"),
-            orbitHalf("Orbit (front)", 0, 180),
-            ...PINS.map(pinLayer),
-            route(PINS[0], PINS[1], 50, 0),
-            route(PINS[1], PINS[2], 94, 1),
-            layer("Globe rim", [
-                group("Highlight", [curve(arcSegs(C, R - 16, 200, 250)), stroke(WHITE, 6, { o: 55 })]),
+            ...[[62, 84], [340, 96], [346, 300], [56, 290]].map((pos, i) => sparkleLayer(ink, `Sparkle ${i}`, pos, 18 + i * 64, i % 2 ? 11 : 15)),
+            nullLayer("Globe", { a: C, p: bob(5) }),
+            flyer,
+            ...pins,
+            ...routes,
+            layer("Rim", [
+                group("Highlight", [curve(arcSegs(C, R - 14, 200, 248)), stroke(WHITE, 6, { o: 55 })]),
                 group("Rim", [ellipse(C, 2 * R), stroke(ink, 6)]),
             ], { parent: "Globe" }),
-            land,
-            // Opaque so the plane really disappears behind the globe.
+            layer("Land", Object.entries(CONTINENTS).map(([nm, pts]) => landPiece(nm, pts)), { parent: "Globe" }),
+            layer("Grid", [group("Grid", [...meridians, ...parallels, stroke(ink, 1.5, { o: 16 })])], { parent: "Globe" }),
             layer("Ocean", [group("Ocean", [ellipse(C, 2 * R), fill(tint(ink, 8))])], { parent: "Globe" }),
-            orbitHalf("Orbit (back)", 180, 360),
-            orbitPlane("Plane (back)", "back"),
-            layer("Shadow", [group("Shadow", [ellipse([200, 352], [150, 18]), fill(ink, 10)])], {
-                a: [200, 352],
-                p: [200, 352],
-                s: track(...[0, 60, 120, 180, 240].map((t, k) => [t, k % 2 ? [84, 84, 100] : [100, 100, 100], EASE.inOut])),
+            layer("Shadow", [group("Shadow", [ellipse([200, 346], [150, 18]), fill(ink, 10)])], {
+                a: [200, 346],
+                p: [200, 346],
+                s: track(...[0, 72, 144, 216, 288].map((t, k) => [t, k % 2 ? [88, 88, 100] : [100, 100, 100], EASE.inOut])),
             }),
         ],
     });
@@ -501,9 +638,9 @@ function tripReady(ink) {
         layers: [
             ...confettiBurst(ink, SP, IMPACT, { count: 18, seed: 11, dist: [120, 200], life: 80 }),
             layer("Stamp", [
-                group("Check", [path([[-24, 2], [-6, 20], [26, -16]]), trim(0, track([IMPACT + 2, 0, EASE.out], [IMPACT + 14, 100])), stroke(ink, 9)], { p: SP }),
-                group("Inner ring", [ellipse(SP, 78), stroke(ink, 2, { o: 50 })]),
-                group("Ring", [ellipse(SP, 96), stroke(ink, 7)]),
+                group("Check", [path([[-24, 2], [-6, 20], [26, -16]]), trim(0, track([IMPACT + 2, 0, EASE.out], [IMPACT + 14, 100])), stroke(lineFor(ink), 9)], { p: SP }),
+                group("Inner ring", [ellipse(SP, 78), stroke(lineFor(ink), 2, { o: 50 })]),
+                group("Ring", [ellipse(SP, 96), stroke(lineFor(ink), 7)]),
             ], {
                 a: SP,
                 p: SP,
@@ -523,18 +660,19 @@ function tripReady(ink) {
                 r: track([0, -16, EASE.out], [18, 4, EASE.inOut], [28, 0], [IMPACT, 0], [IMPACT + 3, -2.5], [IMPACT + 6, 2], [IMPACT + 9, -1], [IMPACT + 12, 0]),
                 s: scaleTrack([IMPACT - 1, 100], [IMPACT + 1, [104, 92], EASE.out], [IMPACT + 7, [98, 103], EASE.inOut], [IMPACT + 13, 100]),
             }),
-            layer("Ticket plane", [plane(26, ink, ink, 1)], {
+            layer("Ticket plane", [plane(26, lineFor(ink), lineFor(ink), 1)], {
                 parent: "Ticket",
                 p: motion([18, FROM, EASE.inOut], [44, TO]),
                 o: track([16, 0], [20, 100]),
             }),
             layer("Ticket face", [
-                group("Route", [path([FROM, TO]), stroke(ink, 3, { o: 45, dash: [0.1, 9] })]),
-                group("Ends", [ellipse(FROM, 12), ellipse(TO, 12), fill(ink)]),
-                group("Text", [rect([130, 214], [90, 10], 5), rect([118, 236], [66, 8], 4), rect([122, 258], [74, 8], 4), fill(ink, 55)]),
-                group("Barcode", [...barcode, fill(ink)]),
-                group("Perforation", [path([[288, 152], [288, 276]]), stroke(ink, 3, { o: 60, dash: [6, 7], cap: 1 })]),
-                group("Ticket", [rect(C, [272, 142], 18), stroke(ink, 6), fill(YELLOW)]),
+                group("Route", [path([FROM, TO]), stroke(lineFor(ink), 3, { o: 45, dash: [0.1, 9] })]),
+                group("Ends", [ellipse(FROM, 12), ellipse(TO, 12), fill(lineFor(ink))]),
+                group("Wordmark", wordmarkLetters(lineFor(ink), [122, 214], 17)),
+                group("Text", [rect([118, 240], [66, 8], 4), rect([122, 260], [74, 8], 4), fill(lineFor(ink), 55)]),
+                group("Barcode", [...barcode, fill(lineFor(ink))]),
+                group("Perforation", [path([[288, 152], [288, 276]]), stroke(lineFor(ink), 3, { o: 60, dash: [6, 7], cap: 1 })]),
+                group("Ticket", [rect(C, [272, 142], 18), stroke(lineFor(ink), 6), fill(YELLOW)]),
             ], { parent: "Ticket" }),
         ],
     });
@@ -566,10 +704,10 @@ function premiumUnlocked(ink) {
                 r: track([T_CROWN, -24, EASE.out], [T_CROWN + 18, 5, EASE.inOut], [T_CROWN + 28, 0]),
             }),
             layer("Crown", [
-                group("Band jewels", [ellipse([160, 262], 11), ellipse([200, 262], 14), ellipse([240, 262], 11), fill(ink)]),
-                group("Band", [rect([200, 262], [154, 28], 7), stroke(ink, 6), fill(YELLOW)]),
-                group("Tip jewels", [ellipse([118, 166], 18), ellipse([200, 144], 20), ellipse([282, 166], 18), stroke(ink, 4), fill(YELLOW)]),
-                group("Crown", [path([[128, 252], [118, 172], [160, 208], [200, 152], [240, 208], [282, 172], [272, 252]], { closed: true }), stroke(ink, 6), fill(YELLOW)]),
+                group("Band jewels", [ellipse([160, 262], 11), ellipse([200, 262], 14), ellipse([240, 262], 11), fill(lineFor(ink))]),
+                group("Band", [rect([200, 262], [154, 28], 7), stroke(lineFor(ink), 6), fill(YELLOW)]),
+                group("Tip jewels", [ellipse([118, 166], 18), ellipse([200, 144], 20), ellipse([282, 166], 18), stroke(lineFor(ink), 4), fill(YELLOW)]),
+                group("Crown", [path([[128, 252], [118, 172], [160, 208], [200, 152], [240, 208], [282, 172], [272, 252]], { closed: true }), stroke(lineFor(ink), 6), fill(YELLOW)]),
             ], { parent: "Crown rig", o: track([T_CROWN - 1, 0], [T_CROWN, 100]) }),
             glowRing("Glow 1", CROWN, T_CROWN + 8),
             glowRing("Glow 2", CROWN, T_CROWN + 18),
@@ -580,12 +718,12 @@ function premiumUnlocked(ink) {
                 r: track([28, 0], [31, -7], [34, 7], [37, -6], [40, 6], [43, 0], [T_FALL, 0, EASE.in], [T_FALL + 18, 16]),
             }),
             layer("Body", [
-                group("Keyhole", [ellipse([200, 240], 26), rect([200, 262], [10, 30], 5), fill(ink)]),
-                group("Body", [rect(LOCK, [160, 128], 26), stroke(ink, 8), fill(YELLOW)]),
+                group("Keyhole", [ellipse([200, 240], 26), rect([200, 262], [10, 30], 5), fill(lineFor(ink))]),
+                group("Body", [rect(LOCK, [160, 128], 26), stroke(lineFor(ink), 8), fill(YELLOW)]),
             ], { parent: "Lock", o: lockFade }),
             layer("Shackle", [group("Shackle", [
                 path([HINGE, [152, 140], [248, 140], [248, 192]], { i: [[0, 0], [0, 0], [0, -64], [0, 0]], o: [[0, 0], [0, -64], [0, 0], [0, 0]] }),
-                stroke(ink, 18, { cap: 1 }),
+                stroke(solidFor(ink), 18, { cap: 1 }),
             ])], {
                 parent: "Lock",
                 o: lockFade,
@@ -614,7 +752,7 @@ function achievementBadge(ink) {
     const leaf = (angle, side, k, outward) => {
         const t = T_LEAVES + 6 + k * 3;
         const tangent = angle + (side < 0 ? 90 : -90); // direction the stem grows (bottom → top)
-        return group(`Leaf ${side}-${k}-${outward}`, [ellipse([0, -15], [14, 30]), stroke(ink, 3), fill(YELLOW)], {
+        return group(`Leaf ${side}-${k}-${outward}`, [ellipse([0, -15], [14, 30]), stroke(lineFor(ink), 3), fill(YELLOW)], {
             p: polar(M, STEM_R + (outward ? 6 : -6), angle),
             r: tangent + (outward ? 1 : -1) * side * -38,
             s: track([t, [0, 0], EASE.out], [t + 8, [120, 120], EASE.inOut], [t + 14, [100, 100]]),
@@ -626,7 +764,7 @@ function achievementBadge(ink) {
             curve(arcSegs(M, STEM_R, 90 + 100, 90 + 10).map((seg) => seg).reverse().map(([a, b, c, d]) => [d, c, b, a])),
             curve(arcSegs(M, STEM_R, 90 - 10, 90 - 100).map((seg) => seg).reverse().map(([a, b, c, d]) => [d, c, b, a])),
             trim(0, track([T_LEAVES, 0, EASE.out], [T_LEAVES + 18, 100])),
-            stroke(ink, 4),
+            stroke(solidFor(ink), 4),
         ]),
         ...LEFT.flatMap((a, k) => [leaf(a, -1, k, true), leaf(a, -1, k, false), leaf(360 - a, 1, k, true), leaf(360 - a, 1, k, false)]),
     ];
@@ -653,7 +791,7 @@ function achievementBadge(ink) {
                 p: track([104, [M[0] - 160, M[1]], EASE.inOut], [124, [M[0] + 160, M[1]]]),
                 r: 20,
             })], { parent: "Medal", mask: circleData(M, 72) }),
-            layer("Star", [group("Star", [star(M, 40, 17, 5), fill(ink)])], {
+            layer("Star", [group("Star", [star(M, 40, 17, 5), fill(lineFor(ink))])], {
                 parent: "Medal",
                 a: M,
                 p: M,
@@ -661,14 +799,18 @@ function achievementBadge(ink) {
                 r: track([96, -72, EASE.out], [112, 0]),
             }),
             layer("Medal", [
-                group("Inner", [ellipse(M, 116), stroke(ink, 3, { o: 40 })]),
-                group("Disc", [ellipse(M, 150), stroke(ink, 7), fill(YELLOW)]),
-                group("Loop", [ellipse([200, 136], 22), stroke(ink, 6)]),
+                group("Inner", [ellipse(M, 116), stroke(lineFor(ink), 3, { o: 40 })]),
+                group("Disc", [ellipse(M, 150), stroke(lineFor(ink), 7), fill(YELLOW)]),
+                group("Loop", [ellipse([200, 136], 22), stroke(solidFor(ink), 6)]),
             ], { parent: "Medal" }),
+            layer("Wordmark", wordmarkLetters(ink, [200, 346], 24, (i) => {
+                const t = T_SETTLE + 26 + i * 3;
+                return { p: track([t, [0, 16], EASE.out], [t + 14, [0, 0]]), o: track([t, 0], [t + 8, 100]) };
+            })),
             layer("Laurel", leaves, { parent: "Rig" }),
             layer("Ribbon", [
-                group("Right strap", [path([[262, -30], [226, -30], [194, 132], [226, 132]], { closed: true }), stroke(ink, 5), fill(ink)]),
-                group("Left strap", [path([[138, -30], [174, -30], [206, 132], [174, 132]], { closed: true }), stroke(ink, 5), fill(YELLOW)]),
+                group("Right strap", [path([[262, -30], [226, -30], [194, 132], [226, 132]], { closed: true }), stroke(lineFor(ink), 5), fill(solidFor(ink))]),
+                group("Left strap", [path([[138, -30], [174, -30], [206, 132], [174, 132]], { closed: true }), stroke(lineFor(ink), 5), fill(YELLOW)]),
             ], { parent: "Rig" }),
             sunburst(M, 170, T_SETTLE, OP),
         ],
@@ -690,13 +832,13 @@ function radarScan(ink) {
         const tagAt = add(pos, [30, -26]);
         return [
             layer(`Tag ${i}`, [group("Tag", [
-                group("Price", [rect([-6, 0], [18, 5], 2), rect([10, 0], [6, 5], 2), fill(ink)]),
-                group("Tag", [rect([0, 0], [48, 24], 12), stroke(ink, 3), fill(YELLOW)]),
+                group("Price", [rect([-6, 0], [18, 5], 2), rect([10, 0], [6, 5], 2), fill(lineFor(ink))]),
+                group("Tag", [rect([0, 0], [48, 24], 12), stroke(lineFor(ink), 3), fill(YELLOW)]),
             ])], {
                 p: tagAt,
                 s: scaleTrack([t + 4, 0, EASE.out], [t + 12, 115, EASE.inOut], [t + 18, 100], [t + 40, 100, EASE.in], [t + 48, 0]),
             }),
-            layer(`Blip ${i}`, [group("Blip", [ellipse([0, 0], 16), stroke(ink, 3), fill(YELLOW)])], {
+            layer(`Blip ${i}`, [group("Blip", [ellipse([0, 0], 16), stroke(lineFor(ink), 3), fill(YELLOW)])], {
                 p: pos,
                 s: scaleTrack([t - 1, 0], [t + 4, 130, EASE.out], [t + 10, 100]),
                 o: track([t, 100], [t + 32, 100], [t + 50, 0]),
@@ -750,6 +892,11 @@ function radarScan(ink) {
 // drives off, the plane taxis and takes off, a new plane lands, opens its door
 // and the loader drives back in — matching frame 0.
 function emptyTrips(ink) {
+    // Dark mode is drawn sticker-style: yellow objects keep dark outlines and
+    // details, standalone dark parts (belt, wheels, duffel) turn soft grey, and
+    // only sky elements (clouds, bird, dust, ground) use the theme ink.
+    const line = lineFor(ink);
+    const solid = solidFor(ink);
     const OP = 360;
     const INTERIOR = [0.09, 0.09, 0.09, 1];
     const GROUND = 330;
@@ -844,7 +991,7 @@ function emptyTrips(ink) {
     }
     const bagLayer = (nm, shape, h, t0) => {
         const keys = [];
-        for (let t = 0; t <= OP; t += 2) keys.push([t, bagState(t, t0)]);
+        for (let t = 0; t <= OP; t += 4) keys.push([t, bagState(t, t0)]);
         return layer(nm, [shape], {
             parent: "Scene",
             a: [0, h / 2], // bottom-centre, so squash keeps the bag on the belt
@@ -856,33 +1003,33 @@ function emptyTrips(ink) {
     };
     const swing = track(...Array.from({ length: 19 }, (_, k) => [k * 20, k % 2 ? -22 : 22, EASE.inOut]));
     const suitcase = group("Suitcase", [
-        group("Tag", [path([[0, 0], [0, 9]]), stroke(ink, 2), group("Label", [rect([0, 13], [9, 8], 2), stroke(ink, 2), fill(YELLOW)])], { p: [8, -25], r: swing }),
-        group("Handle", [path([[-9, -18], [-9, -26], [9, -26], [9, -18]]), stroke(ink, 4)]),
-        group("Stripes", [path([[-12, -13], [-12, 13]]), path([[12, -13], [12, 13]]), stroke(ink, 3, { o: 35, cap: 1 })]),
-        group("Body", [rect([0, 0], [46, 36], 7), stroke(ink, 4), fill(YELLOW)]),
+        group("Tag", [path([[0, 0], [0, 9]]), stroke(line, 2), group("Label", [rect([0, 13], [9, 8], 2), stroke(line, 2), fill(YELLOW)])], { p: [8, -25], r: swing }),
+        group("Handle", [path([[-9, -18], [-9, -26], [9, -26], [9, -18]]), stroke(solid, 4)]),
+        group("Stripes", [path([[-12, -13], [-12, 13]]), path([[12, -13], [12, 13]]), stroke(line, 3, { o: 35, cap: 1 })]),
+        group("Body", [rect([0, 0], [46, 36], 7), stroke(line, 4), fill(YELLOW)]),
     ]);
     const duffel = group("Duffel", [
         group("Band", [rect([0, 0], [8, 28]), fill(YELLOW)]),
-        group("Straps", [path([[-15, -12], [-9, -23], [9, -23], [15, -12]]), stroke(ink, 4)]),
-        group("Body", [rect([0, 0], [58, 28], 14), fill(ink)]),
+        group("Straps", [path([[-15, -12], [-9, -23], [9, -23], [15, -12]]), stroke(solid, 4)]),
+        group("Body", [rect([0, 0], [58, 28], 14), fill(solid)]),
     ]);
     const box = group("Box", [
-        group("Tape", [path([[-17, 0], [17, 0]]), path([[0, -17], [0, 17]]), stroke(ink, 4, { cap: 1 })]),
-        group("Body", [rect([0, 0], [34, 34], 6), stroke(ink, 4), fill(YELLOW)]),
+        group("Tape", [path([[-17, 0], [17, 0]]), path([[0, -17], [0, 17]]), stroke(line, 4, { cap: 1 })]),
+        group("Body", [rect([0, 0], [34, 34], 6), stroke(line, 4), fill(YELLOW)]),
     ]);
 
     // ── Belt ──
     const beltStripes = stroke(YELLOW, 3, { cap: 1, dash: [8, 16] });
     beltStripes.d[2].v = track([0, 0], [OP, -720]); // crawls uphill at the bags' speed
     const roller = (s, i) =>
-        group(`Roller ${i}`, [path([[-4, 0], [4, 0]]), stroke(ink, 2), ellipse([0, 0], 10), stroke(ink, 2), fill(YELLOW)], {
+        group(`Roller ${i}`, [path([[-4, 0], [4, 0]]), stroke(line, 2), ellipse([0, 0], 10), stroke(line, 2), fill(YELLOW)], {
             p: add(S, mul(d, s)),
             r: track([0, 0], [OP, 1440]),
         });
 
     // ── Plane parts (parented to "Plane", drawn in scene coordinates when parked) ──
     const wheelSpin = track([0, 0], [T_TAXI, 0, EASE.in], [T_GONE, 1440], [T_GONE + 1, 1440, EASE.out], [T_STOP, 2160], [OP, 2160]);
-    const wheel = (c, nm) => group(nm, [path([[-8, 0], [8, 0]]), stroke(YELLOW, 3), ellipse([0, 0], 24), fill(ink)], { p: c, r: wheelSpin });
+    const wheel = (c, nm) => group(nm, [path([[-8, 0], [8, 0]]), stroke(YELLOW, 3), ellipse([0, 0], 24), fill(solid)], { p: c, r: wheelSpin });
 
     // Brand mark on the tail fin, from the lockup vectors.
     const markShapes = BRAND.mark.filter((sh) => sh.alpha === 1);
@@ -897,8 +1044,11 @@ function emptyTrips(ink) {
         ...markShapes.flatMap((sh) =>
             sh.contours.map((c) => ({ ty: "sh", nm: "Mark", ks: val({ c: c.c, v: c.v.map(toTail), i: c.i.map((p) => mul(p, mk)), o: c.o.map((p) => mul(p, mk)) }) })),
         ),
-        fill(ink),
+        fill(line),
     ]);
+
+    // "Planera" wordmark painted on the fuselage, livery-style.
+    const livery = group("Wordmark", wordmarkLetters(line, [316, 251], 17));
 
     const fanSpin = track([0, 0], [240, 720, EASE.in], [T_GONE, 4320], [T_GONE + 1, 4320, EASE.out], [OP, 5040]);
     // The plane squashes a little as it swallows each bag, shuts the door and lands.
@@ -964,25 +1114,26 @@ function emptyTrips(ink) {
                 s: scaleTrack(...beaconTimes.flatMap((t) => [[t, 60, EASE.out], [t + 16, 260]])),
                 o: track(...beaconTimes.flatMap((t) => [[t, 0], [t + 1, 90], [t + 16, 0]])),
             }),
-            layer("Door", [group("Door", [rect(DOOR, DOOR_SIZE, 6), stroke(ink, 4), fill(YELLOW)], {
+            layer("Door", [group("Door", [rect(DOOR, DOOR_SIZE, 6), stroke(line, 4), fill(YELLOW)], {
                 p: track([0, [0, -DOOR_LIFT]], [T_CLOSE[0], [0, -DOOR_LIFT], EASE.inOut], [T_CLOSE[1], [0, 0]], [T_STOP, [0, 0], EASE.inOut], [T_STOP + 12, [0, -DOOR_LIFT]], [OP, [0, -DOOR_LIFT]]),
             })], { parent: "Plane" }),
             layer("Engine", [
-                group("Spinner", [path([[-6, 0], [6, 0]]), stroke(ink, 2.5), ellipse([0, 0], 14), stroke(ink, 2.5), fill(YELLOW)], { p: [282, 282], r: fanSpin }),
-                group("Pod", [rect([254, 282], [58, 24], 12), stroke(ink, 4), fill(YELLOW)]),
-                group("Pylon", [path([[244, 262], [250, 272]]), stroke(ink, 5)]),
+                group("Spinner", [path([[-6, 0], [6, 0]]), stroke(line, 2.5), ellipse([0, 0], 14), stroke(line, 2.5), fill(YELLOW)], { p: [282, 282], r: fanSpin }),
+                group("Pod", [rect([254, 282], [58, 24], 12), stroke(line, 4), fill(YELLOW)]),
+                group("Pylon", [path([[244, 262], [250, 272]]), stroke(solid, 5)]),
             ], { parent: "Plane" }),
-            layer("Wing", [group("Wing", [path([[262, 258], [212, 258], [176, 298], [198, 298]], { closed: true }), stroke(ink, 4), fill(YELLOW)])], { parent: "Plane" }),
+            layer("Wing", [group("Wing", [path([[262, 258], [212, 258], [176, 298], [198, 298]], { closed: true }), stroke(line, 4), fill(YELLOW)])], { parent: "Plane" }),
             layer("Fuselage", [
-                group("Beacon", [ellipse(BEACON, 9), stroke(ink, 2), fill(YELLOW)]),
+                group("Beacon", [ellipse(BEACON, 9), stroke(line, 2), fill(YELLOW)]),
                 tailMark,
-                group("Windows", [...[192, 214, 236, 258, 280, 302].map((x) => ellipse([x, 216], [10, 13])), rect([358, 212], [24, 12], 5), fill(ink)]),
-                group("Cheatline", [path([[172, 238], [372, 238]]), stroke(ink, 2, { o: 25 })]),
-                group("Door frame", [rect(DOOR, DOOR_SIZE, 6), stroke(ink, 4)]),
+                livery,
+                group("Windows", [...[192, 214, 236, 258, 280, 302].map((x) => ellipse([x, 216], [10, 13])), rect([358, 212], [24, 12], 5), fill(line)]),
+                group("Cheatline", [path([[172, 238], [372, 238]]), stroke(line, 2, { o: 25 })]),
+                group("Door frame", [rect(DOOR, DOOR_SIZE, 6), stroke(line, 4)]),
                 // Even-odd fill turns the door rectangle into a hole.
-                group("Body", [rect([230, 230], [300, 78], 39), rect(DOOR, DOOR_SIZE, 6), stroke(ink, 5), { ...fill(YELLOW), r: 2 }]),
-                group("Stabilizer", [path([[96, 220], [50, 208], [58, 222], [108, 230]], { closed: true }), stroke(ink, 4), fill(YELLOW)]),
-                group("Fin", [path([[100, 198], [74, 126], [106, 126], [152, 198]], { closed: true }), stroke(ink, 5), fill(YELLOW)]),
+                group("Body", [rect([230, 230], [300, 78], 39), rect(DOOR, DOOR_SIZE, 6), stroke(line, 5), { ...fill(YELLOW), r: 2 }]),
+                group("Stabilizer", [path([[96, 220], [50, 208], [58, 222], [108, 230]], { closed: true }), stroke(line, 4), fill(YELLOW)]),
+                group("Fin", [path([[100, 198], [74, 126], [106, 126], [152, 198]], { closed: true }), stroke(line, 5), fill(YELLOW)]),
             ], { parent: "Plane" }),
             bagLayer("Bag 1", suitcase, 36, DROP[0]),
             bagLayer("Bag 2", duffel, 28, DROP[1]),
@@ -990,18 +1141,18 @@ function emptyTrips(ink) {
             layer("Belt", [
                 ...[0.18, 0.4, 0.62, 0.84].map(roller),
                 group("Stripes", [path([S, E]), beltStripes]),
-                group("Belt", [path([S, E]), stroke(ink, BELT_W, { cap: 2 })]),
+                group("Belt", [path([S, E]), stroke(solid, BELT_W, { cap: 2 })]),
             ], { parent: "Loader rig" }),
             layer("Interior", [group("Interior", [rect(DOOR, DOOR_SIZE, 6), fill(INTERIOR)])], { parent: "Plane" }),
             layer("Gear", [
                 wheel([200, 318], "Main wheel"),
                 wheel([340, 318], "Nose wheel"),
-                group("Struts", [path([[200, 266], [200, 314]]), path([[340, 264], [340, 314]]), stroke(ink, 6)]),
+                group("Struts", [path([[200, 266], [200, 314]]), path([[340, 264], [340, 314]]), stroke(solid, 6)]),
             ], { parent: "Plane" }),
             layer("Loader", [
-                group("Struts", [path([add(S, mul(d, 0.5)), [64, 312]]), path([add(S, mul(d, 0.2)), [30, 312]]), stroke(ink, 5)]),
-                group("Wheels", [ellipse([26, 324], 12), ellipse([78, 324], 12), fill(ink)]),
-                group("Base", [rect([52, 314], [92, 14], 6), stroke(ink, 4), fill(YELLOW)]),
+                group("Struts", [path([add(S, mul(d, 0.5)), [64, 312]]), path([add(S, mul(d, 0.2)), [30, 312]]), stroke(solid, 5)]),
+                group("Wheels", [ellipse([26, 324], 12), ellipse([78, 324], 12), fill(solid)]),
+                group("Base", [rect([52, 314], [92, 14], 6), stroke(line, 4), fill(YELLOW)]),
             ], { parent: "Loader rig" }),
             layer("Ground", [
                 group("Markings", [path([[-80, 348], [480, 348]]), stroke(ink, 3, { o: 14, cap: 1, dash: [26, 22] })]),
@@ -1041,7 +1192,7 @@ function loaderMark(ink) {
         w: 200,
         h: 200,
         layers: [
-            layer("Comet", [group("Comet", [ellipse([C[0], C[1] - ORBIT_R], 12), stroke(ink, 2), fill(YELLOW)], { a: C, p: C, r: track([0, 0], [OP, 360]) })]),
+            layer("Comet", [group("Comet", [ellipse([C[0], C[1] - ORBIT_R], 12), stroke(lineFor(ink), 2), fill(YELLOW)], { a: C, p: C, r: track([0, 0], [OP, 360]) })]),
             layer("Trail", [group("Trail", [ellipse(C, 2 * ORBIT_R), trim(0, TRAIL, track([0, -3.6 * TRAIL], [OP, 360 - 3.6 * TRAIL])), stroke(ink, 3, { o: 30 })])]),
             nullLayer("Mark", { a: C, p: C, s: scaleTrack([0, 100], [44, 100, EASE.out], [50, 110, EASE.inOut], [58, 100]) }),
             layer("P", [group("P", [curve(pSegs), drawErase(0), stroke(YELLOW, W, { cap: 1 })])], { parent: "Mark" }),
@@ -1065,7 +1216,8 @@ mkdirSync(OUT_DIR, { recursive: true });
 for (const [name, build] of Object.entries(ANIMATIONS)) {
     for (const [theme, ink] of Object.entries(INKS)) {
         const data = build(ink);
-        writeFileSync(join(OUT_DIR, `${name}.${theme}.json`), JSON.stringify(data));
+        // 2 decimals is visually exact at these sizes and keeps the bundle lean.
+        writeFileSync(join(OUT_DIR, `${name}.${theme}.json`), JSON.stringify(data, (_, v) => (typeof v === "number" ? Math.round(v * 100) / 100 : v)));
     }
     const { op } = build(INKS.light);
     console.log(`${name.padEnd(18)} ${(op / FPS).toFixed(2)}s`);

@@ -1,4 +1,5 @@
 import { Text, View, StyleSheet, Image, TouchableOpacity, ActivityIndicator, TextInput, Alert, ScrollView, KeyboardAvoidingView, Platform, StatusBar, Linking } from "react-native";
+import { BrandLoader } from "@/components/BrandLoader";
 import { useConvexAuth } from "@/lib/auth-components";
 import { authClient } from "@/lib/auth-client";
 import { useToken } from "@/lib/useAuthenticatedMutation";
@@ -56,7 +57,7 @@ function AuthenticatedRedirect() {
 
     const loadingProfileScreen = (
         <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={COLORS.primary} />
+            <BrandLoader />
             <Text style={styles.loadingText}>{t('auth.loadingProfile')}</Text>
         </View>
     );
@@ -514,7 +515,7 @@ export default function Index() {
     if (isLoading) {
         return (
             <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color={colors.primary} />
+                <BrandLoader />
                 <Text style={styles.loadingText}>{t('common.loading')}</Text>
             </View>
         );

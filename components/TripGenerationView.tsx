@@ -20,6 +20,7 @@ import Animated, {
     Easing,
 } from "react-native-reanimated";
 import { countTripDays } from "@/lib/tripDays";
+import { PlaneraLottie } from "@/components/PlaneraLottie";
 
 const BRAND = "#FFE500";
 
@@ -188,6 +189,8 @@ export default function TripGenerationView({ trip, backgroundUrl, onBack }: Prop
 
                 {/* Header: route + meta */}
                 <View style={styles.header}>
+                    {/* Always on the dark photo scrim, so always the dark variant. */}
+                    <PlaneraLottie name="trip-generating" size={hasStarted ? 96 : 150} theme="dark" style={styles.globe} />
                     <View style={styles.routeRow}>
                         <Text style={styles.route} numberOfLines={1}>{trip.origin || t("tripDetail.unknown", { defaultValue: "" })}</Text>
                         <Ionicons name="arrow-forward" size={16} color={BRAND} style={{ marginHorizontal: 8 }} />
@@ -324,6 +327,7 @@ const styles = StyleSheet.create({
         backgroundColor: "rgba(0,0,0,0.3)", marginTop: 4,
     },
     header: { marginTop: 8, marginBottom: 8 },
+    globe: { alignSelf: "center", marginBottom: 4 },
     routeRow: { flexDirection: "row", alignItems: "center", marginBottom: 14 },
     route: { color: "#fff", fontSize: 20, fontWeight: "800", flexShrink: 1 },
     bannerText: { color: "#fff", fontSize: 15, fontWeight: "700", marginBottom: 10 },

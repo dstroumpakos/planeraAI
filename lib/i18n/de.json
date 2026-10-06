@@ -292,7 +292,8 @@
     "wishlisted": "Auf der Wunschliste",
     "stop": "Stopp",
     "stops": "Stopps",
-    "christmas": "Weihnachten"
+    "christmas": "Weihnachten",
+    "scanning": "Suche nach günstigen Flügen…"
   },
   "dealTrip": {
     "title": "Planen Sie Ihre Reise",
@@ -1482,7 +1483,9 @@
     "optimizeNotEnoughStops": "Nicht genügend verortete Stopps an diesem Tag, um eine kürzere Route zu berechnen.",
     "optimizeTooManyStops": "Dieser Tag hat zu viele Stopps für eine Optimierung. Probieren Sie es an einem leichteren Tag.",
     "optimizeUnavailable": "Es konnte gerade keine kürzere Route berechnet werden. Bitte später erneut versuchen.",
-    "walkableStops": "{{count}} von {{total}} Stopps in {{minutes}} Min. zu Fuß"
+    "walkableStops": "{{count}} von {{total}} Stopps in {{minutes}} Min. zu Fuß",
+    "tripReadyTitle": "Deine Reise ist fertig!",
+    "tripReadySubtitle": "Dein Reiseplan für {{destination}} wartet auf dich."
   },
   "interests": {
     "Adventure": "Abenteuer",

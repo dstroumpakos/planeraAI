@@ -1,4 +1,5 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { BrandLoader } from "@/components/BrandLoader";
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Platform, StatusBar, ScrollView, Dimensions, Animated, Alert } from "react-native";
 import MapView, { Marker, Polyline, Callout, PROVIDER_DEFAULT } from "react-native-maps";
 import { useQuery } from "convex/react";
@@ -672,7 +673,7 @@ export default function TripMap() {
         return (
             <View style={[styles.container, { backgroundColor: colors.background }]}>
                 <View style={styles.fullCenter}>
-                    <ActivityIndicator size="large" color={colors.primary} />
+                    <BrandLoader />
                 </View>
             </View>
         );

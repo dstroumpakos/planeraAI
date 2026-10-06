@@ -4,6 +4,7 @@
  */
 
 import { useState } from "react";
+import { BrandLoader } from "@/components/BrandLoader";
 import {
   View,
   Text,
@@ -121,7 +122,7 @@ export default function FlightReviewScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
+          <BrandLoader />
           <Text style={styles.loadingText}>{t('flightReview.loadingBookingDetails')}</Text>
           <TouchableOpacity
             style={{ marginTop: 20, padding: 12 }}

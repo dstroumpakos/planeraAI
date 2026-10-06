@@ -20,6 +20,7 @@ import { useTheme } from "@/lib/ThemeContext";
 import { useTranslation } from "react-i18next";
 import { AirlineLogo } from "@/components/AirlineLogo";
 import { isChristmasTrip, isWorthBuying } from "@/lib/christmas";
+import { PlaneraLottie } from "@/components/PlaneraLottie";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const CARD_WIDTH = SCREEN_WIDTH - 64;
@@ -108,6 +109,27 @@ type Filter = "all" | "recommended" | "wishlist" | "christmas";
 /** Christmas-dated AND worth buying — the tab only vouches for real deals. */
 const isChristmasDeal = (d: FlightDeal) =>
   isChristmasTrip(d.outboundDate, d.returnDate) && isWorthBuying(d);
+
+/** Placeholder shown while the deals query loads: the radar sweeping for fares. */
+export function LowFareRadarScanning() {
+  const { colors } = useTheme();
+  const { t } = useTranslation();
+  return (
+    <View style={styles.container}>
+      <View style={[styles.scanningCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <PlaneraLottie name="radar-scan" size={84} />
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.title, { color: colors.text }]}>
+            {t("lowFare.title", { defaultValue: "Low Fare Radar" })}
+          </Text>
+          <Text style={[styles.subtitle, { color: colors.textMuted }]}>
+            {t("lowFare.scanning", { defaultValue: "Scanning for low fares…" })}
+          </Text>
+        </View>
+      </View>
+    </View>
+  );
+}
 
 export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip, onPlanFromWishlist, onBookingClick }: LowFareRadarProps) {
   const { colors } = useTheme();
@@ -1320,6 +1342,16 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
 const styles = StyleSheet.create({
   container: {
     marginBottom: 24,
+  },
+  scanningCard: {
+    marginHorizontal: 20,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 18,
+    borderWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
   },
   sectionHeader: {
     paddingHorizontal: 20,

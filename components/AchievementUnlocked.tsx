@@ -7,6 +7,8 @@ import { useTheme } from "@/lib/ThemeContext";
 import { useTranslation } from "react-i18next";
 import { useState, useEffect, useRef, useCallback } from "react";
 import * as Location from "expo-location";
+import * as Haptics from "expo-haptics";
+import { PlaneraLottie } from "@/components/PlaneraLottie";
 
 export default function AchievementUnlocked() {
   const { token } = useToken();
@@ -38,6 +40,7 @@ export default function AchievementUnlocked() {
     if (unseen && !visible) {
       setBadge(unseen);
       setVisible(true);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       Animated.spring(scaleAnim, {
         toValue: 1,
         friction: 5,
@@ -65,11 +68,11 @@ export default function AchievementUnlocked() {
     <Modal visible={visible} transparent animationType="fade" onRequestClose={handleDismiss}>
       <TouchableOpacity style={styles.overlay} activeOpacity={1} onPress={handleDismiss}>
         <Animated.View style={[styles.card, { transform: [{ scale: scaleAnim }] }]}>
-          <Text style={styles.confetti}>🎉</Text>
-          <View style={styles.iconCircle}>
-            <Ionicons name={badge.icon as any} size={36} color={colors.primary} />
+          <PlaneraLottie name="achievement-badge" size={200} style={styles.medal} />
+          <View style={styles.labelRow}>
+            <Ionicons name={badge.icon as any} size={14} color={colors.primary} />
+            <Text style={styles.unlockLabel}>{t("achievements.newBadge")}</Text>
           </View>
-          <Text style={styles.unlockLabel}>{t("achievements.newBadge")}</Text>
           <Text style={styles.title}>{t(badge.titleKey)}</Text>
           <Text style={styles.description}>{t(badge.descriptionKey)}</Text>
           <TouchableOpacity style={styles.dismissButton} onPress={handleDismiss}>
@@ -98,23 +101,15 @@ const createStyles = (colors: any, isDarkMode: boolean) =>
       borderWidth: 1,
       borderColor: colors.primary,
     },
-    confetti: { fontSize: 32, marginBottom: 8 },
-    iconCircle: {
-      width: 72,
-      height: 72,
-      borderRadius: 36,
-      backgroundColor: colors.primary + "30",
-      alignItems: "center",
-      justifyContent: "center",
-      marginBottom: 16,
-    },
+    // Let the ribbon hang from just under the card's top edge.
+    medal: { marginTop: -24, marginBottom: 4 },
+    labelRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 },
     unlockLabel: {
       fontSize: 12,
       fontWeight: "700",
       color: colors.primary,
       textTransform: "uppercase",
       letterSpacing: 1,
-      marginBottom: 4,
     },
     title: { fontSize: 20, fontWeight: "800", color: colors.text, marginBottom: 8, textAlign: "center" },
     description: { fontSize: 14, color: colors.textSecondary, textAlign: "center", marginBottom: 20 },

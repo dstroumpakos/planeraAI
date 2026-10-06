@@ -9,13 +9,13 @@
  */
 
 import { useState } from "react";
+import { BrandLoader } from "@/components/BrandLoader";
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  ActivityIndicator,
   RefreshControl,
   Platform,
 } from "react-native";
@@ -185,7 +185,7 @@ export default function MyFlightsScreen() {
           <View style={{ width: 24 }} />
         </View>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
+          <BrandLoader />
           <Text style={styles.loadingText}>{t('settings.myFlights.loadingFlights')}</Text>
         </View>
       </SafeAreaView>

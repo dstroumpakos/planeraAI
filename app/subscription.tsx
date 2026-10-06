@@ -10,12 +10,14 @@ import { useTheme } from "@/lib/ThemeContext";
 import { useIAP } from "@/lib/useIAP";
 import { finishRestoredPurchase, type PurchaseResult } from "@/lib/iap";
 import { useTranslation } from "react-i18next";
+import { PremiumCelebration } from "@/components/PremiumCelebration";
 
 export default function SubscriptionScreen() {
     const router = useRouter();
     const { colors } = useTheme();
     const { token } = useToken();
     const { t } = useTranslation();
+    const [celebration, setCelebration] = useState<{ title: string; subtitle: string } | null>(null);
     
     // SECURITY: All entitlement grants now go through the verified Apple
     // receipt action. The legacy mutations were removed because they trusted
@@ -163,13 +165,15 @@ export default function SubscriptionScreen() {
                 }
 
                 if (Platform.OS !== "web") {
-                    if (selectedPlan === "single") {
-                        Alert.alert(t('common.success') + " 🎉", t('subscription.tripCreditAdded'));
-                    } else {
-                        Alert.alert(t('subscription.welcomeToPro') + " 🎉", t('subscription.unlimitedTripPlanning'));
-                    }
+                    // Celebrate the unlock; the screen closes when they tap Continue.
+                    setCelebration(
+                        selectedPlan === "single"
+                            ? { title: t('common.success'), subtitle: t('subscription.tripCreditAdded') }
+                            : { title: t('subscription.welcomeToPro'), subtitle: t('subscription.unlimitedTripPlanning') },
+                    );
+                } else {
+                    router.back();
                 }
-                router.back();
             } else if (result.error === "cancelled") {
                 // User cancelled - do nothing silently
                 console.log("Purchase cancelled by user");
@@ -312,6 +316,15 @@ export default function SubscriptionScreen() {
 
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+            <PremiumCelebration
+                visible={!!celebration}
+                title={celebration?.title ?? ""}
+                subtitle={celebration?.subtitle ?? ""}
+                onContinue={() => {
+                    setCelebration(null);
+                    router.back();
+                }}
+            />
             <View style={styles.header}>
                 <Text style={[styles.brandText, { color: colors.text }]}>PLANERA</Text>
                 <TouchableOpacity onPress={() => router.back()} style={styles.closeButton}>

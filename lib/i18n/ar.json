@@ -292,7 +292,8 @@
     "wishlisted": "في قائمة الرغبات",
     "stop": "توقف",
     "stops": "توقفات",
-    "christmas": "الكريسماس"
+    "christmas": "الكريسماس",
+    "scanning": "جارٍ البحث عن أسعار منخفضة…"
   },
   "dealTrip": {
     "title": "خطط لرحلتك",
@@ -1482,7 +1483,9 @@
     "optimizeNotEnoughStops": "لا توجد محطات محددة الموقع كافية في هذا اليوم لحساب مسار أقصر.",
     "optimizeTooManyStops": "هذا اليوم يحتوي على محطات أكثر من اللازم للتحسين. جرّب يوماً أخف.",
     "optimizeUnavailable": "تعذّر حساب مسار أقصر الآن. يرجى المحاولة لاحقاً.",
-    "walkableStops": "{{count}} من {{total}} محطات على بُعد {{minutes}} دقيقة سيراً"
+    "walkableStops": "{{count}} من {{total}} محطات على بُعد {{minutes}} دقيقة سيراً",
+    "tripReadyTitle": "رحلتك جاهزة!",
+    "tripReadySubtitle": "خطة رحلتك إلى {{destination}} بانتظارك."
   },
   "interests": {
     "Adventure": "مغامرة",

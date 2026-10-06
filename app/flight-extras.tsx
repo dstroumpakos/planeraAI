@@ -5,6 +5,7 @@
  */
 
 import { useState, useEffect, useRef } from "react";
+import { BrandLoader } from "@/components/BrandLoader";
 import {
   View,
   Text,
@@ -831,7 +832,7 @@ export default function FlightExtrasScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
+          <BrandLoader />
           <Text style={styles.loadingText}>{t('flightExtras.loading')}</Text>
         </View>
       </SafeAreaView>

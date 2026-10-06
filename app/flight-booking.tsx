@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { BrandLoader } from "@/components/BrandLoader";
 import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, ActivityIndicator, Alert, Platform } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useAction, useQuery } from "convex/react";
@@ -371,7 +372,7 @@ export default function FlightBookingScreen() {
     return (
       <SafeAreaView style={[styles.container, dynamicStyles.container]}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
+          <BrandLoader />
           <Text style={[styles.loadingText, dynamicStyles.text]}>{t('flights.verifyingAvailability')}</Text>
         </View>
       </SafeAreaView>

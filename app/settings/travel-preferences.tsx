@@ -1,4 +1,5 @@
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert, TextInput, Switch, Platform, ActivityIndicator } from "react-native";
+import { BrandLoader } from "@/components/BrandLoader";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -136,7 +137,7 @@ export default function TravelPreferences() {
     if (settings === undefined) {
         return (
             <SafeAreaView style={styles.container}>
-                <ActivityIndicator size="large" color="#1A1A1A" />
+                <BrandLoader />
             </SafeAreaView>
         );
     }

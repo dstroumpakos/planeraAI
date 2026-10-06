@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { BrandLoader } from "@/components/BrandLoader";
 import React from "react";
 import { View, Text, TextInput, StyleSheet, TouchableOpacity, ScrollView, Alert, ActivityIndicator, Modal, Image, StatusBar, Platform, PanResponder, KeyboardAvoidingView } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -1523,7 +1524,7 @@ export default function CreateTripScreen() {
     if (showLoadingScreen) {
         return (
             <SafeAreaView style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
-                <ActivityIndicator size="large" color={colors.primary} style={{ marginBottom: 24 }} />
+                <BrandLoader style={{ marginBottom: 24 }} />
                 <Text style={[styles.loadingTitle, { color: colors.text }]}>{t('createTrip.aiDesigning')}</Text>
                 <Text style={[styles.loadingDestination, { color: colors.primary }]}>{formData.destination}</Text>
                 <Text style={[styles.loadingSubtitle, { color: colors.textMuted }]}>{t('createTrip.analyzingPreferences')}</Text>

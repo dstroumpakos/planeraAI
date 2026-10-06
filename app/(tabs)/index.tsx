@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { BrandLoader } from "@/components/BrandLoader";
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  ActivityIndicator,
   TextInput,
   StatusBar,
   Alert,
@@ -25,7 +25,7 @@ import { useTranslation } from "react-i18next";
 import { useHideTabBarOnScroll } from "@/lib/tabBarVisibility";
 import { LanguagePickerModal } from "@/components/LanguagePickerModal";
 import { FirstTripPopup } from "@/components/FirstTripGuide";
-import { LowFareRadar } from "@/components/LowFareRadar";
+import { LowFareRadar, LowFareRadarScanning } from "@/components/LowFareRadar";
 import WatchedFaresRow from "@/components/WatchedFaresRow";
 import ChristmasRow from "@/components/ChristmasRow";
 import ThisMonthCard from "@/components/ThisMonthCard";
@@ -198,7 +198,7 @@ export default function HomeScreen() {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
+          <BrandLoader />
         </View>
       </SafeAreaView>
     );
@@ -530,6 +530,7 @@ export default function HomeScreen() {
         </TouchableOpacity>
 
         {/* Low Fare Radar */}
+        {lowFareData === undefined && <LowFareRadarScanning />}
         {lowFareDeals && lowFareDeals.length > 0 && (
           <LowFareRadar
             deals={lowFareDeals}

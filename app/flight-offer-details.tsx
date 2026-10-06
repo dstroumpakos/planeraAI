@@ -4,6 +4,7 @@
  */
 
 import { useState, useEffect } from "react";
+import { BrandLoader } from "@/components/BrandLoader";
 import {
   View,
   Text,
@@ -198,7 +199,7 @@ export default function FlightOfferDetailsScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
+          <BrandLoader />
           <Text style={styles.loadingText}>{t('flightOfferDetails.loadingOfferDetails')}</Text>
         </View>
       </SafeAreaView>

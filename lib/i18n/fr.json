@@ -292,7 +292,8 @@
     "wishlisted": "Dans la liste",
     "stop": "escale",
     "stops": "escales",
-    "christmas": "Noël"
+    "christmas": "Noël",
+    "scanning": "Recherche de petits prix…"
   },
   "dealTrip": {
     "title": "Planifiez votre Voyage",
@@ -1482,7 +1483,9 @@
     "optimizeNotEnoughStops": "Pas assez d'arrêts localisés ce jour-là pour calculer un itinéraire plus court.",
     "optimizeTooManyStops": "Cette journée compte trop d'arrêts pour être optimisée. Essayez sur une journée plus légère.",
     "optimizeUnavailable": "Impossible de calculer un itinéraire plus court pour le moment. Réessayez plus tard.",
-    "walkableStops": "{{count}} arrêts sur {{total}} à {{minutes}} min à pied"
+    "walkableStops": "{{count}} arrêts sur {{total}} à {{minutes}} min à pied",
+    "tripReadyTitle": "Votre voyage est prêt !",
+    "tripReadySubtitle": "Votre itinéraire pour {{destination}} vous attend."
   },
   "interests": {
     "Adventure": "Aventure",

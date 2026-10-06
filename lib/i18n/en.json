@@ -292,7 +292,8 @@
     "wishlisted": "Wishlisted",
     "stop": "stop",
     "stops": "stops",
-    "christmas": "Christmas"
+    "christmas": "Christmas",
+    "scanning": "Scanning for low fares…"
   },
   "dealTrip": {
     "title": "Plan Your Trip",
@@ -1477,7 +1478,9 @@
     "optimizeNotEnoughStops": "Not enough located stops on this day to work out a shorter route.",
     "optimizeTooManyStops": "This day has too many stops to optimize. Try it on a lighter day.",
     "optimizeUnavailable": "Couldn't work out a shorter route right now. Please try again later.",
-    "walkableStops": "{{count}} of {{total}} stops within a {{minutes}}-min walk"
+    "walkableStops": "{{count}} of {{total}} stops within a {{minutes}}-min walk",
+    "tripReadyTitle": "Your trip is ready!",
+    "tripReadySubtitle": "Your {{destination}} itinerary is waiting."
   },
   "interests": {
     "Adventure": "Adventure",

@@ -1,4 +1,5 @@
-import { View, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
+import { BrandLoader } from "@/components/BrandLoader";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import * as SecureStore from "expo-secure-store";
@@ -86,7 +87,7 @@ export default function InviteDeepLink() {
 
   return (
     <View style={styles.container}>
-      <ActivityIndicator size="large" color={COLORS.primary} />
+      <BrandLoader />
       <Text style={styles.subtitle}>
         {t("invite.joining", { defaultValue: "Joining trip…" })}
       </Text>

@@ -1,4 +1,4 @@
-import { Text, View, StyleSheet, TouchableOpacity, FlatList, ActivityIndicator, Alert, StatusBar } from "react-native";
+import { Text, View, StyleSheet, TouchableOpacity, FlatList, Alert, StatusBar } from "react-native";
 import { useEffect } from "react";
 import { useToken, useAuthenticatedMutation } from "@/lib/useAuthenticatedMutation";
 import { api } from "@/convex/_generated/api";
@@ -7,6 +7,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { Id } from "@/convex/_generated/dataModel";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useTheme } from "@/lib/ThemeContext";
+import { PlaneraLottie } from "@/components/PlaneraLottie";
+import { BrandLoader } from "@/components/BrandLoader";
 import { useTranslation } from "react-i18next";
 import { useHideTabBarOnScroll } from "@/lib/tabBarVisibility";
 import { useCachedQuery, useIsOffline } from "@/lib/useCachedQuery";
@@ -66,7 +68,7 @@ export default function TripsScreen() {
     if (trips === undefined) {
         return (
             <View style={[styles.center, { backgroundColor: colors.background }]}>
-                <ActivityIndicator size="large" color={colors.primary} />
+                <BrandLoader />
             </View>
         );
     }
@@ -97,9 +99,7 @@ export default function TripsScreen() {
 
             {tripsList.length === 0 ? (
                 <View style={styles.emptyState}>
-                    <View style={[styles.emptyIconContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                        <Ionicons name="airplane-outline" size={48} color={colors.primary} />
-                    </View>
+                    <PlaneraLottie name="empty-trips" size={280} style={styles.emptyAnimation} />
                     <Text style={[styles.emptyText, { color: colors.text }]}>{t('trips.noTripsYet')}</Text>
                     <Text style={[styles.emptySubtext, { color: colors.textMuted }]}>{t('trips.tapToCreate')}</Text>
                     <TouchableOpacity 
@@ -320,14 +320,10 @@ const styles = StyleSheet.create({
         alignItems: "center",
         padding: 32,
     },
-    emptyIconContainer: {
-        width: 100,
-        height: 100,
-        borderRadius: 50,
-        justifyContent: "center",
-        alignItems: "center",
-        marginBottom: 24,
-        borderWidth: 1,
+    // The scene sits low in its square canvas (sky on top), so tuck it up.
+    emptyAnimation: {
+        marginTop: -40,
+        marginBottom: 4,
     },
     emptyText: {
         fontSize: 22,
