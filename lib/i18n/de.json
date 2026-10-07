@@ -864,7 +864,23 @@
       "notNow": "Nicht Jetzt",
       "allow": "Erlauben",
       "couldNotEnable": "Konnte Nicht Aktiviert Werden",
-      "couldNotEnableMsg": "Wir konnten die Push-Benachrichtigungen nicht aktivieren. Bitte überprüfen Sie Ihre Geräteeinstellungen."
+      "couldNotEnableMsg": "Wir konnten die Push-Benachrichtigungen nicht aktivieren. Bitte überprüfen Sie Ihre Geräteeinstellungen.",
+      "inboxTab": "Posteingang",
+      "settingsTab": "Einstellungen",
+      "markAllRead": "Alle als gelesen markieren",
+      "emptyTitle": "Noch keine Benachrichtigungen",
+      "emptyBody": "Angebote, Reiseerinnerungen und alles andere, was wir dir schicken, erscheinen hier.",
+      "loadError": "Benachrichtigungen konnten nicht geladen werden",
+      "loadMore": "Mehr laden",
+      "filterAll": "Alle",
+      "filterDeals": "Angebote",
+      "filterTrips": "Reisen",
+      "filterOther": "Sonstige",
+      "timeNow": "jetzt",
+      "timeMinutes": "{{count}} Min.",
+      "timeHours": "{{count}} Std.",
+      "timeDays": "{{count}} T.",
+      "unreadCount": "{{count}} ungelesen"
     },
     "pushNotifications": {
       "permissionTitle": "Bleiben Sie informiert",
@@ -1914,7 +1930,9 @@
     "removeConfirm": "Möchten Sie {{destination}} wirklich von Ihrer Liste entfernen?",
     "dealAlerts": "Angebots-Benachrichtigungen",
     "planTrip": "Reise planen",
-    "savedDestinations": "Gespeicherte Ziele"
+    "savedDestinations": "Gespeicherte Ziele",
+    "invalidCountry": "Wähle ein Land aus der Liste oder lass das Feld leer.",
+    "wholeCountry": "Ganzes Land"
   },
   "streaks": {
     "dayStreak": "{{count}}-Tage-Serie",

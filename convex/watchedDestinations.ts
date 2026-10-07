@@ -1,8 +1,9 @@
 import { v } from "convex/values";
-import { internalAction, internalQuery } from "./_generated/server";
+import { internalAction, internalQuery, type QueryCtx } from "./_generated/server";
 import { internal as _internal } from "./_generated/api";
 import { api } from "./_generated/api";
 import { authQuery, authMutation } from "./functions";
+import { PRICE_DROP_COOLDOWN_MS, homeAirportMatchesOrigin, isNotablePriceDrop } from "./lib/notificationInbox";
 
 // Type assertion: internal references won't exist until `npx convex dev` regenerates types
 const internal = _internal as any;
@@ -111,41 +112,127 @@ export const getUsersWatching = internalQuery({
         destinationCity: v.string(),
         destinationIata: v.optional(v.string()),
     },
+    handler: async (ctx, args) => findWatchers(ctx, args),
+});
+
+async function findWatchers(
+    ctx: QueryCtx,
+    args: { destinationCity: string; destinationIata?: string }
+): Promise<any[]> {
+    const normalizedCity = args.destinationCity.toLowerCase().trim();
+
+    // Query by normalized city name
+    const byCity = await ctx.db
+        .query("watchedDestinations")
+        .withIndex("by_destination", (q) => q.eq("destination", normalizedCity))
+        .collect();
+
+    // Also query by IATA code if provided
+    let byIata: any[] = [];
+    if (args.destinationIata) {
+        // IATA matches need a full scan filtered — watchedDestinations index is on city name
+        // We cross-check IATA from the byCity results + scan for IATA-only watchers
+        const allWatched = await ctx.db.query("watchedDestinations").collect();
+        byIata = allWatched.filter(
+            (w) =>
+                w.destinationIata === args.destinationIata!.toUpperCase() &&
+                w.destination !== normalizedCity // avoid duplicates with byCity
+        );
+    }
+
+    // Deduplicate by userId
+    const seen = new Set<string>();
+    const results: any[] = [];
+    for (const entry of [...byCity, ...byIata]) {
+        if (!seen.has(entry.userId)) {
+            seen.add(entry.userId);
+            results.push(entry);
+        }
+    }
+
+    return results;
+}
+
+// ─── Internal: who gets an automatic alert for a deal ───
+//
+// Watching a destination means "tell me about fares to it FROM MY airport".
+// These alerts used to go to every watcher of the destination, so an ATH user
+// watching Paris was pinged about a Berlin → Paris fare every time the radar
+// refresh lowered its price — a deal that never even appears in their own
+// radar. Now only watchers whose home airport resolves to the deal's origin
+// (the same rule as `lowFareRadar.getDealsForUser`) are alerted; watchers with
+// no home airport are skipped, as in the saved-route seeder.
+const DEAL_ALERT_TYPES = ["deal_alert_watched", "deal_price_drop"] as const;
+
+export const getDealAlertAudience = internalQuery({
+    args: {
+        dealId: v.id("lowFareRadar"),
+        origin: v.string(),
+        destinationCity: v.string(),
+        destinationIata: v.optional(v.string()),
+    },
     handler: async (ctx, args) => {
-        const normalizedCity = args.destinationCity.toLowerCase().trim();
+        const watchers: any[] = await findWatchers(ctx, {
+            destinationCity: args.destinationCity,
+            destinationIata: args.destinationIata,
+        });
 
-        // Query by normalized city name
-        const byCity = await ctx.db
-            .query("watchedDestinations")
-            .withIndex("by_destination", (q) => q.eq("destination", normalizedCity))
-            .collect();
+        const recipients: Array<{
+            userId: string;
+            language: string;
+            /** Fare in the last alert this user got about THIS deal, if any. */
+            lastNotifiedPrice: number | null;
+            lastNotifiedAt: number | null;
+        }> = [];
+        let otherAirport = 0;
+        let noHomeAirport = 0;
 
-        // Also query by IATA code if provided
-        let byIata: any[] = [];
-        if (args.destinationIata) {
-            // IATA matches need a full scan filtered — watchedDestinations index is on city name
-            // We cross-check IATA from the byCity results + scan for IATA-only watchers
-            const allWatched = await ctx.db.query("watchedDestinations").collect();
-            byIata = allWatched.filter(
-                (w) =>
-                    w.destinationIata === args.destinationIata!.toUpperCase() &&
-                    w.destination !== normalizedCity // avoid duplicates with byCity
-            );
-        }
+        for (const w of watchers) {
+            const settings = await ctx.db
+                .query("userSettings")
+                .withIndex("by_user", (q) => q.eq("userId", w.userId))
+                .unique();
+            if (!settings?.homeAirport) { noHomeAirport++; continue; }
+            if (!homeAirportMatchesOrigin(settings.homeAirport, args.origin)) { otherAirport++; continue; }
 
-        // Deduplicate by userId
-        const seen = new Set<string>();
-        const results: any[] = [];
-        for (const entry of [...byCity, ...byIata]) {
-            if (!seen.has(entry.userId)) {
-                seen.add(entry.userId);
-                results.push(entry);
+            // Most recent alert about this same deal (new-deal or price-drop).
+            let last: { sentAt: number; price: number | null } | null = null;
+            for (const type of DEAL_ALERT_TYPES) {
+                const rows = await ctx.db
+                    .query("notificationLog")
+                    .withIndex("by_user_type", (q) => q.eq("userId", w.userId).eq("type", type))
+                    .order("desc")
+                    .take(20);
+                const hit = rows.find((r: any) => r.data?.dealId === args.dealId);
+                if (hit && (!last || hit.sentAt > last.sentAt)) {
+                    const p = Number(hit.data?.price);
+                    last = { sentAt: hit.sentAt, price: Number.isFinite(p) && p > 0 ? p : null };
+                }
             }
+
+            recipients.push({
+                userId: w.userId,
+                language: settings.language || "en",
+                lastNotifiedPrice: last?.price ?? null,
+                lastNotifiedAt: last?.sentAt ?? null,
+            });
         }
 
-        return results;
+        return { recipients, watchers: watchers.length, otherAirport, noHomeAirport };
     },
 });
+
+function dealPushData(dealId: string, deal: any, price: number) {
+    return {
+        screen: "deal-trip",
+        dealId,
+        origin: deal.origin,
+        originCity: deal.originCity,
+        destination: deal.destination,
+        destinationCity: deal.destinationCity,
+        price: String(price),
+    };
+}
 
 // ─── Internal action: Notify users watching a destination when a new deal is created ───
 export const notifyMatchingUsers = internalAction({
@@ -160,34 +247,29 @@ export const notifyMatchingUsers = internalAction({
             return;
         }
 
-        // 2. Find users watching this destination
-        const watchers = await ctx.runQuery(
-            internal.watchedDestinations.getUsersWatching,
-            {
-                destinationCity: deal.destinationCity,
-                destinationIata: deal.destination, // IATA code
-            }
+        // 2. Watchers of this destination who fly from this deal's origin
+        const audience = await ctx.runQuery(internal.watchedDestinations.getDealAlertAudience, {
+            dealId: args.dealId,
+            origin: deal.origin,
+            destinationCity: deal.destinationCity,
+            destinationIata: deal.destination,
+        });
+
+        console.log(
+            `🔔 ${deal.origin} → ${deal.destinationCity}: ${audience.watchers} watcher(s), ` +
+            `${audience.recipients.length} at ${deal.origin}, skipped ${audience.otherAirport} other-airport + ` +
+            `${audience.noHomeAirport} without a home airport`
         );
 
-        if (watchers.length === 0) {
-            console.log(`📭 No users watching ${deal.destinationCity} (${deal.destination})`);
-            return;
-        }
+        // 3. Send in each user's language
+        for (const r of audience.recipients) {
+            // Already told about this exact deal (e.g. the deal was re-created).
+            if (r.lastNotifiedAt !== null) continue;
 
-        console.log(`🔔 Found ${watchers.length} user(s) watching ${deal.destinationCity} — sending deal alerts`);
-
-        // 3. Get notification text in each user's language and send
-        for (const watcher of watchers) {
-            const settings = await ctx.runQuery(
-                internal.notifications.getUserNotificationSettings,
-                { userId: watcher.userId }
-            );
-
-            const lang = settings?.language || "en";
-            const title = getDealNotifText(lang, "deal_watch_title", {
+            const title = getDealNotifText(r.language, "deal_watch_title", {
                 dest: deal.destinationCity,
             });
-            const body = getDealNotifText(lang, "deal_watch_body", {
+            const body = getDealNotifText(r.language, "deal_watch_body", {
                 origin: deal.originCity,
                 dest: deal.destinationCity,
                 price: `${deal.price}`,
@@ -195,22 +277,13 @@ export const notifyMatchingUsers = internalAction({
             });
 
             await ctx.runAction(internal.notifications.sendPushNotification, {
-                userId: watcher.userId,
+                userId: r.userId,
                 title,
                 body,
                 type: "deal_alert_watched",
-                data: {
-                    screen: "deal-trip",
-                    dealId: args.dealId,
-                    origin: deal.origin,
-                    originCity: deal.originCity,
-                    destination: deal.destination,
-                    destinationCity: deal.destinationCity,
-                },
+                data: dealPushData(args.dealId, deal, deal.price),
             });
         }
-
-        console.log(`✅ Deal alert notifications sent for ${deal.originCity} → ${deal.destinationCity}`);
     },
 });
 
@@ -222,54 +295,64 @@ export const notifyPriceDrop = internalAction({
         newPrice: v.float64(),
     },
     handler: async (ctx, args) => {
+        // Refreshes nudge fares by a euro or two all the time — not news.
+        if (!isNotablePriceDrop(args.oldPrice, args.newPrice)) {
+            console.log(`📉 Price ${args.oldPrice} → ${args.newPrice} for deal ${args.dealId} below alert threshold`);
+            return;
+        }
+
         const deal = await ctx.runQuery(api.lowFareRadar.get, { id: args.dealId });
         if (!deal || !deal.active) return;
 
-        const watchers = await ctx.runQuery(
-            internal.watchedDestinations.getUsersWatching,
-            {
-                destinationCity: deal.destinationCity,
-                destinationIata: deal.destination,
+        const audience = await ctx.runQuery(internal.watchedDestinations.getDealAlertAudience, {
+            dealId: args.dealId,
+            origin: deal.origin,
+            destinationCity: deal.destinationCity,
+            destinationIata: deal.destination,
+        });
+
+        const now = Date.now();
+        let sent = 0;
+        let cooledDown = 0;
+
+        for (const r of audience.recipients) {
+            // One alert per deal per cooldown window, unless the fare has
+            // dropped notably again since the price we last quoted them.
+            if (r.lastNotifiedAt !== null && now - r.lastNotifiedAt < PRICE_DROP_COOLDOWN_MS) {
+                if (r.lastNotifiedPrice === null || !isNotablePriceDrop(r.lastNotifiedPrice, args.newPrice)) {
+                    cooledDown++;
+                    continue;
+                }
             }
-        );
+            // The "was" price is what THIS user last saw, when we know it.
+            const wasPrice = r.lastNotifiedPrice ?? args.oldPrice;
 
-        if (watchers.length === 0) return;
-
-        console.log(`📉 Price drop ${args.oldPrice} → ${args.newPrice} for ${deal.destinationCity} — notifying ${watchers.length} user(s)`);
-
-        for (const watcher of watchers) {
-            const settings = await ctx.runQuery(
-                internal.notifications.getUserNotificationSettings,
-                { userId: watcher.userId }
-            );
-
-            const lang = settings?.language || "en";
-            const title = getDealNotifText(lang, "price_drop_title", {
+            const title = getDealNotifText(r.language, "price_drop_title", {
                 dest: deal.destinationCity,
             });
-            const body = getDealNotifText(lang, "price_drop_body", {
+            const body = getDealNotifText(r.language, "price_drop_body", {
                 origin: deal.originCity,
                 dest: deal.destinationCity,
-                oldPrice: `${args.oldPrice}`,
+                oldPrice: `${wasPrice}`,
                 newPrice: `${args.newPrice}`,
                 currency: deal.currency,
             });
 
             await ctx.runAction(internal.notifications.sendPushNotification, {
-                userId: watcher.userId,
+                userId: r.userId,
                 title,
                 body,
                 type: "deal_price_drop",
-                data: {
-                    screen: "deal-trip",
-                    dealId: args.dealId,
-                    origin: deal.origin,
-                    originCity: deal.originCity,
-                    destination: deal.destination,
-                    destinationCity: deal.destinationCity,
-                },
+                data: dealPushData(args.dealId, deal, args.newPrice),
             });
+            sent++;
         }
+
+        console.log(
+            `📉 ${deal.origin} → ${deal.destinationCity} ${args.oldPrice} → ${args.newPrice}: ` +
+            `${sent} notified, ${cooledDown} in cooldown, skipped ${audience.otherAirport} other-airport + ` +
+            `${audience.noHomeAirport} without a home airport (of ${audience.watchers} watchers)`
+        );
     },
 });
 

@@ -26,6 +26,7 @@
 
 import { AIRPORTS } from "../../lib/airports";
 import { resolveAirport } from "../../lib/destinationAirports";
+import { resolveCountry } from "../../lib/countries";
 
 export type PoolDestination = {
   /** IATA airport or metro code Google Flights accepts as `arrival_id`. */
@@ -209,13 +210,139 @@ export function calendarAirportFor(code: string): string {
   return METRO_PRIMARY_AIRPORT[upper] ?? upper;
 }
 
+// ─── Countries as destinations ───
+//
+// People save whole countries ("Spain", "Αίγυπτος"). A country is searched as
+// its main airports from the user's home airport, and only the cheapest
+// qualifying one becomes the deal ("Spain from €X" = ATH → Malaga). Country
+// names resolve through `lib/countries.ts`.
+
+/**
+ * Hand-picked main airports where the dataset order isn't the right pick
+ * (metro codes price every airport in the city; island hubs matter for Spain
+ * and Greece). Codes must be pool/AIRPORTS/extra codes so the deal gets a city.
+ */
+const COUNTRY_MAIN_AIRPORTS: Record<string, string[]> = {
+  UK: ["LON", "MAN", "EDI"],
+  USA: ["NYC", "LAX", "MIA", "MCO"],
+  Spain: ["BCN", "MAD", "AGP", "PMI"],
+  Italy: ["FCO", "MIL", "NAP", "VCE"],
+  France: ["PAR", "NCE", "LYS", "MRS"],
+  Japan: ["TYO", "OSA"],
+  Greece: ["ATH", "JTR", "HER", "JMK"],
+  Turkey: ["IST", "SAW"],
+};
+
+/** Countries the airport dataset has no airport for: main airport(s) + city. */
+const COUNTRY_EXTRA_AIRPORTS: Record<string, Array<{ code: string; city: string }>> = {
+  Luxembourg: [{ code: "LUX", city: "Luxembourg" }],
+  Monaco: [{ code: "NCE", city: "Nice" }],
+  Malta: [{ code: "MLA", city: "Malta" }],
+  Slovenia: [{ code: "LJU", city: "Ljubljana" }],
+  Slovakia: [{ code: "BTS", city: "Bratislava" }],
+  Estonia: [{ code: "TLL", city: "Tallinn" }],
+  Latvia: [{ code: "RIX", city: "Riga" }],
+  Lithuania: [{ code: "VNO", city: "Vilnius" }],
+  "Bosnia & Herzegovina": [{ code: "SJJ", city: "Sarajevo" }],
+  Montenegro: [{ code: "TGD", city: "Podgorica" }, { code: "TIV", city: "Tivat" }],
+  "North Macedonia": [{ code: "SKP", city: "Skopje" }, { code: "OHD", city: "Ohrid" }],
+  Kosovo: [{ code: "PRN", city: "Pristina" }],
+  Georgia: [{ code: "TBS", city: "Tbilisi" }, { code: "KUT", city: "Kutaisi" }, { code: "BUS", city: "Batumi" }],
+  Armenia: [{ code: "EVN", city: "Yerevan" }],
+  Azerbaijan: [{ code: "GYD", city: "Baku" }],
+  Cyprus: [{ code: "LCA", city: "Larnaca" }, { code: "PFO", city: "Paphos" }],
+  Tunisia: [{ code: "TUN", city: "Tunis" }, { code: "DJE", city: "Djerba" }, { code: "MIR", city: "Monastir" }],
+  Algeria: [{ code: "ALG", city: "Algiers" }],
+  Ghana: [{ code: "ACC", city: "Accra" }],
+  Ethiopia: [{ code: "ADD", city: "Addis Ababa" }],
+  Zimbabwe: [{ code: "VFA", city: "Victoria Falls" }, { code: "HRE", city: "Harare" }],
+  Namibia: [{ code: "WDH", city: "Windhoek" }],
+  Senegal: [{ code: "DSS", city: "Dakar" }],
+  Rwanda: [{ code: "KGL", city: "Kigali" }],
+  "Hong Kong": [{ code: "HKG", city: "Hong Kong" }],
+  Bhutan: [{ code: "PBH", city: "Paro" }],
+  "Costa Rica": [{ code: "SJO", city: "San José" }, { code: "LIR", city: "Liberia" }],
+  Bolivia: [{ code: "VVI", city: "Santa Cruz" }, { code: "LPB", city: "La Paz" }],
+  Aruba: [{ code: "AUA", city: "Aruba" }],
+  "Curaçao": [{ code: "CUR", city: "Curaçao" }],
+  Barbados: [{ code: "BGI", city: "Barbados" }],
+  "Saint Lucia": [{ code: "UVF", city: "Saint Lucia" }],
+  "Antigua & Barbuda": [{ code: "ANU", city: "Antigua" }],
+  "Trinidad & Tobago": [{ code: "POS", city: "Port of Spain" }],
+  Bermuda: [{ code: "BDA", city: "Bermuda" }],
+  "Cayman Islands": [{ code: "GCM", city: "Grand Cayman" }],
+  Guatemala: [{ code: "GUA", city: "Guatemala City" }],
+  Belize: [{ code: "BZE", city: "Belize City" }],
+  Russia: [{ code: "MOW", city: "Moscow" }, { code: "LED", city: "Saint Petersburg" }],
+  Uzbekistan: [{ code: "TAS", city: "Tashkent" }, { code: "SKD", city: "Samarkand" }],
+  Macau: [{ code: "MFM", city: "Macau" }],
+  Mongolia: [{ code: "UBN", city: "Ulaanbaatar" }],
+};
+
+/** Curated-list airports missing from the dataset (countries that DO have others there). */
+const EXTRA_AIRPORT_INFO: Record<string, { city: string; country: string }> = {
+  MAN: { city: "Manchester", country: "UK" },
+  EDI: { city: "Edinburgh", country: "UK" },
+};
+
+const EXTRA_BY_CODE: Map<string, { city: string; country: string }> = (() => {
+  const m = new Map<string, { city: string; country: string }>(Object.entries(EXTRA_AIRPORT_INFO));
+  for (const [country, list] of Object.entries(COUNTRY_EXTRA_AIRPORTS)) {
+    for (const a of list) if (!m.has(a.code)) m.set(a.code, { city: a.city, country });
+  }
+  return m;
+})();
+
+/** Airports searched for a country, best first. At most this many. */
+export const MAX_COUNTRY_AIRPORTS = 4;
+
+/** Main airports to search for a canonical country name (may be empty). */
+export function countryAirports(country: string): string[] {
+  const curated = COUNTRY_MAIN_AIRPORTS[country];
+  if (curated) return curated.slice(0, MAX_COUNTRY_AIRPORTS);
+  const extra = COUNTRY_EXTRA_AIRPORTS[country];
+  if (extra) return extra.map((a) => a.code).slice(0, MAX_COUNTRY_AIRPORTS);
+  // The dataset is ordered roughly busiest-first.
+  return AIRPORTS.filter((a) => a.country === country)
+    .map((a) => a.code)
+    .slice(0, MAX_COUNTRY_AIRPORTS);
+}
+
+/** Canonical country of an airport or metro code; null when unknown. */
+export function countryForIata(code: string): string | null {
+  const raw = code.toUpperCase();
+  const primary = calendarAirportFor(raw); // LON → LHR
+  // The dataset wins over the extras table (NCE is France, not Monaco).
+  return (
+    AIRPORTS.find((a) => a.code === raw)?.country ??
+    AIRPORTS.find((a) => a.code === primary)?.country ??
+    EXTRA_BY_CODE.get(raw)?.country ??
+    EXTRA_BY_CODE.get(primary)?.country ??
+    null
+  );
+}
+
+/**
+ * A saved name that is a whole country with something to search, e.g.
+ * "Spain" → { country: "Spain", airports: [BCN, MAD, AGP, PMI] }.
+ * Null for anything that isn't a country (or a country we have no airport for).
+ */
+export function resolveCountryDestination(
+  name: string | undefined | null
+): { country: string; airports: string[] } | null {
+  const country = resolveCountry(name);
+  if (!country) return null;
+  const airports = countryAirports(country);
+  return airports.length ? { country, airports } : null;
+}
+
 /** English city name for an airport or metro code; the code itself if unknown. */
 export function cityForIata(code: string): string {
   const upper = code.toUpperCase();
   const pool = POOL_BY_CODE.get(upper);
   if (pool) return pool.city;
   const hit = AIRPORTS.find((a) => a.code === upper);
-  return hit?.city ?? upper;
+  return hit?.city ?? EXTRA_BY_CODE.get(upper)?.city ?? upper;
 }
 
 /**

@@ -143,7 +143,7 @@ export const _usersPage = internalQuery({
     const res = await ctx.db.query("userSettings").paginate({ cursor, numItems });
     const rows: UserRow[] = res.page.map((u: any) => ({
       userId: u.userId,
-      platform: u.platform || "unknown",
+      platform: u.platform || u.lastActivePlatform || "unknown",
       authProvider: u.authProvider || "unknown",
       onboardingCompleted: u.onboardingCompleted === true,
       aiConsent: u.aiDataConsent === true,

@@ -35,10 +35,12 @@ import AchievementUnlocked from "@/components/AchievementUnlocked";
 import AirplaneIntro from "@/components/AirplaneIntro";
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, withSequence, Easing } from "react-native-reanimated";
 import { useTrackMarketing } from "@/lib/trackMarketing";
+import { useUnreadNotificationCount, badgeLabel } from "@/lib/useNotificationInbox";
 
 export default function HomeScreen() {
   const router = useRouter();
   const trackMarketing = useTrackMarketing();
+  const unreadNotifications = useUnreadNotificationCount();
   const { isAuthenticated, isLoading: authLoading } = useConvexAuth();
   const { colors, isDarkMode } = useTheme();
   const hideOnScroll = useHideTabBarOnScroll();
@@ -297,6 +299,18 @@ export default function HomeScreen() {
               <View style={[styles.onlineBadge, { backgroundColor: colors.primary, borderColor: colors.background }]} />
             </View>
             <View style={styles.headerRight}>
+              <TouchableOpacity
+                style={[styles.bellButton, { backgroundColor: colors.secondary }]}
+                onPress={() => router.push("/settings/notifications" as any)}
+                accessibilityLabel={t("settings.notifications.title")}
+              >
+                <Ionicons name="notifications-outline" size={20} color={colors.text} />
+                {unreadNotifications > 0 && (
+                  <View style={[styles.bellBadge, { backgroundColor: "#E5484D", borderColor: colors.background }]}>
+                    <Text style={styles.bellBadgeText}>{badgeLabel(unreadNotifications)}</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
               <TouchableOpacity 
                 style={styles.creditContainer}
                 onPress={() => router.push("/subscription")}
@@ -829,6 +843,30 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+  },
+  bellButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bellBadge: {
+    position: "absolute",
+    top: -3,
+    right: -4,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    borderWidth: 2,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bellBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "800",
   },
   creditContainer: {
     justifyContent: "center",

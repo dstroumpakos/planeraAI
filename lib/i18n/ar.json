@@ -864,7 +864,23 @@
       "notNow": "ليس الآن",
       "allow": "السماح",
       "couldNotEnable": "تعذر التفعيل",
-      "couldNotEnableMsg": "لم نتمكن من تفعيل الإشعارات الفورية. يرجى التحقق من إعدادات جهازك."
+      "couldNotEnableMsg": "لم نتمكن من تفعيل الإشعارات الفورية. يرجى التحقق من إعدادات جهازك.",
+      "inboxTab": "الوارد",
+      "settingsTab": "الإعدادات",
+      "markAllRead": "تحديد الكل كمقروء",
+      "emptyTitle": "لا توجد إشعارات بعد",
+      "emptyBody": "ستظهر هنا العروض وتذكيرات الرحلات وكل ما نرسله إليك.",
+      "loadError": "تعذّر تحميل إشعاراتك",
+      "loadMore": "تحميل المزيد",
+      "filterAll": "الكل",
+      "filterDeals": "العروض",
+      "filterTrips": "الرحلات",
+      "filterOther": "أخرى",
+      "timeNow": "الآن",
+      "timeMinutes": "{{count}} د",
+      "timeHours": "{{count}} س",
+      "timeDays": "{{count}} ي",
+      "unreadCount": "{{count}} غير مقروءة"
     },
     "pushNotifications": {
       "permissionTitle": "ابقَ على اطلاع",
@@ -1914,7 +1930,9 @@
     "removeConfirm": "هل أنت متأكد من إزالة {{destination}} من قائمتك؟",
     "dealAlerts": "تنبيهات العروض",
     "planTrip": "تخطيط الرحلة",
-    "savedDestinations": "الوجهات المحفوظة"
+    "savedDestinations": "الوجهات المحفوظة",
+    "invalidCountry": "اختر دولة من القائمة أو اتركها فارغة.",
+    "wholeCountry": "الدولة بأكملها"
   },
   "streaks": {
     "dayStreak": "سلسلة {{count}} يوم",

@@ -114,6 +114,7 @@ import type * as lib_baggage from "../lib/baggage.js";
 import type * as lib_countryFacts from "../lib/countryFacts.js";
 import type * as lib_geocoding from "../lib/geocoding.js";
 import type * as lib_mapbox from "../lib/mapbox.js";
+import type * as lib_notificationInbox from "../lib/notificationInbox.js";
 import type * as lib_quietHours from "../lib/quietHours.js";
 import type * as lib_radarDestinations from "../lib/radarDestinations.js";
 import type * as lib_savedDestinations from "../lib/savedDestinations.js";
@@ -303,6 +304,7 @@ declare const fullApi: ApiFromModules<{
   "lib/countryFacts": typeof lib_countryFacts;
   "lib/geocoding": typeof lib_geocoding;
   "lib/mapbox": typeof lib_mapbox;
+  "lib/notificationInbox": typeof lib_notificationInbox;
   "lib/quietHours": typeof lib_quietHours;
   "lib/radarDestinations": typeof lib_radarDestinations;
   "lib/savedDestinations": typeof lib_savedDestinations;

@@ -864,7 +864,23 @@
       "notNow": "Not Now",
       "allow": "Allow",
       "couldNotEnable": "Could Not Enable",
-      "couldNotEnableMsg": "We couldn't enable push notifications. Please check your device settings."
+      "couldNotEnableMsg": "We couldn't enable push notifications. Please check your device settings.",
+      "inboxTab": "Inbox",
+      "settingsTab": "Settings",
+      "markAllRead": "Mark all as read",
+      "emptyTitle": "No notifications yet",
+      "emptyBody": "Deal alerts, trip reminders and everything else we send you will show up here.",
+      "loadError": "Couldn't load your notifications",
+      "loadMore": "Load more",
+      "filterAll": "All",
+      "filterDeals": "Deals",
+      "filterTrips": "Trips",
+      "filterOther": "Other",
+      "timeNow": "now",
+      "timeMinutes": "{{count}}m",
+      "timeHours": "{{count}}h",
+      "timeDays": "{{count}}d",
+      "unreadCount": "{{count}} unread"
     },
     "pushNotifications": {
       "permissionTitle": "Stay in the Loop",
@@ -1914,7 +1930,9 @@
     "removeConfirm": "Are you sure you want to remove {{destination}} from your wishlist?",
     "dealAlerts": "Deal Alerts",
     "planTrip": "Plan Trip",
-    "savedDestinations": "Saved Destinations"
+    "savedDestinations": "Saved Destinations",
+    "invalidCountry": "Pick a country from the list, or leave it empty.",
+    "wholeCountry": "Whole country"
   },
   "streaks": {
     "dayStreak": "{{count}}-day streak",

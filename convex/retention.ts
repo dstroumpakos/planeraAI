@@ -69,9 +69,14 @@ export const touchActive = authMutation({
             args.timezone && /^[A-Za-z_]+\/[A-Za-z_\/+-]+$/.test(String(args.timezone))
                 ? String(args.timezone).slice(0, 64)
                 : undefined;
+        // Android builds before the auth fix never sent a signup platform, so
+        // backfill it from the first device we see the user on.
+        const backfillPlatform =
+            !settings.platform && platform && ["ios", "android", "web"].includes(platform);
         await ctx.db.patch(settings._id, {
             lastActiveAt: now,
             ...(platform ? { lastActivePlatform: platform } : {}),
+            ...(backfillPlatform ? { platform } : {}),
             ...(timezone && timezone !== settings.timezone ? { timezone } : {}),
         });
 

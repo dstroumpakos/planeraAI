@@ -87,6 +87,7 @@ import {
   POPULAR_DESTINATIONS,
   calendarAirportFor,
   cityForIata,
+  countryForIata,
 } from "./lib/radarDestinations";
 import {
   CHRISTMAS_DESTINATIONS,
@@ -168,6 +169,13 @@ function windowsForHorizon(
 
 /** How many top-ranked routes get a real (bookable, graded) verify search. */
 const VERIFY_HEADROOM = 6;
+
+/**
+ * Airports per country group that get a real verify search. A country is
+ * scanned across all its main airports, but only its cheapest few on the
+ * calendar are worth a (heavier) verify search — one winner is kept anyway.
+ */
+const GROUP_VERIFY_MAX = 2;
 
 /**
  * Phase 0 is read-only and quota-bounded regardless of pacing, so run a few
@@ -563,6 +571,15 @@ export const seedDealsForOrigin = action({
      */
     destinations: v.optional(v.array(v.string())),
     /**
+     * Countries (or any "one of these" set): every code in a group is scanned,
+     * but at most ONE deal is seeded per group — the best qualifying fare. A
+     * group is skipped when the origin already has a live deal into it. Used by
+     * `seedWishlistRoutes` for saved countries ("Spain" → BCN/MAD/AGP/PMI).
+     */
+    destinationGroups: v.optional(
+      v.array(v.object({ label: v.string(), codes: v.array(v.string()) }))
+    ),
+    /**
      * Seasonal campaign. `"christmas"` scans `CHRISTMAS_DESTINATIONS` (or the
      * explicit `destinations`) ONLY on festive dates (see `lib/christmas.ts`),
      * treats a route as covered only by an existing Christmas-dated deal, and
@@ -620,10 +637,28 @@ export const seedDealsForOrigin = action({
           .filter((c) => /^[A-Z]{3}$/.test(c))
       )
     );
+    // Country groups: code → group label. A code also listed on its own stays
+    // a plain destination (it was asked for by name).
+    const groupOf = new Map<string, string>();
+    const groupLabels: string[] = [];
+    for (const g of args.destinationGroups ?? []) {
+      const label = g.label.trim();
+      const codes = Array.from(
+        new Set(g.codes.map((c) => String(c).trim().toUpperCase()).filter((c) => /^[A-Z]{3}$/.test(c)))
+      ).filter((c) => !explicitCodes.includes(c));
+      if (!label || codes.length === 0) continue;
+      groupLabels.push(label);
+      for (const c of codes) if (!groupOf.has(c)) groupOf.set(c, label);
+    }
+    const singleCount = explicitCodes.length;
+    explicitCodes.push(...Array.from(groupOf.keys()).filter((c) => !explicitCodes.includes(c)));
     const isExplicit = explicitCodes.length > 0;
     const count = Math.max(
       1,
-      Math.min(Math.round(args.count ?? (isExplicit ? explicitCodes.length : 10)), 20)
+      Math.min(
+        Math.round(args.count ?? (isExplicit ? singleCount + groupLabels.length : 10)),
+        20
+      )
     );
     const adults = typeof args.adults === "number" && args.adults > 0 ? args.adults : 1;
     // Optional tag override applied to every seeded deal. When omitted, the tag
@@ -728,6 +763,22 @@ export const seedDealsForOrigin = action({
         )
         .map((d) => d.destination.toUpperCase())
     );
+    // A group is covered by a live deal to ANY of its airports, or to anywhere
+    // in that country (an ATH→VLC deal already answers "Spain").
+    const coveredCountries = new Set(
+      Array.from(covered).map((c) => countryForIata(c)).filter((c): c is string => !!c)
+    );
+    const coveredGroups = new Set<string>();
+    for (const [code, label] of groupOf) {
+      if (covered.has(code) || coveredCountries.has(label)) coveredGroups.add(label);
+    }
+    for (const [code, label] of Array.from(groupOf)) {
+      if (coveredGroups.has(label)) {
+        groupOf.delete(code);
+        const i = explicitCodes.indexOf(code);
+        if (i >= 0) explicitCodes.splice(i, 1);
+      }
+    }
 
     // Exclude the origin itself, anything already covered, and same-city metro
     // codes (e.g. origin JFK vs destination NYC, both "New York").
@@ -944,6 +995,26 @@ export const seedDealsForOrigin = action({
       scanTo = dates[dates.length - 1];
     }
 
+    // Country groups: only the group's calendar-cheapest few go on to verify.
+    const groupKeep = new Set<string>();
+    {
+      const byGroup = new Map<string, ScanResult[]>();
+      for (const sc of scans) {
+        const label = groupOf.get(sc.destination);
+        if (!label) continue;
+        const list = byGroup.get(label) ?? [];
+        list.push(sc);
+        byGroup.set(label, list);
+      }
+      for (const list of byGroup.values()) {
+        list
+          .sort((a, b) => (a.calendarPrice ?? Infinity) - (b.calendarPrice ?? Infinity))
+          .slice(0, GROUP_VERIFY_MAX)
+          .forEach((sc) => groupKeep.add(sc.destination));
+      }
+    }
+    const groupDone = new Set<string>();
+
     // Rank by the route-local discount, then by indicative price, and verify
     // only the head of that list. Ranking on the calendar's own signal (rather
     // than absolute cheapness) keeps a genuinely-discounted long-haul ahead of
@@ -955,6 +1026,7 @@ export const seedDealsForOrigin = action({
           s.calendarPrice === null ||
           s.calendarPrice <= args.maxPrice
       )
+      .filter((s) => !groupOf.has(s.destination) || groupKeep.has(s.destination))
       .sort((a, b) => {
         if (b.calendarDiscount !== a.calendarDiscount) {
           return b.calendarDiscount - a.calendarDiscount;
@@ -989,6 +1061,9 @@ export const seedDealsForOrigin = action({
       }
 
       const dest = { code: scan.destination, city: scan.city };
+      const group = groupOf.get(dest.code);
+      // One deal per country: stop once a sibling airport qualified.
+      if (group && groupDone.has(group)) continue;
       // The picked pair first, then (long scans only) other months' cheapest
       // pairs — stopping at the first that Google grades as a deal.
       const attempts = [
@@ -1074,6 +1149,7 @@ export const seedDealsForOrigin = action({
             discount,
             typicalMid: mid,
           });
+          if (group) groupDone.add(group);
           break;
         } catch (err) {
           console.error(`[radar-seed] search failed ${origin}->${dest.code}`);
@@ -1248,7 +1324,8 @@ export const seedWishlistRoutes = action({
     origins: Array<{
       origin: string;
       originCity: string;
-      destinations: Array<{ code: string; city: string; users: number }>;
+      /** `airports` is set on saved COUNTRIES: searched together, one deal kept. */
+      destinations: Array<{ code: string; city: string; users: number; airports?: string[] }>;
       /** Seconds from now this origin's run starts (0 on dry runs). */
       startsInSeconds: number;
     }>;
@@ -1272,6 +1349,8 @@ export const seedWishlistRoutes = action({
         watchUsers?: number;
         sources?: Array<"wishlist" | "watch">;
         hasLive: boolean;
+        kind?: "country";
+        airports?: string[];
       }>;
       unresolved: Array<{ destination: string; count: number }>;
       noHomeAirport: number;
@@ -1287,7 +1366,7 @@ export const seedWishlistRoutes = action({
     // Group by origin, keeping the query's demand order inside each group.
     const byOrigin = new Map<
       string,
-      { originCity: string; destinations: Array<{ code: string; city: string; users: number }> }
+      { originCity: string; destinations: Array<{ code: string; city: string; users: number; airports?: string[] }> }
     >();
     for (const r of gaps) {
       let g = byOrigin.get(r.origin);
@@ -1295,7 +1374,12 @@ export const seedWishlistRoutes = action({
         g = { originCity: r.originCity, destinations: [] };
         byOrigin.set(r.origin, g);
       }
-      g.destinations.push({ code: r.destination, city: r.destinationCity, users: r.users });
+      g.destinations.push({
+        code: r.destination,
+        city: r.destinationCity,
+        users: r.users,
+        ...(r.kind === "country" && r.airports?.length ? { airports: r.airports } : {}),
+      });
     }
 
     // Busiest origins first so the most-wanted routes get priced soonest.
@@ -1309,7 +1393,7 @@ export const seedWishlistRoutes = action({
     const origins: Array<{
       origin: string;
       originCity: string;
-      destinations: Array<{ code: string; city: string; users: number }>;
+      destinations: Array<{ code: string; city: string; users: number; airports?: string[] }>;
       startsInSeconds: number;
     }> = [];
 
@@ -1325,7 +1409,10 @@ export const seedWishlistRoutes = action({
           {
             adminKey: args.adminKey,
             origin,
-            destinations: g.destinations.map((d) => d.code),
+            destinations: g.destinations.filter((d) => !d.airports).map((d) => d.code),
+            destinationGroups: g.destinations
+              .filter((d) => d.airports)
+              .map((d) => ({ label: d.code, codes: d.airports! })),
             currency: args.currency,
             adults: args.adults,
           }

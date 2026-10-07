@@ -4,6 +4,7 @@ import * as Notifications from "expo-notifications";
 import * as Device from "expo-device";
 import Constants from "expo-constants";
 import { useMutation, useConvex } from "convex/react";
+import { useUnreadNotificationCount } from "@/lib/useNotificationInbox";
 import { api } from "@/convex/_generated/api";
 import { useToken } from "@/lib/useAuthenticatedMutation";
 import { useRouter } from "expo-router";
@@ -109,6 +110,101 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
 }
 
 /**
+ * Open whatever a notification points at. Shared by push taps (below) and
+ * inbox rows (app/settings/notifications.tsx), so both land in the same place.
+ * Also marks the inbox row read and records broadcast tap-through.
+ * Returns false when the payload has no destination.
+ */
+export async function openNotificationTarget(
+    data: any,
+    deps: {
+        router: ReturnType<typeof useRouter>;
+        convex: ReturnType<typeof useConvex>;
+        token: string | null | undefined;
+        /** Where the open came from — feeds the admin open-rate split. */
+        via?: "push" | "inbox";
+    }
+): Promise<boolean> {
+    const { router, convex, token, via = "push" } = deps;
+    if (!data) return false;
+
+    if (data.notificationId && token) {
+        convex
+            .mutation((api as any).notifications.markRead, { token, notificationId: String(data.notificationId), via })
+            .catch(() => {});
+    }
+
+    // Fire-and-forget tap analytics for deal broadcasts
+    if (data.broadcastId && token) {
+        convex
+            .mutation((api as any).lowFareRadar.trackBroadcastTap, {
+                token,
+                broadcastId: data.broadcastId,
+            })
+            .catch((err: any) => console.warn("[Notifications] trackBroadcastTap failed:", err));
+    }
+
+    if (data.screen === "trip" && data.tripId) {
+        router.push(`/trip/${data.tripId}` as any);
+        return true;
+    }
+    if (data.screen === "create-trip") {
+        router.push("/create-trip" as any);
+        return true;
+    }
+    if (data.screen === "trip-recap" && data.tripId) {
+        router.push({ pathname: "/trip-recap", params: { tripId: data.tripId } } as any);
+        return true;
+    }
+    if (data.screen === "destinations") {
+        router.push("/destinations" as any);
+        return true;
+    }
+    if (data.screen === "home") {
+        router.push("/(tabs)" as any);
+        return true;
+    }
+    if (data.screen === "deal-trip" && data.dealId) {
+        // Fetch the deal so we can pre-fill the locked flight card
+        const deal: any = await convex
+            .query((api as any).lowFareRadar.get, { id: data.dealId })
+            .catch(() => null);
+        if (!deal) {
+            // Deal removed/expired — fall back to home so user isn't stuck
+            router.push("/(tabs)" as any);
+            return true;
+        }
+        router.push({
+            pathname: "/deal-trip",
+            params: {
+                dealId: deal._id,
+                origin: deal.origin,
+                originCity: deal.originCity,
+                destination: deal.destination,
+                destinationCity: deal.destinationCity,
+                airline: deal.airline,
+                outboundDate: deal.outboundDate,
+                outboundDeparture: deal.outboundDeparture,
+                outboundArrival: deal.outboundArrival,
+                returnDate: deal.returnDate || "",
+                returnDeparture: deal.returnDeparture || "",
+                returnArrival: deal.returnArrival || "",
+                returnAirline: deal.returnAirline || "",
+                price: String(deal.price),
+                totalPrice: deal.totalPrice ? String(deal.totalPrice) : "",
+                currency: deal.currency,
+                outboundStops: String(deal.outboundStops ?? 0),
+                returnStops: String(deal.returnStops ?? 0),
+                outboundSegments: deal.outboundSegments ? JSON.stringify(deal.outboundSegments) : "",
+                returnSegments: deal.returnSegments ? JSON.stringify(deal.returnSegments) : "",
+            },
+        } as any);
+        return true;
+    }
+    return false;
+}
+
+/**
  * Hook that manages push notification registration and listeners.
  * Should be used once at the root of the authenticated app.
  */
@@ -120,6 +216,14 @@ export function useNotifications() {
     const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
     const notificationListener = useRef<Notifications.EventSubscription | null>(null);
     const responseListener = useRef<Notifications.EventSubscription | null>(null);
+
+    // Keep the app-icon badge equal to the inbox's unread count. Pushes set it
+    // when they arrive; this brings it back down as rows get read.
+    const unread = useUnreadNotificationCount();
+    useEffect(() => {
+        if (!token || token === "skip") return;
+        Notifications.setBadgeCountAsync(unread).catch(() => {});
+    }, [unread, token]);
 
     useEffect(() => {
         if (!token || token === "skip") return;
@@ -140,72 +244,7 @@ export function useNotifications() {
                         .catch(() => {});
                 }
 
-                // Fire-and-forget tap analytics for deal broadcasts
-                if (data?.broadcastId && token) {
-                    convex
-                        .mutation((api as any).lowFareRadar.trackBroadcastTap, {
-                            token,
-                            broadcastId: data.broadcastId,
-                        })
-                        .catch((err: any) => console.warn("[Notifications] trackBroadcastTap failed:", err));
-                }
-
-                if (data?.screen === "trip" && data?.tripId) {
-                    router.push(`/trip/${data.tripId}` as any);
-                    return;
-                }
-                if (data?.screen === "create-trip") {
-                    router.push("/create-trip" as any);
-                    return;
-                }
-                if (data?.screen === "trip-recap" && data?.tripId) {
-                    router.push({ pathname: "/trip-recap", params: { tripId: data.tripId } } as any);
-                    return;
-                }
-                if (data?.screen === "destinations") {
-                    router.push("/destinations" as any);
-                    return;
-                }
-                if (data?.screen === "home") {
-                    router.push("/(tabs)" as any);
-                    return;
-                }
-                if (data?.screen === "deal-trip" && data?.dealId) {
-                    // Fetch the deal so we can pre-fill the locked flight card
-                    const deal: any = await convex
-                        .query((api as any).lowFareRadar.get, { id: data.dealId })
-                        .catch(() => null);
-                    if (!deal) {
-                        // Deal removed/expired — fall back to home so user isn't stuck
-                        router.push("/(tabs)" as any);
-                        return;
-                    }
-                    router.push({
-                        pathname: "/deal-trip",
-                        params: {
-                            dealId: deal._id,
-                            origin: deal.origin,
-                            originCity: deal.originCity,
-                            destination: deal.destination,
-                            destinationCity: deal.destinationCity,
-                            airline: deal.airline,
-                            outboundDate: deal.outboundDate,
-                            outboundDeparture: deal.outboundDeparture,
-                            outboundArrival: deal.outboundArrival,
-                            returnDate: deal.returnDate || "",
-                            returnDeparture: deal.returnDeparture || "",
-                            returnArrival: deal.returnArrival || "",
-                            returnAirline: deal.returnAirline || "",
-                            price: String(deal.price),
-                            totalPrice: deal.totalPrice ? String(deal.totalPrice) : "",
-                            currency: deal.currency,
-                            outboundStops: String(deal.outboundStops ?? 0),
-                            returnStops: String(deal.returnStops ?? 0),
-                            outboundSegments: deal.outboundSegments ? JSON.stringify(deal.outboundSegments) : "",
-                            returnSegments: deal.returnSegments ? JSON.stringify(deal.returnSegments) : "",
-                        },
-                    } as any);
-                }
+                await openNotificationTarget(data, { router, convex, token, via: "push" });
             } catch (err) {
                 console.error("[Notifications] Failed to handle tap:", err);
             }

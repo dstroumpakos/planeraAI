@@ -864,7 +864,23 @@
       "notNow": "Όχι Τώρα",
       "allow": "Να Επιτραπεί",
       "couldNotEnable": "Αδυναμία Ενεργοποίησης",
-      "couldNotEnableMsg": "Δεν μπορέσαμε να ενεργοποιήσουμε τις ειδοποιήσεις Push. Ελέγξτε τις ρυθμίσεις συσκευής σας."
+      "couldNotEnableMsg": "Δεν μπορέσαμε να ενεργοποιήσουμε τις ειδοποιήσεις Push. Ελέγξτε τις ρυθμίσεις συσκευής σας.",
+      "inboxTab": "Εισερχόμενα",
+      "settingsTab": "Ρυθμίσεις",
+      "markAllRead": "Σήμανση όλων ως αναγνωσμένα",
+      "emptyTitle": "Δεν υπάρχουν ειδοποιήσεις ακόμα",
+      "emptyBody": "Οι προσφορές, οι υπενθυμίσεις ταξιδιών και ό,τι άλλο σας στέλνουμε θα εμφανίζονται εδώ.",
+      "loadError": "Δεν ήταν δυνατή η φόρτωση των ειδοποιήσεων",
+      "loadMore": "Φόρτωση περισσότερων",
+      "filterAll": "Όλες",
+      "filterDeals": "Προσφορές",
+      "filterTrips": "Ταξίδια",
+      "filterOther": "Άλλες",
+      "timeNow": "τώρα",
+      "timeMinutes": "{{count}}λ",
+      "timeHours": "{{count}}ω",
+      "timeDays": "{{count}}ημ",
+      "unreadCount": "{{count}} μη αναγνωσμένες"
     },
     "pushNotifications": {
       "permissionTitle": "Μείνετε Ενημερωμένοι",
@@ -1914,7 +1930,9 @@
     "removeConfirm": "Είστε σίγουροι ότι θέλετε να αφαιρέσετε {{destination}} από τη λίστα;",
     "dealAlerts": "Ειδοποιήσεις Προσφορών",
     "planTrip": "Σχεδιασμός Ταξιδιού",
-    "savedDestinations": "Αποθηκευμένοι Προορισμοί"
+    "savedDestinations": "Αποθηκευμένοι Προορισμοί",
+    "invalidCountry": "Επιλέξτε χώρα από τη λίστα ή αφήστε το κενό.",
+    "wholeCountry": "Όλη η χώρα"
   },
   "streaks": {
     "dayStreak": "σερί {{count}} ημερών",

@@ -1,4 +1,10 @@
-import { resolveDestinationIata, cityForIata } from "./radarDestinations";
+import {
+  resolveDestinationIata,
+  cityForIata,
+  countryForIata,
+  resolveCountryDestination,
+} from "./radarDestinations";
+import { resolveCountry } from "../../lib/countries";
 import { airportCityName, resolveHomeIata } from "../../lib/homeAirport";
 import { AIRPORTS } from "../../lib/airports";
 
@@ -42,7 +48,9 @@ export async function collectSavedDestinations(ctx: any): Promise<SavedDestinati
     rows.push({
       userId: w.userId,
       label,
-      country: (w as any).country || null,
+      // Only a real country survives — the field used to be free text, so rows
+      // like "Egypt · Why" exist. A saved country is its own country.
+      country: resolveCountry((w as any).country) ?? resolveCountry(label),
       source: "wishlist",
     });
   }
@@ -127,6 +135,13 @@ export type DemandRoute = {
   /** Which kind(s) of save produced this route. */
   sources: Array<"wishlist" | "watch">;
   hasLive: boolean;
+  /**
+   * Set when users saved a whole COUNTRY. `destination`/`destinationCity` are
+   * then the country name, and `airports` its main airports — the seeder
+   * searches them all and keeps only the cheapest qualifying fare.
+   */
+  kind?: "country";
+  airports?: string[];
 };
 
 type SettingsRow = { userId: string; homeAirport?: string | null };
@@ -166,7 +181,8 @@ export function buildDemandRoutes(
     if (code) homeByUser.set(s.userId, code);
   }
 
-  // Live coverage keyed three ways so metro codes and single airports meet.
+  // Live coverage keyed three ways so metro codes and single airports meet,
+  // plus once by country so any deal into a saved country covers it.
   const liveKeys = new Set<string>();
   for (const d of deals) {
     if (d.deletedAt || (d.expiresAt && d.expiresAt <= now)) continue;
@@ -176,6 +192,8 @@ export function buildDemandRoutes(
     if (d.destinationCity) liveKeys.add(`${o}|${normName(d.destinationCity)}`);
     const airport = AIRPORTS.find((a) => a.code === dest);
     if (airport) liveKeys.add(`${o}|${normName(airport.city)}`);
+    const country = countryForIata(dest);
+    if (country) liveKeys.add(`${o}|country:${country}`);
   }
 
   const routes = new Map<
@@ -199,7 +217,46 @@ export function buildDemandRoutes(
       noHomeAirport.add(savedKey);
       continue;
     }
+    // A whole country ("Spain") — one route per (origin, country), searched
+    // across its main airports. Single-airport countries (Singapore, Malta)
+    // are just a city route.
+    const country = resolveCountryDestination(w.label);
+    if (country && country.airports.length > 1) {
+      const airports = country.airports.filter(
+        (code) => code !== origin && cityForIata(code) !== (airportCityName(origin) ?? origin)
+      );
+      if (airports.length === 0) {
+        sameCity.add(savedKey);
+        continue;
+      }
+      const key = `${origin}|country:${country.country}`;
+      let r = routes.get(key);
+      if (!r) {
+        const originCity = airportCityName(origin) ?? origin;
+        r = {
+          origin,
+          originCity,
+          destination: country.country,
+          destinationCity: country.country,
+          labels: [],
+          kind: "country",
+          airports,
+          hasLive:
+            liveKeys.has(key) || airports.some((code) => liveKeys.has(`${origin}|${code}`)),
+          userIds: new Set(),
+          wishlistIds: new Set(),
+          watchIds: new Set(),
+        };
+        routes.set(key, r);
+      }
+      r.userIds.add(w.userId);
+      (w.source === "wishlist" ? r.wishlistIds : r.watchIds).add(w.userId);
+      if (!r.labels.some((l) => normName(l) === normName(w.label))) r.labels.push(w.label);
+      continue;
+    }
+
     const resolved =
+      (country ? { code: country.airports[0], city: cityForIata(country.airports[0]) } : null) ??
       resolveDestinationIata(w.label) ??
       (w.iata ? { code: w.iata, city: cityForIata(w.iata) } : null);
     if (!resolved) {

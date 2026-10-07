@@ -199,7 +199,7 @@ export const getStats = query({
                     // Platform the user signed up from. New signups store this directly;
                     // older users predate the field, so fall back to the platform of any
                     // push token they've registered (mobile devices record ios/android).
-                    let platform = u.platform;
+                    let platform = u.platform || u.lastActivePlatform;
                     if (!platform) {
                         const pushToken = await ctx.db
                             .query("pushTokens")
@@ -686,7 +686,7 @@ async function buildUserRow(ctx: any, settings: any, now: number, adminIds: stri
         dateOfBirth: settings.dateOfBirth || null,
         hasProfilePicture: !!settings.profilePicture,
         authProvider: settings.authProvider || "unknown",
-        platform: settings.platform || devicePlatforms[0] || null,
+        platform: settings.platform || settings.lastActivePlatform || devicePlatforms[0] || null,
         devicePlatforms,
         devicesCount: pushTokens.length,
         language: settings.language || null,
@@ -983,7 +983,7 @@ export const getUser = query({
             dateOfBirth: settings.dateOfBirth || null,
             hasProfilePicture: !!settings.profilePicture,
             authProvider: settings.authProvider || "unknown",
-            platform: settings.platform || devicePlatforms[0] || null,
+            platform: settings.platform || settings.lastActivePlatform || devicePlatforms[0] || null,
             devicePlatforms,
             devices: pushTokens.map((t: any) => ({
                 platform: t.platform,

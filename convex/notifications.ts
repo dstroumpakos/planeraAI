@@ -1,9 +1,10 @@
-import { v } from "convex/values";
+import { v, ConvexError } from "convex/values";
 import { mutation, query, action, internalMutation, internalQuery, internalAction } from "./_generated/server";
 import { internal as _internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { authMutation, authQuery } from "./functions";
 import { quietHoursDelayMs, resolveUserTimezone } from "./lib/quietHours";
+import { INBOX_UNREAD_CAP, INBOX_UNREAD_WINDOW_MS, inboxCategory, inboxData, statsDay, statsKey } from "./lib/notificationInbox";
 import { describeWeatherCode } from "./weather";
 
 // Type assertion: `internal.notifications` won't exist until `npx convex dev` regenerates types
@@ -71,6 +72,171 @@ export const removePushToken = authMutation({
     },
 });
 
+// ─── Client-facing: Notification inbox ───
+// The inbox IS notificationLog: every push sendPushNotification / sendExpoBatch
+// sends writes one row per user, so whatever we pushed shows up here.
+
+const INBOX_DEFAULT_LIMIT = 30;
+const INBOX_MAX_LIMIT = 200;
+
+/** Newest-first inbox for the signed-in user. "Load more" = a bigger `limit`. */
+export const listMine = authQuery({
+    args: { limit: v.optional(v.number()) },
+    handler: async (ctx: any, args: any) => {
+        const userId = ctx.user.userId;
+        const limit = Math.max(1, Math.min(INBOX_MAX_LIMIT, Math.floor(args.limit ?? INBOX_DEFAULT_LIMIT)));
+        // `by_user` is ordered by _creationTime within a user, which tracks sentAt.
+        const rows = await ctx.db
+            .query("notificationLog")
+            .withIndex("by_user", (q: any) => q.eq("userId", userId))
+            .order("desc")
+            .take(limit + 1);
+        const unreadSince = Date.now() - INBOX_UNREAD_WINDOW_MS;
+        return {
+            items: rows.slice(0, limit).map((r: any) => {
+                // Rows written before the inbox existed have no `data`; trip
+                // reminders can still deep-link through their tripId.
+                const data = r.data ?? (r.tripId ? { screen: "trip", tripId: r.tripId } : undefined);
+                return {
+                    _id: r._id,
+                    type: r.type,
+                    category: inboxCategory(r.type),
+                    title: r.title,
+                    body: r.body,
+                    sentAt: r.sentAt,
+                    // Anything older than the badge window counts as seen, so
+                    // pre-inbox history doesn't render as a wall of unread dots.
+                    read: !!r.readAt || r.sentAt < unreadSince,
+                    data: data ?? null,
+                };
+            }),
+            hasMore: rows.length > limit,
+            unread: await countUnread(ctx, userId),
+        };
+    },
+});
+
+/** Unread count for the bell / profile badge. Capped at INBOX_UNREAD_CAP + 1. */
+export const getUnreadCount = authQuery({
+    args: {},
+    handler: async (ctx: any) => countUnread(ctx, ctx.user.userId),
+});
+
+/**
+ * The user opened a notification — tapped the push (`via: "push"`) or the
+ * inbox row (`via: "inbox"`). Marks it read and, the first time only, records
+ * the open for the admin open-rate.
+ */
+export const markRead = authMutation({
+    args: { notificationId: v.string(), via: v.optional(v.string()) },
+    returns: v.null(),
+    handler: async (ctx: any, args: any) => {
+        const id = ctx.db.normalizeId("notificationLog", args.notificationId);
+        if (!id) return null;
+        const row = await ctx.db.get(id);
+        // Silently ignore someone else's row rather than confirming it exists.
+        if (!row || row.userId !== ctx.user.userId) return null;
+        if (row.openedAt) {
+            if (!row.readAt) await ctx.db.patch(id, { readAt: Date.now() });
+            return null;
+        }
+        const now = Date.now();
+        const via = args.via === "inbox" ? "inbox" : "push";
+        await ctx.db.patch(id, { readAt: row.readAt ?? now, openedAt: now, openedVia: via });
+        await bumpStats(ctx, statsKey(row.type, row.sentAt, row.data), {
+            opened: 1,
+            openedPush: via === "push" ? 1 : 0,
+            openedInbox: via === "inbox" ? 1 : 0,
+        });
+        return null;
+    },
+});
+
+export const markAllRead = authMutation({
+    args: {},
+    handler: async (ctx: any) => {
+        const userId = ctx.user.userId;
+        const now = Date.now();
+        // Bounded per call; the badge only counts the last 30 days, which is far
+        // below this for any real user.
+        const rows = await ctx.db
+            .query("notificationLog")
+            .withIndex("by_user_readAt_sentAt", (q: any) => q.eq("userId", userId).eq("readAt", undefined))
+            .order("desc")
+            .take(500);
+        for (const r of rows) await ctx.db.patch(r._id, { readAt: now });
+        return { marked: rows.length };
+    },
+});
+
+// ─── Admin: open rates for every notification type (Low-Fare Radar widget) ───
+//
+// Covers everything that goes through sendPushNotification / sendExpoBatch —
+// automatic deal + price-drop alerts, trip reminders, retention pushes AND
+// admin broadcasts — from notificationStats counters. Opens only exist from
+// the inbox release on (older app builds never report them), which is why the
+// response says when tracking started.
+export const getNotificationStats = query({
+    args: { adminKey: v.string(), days: v.optional(v.number()) },
+    handler: async (ctx, args) => {
+        const expected = process.env.CONVEX_LOW_FARE_ADMIN_KEY;
+        if (!expected || args.adminKey !== expected) throw new ConvexError("Unauthorized: invalid admin key");
+
+        const days = Math.max(1, Math.min(90, Math.floor(args.days ?? 30)));
+        const sinceDay = statsDay(Date.now() - (days - 1) * 24 * 60 * 60 * 1000);
+        const rows = await ctx.db
+            .query("notificationStats")
+            .withIndex("by_day", (q) => q.gte("day", sinceDay))
+            .collect();
+        const first = await ctx.db.query("notificationStats").withIndex("by_day").order("asc").first();
+
+        type Counts = { sent: number; pushed: number; opened: number; openedPush: number; openedInbox: number };
+        const zero = (): Counts => ({ sent: 0, pushed: 0, opened: 0, openedPush: 0, openedInbox: 0 });
+        const add = (into: Counts, r: Counts) => {
+            into.sent += r.sent;
+            into.pushed += r.pushed;
+            into.opened += r.opened;
+            into.openedPush += r.openedPush;
+            into.openedInbox += r.openedInbox;
+        };
+
+        const totals = zero();
+        const byType = new Map<string, Counts & { type: string }>();
+        const byDeal = new Map<string, Counts & { dealId: string; type: string; route: string | null; lastDay: string }>();
+        const byDay = new Map<string, Counts & { day: string }>();
+
+        for (const r of rows) {
+            add(totals, r);
+            const t = byType.get(r.type) ?? { type: r.type, ...zero() };
+            add(t, r);
+            byType.set(r.type, t);
+            const d = byDay.get(r.day) ?? { day: r.day, ...zero() };
+            add(d, r);
+            byDay.set(r.day, d);
+            if (r.dealId) {
+                const k = `${r.dealId}|${r.type}`;
+                const g = byDeal.get(k) ?? { dealId: r.dealId, type: r.type, route: r.route ?? null, lastDay: r.day, ...zero() };
+                add(g, r);
+                if (r.day > g.lastDay) g.lastDay = r.day;
+                if (!g.route && r.route) g.route = r.route;
+                byDeal.set(k, g);
+            }
+        }
+
+        return {
+            days,
+            sinceDay,
+            trackingSince: first?.day ?? null,
+            totals,
+            byType: Array.from(byType.values()).sort((a, b) => b.sent - a.sent),
+            byDeal: Array.from(byDeal.values())
+                .sort((a, b) => (b.lastDay > a.lastDay ? 1 : b.lastDay < a.lastDay ? -1 : b.sent - a.sent))
+                .slice(0, 100),
+            byDay: Array.from(byDay.values()).sort((a, b) => (a.day < b.day ? -1 : 1)),
+        };
+    },
+});
+
 // ─── Internal: Get all push tokens for a user ───
 export const getUserPushTokens = internalQuery({
     args: { userId: v.string() },
@@ -113,7 +279,93 @@ export const wasNotificationSent = internalQuery({
     },
 });
 
-// ─── Internal: Log that a notification was sent ───
+type StatsDelta = { sent?: number; pushed?: number; opened?: number; openedPush?: number; openedInbox?: number };
+
+/** Add to the per-day admin counters (notificationStats) for one key. */
+async function bumpStats(
+    ctx: any,
+    key: { day: string; type: string; dealId?: string; route?: string },
+    delta: StatsDelta
+): Promise<void> {
+    const existing = await ctx.db
+        .query("notificationStats")
+        .withIndex("by_day_type_deal", (q: any) =>
+            q.eq("day", key.day).eq("type", key.type).eq("dealId", key.dealId)
+        )
+        .first();
+    if (existing) {
+        await ctx.db.patch(existing._id, {
+            sent: existing.sent + (delta.sent || 0),
+            pushed: existing.pushed + (delta.pushed || 0),
+            opened: existing.opened + (delta.opened || 0),
+            openedPush: existing.openedPush + (delta.openedPush || 0),
+            openedInbox: existing.openedInbox + (delta.openedInbox || 0),
+            ...(key.route && !existing.route ? { route: key.route } : {}),
+        });
+        return;
+    }
+    await ctx.db.insert("notificationStats", {
+        day: key.day,
+        type: key.type,
+        dealId: key.dealId,
+        route: key.route,
+        sent: delta.sent || 0,
+        pushed: delta.pushed || 0,
+        opened: delta.opened || 0,
+        openedPush: delta.openedPush || 0,
+        openedInbox: delta.openedInbox || 0,
+    });
+}
+
+/** Group rows by counter key and bump each key once (batch writes). */
+async function bumpStatsGrouped(
+    ctx: any,
+    rows: Array<{ type: string; sentAt: number; data?: unknown }>,
+    field: "sent" | "pushed"
+): Promise<void> {
+    const groups = new Map<string, { key: ReturnType<typeof statsKey>; n: number }>();
+    for (const r of rows) {
+        const key = statsKey(r.type, r.sentAt, r.data);
+        const k = `${key.day}|${key.type}|${key.dealId ?? ""}`;
+        const g = groups.get(k);
+        if (g) g.n++;
+        else groups.set(k, { key, n: 1 });
+    }
+    for (const { key, n } of groups.values()) await bumpStats(ctx, key, { [field]: n });
+}
+
+/** Flag inbox rows whose push reached at least one device. */
+export const markPushed = internalMutation({
+    args: { ids: v.array(v.string()) },
+    handler: async (ctx, args) => {
+        const rows: any[] = [];
+        for (const raw of args.ids) {
+            const id = ctx.db.normalizeId("notificationLog", raw);
+            if (!id) continue;
+            const row = await ctx.db.get(id);
+            if (!row || row.pushed) continue;
+            await ctx.db.patch(id, { pushed: true });
+            rows.push(row);
+        }
+        await bumpStatsGrouped(ctx, rows, "pushed");
+    },
+});
+
+/** Unread inbox rows inside the badge window, capped (the badge shows "99+"). */
+async function countUnread(ctx: any, userId: string): Promise<number> {
+    const rows = await ctx.db
+        .query("notificationLog")
+        .withIndex("by_user_readAt_sentAt", (q: any) =>
+            q.eq("userId", userId).eq("readAt", undefined).gte("sentAt", Date.now() - INBOX_UNREAD_WINDOW_MS)
+        )
+        .take(INBOX_UNREAD_CAP + 1);
+    return rows.length;
+}
+
+// ─── Internal: Log a notification (= write it to the user's inbox) ───
+// Written BEFORE the push goes out so the payload can carry the row id (a push
+// tap marks the inbox row read) and the user's new unread count (the app-icon
+// badge). Returns both.
 export const logNotification = internalMutation({
     args: {
         userId: v.string(),
@@ -121,16 +373,22 @@ export const logNotification = internalMutation({
         type: v.string(),
         title: v.string(),
         body: v.string(),
+        data: v.optional(v.any()),
     },
-    handler: async (ctx, args) => {
-        await ctx.db.insert("notificationLog", {
+    handler: async (ctx, args): Promise<{ id: Id<"notificationLog">; unread: number }> => {
+        const sentAt = Date.now();
+        const data = inboxData(args.data);
+        const id = await ctx.db.insert("notificationLog", {
             userId: args.userId,
             tripId: args.tripId,
             type: args.type,
-            sentAt: Date.now(),
+            sentAt,
             title: args.title,
             body: args.body,
+            data,
         });
+        await bumpStats(ctx, statsKey(args.type, sentAt, data), { sent: 1 });
+        return { id, unread: await countUnread(ctx, args.userId) };
     },
 });
 
@@ -341,25 +599,44 @@ export const sendPushNotification = internalAction({
             }
         }
 
-        // 3. Get push tokens
+        // 3. Write it to the inbox first. Every notification that clears the
+        // preference gates lands in the in-app list — including for users with
+        // no registered device (web-only, revoked permission, reinstalled app),
+        // who previously got nothing at all.
+        const logged: { id: string; unread: number } = await ctx.runMutation(
+            internal.notifications.logNotification,
+            {
+                userId: args.userId,
+                tripId: args.tripId,
+                type: args.type,
+                title: args.title,
+                body: args.body,
+                data: args.data,
+            }
+        );
+
+        // 4. Get push tokens
         const tokens = await ctx.runQuery(internal.notifications.getUserPushTokens, {
             userId: args.userId,
         });
 
         if (!tokens || tokens.length === 0) {
-            console.log(`📱 No push tokens for user ${args.userId}`);
+            console.log(`📱 No push tokens for user ${args.userId} — inbox only`);
             return;
         }
 
-        // 4. Send via Expo Push API
+        // 5. Send via Expo Push API
         // `type` rides along in the payload so the client can log a
-        // `notification_open` marketing event per push type (retention KPIs).
+        // `notification_open` marketing event per push type (retention KPIs);
+        // `notificationId` lets a tap mark the inbox row read; `badge` keeps the
+        // app-icon count equal to the inbox's unread count.
         const messages = tokens.map((t: any) => ({
             to: t.token,
             sound: "default",
             title: args.title,
             body: args.body,
-            data: { ...(args.data || {}), type: args.type },
+            badge: logged.unread,
+            data: { ...(args.data || {}), type: args.type, notificationId: logged.id },
         }));
 
         try {
@@ -393,20 +670,14 @@ export const sendPushNotification = internalAction({
                         }
                     }
                 }
+                if (result.data.some((ticket: any) => ticket?.status === "ok")) {
+                    await ctx.runMutation(internal.notifications.markPushed, { ids: [logged.id] });
+                }
             }
         } catch (error) {
+            // The inbox row stays: the user still sees it in-app.
             console.error(`❌ Failed to send push notification:`, error);
-            return;
         }
-
-        // 5. Log the notification
-        await ctx.runMutation(internal.notifications.logNotification, {
-            userId: args.userId,
-            tripId: args.tripId,
-            type: args.type,
-            title: args.title,
-            body: args.body,
-        });
     },
 });
 
@@ -453,19 +724,28 @@ export const logNotificationsBatch = internalMutation({
             type: v.string(),
             title: v.string(),
             body: v.string(),
+            data: v.optional(v.any()),
         })),
     },
-    handler: async (ctx, args) => {
+    handler: async (ctx, args): Promise<Array<{ userId: string; id: Id<"notificationLog">; unread: number }>> => {
         const sentAt = Date.now();
+        const out: Array<{ userId: string; id: Id<"notificationLog">; unread: number }> = [];
+        const written: Array<{ type: string; sentAt: number; data?: unknown }> = [];
         for (const r of args.rows) {
-            await ctx.db.insert("notificationLog", {
+            const data = inboxData(r.data);
+            const id = await ctx.db.insert("notificationLog", {
                 userId: r.userId,
                 type: r.type,
                 sentAt,
                 title: r.title,
                 body: r.body,
+                data,
             });
+            written.push({ type: r.type, sentAt, data });
+            out.push({ userId: r.userId, id, unread: await countUnread(ctx, r.userId) });
         }
+        await bumpStatsGrouped(ctx, written, "sent");
+        return out;
     },
 });
 
@@ -497,13 +777,35 @@ export const sendExpoBatch = internalAction({
             return { deliveredUserIds: [], failedUserIds: [], invalidTokens: 0 };
         }
 
-        const payload = args.messages.map((m) => ({
-            to: m.token,
-            sound: "default",
-            title: m.title,
-            body: m.body,
-            data: m.data || {},
-        }));
+        // Inbox rows first (one per user, not per device), so each push can
+        // carry its row id + the user's unread badge — same as the per-user path.
+        const inbox = new Map<string, { id: string; unread: number }>();
+        if (args.log !== false) {
+            const seen = new Set<string>();
+            const rows: Array<{ userId: string; type: string; title: string; body: string; data?: any }> = [];
+            for (const m of args.messages) {
+                if (seen.has(m.userId)) continue;
+                seen.add(m.userId);
+                rows.push({ userId: m.userId, type: args.type, title: m.title, body: m.body, data: m.data });
+            }
+            const logged: Array<{ userId: string; id: string; unread: number }> = await ctx.runMutation(
+                internal.notifications.logNotificationsBatch,
+                { rows }
+            );
+            for (const l of logged) inbox.set(l.userId, { id: l.id, unread: l.unread });
+        }
+
+        const payload = args.messages.map((m) => {
+            const row = inbox.get(m.userId);
+            return {
+                to: m.token,
+                sound: "default",
+                title: m.title,
+                body: m.body,
+                ...(row ? { badge: row.unread } : {}),
+                data: { ...(m.data || {}), type: args.type, ...(row ? { notificationId: row.id } : {}) },
+            };
+        });
 
         let tickets: any[] = [];
         try {
@@ -557,17 +859,11 @@ export const sendExpoBatch = internalAction({
             (ok ? deliveredUserIds : failedUserIds).push(userId);
         }
 
-        if (args.log !== false && deliveredUserIds.length > 0) {
-            // One log row per delivered user (not per device).
-            const seen = new Set<string>();
-            const rows: Array<{ userId: string; type: string; title: string; body: string }> = [];
-            for (const m of args.messages) {
-                if (seen.has(m.userId)) continue;
-                if (!okByUser.get(m.userId)) continue;
-                seen.add(m.userId);
-                rows.push({ userId: m.userId, type: args.type, title: m.title, body: m.body });
-            }
-            await ctx.runMutation(internal.notifications.logNotificationsBatch, { rows });
+        const pushedIds = deliveredUserIds
+            .map((userId) => inbox.get(userId)?.id)
+            .filter((id): id is string => !!id);
+        if (pushedIds.length > 0) {
+            await ctx.runMutation(internal.notifications.markPushed, { ids: pushedIds });
         }
 
         return { deliveredUserIds, failedUserIds, invalidTokens: badTokenIds.length };

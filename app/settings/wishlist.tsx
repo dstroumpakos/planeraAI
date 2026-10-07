@@ -9,6 +9,9 @@ import { useTheme } from "@/lib/ThemeContext";
 import { useTranslation } from "react-i18next";
 import { useState, useMemo, useCallback } from "react";
 import { CITY_TRANSLATIONS, COUNTRY_TRANSLATIONS } from "@/lib/destinationTranslations";
+import { resolveCountry } from "@/lib/countries";
+
+const normalizeCountryLabel = (v: string) => v.trim().toLowerCase();
 
 const PRIORITY_OPTIONS = [
   { id: "dream", icon: "sparkles", color: "#F59E0B" },
@@ -64,10 +67,17 @@ export default function Wishlist() {
     return results;
   }, [lang]);
 
-  const citySuggestions = useMemo(() =>
-    showCitySuggestions ? filterSuggestions(newDestination, CITY_TRANSLATIONS) : [],
-    [newDestination, showCitySuggestions, filterSuggestions]
-  );
+  // Whole countries are valid destinations too ("Spain") — the radar searches
+  // their main airports — so they're offered alongside cities.
+  const citySuggestions = useMemo(() => {
+    if (!showCitySuggestions) return [];
+    const cities = filterSuggestions(newDestination, CITY_TRANSLATIONS).map((c) => ({ ...c, isCountry: false }));
+    const countries = filterSuggestions(newDestination, COUNTRY_TRANSLATIONS).map((c) => ({ ...c, isCountry: true }));
+    return [...cities.slice(0, 6), ...countries].slice(0, 8);
+  }, [newDestination, showCitySuggestions, filterSuggestions]);
+
+  // Saving a country as the destination makes the country field redundant.
+  const destinationIsCountry = !!resolveCountry(newDestination);
 
   const countrySuggestions = useMemo(() =>
     showCountrySuggestions ? filterSuggestions(newCountry, COUNTRY_TRANSLATIONS) : [],
@@ -93,8 +103,18 @@ export default function Wishlist() {
       return input.trim();
     };
 
-    const destination = resolveEnglishName(newDestination, CITY_TRANSLATIONS);
-    const country = newCountry.trim() ? resolveEnglishName(newCountry, COUNTRY_TRANSLATIONS) : undefined;
+    const destinationCountry = resolveCountry(newDestination);
+    const destination = destinationCountry ?? resolveEnglishName(newDestination, CITY_TRANSLATIONS);
+    // Only a country we recognise is accepted — free text used to store junk.
+    let country: string | undefined = destinationCountry ?? undefined;
+    if (!destinationCountry && newCountry.trim()) {
+      const resolved = resolveCountry(newCountry);
+      if (!resolved) {
+        Alert.alert(t("common.error"), t("wishlist.invalidCountry"));
+        return;
+      }
+      country = resolved;
+    }
 
     const result = await addToWishlist({
       destination,
@@ -217,7 +237,9 @@ export default function Wishlist() {
                     </TouchableOpacity>
                   </View>
                   <Text style={styles.destination}>{item.destination}</Text>
-                  {item.country && <Text style={styles.country}>{item.country}</Text>}
+                  {item.country && normalizeCountryLabel(item.country) !== normalizeCountryLabel(item.destination) && (
+                    <Text style={styles.country}>{getLocalizedName(item.country, COUNTRY_TRANSLATIONS)}</Text>
+                  )}
                   {item.notes && <Text style={styles.notes}>{item.notes}</Text>}
                   <View style={styles.cardFooter}>
                     <TouchableOpacity
@@ -282,7 +304,7 @@ export default function Wishlist() {
                   <View style={styles.suggestionsContainer}>
                     {citySuggestions.map((item) => (
                       <TouchableOpacity
-                        key={item.english}
+                        key={(item.isCountry ? "country:" : "city:") + item.english}
                         style={styles.suggestionItem}
                         onPress={() => {
                           setNewDestination(item.display);
@@ -290,17 +312,20 @@ export default function Wishlist() {
                           Keyboard.dismiss();
                         }}
                       >
-                        <Ionicons name="location-outline" size={16} color={colors.textMuted} />
+                        <Ionicons name={item.isCountry ? "flag-outline" : "location-outline"} size={16} color={colors.textMuted} />
                         <Text style={styles.suggestionText}>{item.display}</Text>
-                        {item.display !== item.english && (
+                        {item.isCountry ? (
+                          <Text style={styles.suggestionSubtext}>{t("wishlist.wholeCountry")}</Text>
+                        ) : item.display !== item.english ? (
                           <Text style={styles.suggestionSubtext}>{item.english}</Text>
-                        )}
+                        ) : null}
                       </TouchableOpacity>
                     ))}
                   </View>
                 )}
               </View>
 
+              {!destinationIsCountry && (<>
               <Text style={styles.fieldLabel}>{t("wishlist.countryOptional")}</Text>
               <View style={{ zIndex: 1 }}>
                 <TextInput
@@ -336,6 +361,7 @@ export default function Wishlist() {
                   </View>
                 )}
               </View>
+              </>)}
 
               <Text style={styles.fieldLabel}>{t("wishlist.priority")}</Text>
               <View style={styles.priorityRow}>

@@ -1,5 +1,7 @@
 import { authQuery, authMutation } from "./functions";
-import { v } from "convex/values";
+import { mutation } from "./_generated/server";
+import { ConvexError, v } from "convex/values";
+import { resolveCountry } from "../lib/countries";
 
 const FREE_WISHLIST_LIMIT = 5;
 
@@ -88,10 +90,15 @@ export const addToWishlist = authMutation({
       return { success: false, reason: "limit_reached" };
     }
 
+    // `country` used to be stored as typed, so junk ("Why") ended up on the
+    // admin radar. Keep it only when it is a real country; a saved country is
+    // its own country. Older app builds still send free text, hence server-side.
+    const country = resolveCountry(args.country) ?? resolveCountry(args.destination) ?? undefined;
+
     await ctx.db.insert("wishlist", {
       userId,
-      destination: args.destination,
-      country: args.country,
+      destination: args.destination.trim(),
+      country,
       notes: args.notes,
       priority: args.priority || "someday",
       image: args.image,
@@ -180,5 +187,29 @@ export const getWishlistDestinations = authQuery({
       .withIndex("by_user", (q: any) => q.eq("userId", userId))
       .collect();
     return items.map((i: any) => i.destination.toLowerCase());
+  },
+});
+
+/**
+ * Admin one-off: normalise `country` on existing wishlist rows — canonical name
+ * when it's a real country ("españa" → "Spain"), removed when it isn't ("Why"),
+ * filled in when the destination itself is a country. `dryRun` reports only.
+ */
+export const cleanupCountries = mutation({
+  args: { adminKey: v.string(), dryRun: v.optional(v.boolean()) },
+  handler: async (ctx, args) => {
+    const expected = process.env.CONVEX_LOW_FARE_ADMIN_KEY;
+    if (!expected || args.adminKey !== expected) throw new ConvexError("Unauthorized: invalid admin key");
+
+    const rows = await ctx.db.query("wishlist").collect();
+    const changes: Array<{ destination: string; from: string | null; to: string | null }> = [];
+    for (const r of rows) {
+      const current = r.country ?? null;
+      const next = resolveCountry(current) ?? resolveCountry(r.destination) ?? null;
+      if (next === current) continue;
+      changes.push({ destination: r.destination, from: current, to: next });
+      if (!args.dryRun) await ctx.db.patch(r._id, { country: next ?? undefined });
+    }
+    return { dryRun: !!args.dryRun, scanned: rows.length, changed: changes.length, changes };
   },
 });

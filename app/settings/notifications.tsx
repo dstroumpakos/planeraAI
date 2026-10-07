@@ -1,6 +1,6 @@
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Switch, Alert, Linking, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
@@ -11,12 +11,19 @@ import { registerForPushNotificationsAsync } from "@/lib/useNotifications";
 import { useTheme } from "@/lib/ThemeContext";
 import { useTranslation } from "react-i18next";
 import NewsletterSignup from "@/components/NewsletterSignup";
+import NotificationInbox from "@/components/NotificationInbox";
+import { useUnreadNotificationCount, badgeLabel } from "@/lib/useNotificationInbox";
 
 export default function NotificationsScreen() {
     const router = useRouter();
     const { colors, isDarkMode } = useTheme();
     const { t } = useTranslation();
     const { token } = useToken();
+    // Inbox first: this screen is where every notification we send can be
+    // found again. `?tab=settings` opens straight on the preferences.
+    const params = useLocalSearchParams<{ tab?: string }>();
+    const [tab, setTab] = useState<"inbox" | "settings">(params.tab === "settings" ? "settings" : "inbox");
+    const unread = useUnreadNotificationCount();
     const settings = useQuery(api.users.getSettings as any, { token: token || "skip" });
     const updateNotifications = useMutation(api.users.updateNotifications);
     const registerPushToken = useMutation((api as any).notifications.registerPushToken);
@@ -117,7 +124,7 @@ export default function NotificationsScreen() {
         }
     };
 
-    if (settings === undefined) {
+    if (settings === undefined && tab === "settings") {
         return (
             <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
                 <Text style={{ color: colors.text }}>{t('common.loading')}</Text>
@@ -168,6 +175,31 @@ export default function NotificationsScreen() {
                 <View style={{ width: 24 }} />
             </View>
 
+            <View style={[styles.tabs, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                {(["inbox", "settings"] as const).map((key) => {
+                    const active = tab === key;
+                    return (
+                        <TouchableOpacity
+                            key={key}
+                            onPress={() => setTab(key)}
+                            style={[styles.tab, active && { backgroundColor: colors.primary }]}
+                        >
+                            <Text style={[styles.tabText, { color: active ? "#1A1A1A" : colors.textSecondary }]}>
+                                {key === "inbox" ? t('settings.notifications.inboxTab') : t('settings.notifications.settingsTab')}
+                            </Text>
+                            {key === "inbox" && unread > 0 && (
+                                <View style={[styles.tabBadge, { backgroundColor: active ? "#1A1A1A" : colors.primary }]}>
+                                    <Text style={[styles.tabBadgeText, { color: active ? colors.primary : "#1A1A1A" }]}>{badgeLabel(unread)}</Text>
+                                </View>
+                            )}
+                        </TouchableOpacity>
+                    );
+                })}
+            </View>
+
+            {tab === "inbox" ? (
+                <NotificationInbox />
+            ) : (
             <ScrollView style={styles.content}>
                 <View style={[styles.section, { backgroundColor: colors.card }]}>
                     {notificationOptions.map((option, index) => (
@@ -202,6 +234,7 @@ export default function NotificationsScreen() {
                     <Text style={[styles.saveButtonText, { color: colors.text === '#FFFFFF' ? '#1A1A1A' : '#1A1A1A' }]}>{t('settings.notifications.savePreferences')}</Text>
                 </TouchableOpacity>
             </ScrollView>
+            )}
         </SafeAreaView>
     );
 }
@@ -224,6 +257,39 @@ const styles = StyleSheet.create({
     headerTitle: {
         fontSize: 18,
         fontWeight: '600',
+    },
+    tabs: {
+        flexDirection: 'row',
+        marginHorizontal: 20,
+        marginTop: 16,
+        padding: 4,
+        borderRadius: 12,
+        borderWidth: 1,
+    },
+    tab: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        paddingVertical: 9,
+        borderRadius: 9,
+    },
+    tabText: {
+        fontSize: 14,
+        fontWeight: '700',
+    },
+    tabBadge: {
+        minWidth: 20,
+        height: 20,
+        borderRadius: 10,
+        paddingHorizontal: 5,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    tabBadgeText: {
+        fontSize: 11,
+        fontWeight: '800',
     },
     content: {
         flex: 1,

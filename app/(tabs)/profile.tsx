@@ -21,6 +21,7 @@ import * as Notifications from "expo-notifications";
 import * as Updates from "expo-updates";
 import { useMutation } from "convex/react";
 import { useTranslation } from "react-i18next";
+import { useUnreadNotificationCount } from "@/lib/useNotificationInbox";
 
 const INSIGHT_CATEGORIES = [
   { id: "food", labelKey: "profile.foodDrink", icon: "restaurant" },
@@ -83,6 +84,7 @@ export default function Profile() {
     const { isDarkMode, toggleDarkMode, colors } = useTheme();
     const hideOnScroll = useHideTabBarOnScroll();
     const { t, i18n } = useTranslation();
+    const unreadNotifications = useUnreadNotificationCount();
     const [menuVisible, setMenuVisible] = useState(false);
     const [uploading, setUploading] = useState(false);
     const [isEditingName, setIsEditingName] = useState(false);
@@ -434,7 +436,9 @@ export default function Profile() {
         },
         {
             title: t('profile.notifications'),
-            subtitle: t('profile.pushEmailReminders'),
+            subtitle: unreadNotifications > 0
+                ? t('settings.notifications.unreadCount', { count: unreadNotifications })
+                : t('profile.pushEmailReminders'),
             icon: "notifications-outline",
             iconBg: isDarkMode ? "#3D3D00" : "#FFF8E1",
             iconColor: colors.primary,

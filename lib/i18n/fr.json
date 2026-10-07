@@ -864,7 +864,23 @@
       "notNow": "Pas Maintenant",
       "allow": "Autoriser",
       "couldNotEnable": "Impossible d'Activer",
-      "couldNotEnableMsg": "Nous n'avons pas pu activer les notifications push. Veuillez vérifier les paramètres de votre appareil."
+      "couldNotEnableMsg": "Nous n'avons pas pu activer les notifications push. Veuillez vérifier les paramètres de votre appareil.",
+      "inboxTab": "Boîte de réception",
+      "settingsTab": "Réglages",
+      "markAllRead": "Tout marquer comme lu",
+      "emptyTitle": "Aucune notification pour l'instant",
+      "emptyBody": "Les offres, les rappels de voyage et tout ce que nous vous envoyons apparaîtront ici.",
+      "loadError": "Impossible de charger vos notifications",
+      "loadMore": "Voir plus",
+      "filterAll": "Toutes",
+      "filterDeals": "Offres",
+      "filterTrips": "Voyages",
+      "filterOther": "Autres",
+      "timeNow": "à l'instant",
+      "timeMinutes": "{{count}} min",
+      "timeHours": "{{count}} h",
+      "timeDays": "{{count}} j",
+      "unreadCount": "{{count}} non lue(s)"
     },
     "pushNotifications": {
       "permissionTitle": "Restez informé",
@@ -1914,7 +1930,9 @@
     "removeConfirm": "Êtes-vous sûr de vouloir retirer {{destination}} de votre liste ?",
     "dealAlerts": "Alertes Offres",
     "planTrip": "Planifier le Voyage",
-    "savedDestinations": "Destinations Sauvegardées"
+    "savedDestinations": "Destinations Sauvegardées",
+    "invalidCountry": "Choisissez un pays dans la liste ou laissez vide.",
+    "wholeCountry": "Tout le pays"
   },
   "streaks": {
     "dayStreak": "série de {{count}} jours",

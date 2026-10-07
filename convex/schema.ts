@@ -778,10 +778,48 @@ export default defineSchema({
         sentAt: v.float64(),
         title: v.string(),
         body: v.string(),
+        // Doubles as the user's in-app notification inbox (notifications.listMine).
+        // `data` is the push payload (deep-link target: screen/tripId/dealId…),
+        // so tapping an inbox row lands where the push would have. Absent on
+        // rows written before the inbox existed.
+        data: v.optional(v.any()),
+        // When the user opened/read it (inbox row tap, push tap, "mark all
+        // read"). Absent = unread.
+        readAt: v.optional(v.float64()),
+        // First time the user actually OPENED it — tapped the push or the inbox
+        // row. Unlike readAt, "mark all read" never sets this, so it is the
+        // number the admin open-rate is built on.
+        openedAt: v.optional(v.float64()),
+        openedVia: v.optional(v.string()), // "push" | "inbox"
+        // At least one of the user's devices accepted the push (Expo ticket ok).
+        // Absent = inbox only (no device, or the push failed).
+        pushed: v.optional(v.boolean()),
     })
         .index("by_user", ["userId"])
         .index("by_user_type", ["userId", "type"])
-        .index("by_trip_type", ["tripId", "type"]),
+        .index("by_trip_type", ["tripId", "type"])
+        // Unread inbox rows: eq(userId).eq(readAt, undefined).gte(sentAt, …)
+        .index("by_user_readAt_sentAt", ["userId", "readAt", "sentAt"]),
+
+    // Per-day notification counters for the admin "Automatic notifications"
+    // panel in the Low-Fare Radar widget. One row per (UTC day, type, deal);
+    // `dealId`/`route` only on deal pushes. Kept as counters rather than
+    // scanning notificationLog so the admin view stays a few hundred reads no
+    // matter how many pushes go out. Opens are credited to the day the
+    // notification was SENT, so a day's open rate is stable once it settles.
+    notificationStats: defineTable({
+        day: v.string(), // "2026-10-06" (UTC)
+        type: v.string(), // collapsed: morning_briefing_day3 → morning_briefing
+        dealId: v.optional(v.string()),
+        route: v.optional(v.string()), // "ATH → CDG"
+        sent: v.float64(), // inbox rows written
+        pushed: v.float64(), // reached ≥1 device
+        opened: v.float64(), // first opens (push tap or inbox tap)
+        openedPush: v.float64(),
+        openedInbox: v.float64(),
+    })
+        .index("by_day", ["day"])
+        .index("by_day_type_deal", ["day", "type", "dealId"]),
 
     // Admin-initiated push broadcasts (one row per "Send" click in the widget).
     // Used to track tap-through rate and which deal/notification each tap came from.
