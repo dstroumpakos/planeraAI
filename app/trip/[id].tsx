@@ -1969,7 +1969,7 @@ export default function TripDetails() {
                 token: token || "",
                 tripId: id as Id<"trips">,
                 type: 'hotel',
-                item: acc?.type === 'airbnb' ? 'airbnb-listing' : 'hotel-listing',
+                item: acc?.type === 'airbnb' ? 'airbnb-listing' : acc?.provider === 'booking' ? 'booking-listing' : 'hotel-listing',
                 url,
             });
         } catch (e) {
@@ -2140,10 +2140,11 @@ export default function TripDetails() {
         return sym ? `${sym}${rounded.toLocaleString(i18n.language)}` : `${rounded.toLocaleString(i18n.language)} ${currency || ''}`.trim();
     };
 
-    // Premium accommodation result card (real Google Hotels / Airbnb listings).
+    // Premium accommodation result card (real Google Hotels / Booking.com / Airbnb listings).
     const renderStayCard = (acc: any, index: number, opts?: { featured?: boolean }) => {
         const featured = opts?.featured;
         const isAirbnb = acc?.type === 'airbnb';
+        const isBooking = acc?.provider === 'booking';
         const accentColor = isAirbnb ? '#FF5A5F' : '#003580';
         const nightly = acc?.pricePerNight || 0;
         const total = acc?.totalPrice || (nightly ? nightly * duration : 0);
@@ -2198,7 +2199,7 @@ export default function TripDetails() {
                     {/* Type badge */}
                     <View style={{ position: 'absolute', top: 12, left: 12, flexDirection: 'row', alignItems: 'center', backgroundColor: accentColor, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 }}>
                         <Ionicons name={isAirbnb ? 'home' : 'business'} size={12} color="#fff" style={{ marginRight: 4 }} />
-                        <Text style={{ color: '#fff', fontSize: 11, fontWeight: '800' }}>{isAirbnb ? t('tripDetail.airbnbLabel') : t('tripDetail.hotelLabel')}</Text>
+                        <Text style={{ color: '#fff', fontSize: 11, fontWeight: '800' }}>{isAirbnb ? t('tripDetail.airbnbLabel') : isBooking ? 'Booking.com' : t('tripDetail.hotelLabel')}</Text>
                     </View>
                     {/* Deal / save badge */}
                     {savePct > 0 && (
@@ -4444,6 +4445,7 @@ export default function TripDetails() {
                                 </View>
                             </TouchableOpacity>
 
+                            {renderAffiliateHotelCard({ partner: 'booking', item: 'booking-hotels', brand: 'Booking.com', badge: 'B.', color: '#003580', subtitle: t('tripDetail.searchHotelsOnBooking'), cta: t('tripDetail.searchOnBookingHotels') })}
                             {renderAffiliateHotelCard({ partner: 'tripcom', item: 'tripcom-hotels', brand: 'Trip.com', badge: 'Trip', color: '#287DFA', subtitle: t('tripDetail.searchHotelsOnTripcom'), cta: t('tripDetail.searchOnTripcomHotels') })}
                             {renderAffiliateHotelCard({ partner: 'esky', item: 'esky-stays', brand: 'eSky', badge: 'eS', color: '#00A1E0', subtitle: t('tripDetail.searchStaysOnEsky'), cta: t('tripDetail.searchOnEskyStays') })}
                               </>
@@ -4998,6 +5000,7 @@ export default function TripDetails() {
                                                     </View>
                                                     <Text style={[styles.budgetOptionMeta, { color: colors.textMuted }]} numberOfLines={1}>
                                                         {(acc.type === 'airbnb' ? t('tripDetail.airbnbType') : t('tripDetail.hotelType'))}
+                                                        {acc.provider === 'booking' ? ' · Booking.com' : ''}
                                                         {acc.dealLabel ? ` · ${acc.dealLabel}` : ''}
                                                     </Text>
                                                 </View>

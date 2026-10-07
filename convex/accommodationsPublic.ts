@@ -1,17 +1,17 @@
 "use node";
 
 /**
- * Public, account-free accommodation search (hotels + Airbnb).
+ * Public, account-free accommodation search (hotels, Booking.com + Airbnb).
  *
  * Wraps `lib/searchApiAccommodations.fetchAccommodations` — the same engines
- * (`google_hotels` + `airbnb`) that enrich authenticated trip generation in
+ * (`google_hotels` + `booking` + `airbnb`) that enrich authenticated trip generation in
  * `tripsActions.ts` — and exposes them for the marketing/SEO surfaces and the
  * ChatGPT App (Apps SDK / MCP), where there is no user session.
  *
  * Takes an opaque per-caller `deviceId` used ONLY for rate limiting (never a
  * user record), so public searches never create users. Results are cached for
  * 6h keyed on destination + dates + guests, since nightly rates move slowly and
- * each miss costs two searchapi calls.
+ * each miss costs three searchapi calls.
  *
  * The API key never crosses the frontend boundary and is never logged.
  */
@@ -35,7 +35,7 @@ function buildCacheKey(input: {
   currency?: string;
 }): string {
   return [
-    "accom:v1",
+    "accom:v2",
     input.destination.trim().toLowerCase(),
     input.checkInDate,
     input.checkOutDate,

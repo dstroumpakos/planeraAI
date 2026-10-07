@@ -303,8 +303,21 @@ function tripComHotelTarget(p: HotelLinkParams): string {
   );
 }
 
+// Booking.com search results for the destination + stay. Booking localizes on
+// its own (browser language), so no per-locale domain is needed. No affiliate
+// id yet — plain, un-commissioned link.
+function bookingHotelTarget(p: HotelLinkParams): string {
+  const city = encodeURIComponent(p.destination || "");
+  return (
+    `https://www.booking.com/searchresults.html?ss=${city}` +
+    `&checkin=${p.checkIn}&checkout=${p.checkOut}&group_adults=${p.travelers}` +
+    `&group_children=0&no_rooms=1&selected_currency=EUR`
+  );
+}
+
 export type HotelPartnerKey =
   | "airbnb"
+  | "booking"
   | "skyscanner"
   | "tripcom"
   | "esky";
@@ -317,6 +330,8 @@ export function buildHotelLink(
   switch (partner) {
     case "airbnb":
       return airbnbTarget(p); // no CJ link → plain fallback
+    case "booking":
+      return bookingHotelTarget(p); // no affiliate id yet → plain link
     case "skyscanner":
       return skyscannerHotelTarget(p); // no CJ link → plain fallback
     case "tripcom":

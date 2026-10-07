@@ -1246,7 +1246,7 @@ export const generate = internalAction({
                     };
                 }
 
-                // Try real listings (Google Hotels + Airbnb) via searchapi.io first.
+                // Try real listings (Google Hotels + Booking.com + Airbnb) via searchapi.io first.
                 if (FEATURES.REAL_ACCOMMODATIONS) {
                     try {
                         const checkInDate = new Date(trip.startDate).toISOString().split('T')[0];
