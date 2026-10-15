@@ -25,6 +25,7 @@
  */
 
 import { v } from "convex/values";
+import { OPENAI_MODEL } from "./lib/openaiModel";
 import { action } from "./_generated/server";
 import { api } from "./_generated/api";
 import { normalizeDestinationToEnglish } from "../lib/destinationTranslations";
@@ -107,7 +108,7 @@ export const parseTripRequest = action({
     if (text.length < 3) return empty;
 
     const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-    const MODEL = process.env.ATLAS_MODEL || "gpt-4o-mini";
+    const MODEL = process.env.ATLAS_MODEL || OPENAI_MODEL;
     if (!OPENAI_API_KEY) {
       console.error("[AtlasParse] OPENAI_API_KEY not set");
       return empty;
@@ -150,8 +151,10 @@ export const parseTripRequest = action({
             { role: "system", content: system },
             { role: "user", content: text },
           ],
-          max_tokens: 220,
-          temperature: 0,
+          // Reasoning tokens count toward this cap, so it sits well above
+          // the ~220-token JSON answer.
+          max_completion_tokens: 2000,
+          reasoning_effort: "low",
           response_format: { type: "json_object" },
         }),
       });

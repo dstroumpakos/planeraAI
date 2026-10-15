@@ -1,6 +1,7 @@
 "use node";
 
 import { v } from "convex/values";
+import { OPENAI_MODEL } from "./lib/openaiModel";
 import { internalAction } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import OpenAI from "openai";
@@ -331,9 +332,9 @@ ${takenTitlesBlock}
 - Provide practical info based on the destination`;
 
         const response = await openai.chat.completions.create({
-            model: "gpt-4o-mini",
+            model: OPENAI_MODEL,
             messages: [{ role: "user", content: prompt }],
-            temperature: 0.7,
+            reasoning_effort: "low",
             response_format: { type: "json_object" },
         });
 
@@ -516,9 +517,9 @@ ${JSON.stringify(source)}`;
 
         try {
             const resp = await openai.chat.completions.create({
-                model: "gpt-4o-mini",
+                model: OPENAI_MODEL,
                 messages: [{ role: "user", content: prompt }],
-                temperature: 0.3,
+                reasoning_effort: "low",
                 response_format: { type: "json_object" },
             });
             const content = resp.choices[0]?.message?.content;

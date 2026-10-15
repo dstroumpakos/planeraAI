@@ -53,8 +53,9 @@ export const AI_WRITER_MODELS: ReadonlyArray<AiWriterModelSpec> = [
     // ── Reasoning (Responses API, reasoning.effort) ──────────────────────────
     { id: "o3", model: "o3", label: "o3", family: "reasoning", hint: "Reasoning", efforts: O_SERIES_EFFORTS },
     { id: "o4-mini", model: "o4-mini", label: "o4-mini", family: "reasoning", hint: "Fast reasoning", efforts: O_SERIES_EFFORTS },
+    { id: "gpt-6.1-sol", model: "gpt-6.1-sol", label: "GPT-6.1 Sol", family: "reasoning", hint: "Used by Planera's own features", efforts: GPT56_EFFORTS },
     { id: "gpt-5.6-sol", model: "gpt-5.6-sol", label: "GPT-5.6 Sol", family: "reasoning", hint: "Flagship, 1M context", efforts: GPT56_EFFORTS },
-    { id: "gpt-5.6-terra", model: "gpt-5.6-terra", label: "GPT-5.6 Terra", family: "reasoning", hint: "Used by Planera's own features", efforts: GPT56_EFFORTS },
+    { id: "gpt-5.6-terra", model: "gpt-5.6-terra", label: "GPT-5.6 Terra", family: "reasoning", efforts: GPT56_EFFORTS },
     { id: "gpt-5.6-luna", model: "gpt-5.6-luna", label: "GPT-5.6 Luna", family: "reasoning", efforts: GPT56_EFFORTS },
     { id: "gpt-5.4-2026-03-05", model: "gpt-5.4-2026-03-05", label: "GPT-5.4 (2026-03-05)", family: "reasoning", efforts: O_SERIES_EFFORTS },
     { id: "gpt-5.2", model: "gpt-5.2", label: "GPT-5.2", family: "reasoning", efforts: O_SERIES_EFFORTS },

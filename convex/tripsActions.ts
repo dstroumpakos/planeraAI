@@ -1,6 +1,7 @@
 ﻿"use node";
 
 import { v } from "convex/values";
+import { OPENAI_MODEL } from "./lib/openaiModel";
 import { internalAction } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import OpenAI from "openai";
@@ -1611,7 +1612,7 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                     // ~1.5-2x larger than English. Bump the token budget accordingly.
                     const isNonLatinLang = isNonLatinLangForGen;
                     const langMultiplier = isNonEnglish ? (isNonLatinLang ? 1.5 : 1.1) : 1;
-                    // gpt-5.5 is a reasoning model: max_completion_tokens covers BOTH
+                    // gpt-6.1-sol is a reasoning model: max_completion_tokens covers BOTH
                     // reasoning tokens and visible output. Reasoning can easily eat
                     // 8-15k tokens on its own. We budget reasoning headroom on top of
                     // the visible-output estimate so the JSON itinerary actually has
@@ -1713,7 +1714,7 @@ Make sure prices are realistic for ${trip.destination} and aligned with the ${bu
                                     { role: "system", content: systemPrompt },
                                     { role: "user", content: itineraryPrompt },
                                 ],
-                                model: "gpt-5.6-terra",
+                                model: OPENAI_MODEL,
                                 max_completion_tokens: maxTokens,
                                 // Itinerary planning is a structured-data task and does not
                                 // need deep reasoning; keep hidden reasoning bounded.
@@ -2229,9 +2230,10 @@ async function resolveIataWithAI(ctx: any, cityName: string): Promise<string> {
         console.log(`🤖 Resolving IATA via OpenAI for: "${cityName}"`);
         const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
         const completion = await openai.chat.completions.create({
-            model: "gpt-4o-mini",
-            temperature: 0,
-            max_tokens: 20,
+            model: OPENAI_MODEL,
+            // Reasoning tokens count toward the cap; the answer itself is 3 letters.
+            max_completion_tokens: 1000,
+            reasoning_effort: "low",
             messages: [
                 {
                     role: "system",
@@ -4148,12 +4150,13 @@ Return a single JSON object (NOT an array) with the replacement activity:
                 { role: "system", content: `You are a travel planner. Return only valid JSON for a single activity.${lang !== "en" ? ` Write all content in ${langName}.` : ""}` },
                 { role: "user", content: prompt },
             ],
-            model: "gpt-5.6-terra",
+            model: OPENAI_MODEL,
             response_format: { type: "json_object" },
-            max_completion_tokens: 1000,
-            // All data for this single activity is supplied in the prompt; skip
-            // hidden reasoning for max speed since the user is waiting on the swap.
-            reasoning_effort: "none",
+            max_completion_tokens: 4000,
+            // All data for this single activity is supplied in the prompt; keep
+            // hidden reasoning at the floor since the user is waiting on the swap
+            // (gpt-6.1-sol rejects "none").
+            reasoning_effort: "low",
         } as any);
 
         const content = completion.choices[0]?.message?.content;
@@ -4298,12 +4301,13 @@ Return a single JSON object (NOT an array, NOT wrapped in another key):
             { role: "user" as const, content: prompt },
         ];
 
-        // Primary model first; if it errors or returns something unusable, retry
-        // once on a stable model so the user's add never silently dies.
+        // Two attempts so one bad generation (an error or unusable JSON) never
+        // silently kills the user's add.
         const attempts: any[] = [
-            // All data is in the prompt; skip hidden reasoning since the user is waiting.
-            { model: "gpt-5.6-terra", reasoning_effort: "none", max_completion_tokens: 1000 },
-            { model: "gpt-4.1", max_tokens: 1000 },
+            // All data is in the prompt; reasoning at the floor since the user is
+            // waiting (gpt-6.1-sol rejects "none").
+            { model: OPENAI_MODEL, reasoning_effort: "low", max_completion_tokens: 4000 },
+            { model: OPENAI_MODEL, reasoning_effort: "low", max_completion_tokens: 4000 },
         ];
         let newActivity: any = null;
         let lastError: unknown = null;
@@ -4481,12 +4485,13 @@ The first activity's travelFromPrevious MUST be null. Each subsequent activity s
                 { role: "system", content: `You are a travel planner. Return only valid JSON for a single day with an activities array.${lang !== "en" ? ` Write all content in ${langName}.` : ""}` },
                 { role: "user", content: prompt },
             ],
-            model: "gpt-5.6-terra",
+            model: OPENAI_MODEL,
             response_format: { type: "json_object" },
-            max_completion_tokens: 3000,
-            // Full day template and context are supplied in the prompt; skip hidden
-            // reasoning for max speed since the user is waiting on the regenerate.
-            reasoning_effort: "none",
+            max_completion_tokens: 6000,
+            // Full day template and context are supplied in the prompt; keep hidden
+            // reasoning at the floor since the user is waiting on the regenerate
+            // (gpt-6.1-sol rejects "none").
+            reasoning_effort: "low",
         } as any);
 
         const content = completion.choices[0]?.message?.content;

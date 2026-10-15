@@ -1,6 +1,7 @@
 "use node";
 
 import { v } from "convex/values";
+import { OPENAI_MODEL } from "./lib/openaiModel";
 import { internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import OpenAI from "openai";
@@ -40,7 +41,7 @@ import { journeyDestination } from "./helpers/tripMatch";
  * sender/subject for display. The body exists in memory for one action call.
  */
 
-const MODEL = process.env.RESERVATION_PARSE_MODEL || "gpt-4o-mini";
+const MODEL = process.env.RESERVATION_PARSE_MODEL || OPENAI_MODEL;
 
 // Emails with marketing footers get long; confirmations put the useful data up
 // top. Truncating bounds both cost and injection surface.
@@ -168,6 +169,7 @@ export const parseInboundEmail = internalAction({
             const completion = await openai.chat.completions.create({
                 model: MODEL,
                 response_format: { type: "json_object" },
+                reasoning_effort: "low",
                 messages: [
                     { role: "system", content: SYSTEM_PROMPT },
                     {

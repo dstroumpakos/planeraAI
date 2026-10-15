@@ -16,6 +16,7 @@
  */
 
 import { v } from "convex/values";
+import { OPENAI_MODEL } from "./lib/openaiModel";
 import { query, action, internalQuery, internalMutation, internalAction } from "./_generated/server";
 import { internal as _internal } from "./_generated/api";
 import { assertAdmin } from "./admin";
@@ -38,7 +39,7 @@ const internal = _internal as any;
 // Marketing copy is customer-facing and low-volume (a handful of drafts every
 // 3 days), so quality matters more than cost here — hence terra rather than the
 // cheaper luna the partner itinerary generator uses.
-const MODEL = process.env.NEWSLETTER_AI_MODEL || "gpt-5.6-terra";
+const MODEL = process.env.NEWSLETTER_AI_MODEL || OPENAI_MODEL;
 
 // Human-readable language names for the prompt.
 const LANG_NAMES: Record<string, string> = {
@@ -872,7 +873,7 @@ async function requestDraft(
     body: JSON.stringify({
       model: MODEL,
       response_format: { type: "json_object" },
-      // No `temperature`: the gpt-5.6 family rejects it (same reason no other
+      // No `temperature`: reasoning models reject it (same reason no other
       // OpenAI call in this repo sets it). Budget is generous because
       // reasoning tokens count toward this limit — too low and the JSON comes
       // back truncated.

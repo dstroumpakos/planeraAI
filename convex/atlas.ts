@@ -19,6 +19,7 @@
  */
 
 import { v } from "convex/values";
+import { OPENAI_MODEL } from "./lib/openaiModel";
 import { action } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import {
@@ -50,6 +51,20 @@ const MAX_MESSAGE_CHARS = 4000;
  * weather there"; the cap stops a pathological loop from calling tools forever.
  */
 const MAX_TOOL_ROUNDS = 3;
+
+/**
+ * ATLAS_TOOLS is declared in Chat Completions shape ({ type, function: {...} });
+ * the Responses API wants the function fields flattened onto the tool.
+ */
+const ATLAS_RESPONSES_TOOLS = ATLAS_TOOLS.map((tool) => ({
+    type: "function" as const,
+    name: tool.function.name,
+    description: tool.function.description,
+    parameters: tool.function.parameters,
+    // Responses defaults function tools to strict schemas, which require every
+    // property listed in `required`; several Atlas tools have optional args.
+    strict: false,
+}));
 
 // ─────────────────────────────── System prompt ──────────────────────────────
 
@@ -310,7 +325,7 @@ export const chat = action({
         }
 
         const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-        const MODEL = process.env.ATLAS_MODEL || "gpt-4o-mini";
+        const MODEL = process.env.ATLAS_MODEL || OPENAI_MODEL;
         if (!OPENAI_API_KEY) {
             throw new Error("OpenAI API key not configured in Convex environment");
         }
@@ -372,10 +387,12 @@ export const chat = action({
         const latestUserMessage =
             [...trimmed].reverse().find((m) => m.role === "user")?.content ?? "";
 
-        const conversation: any[] = [
-            { role: "system", content: `${ATLAS_SYSTEM_PROMPT}\n\n=== USER CONTEXT ===\n${contextBlock}` },
-            ...trimmed,
-        ];
+        // Responses API, not Chat Completions: gpt-6.1-sol only accepts tool
+        // calling on Responses. Stateless (store: false) — every round resends
+        // the whole input, including the model's encrypted reasoning items,
+        // which the API needs alongside the function calls they produced.
+        const instructions = `${ATLAS_SYSTEM_PROMPT}\n\n=== USER CONTEXT ===\n${contextBlock}`;
+        const input: any[] = [...trimmed];
 
         // ── Tool-calling loop ───────────────────────────────────────────────
         const cards: AtlasCard[] = [];
@@ -387,7 +404,7 @@ export const chat = action({
             // instead of another tool call we have no budget to service.
             const allowTools = round < MAX_TOOL_ROUNDS;
 
-            const response = await fetch("https://api.openai.com/v1/chat/completions", {
+            const response = await fetch("https://api.openai.com/v1/responses", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
@@ -395,10 +412,15 @@ export const chat = action({
                 },
                 body: JSON.stringify({
                     model: MODEL,
-                    messages: conversation,
-                    max_tokens: 1200,
-                    temperature: 0.7,
-                    ...(allowTools ? { tools: ATLAS_TOOLS, tool_choice: "auto" } : {}),
+                    instructions,
+                    input,
+                    store: false,
+                    include: ["reasoning.encrypted_content"],
+                    reasoning: { effort: "low" },
+                    // Reasoning tokens count toward this cap; the visible reply
+                    // still targets the old ~1200-token budget.
+                    max_output_tokens: 4000,
+                    ...(allowTools ? { tools: ATLAS_RESPONSES_TOOLS, tool_choice: "auto" } : {}),
                 }),
             });
 
@@ -409,27 +431,31 @@ export const chat = action({
             }
 
             const data = await response.json();
-            const choice = data.choices?.[0];
-            const message = choice?.message;
-            if (!message) {
-                throw new Error("OpenAI returned no message");
+            const output: any[] = Array.isArray(data.output) ? data.output : [];
+            if (output.length === 0) {
+                throw new Error("OpenAI returned no output");
             }
 
-            const toolCalls = message.tool_calls;
-            if (!toolCalls || toolCalls.length === 0) {
-                finalText = message.content ?? "";
+            const toolCalls = output.filter((item) => item.type === "function_call");
+            if (toolCalls.length === 0) {
+                finalText = output
+                    .filter((item) => item.type === "message")
+                    .flatMap((item) => item.content ?? [])
+                    .filter((part: any) => part.type === "output_text")
+                    .map((part: any) => part.text ?? "")
+                    .join("");
                 break;
             }
 
-            // Echo the assistant's tool-call message back before the results —
-            // the API rejects tool messages that don't follow their request.
-            conversation.push(message);
+            // Echo the model's output (reasoning + function calls) back before
+            // the results — the API rejects outputs that don't follow their call.
+            input.push(...output);
 
             for (const call of toolCalls) {
-                const name = call.function?.name ?? "";
+                const name = call.name ?? "";
                 let parsedArgs: any = {};
                 try {
-                    parsedArgs = call.function?.arguments ? JSON.parse(call.function.arguments) : {};
+                    parsedArgs = call.arguments ? JSON.parse(call.arguments) : {};
                 } catch {
                     parsedArgs = {};
                 }
@@ -447,10 +473,10 @@ export const chat = action({
                 if (!toolsUsed.includes(name)) toolsUsed.push(name);
                 if (outcome.card) cards.push(outcome.card);
 
-                conversation.push({
-                    role: "tool",
-                    tool_call_id: call.id,
-                    content: outcome.result,
+                input.push({
+                    type: "function_call_output",
+                    call_id: call.call_id,
+                    output: outcome.result,
                 });
             }
         }

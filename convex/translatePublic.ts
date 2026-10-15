@@ -30,6 +30,7 @@
 import { action } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
+import { OPENAI_MODEL } from "./lib/openaiModel";
 import OpenAI from "openai";
 import { reportError } from "./helpers/reportError";
 
@@ -43,7 +44,7 @@ const LANG_NAMES: Record<string, string> = {
 
 // Same family as the partner generator; override with
 // `npx convex env set TRANSLATE_MODEL gpt-5.6-terra` if quality disappoints.
-const MODEL = process.env.TRANSLATE_MODEL || "gpt-5.6-luna";
+const MODEL = process.env.TRANSLATE_MODEL || OPENAI_MODEL;
 const TIMEOUT_MS = 12_000;
 
 // Bounds sized to the largest itinerary the tools can request (21 days) with
@@ -140,6 +141,8 @@ ${serialized}`,
             },
           ],
           response_format: { type: "json_object" },
+          // The traveller is waiting on this; keep hidden reasoning at the floor.
+          reasoning_effort: "low",
         },
         { timeout: TIMEOUT_MS }
       );

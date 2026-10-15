@@ -120,7 +120,7 @@ Set in the Convex dashboard (see `.env.example`):
 | `AGENCY_QUOTE_PUBLIC_BASE_URL` | Origin for invite and customer-quote links. Defaults to `https://planeraai.app`. |
 | `AGENCY_ALERT_TO` | Optional. Where new-signup alerts go. Falls back to `STATS_REPORT_TO`, then the founder address. |
 | `OPENAI_API_KEY` | Optional. Without it quotes simply carry no AI copy. |
-| `AGENCY_COPY_MODEL` | Optional. Defaults to `gpt-4o-mini`. |
+| `AGENCY_COPY_MODEL` | Optional. Defaults to `OPENAI_MODEL` in `convex/lib/openaiModel.ts` (`gpt-6.1-sol`). |
 | `AGENCY_ENABLE_MOCKS` | Set to `1` to offer the mock connectors in the catalogue. Off in production. |
 
 ## Search redesign (2026-09-01, web `2026.9.1`)

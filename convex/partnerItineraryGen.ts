@@ -1,6 +1,7 @@
 "use node";
 
 import { v } from "convex/values";
+import { OPENAI_MODEL } from "./lib/openaiModel";
 import { internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import OpenAI from "openai";
@@ -40,7 +41,7 @@ import {
 // switching it does not invalidate existing cached itineraries — they age out
 // naturally instead of triggering a regeneration wave. That also means a
 // quality regression surfaces gradually, only on cache misses.
-const MODEL = process.env.PARTNER_ITINERARY_MODEL || "gpt-5.6-luna";
+const MODEL = process.env.PARTNER_ITINERARY_MODEL || OPENAI_MODEL;
 
 type Sight = {
   name: string;

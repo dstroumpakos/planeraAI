@@ -1,6 +1,7 @@
 "use node";
 
 import { v } from "convex/values";
+import { OPENAI_MODEL } from "./lib/openaiModel";
 import { ConvexError } from "convex/values";
 import { internalAction, action } from "./_generated/server";
 import { internal } from "./_generated/api";
@@ -27,7 +28,7 @@ import { CURATED_CITIES, DEFAULT_DURATIONS } from "./partnerPregenConfig";
 // silently keep whatever model this file names, and changing the live
 // generator's model has no visible effect. Shares the same env var so they
 // cannot come apart again.
-const MODEL = process.env.PARTNER_ITINERARY_MODEL || "gpt-5.6-luna";
+const MODEL = process.env.PARTNER_ITINERARY_MODEL || OPENAI_MODEL;
 
 type Sight = {
   name: string;

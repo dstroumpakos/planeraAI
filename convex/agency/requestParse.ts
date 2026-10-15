@@ -12,12 +12,13 @@
  */
 
 import { v } from "convex/values";
+import { OPENAI_MODEL } from "../lib/openaiModel";
 import { makeFunctionReference } from "convex/server";
 import { action, internalMutation } from "../_generated/server";
 import { guard, invalid } from "./errors";
 import { consumeLimit, requireAccessRW } from "./store";
 
-const MODEL = process.env.AGENCY_COPY_MODEL || "gpt-4o-mini";
+const MODEL = process.env.AGENCY_COPY_MODEL || OPENAI_MODEL;
 const TIMEOUT_MS = 25_000;
 
 export interface ParsedRequest {

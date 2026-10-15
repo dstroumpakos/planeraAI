@@ -28,6 +28,7 @@
  */
 
 import { v } from "convex/values";
+import { OPENAI_MODEL } from "./lib/openaiModel";
 import { internalAction, internalMutation, internalQuery } from "./_generated/server";
 import { internal as _internal } from "./_generated/api";
 import { authAction } from "./functions";
@@ -43,7 +44,7 @@ import {
 // codegen; same escape hatch the other Convex modules here use.
 const internal = _internal as any;
 
-const MODEL = process.env.AIRPORT_AI_MODEL || "gpt-4o-mini";
+const MODEL = process.env.AIRPORT_AI_MODEL || OPENAI_MODEL;
 
 /** Longest free-text base airport we'll spend an OpenAI call on. */
 const MAX_QUERY_LENGTH = 120;
@@ -149,9 +150,10 @@ async function askOpenAi(raw: string): Promise<ResolvedAirport | null> {
             body: JSON.stringify({
                 model: MODEL,
                 response_format: { type: "json_object" },
-                // No `temperature`: the gpt-5 family rejects it, and the model
-                // is env-switchable.
-                max_completion_tokens: 200,
+                // No `temperature`: reasoning models reject it, and the model
+                // is env-switchable. Reasoning tokens count toward the cap.
+                max_completion_tokens: 2000,
+                reasoning_effort: "low",
                 messages: [
                     {
                         role: "system",

@@ -1,6 +1,7 @@
 "use node";
 
 import { v } from "convex/values";
+import { OPENAI_MODEL } from "./lib/openaiModel";
 import { action, internalAction } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import OpenAI from "openai";
@@ -85,7 +86,7 @@ IMPORTANT: The latitude and longitude MUST be the exact coordinates of each sigh
                 { role: "system", content: `You are a travel expert providing informational recommendations. Return only valid JSON.${isNonEnglish ? ` All text content in the response must be written in ${languageName}. Keep JSON field names in English.` : ''}` },
                 { role: "user", content: prompt },
             ],
-            model: "gpt-5.4-2026-03-05",
+            model: OPENAI_MODEL,
             response_format: { type: "json_object" },
         });
 

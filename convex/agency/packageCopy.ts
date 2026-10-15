@@ -24,6 +24,7 @@
  */
 
 import { v } from "convex/values";
+import { OPENAI_MODEL } from "../lib/openaiModel";
 import { makeFunctionReference } from "convex/server";
 import { internalAction, internalMutation } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
@@ -31,7 +32,7 @@ import type { PackageTier, TravelPackage } from "./model/types";
 import { toCustomerPackages, type CustomerPackage } from "./quoteView";
 import { guard, notFound } from "./errors";
 
-const MODEL = process.env.AGENCY_COPY_MODEL || "gpt-4o-mini";
+const MODEL = process.env.AGENCY_COPY_MODEL || OPENAI_MODEL;
 
 /** Copy is a nicety; it must never hold a search open. */
 const OPENAI_TIMEOUT_MS = 20_000;
@@ -182,7 +183,7 @@ async function askOpenAi(
       body: JSON.stringify({
         model: MODEL,
         response_format: { type: "json_object" },
-        // No `temperature`: the gpt-5 family rejects it and the model is
+        // No `temperature`: reasoning models reject it and the model is
         // env-switchable, same as the other AI modules here.
         max_completion_tokens: 900,
         messages: [
