@@ -8,6 +8,8 @@
 //   radar-scan          loop      sweep with afterglow, blips pop price tags, plane blip, pulses
 //   empty-trips         loop      bags hop into a plane's hold, it takes off, a new one lands
 //   loader-mark         loop      the Planera mark draws, pops and erases; a comet orbits it
+//   atlas-mark          segments  Atlas holding up the globe, motion-graphics style: hop / wave /
+//                                 think (flat colour, written as .yellow / .grey / .ink)
 //
 // Brand yellow stays fixed; "ink" is #1D1D1B on light and #FAF9F6 on dark.
 // Dark mode is drawn sticker-style: details on yellow use lineFor(ink) (near
@@ -1201,6 +1203,273 @@ function loaderMark(ink) {
     });
 }
 
+// ── 8. Atlas mark (segments) ────────────────────────────────────────────────
+// Atlas as a character: a little geometric figure holding the globe overhead,
+// animated motion-graphics style (squash & stretch, overlapping action, rubber-
+// hose arms, a comet orbiting the globe, sparkles and dust on the landing). It
+// is the Atlas tab icon and Atlas's avatar, so the rest pose stays bold and
+// simple enough to read at ~25px; the extras only exist while it moves.
+// One file holds three segments the app plays on demand; each starts and ends
+// on the same rest pose, so they chain without a jump:
+//
+//   hop    0–75     anticipate, hop, the globe lags then overshoots and spins
+//                  half a turn, a comet loops it, land with dust + sparkles
+//   wave   75–165   leans in, lets go with one hand and waves twice ("hi"
+//                  lines), the globe wobbles on the other hand
+//   think  165–285  globe spins a full turn, the comet orbits, body breathes (loops)
+//
+// Unlike the themed animations above it is one flat colour (plus an accent for
+// the sparkles), written per use: yellow (active tab), grey (inactive tab on
+// the dark pill), ink (on a yellow disc).
+const ATLAS_SEGMENTS = { hop: [0, 75], wave: [75, 165], think: [165, 285] };
+const ATLAS_COLORS = {
+    yellow: { color: YELLOW, accent: WHITE },
+    grey: { color: [0.553, 0.553, 0.573, 1], accent: [0.553, 0.553, 0.573, 1] }, // inactive tab grey, opaque over the pill
+    ink: { color: [0.102, 0.102, 0.102, 1], accent: [0.102, 0.102, 0.102, 1] }, // #1A1A1A
+};
+
+// Keyframes sampled from fn(t). A step bigger than `jump` holds the previous
+// value instead of tweening through it (used when a meridian wraps behind the globe).
+function sampledTrack(t0, t1, step, fn, jump = Infinity) {
+    const keys = [];
+    for (let t = t0; t <= t1; t += step) keys.push({ t, s: fn(t) });
+    if (keys[keys.length - 1].t !== t1) keys.push({ t: t1, s: fn(t1) });
+    return keys.map((k, idx) => {
+        if (idx === keys.length - 1) return k;
+        const n = k.s.length;
+        if (Math.abs(keys[idx + 1].s[0] - k.s[0]) > jump) return { ...k, h: 1 };
+        return { ...k, o: { x: Array(n).fill(0), y: Array(n).fill(0) }, i: { x: Array(n).fill(1), y: Array(n).fill(1) } };
+    });
+}
+// Several sampled windows as one track; the value is held between windows.
+function windowsTrack(windows, step, fn, jump) {
+    const keys = windows.flatMap(([a, b]) => sampledTrack(a, b, step, fn, jump));
+    return {
+        a: 1,
+        k: keys.map((k, idx) => (idx < keys.length - 1 && !k.o && !k.h ? { ...k, h: 1 } : k)),
+    };
+}
+
+function atlasMark({ color, accent }) {
+    const OP = 285;
+    const OFFSET = [8, 17]; // figure drawn in a 100-unit box, placed with headroom for the hop
+    const FEET = [50, 97];
+    const NECK = [50, 66];
+    const G = [50, 27]; // globe centre
+    const R = 20;
+    const LIMB = 6.5;
+    const LINE = 4.5;
+    const spring = cubicBezier(EASE.inOut);
+
+    // ── Globe: where it sits relative to the body, over time. The arms are
+    // derived from the same keys, so the hands stay on it through the lag and
+    // overshoot. [t, dx, dy, ease]
+    const GLOBE_KEYS = [
+        [0, 0, 0, EASE.out],
+        [8, 0, 3, EASE.inOut], // anticipation: pressed down into the squash
+        [23, 0, -7, EASE.inOut], // follows the launch late, overshoots high
+        [33, 0, -2, EASE.in],
+        [41, 0, 4, EASE.out], // keeps falling after the feet land
+        [48, 0, -2, EASE.inOut],
+        [55, 0, 1, EASE.inOut],
+        [61, 0, 0],
+        [75, 0, 0, EASE.out],
+        [86, -3, 1, EASE.inOut], // shifts onto the left hand for the wave
+        [133, -3, 1, EASE.out],
+        [143, 0, -1, EASE.inOut],
+        [150, 0, 0],
+    ];
+
+    // Arm: shoulder → elbow → hand. Angular elbows keep it reading as arms at
+    // icon size (smooth bows merge with the round head and globe into an "8").
+    const holdArm = (side, dx, dy) => {
+        const m = side === "L" ? (x) => x : (x) => 100 - x;
+        return [[m(42), 69], [m(28.5) + dx * 0.5, 58 + dy * 0.4], [m(36.5) + dx, 43 + dy]];
+    };
+    const WAVE = {
+        out: [[58, 69], [73, 62], [85, 47]],
+        in: [[58, 69], [73, 62], [70, 44]],
+    };
+    const armLayer = (nm, poses) =>
+        layer(nm, [
+            group("Arm", [
+                { ty: "sh", nm: "Arm", ks: track(...poses.map(([t, pose, ease]) => [t, pathData(pose), ease])) },
+                stroke(color, LIMB),
+            ]),
+        ], { parent: "Body" });
+    const holdPoses = (side) => GLOBE_KEYS.map(([t, dx, dy, ease]) => [t, holdArm(side, dx, dy), ease]);
+    const rightPoses = [
+        ...holdPoses("R").filter(([t]) => t <= 75),
+        [86, WAVE.out, EASE.inOut],
+        [94, WAVE.in, EASE.inOut],
+        [102, WAVE.out, EASE.inOut],
+        [110, WAVE.in, EASE.inOut],
+        [118, WAVE.out, EASE.inOut],
+        [133, WAVE.out, EASE.inOut],
+        [143, holdArm("R", 0, -1), EASE.inOut],
+        [150, holdArm("R", 0, 0)],
+    ];
+
+    // ── Globe spin: four meridians, each the front half of a great circle drawn
+    // as a semicircle squeezed by sin(longitude); behind the globe it parks on
+    // the rim. ±30° at rest gives the classic "()" look, and the pattern repeats
+    // every half turn, so the hop's 180° spin lands back on it.
+    const longitude = (t) => {
+        if (t >= 10 && t <= 60) return 180 * spring((t - 10) / 50);
+        if (t >= 165) return (360 * (t - 165)) / 120;
+        return 0;
+    };
+    const meridian = (offset) =>
+        group(`Meridian ${offset}`, [curve(arcSegs(G, R, -90, 90)), stroke(color, LINE)], {
+            a: G,
+            p: G,
+            s: windowsTrack([[0, 75], [165, 285]], 2, (t) => {
+                const lam = ((((longitude(t) + offset + 180) % 360) + 360) % 360) - 180;
+                const sx = Math.abs(lam) <= 90 ? 100 * Math.sin(rad(lam)) : lam > 0 ? 100 : -100;
+                return [sx, 100, 100];
+            }, 150),
+        });
+
+    // ── Comet: a moon on a tilted orbit with a fading trail.
+    const ORBIT = { a: 31, b: 9, tilt: -16 };
+    const theta = (t) => {
+        if (t >= 12 && t <= 56) return 200 + 450 * spring((t - 12) / 44);
+        if (t >= 165) return 200 + (1080 * (t - 165)) / 120;
+        return 200;
+    };
+    const orbitPoint = (deg) => {
+        const x = ORBIT.a * Math.cos(rad(deg));
+        const y = ORBIT.b * Math.sin(rad(deg));
+        const c = Math.cos(rad(ORBIT.tilt));
+        const s = Math.sin(rad(ORBIT.tilt));
+        return [G[0] + x * c - y * s, G[1] + x * s + y * c];
+    };
+    const COMET_WINDOWS = [[12, 56], [165, 285]];
+    const cometScale = scaleTrack(
+        [12, 0, EASE.out], [19, 100], [49, 100, EASE.in], [56, 0],
+        [165, 0, EASE.out], [173, 100], [277, 100, EASE.in], [285, 0],
+    );
+    const cometFade = track(
+        [12, 0, EASE.out], [19, 100], [49, 100, EASE.in], [56, 0],
+        [165, 0, EASE.out], [173, 100], [277, 100, EASE.in], [285, 0],
+    );
+    const TRAIL = 22; // % of the orbit
+    const comet = layer("Comet", [
+        group("Moon", [ellipse([0, 0], 7), fill(color)], {
+            p: { a: 1, k: windowsTrack(COMET_WINDOWS, 2, (t) => orbitPoint(theta(t))).k.map((k) => ({ ...k, s: [...k.s, 0] })) },
+            s: cometScale,
+            // Dim when it passes behind the globe.
+            o: windowsTrack(COMET_WINDOWS, 2, (t) => [Math.sin(rad(theta(t))) < 0 ? 35 : 100]),
+        }),
+        group("Trail", [
+            // The orbit ellipse, built by squashing a unit circle's curve (an
+            // affine map keeps it exact) so the stroke itself isn't stretched.
+            curve(arcSegs([0, 0], 1, 0, 360).map((seg) => seg.map(([x, y]) => [x * ORBIT.a, y * ORBIT.b])), true),
+            trim(0, TRAIL, windowsTrack(COMET_WINDOWS, 2, (t) => [theta(t) - 3.6 * TRAIL])),
+            stroke(color, 2.5, { o: 55 }),
+        ], { p: G, r: ORBIT.tilt, o: cometFade }),
+    ], { parent: "Globe" });
+
+    // ── Extras: sparkles at the landing, dust puffs, "hi" lines for the wave.
+    const sparkleAt = (nm, pos, t0, size) =>
+        layer(nm, [group("Sparkle", [star([0, 0], size, size * 0.3, 4), fill(accent)])], {
+            parent: "Root",
+            p: pos,
+            s: scaleTrack([t0, 0, EASE.out], [t0 + 7, 125, EASE.inOut], [t0 + 20, 0]),
+            r: track([t0, -20], [t0 + 20, 70]),
+        });
+    const puff = (nm, from, to) =>
+        layer(nm, [group("Puff", [ellipse([0, 0], 6), fill(color)])], {
+            parent: "Root",
+            p: motion([38, from, EASE.out], [52, to]),
+            s: scaleTrack([38, 0, EASE.out], [42, 100, EASE.in], [52, 0]),
+        });
+    const HI = [90, 36];
+    const hiLine = (deg, t0) => {
+        const a = polar(HI, 3, deg);
+        const b = polar(HI, 9, deg);
+        return group(`Hi ${deg}`, [
+            path([a, b]),
+            trim(track([t0 + 6, 0, EASE.in], [t0 + 12, 100]), track([t0, 0, EASE.out], [t0 + 6, 100])),
+            stroke(color, 3),
+        ]);
+    };
+    const hiLines = layer("Hi", [
+        ...[20, 60, 100].map((deg) => hiLine(deg, 87)),
+        ...[20, 60, 100].map((deg) => hiLine(deg, 107)),
+    ], { parent: "Body" });
+
+    return comp("Atlas mark", {
+        op: OP,
+        w: 116,
+        h: 116,
+        layers: [
+            nullLayer("Root", { p: OFFSET, a: [0, 0] }),
+            // Hop, lean and breathe all pivot on the feet.
+            nullLayer("Body", {
+                parent: "Root",
+                a: FEET,
+                p: motion([0, FEET], [8, FEET, EASE.out], [22, [FEET[0], FEET[1] - 9], EASE.in], [36, FEET]),
+                s: scaleTrack(
+                    [0, 100, EASE.out],
+                    [8, [112, 88], EASE.out],
+                    [16, [92, 108], EASE.inOut],
+                    [27, 100, EASE.in],
+                    [36, 100, EASE.out],
+                    [40, [114, 86], EASE.out],
+                    [47, [96, 104], EASE.inOut],
+                    [53, [102, 98], EASE.inOut],
+                    [59, 100],
+                    [165, 100, EASE.inOut],
+                    [195, [103, 97], EASE.inOut],
+                    [225, 100, EASE.inOut],
+                    [255, [103, 97], EASE.inOut],
+                    [285, 100],
+                ),
+                r: track([75, 0, EASE.out], [86, -5, EASE.inOut], [133, -5, EASE.inOut], [143, 2, EASE.inOut], [150, 0]),
+            }),
+            nullLayer("Globe", {
+                parent: "Body",
+                a: G,
+                p: motion(...GLOBE_KEYS.map(([t, dx, dy, ease]) => [t, [G[0] + dx, G[1] + dy], ease])),
+                r: track([75, 0, EASE.out], [86, -10, EASE.inOut], [96, -5, EASE.inOut], [106, -11, EASE.inOut], [116, -5, EASE.inOut], [133, -9, EASE.inOut], [145, 0]),
+                s: scaleTrack([38, 100, EASE.out], [42, [110, 90], EASE.out], [48, [96, 104], EASE.inOut], [55, 100]),
+            }),
+            sparkleAt("Sparkle 1", [16, 20], 40, 7),
+            sparkleAt("Sparkle 2", [84, 10], 44, 6),
+            sparkleAt("Sparkle 3", [82, 44], 49, 5),
+            puff("Puff L", [44, 93], [31, 90]),
+            puff("Puff R", [56, 93], [69, 90]),
+            hiLines,
+            comet,
+            layer("Globe lines", [
+                group("Equator", [path([[G[0] - R, G[1]], [G[0] + R, G[1]]]), stroke(color, LINE)]),
+                meridian(-30),
+                meridian(30),
+                meridian(150),
+                meridian(-150),
+            ], { parent: "Globe" }),
+            layer("Globe rim", [group("Rim", [ellipse(G, 2 * R), stroke(color, LIMB)])], { parent: "Globe" }),
+            armLayer("Arm L", holdPoses("L")),
+            armLayer("Arm R", rightPoses),
+            layer("Head", [group("Head", [ellipse([50, 56], 17), fill(color)])], {
+                parent: "Body",
+                a: NECK,
+                p: NECK,
+                r: track(
+                    [8, 0, EASE.out], [14, -6, EASE.inOut], [24, 4, EASE.inOut], [34, 0], // drags behind the hop
+                    [75, 0, EASE.out], [88, 10, EASE.inOut], [100, 5, EASE.inOut], [112, 10, EASE.inOut], [133, 10, EASE.inOut], [145, 0],
+                ),
+            }),
+            layer("Torso", [group("Torso", [rect([50, 76], [18, 19], 6), fill(color)])], { parent: "Body" }),
+            layer("Legs", [
+                group("Leg L", [path([[45.5, 84], [44.5, 94]]), stroke(color, 7)]),
+                group("Leg R", [path([[54.5, 84], [55.5, 94]]), stroke(color, 7)]),
+            ], { parent: "Body" }),
+        ],
+    });
+}
+
 // ── Write ───────────────────────────────────────────────────────────────────
 const ANIMATIONS = {
     "trip-generating": tripGenerating,
@@ -1222,4 +1491,9 @@ for (const [name, build] of Object.entries(ANIMATIONS)) {
     const { op } = build(INKS.light);
     console.log(`${name.padEnd(18)} ${(op / FPS).toFixed(2)}s`);
 }
-console.log(`wrote ${Object.keys(ANIMATIONS).length * 2} files to ${OUT_DIR}`);
+for (const [variant, color] of Object.entries(ATLAS_COLORS)) {
+    const data = atlasMark(color);
+    writeFileSync(join(OUT_DIR, `atlas-mark.${variant}.json`), JSON.stringify(data, (_, v) => (typeof v === "number" ? Math.round(v * 100) / 100 : v)));
+}
+console.log(`${"atlas-mark".padEnd(18)} ${Object.entries(ATLAS_SEGMENTS).map(([k, [a, b]]) => `${k} ${a}–${b}`).join(", ")}`);
+console.log(`wrote ${Object.keys(ANIMATIONS).length * 2 + Object.keys(ATLAS_COLORS).length} files to ${OUT_DIR}`);

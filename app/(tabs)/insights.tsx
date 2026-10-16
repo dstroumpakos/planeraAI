@@ -24,51 +24,97 @@ import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "@/lib/ThemeContext";
 import * as Haptics from "expo-haptics";
+import * as Clipboard from "expo-clipboard";
 import { LinearGradient } from "expo-linear-gradient";
 import AIConsentModal from "@/components/AIConsentModal";
 import { AtlasCardRenderer, type AtlasCardData } from "@/components/AtlasCards";
+import { Image as ExpoImage } from "expo-image";
+import { useReducedMotion } from "react-native-reanimated";
+import { setAtlasBusy } from "@/lib/atlasActivity";
 import { useTranslation } from "react-i18next";
 
+// Atlas, the 3D character (rendered in Blender): a head-and-shoulders avatar for
+// the chat, and a looping scene of him in the Planera office for the welcome screen.
+const ATLAS_AVATAR = require("@/assets/images/atlas-avatar.png");
+const ATLAS_OFFICE = require("@/assets/images/atlas-office.webp");
+
+// Brand yellow is a fill; anything drawn on top of it uses ink, in both themes.
+const YELLOW = "#FFE500";
+const INK = "#1A1A1A";
+
 // Animated typing dots component
-const TypingIndicator = ({ colors }: { colors: any }) => {
+const TypingIndicator = ({ color }: { color: string }) => {
     const dot1 = useRef(new Animated.Value(0)).current;
     const dot2 = useRef(new Animated.Value(0)).current;
     const dot3 = useRef(new Animated.Value(0)).current;
 
     useEffect(() => {
-        const animateDot = (dot: Animated.Value, delay: number) => {
+        const animateDot = (dot: Animated.Value, delay: number) =>
             Animated.loop(
                 Animated.sequence([
                     Animated.delay(delay),
-                    Animated.timing(dot, {
-                        toValue: 1,
-                        duration: 300,
-                        useNativeDriver: true,
-                    }),
-                    Animated.timing(dot, {
-                        toValue: 0,
-                        duration: 300,
-                        useNativeDriver: true,
-                    }),
+                    Animated.timing(dot, { toValue: 1, duration: 300, useNativeDriver: true }),
+                    Animated.timing(dot, { toValue: 0, duration: 300, useNativeDriver: true }),
                 ])
-            ).start();
-        };
+            );
 
-        animateDot(dot1, 0);
-        animateDot(dot2, 150);
-        animateDot(dot3, 300);
+        const loops = [animateDot(dot1, 0), animateDot(dot2, 150), animateDot(dot3, 300)];
+        loops.forEach((l) => l.start());
+        return () => loops.forEach((l) => l.stop());
     }, []);
 
     const dotStyle = (anim: Animated.Value) => ({
         transform: [{ scale: anim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.3] }) }],
-        opacity: anim.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] }),
+        opacity: anim.interpolate({ inputRange: [0, 1], outputRange: [0.35, 1] }),
     });
 
     return (
-        <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
-            <Animated.View style={[{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary }, dotStyle(dot1)]} />
-            <Animated.View style={[{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary }, dotStyle(dot2)]} />
-            <Animated.View style={[{ width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary }, dotStyle(dot3)]} />
+        <View style={{ flexDirection: "row", gap: 5, alignItems: "center" }}>
+            {[dot1, dot2, dot3].map((d, i) => (
+                <Animated.View
+                    key={i}
+                    style={[{ width: 7, height: 7, borderRadius: 4, backgroundColor: color }, dotStyle(d)]}
+                />
+            ))}
+        </View>
+    );
+};
+
+/** Atlas's face in a yellow disc; a soft ring pulses around it while he's thinking. */
+const AtlasAvatar = ({ size, busy = false }: { size: number; busy?: boolean }) => {
+    const pulse = useRef(new Animated.Value(0)).current;
+    const reduceMotion = useReducedMotion();
+    useEffect(() => {
+        if (!busy || reduceMotion) {
+            pulse.setValue(0);
+            return;
+        }
+        const loop = Animated.loop(
+            Animated.timing(pulse, { toValue: 1, duration: 1100, useNativeDriver: true })
+        );
+        loop.start();
+        return () => loop.stop();
+    }, [busy, reduceMotion]);
+
+    return (
+        <View style={{ width: size, height: size }}>
+            {busy && (
+                <Animated.View
+                    pointerEvents="none"
+                    style={{
+                        position: "absolute",
+                        width: size,
+                        height: size,
+                        borderRadius: size / 2,
+                        backgroundColor: YELLOW,
+                        opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.55, 0] }),
+                        transform: [{ scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.6] }) }],
+                    }}
+                />
+            )}
+            <View style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: YELLOW, overflow: "hidden" }}>
+                <ExpoImage source={ATLAS_AVATAR} style={{ width: size, height: size }} contentFit="cover" />
+            </View>
         </View>
     );
 };
@@ -85,574 +131,158 @@ interface Message {
     cards?: AtlasCardData[];
     /** Follow-up questions offered as tappable chips under the last reply. */
     suggestions?: string[];
+    /** Set on a failed turn: the question to re-ask when "Retry" is tapped. */
+    retryText?: string;
 }
 
-// Helper to detect weather JSON block
-const extractWeatherJson = (content: string): { weatherData: any; cleanContent: string } => {
-    const jsonMatch = content.match(/<WEATHER_JSON>([\s\S]*?)<\/WEATHER_JSON>/);
-    if (jsonMatch && jsonMatch[1]) {
+/**
+ * Replies saved before Atlas moved to structured cards carried their weather
+ * and restaurant data inline as <WEATHER_JSON>/<RESTAURANT_JSON> blocks. Turn
+ * those into cards so old threads opened from history still render properly.
+ */
+const extractLegacyCards = (content: string): { cards: AtlasCardData[]; text: string } => {
+    const cards: AtlasCardData[] = [];
+    let text = content;
+
+    const weather = text.match(/<WEATHER_JSON>([\s\S]*?)<\/WEATHER_JSON>/);
+    if (weather?.[1]) {
         try {
-            const weatherData = JSON.parse(jsonMatch[1]);
-            const cleanContent = content.replace(/<WEATHER_JSON>[\s\S]*?<\/WEATHER_JSON>/, '').trim();
-            return { weatherData, cleanContent };
-        } catch (e) {
-            console.error("Failed to parse weather JSON:", e);
-        }
+            cards.push({ type: "weather", data: JSON.parse(weather[1]) });
+        } catch {}
+        text = text.replace(weather[0], "");
     }
-    return { weatherData: null, cleanContent: content };
-};
 
-// Helper to detect restaurant JSON block
-const extractRestaurantJson = (content: string): { restaurantData: any[] | null; cleanContent: string } => {
-    const jsonMatch = content.match(/<RESTAURANT_JSON>([\s\S]*?)<\/RESTAURANT_JSON>/);
-    if (jsonMatch && jsonMatch[1]) {
+    const restaurants = text.match(/<RESTAURANT_JSON>([\s\S]*?)<\/RESTAURANT_JSON>/);
+    if (restaurants?.[1]) {
         try {
-            const restaurantData = JSON.parse(jsonMatch[1]);
-            const cleanContent = content.replace(/<RESTAURANT_JSON>[\s\S]*?<\/RESTAURANT_JSON>/, '').trim();
-            return { restaurantData: Array.isArray(restaurantData) ? restaurantData : null, cleanContent };
-        } catch (e) {
-            console.error("Failed to parse restaurant JSON:", e);
-        }
+            const parsed = JSON.parse(restaurants[1]);
+            if (Array.isArray(parsed)) cards.push({ type: "restaurants", data: { restaurants: parsed } });
+        } catch {}
+        text = text.replace(restaurants[0], "");
     }
-    return { restaurantData: null, cleanContent: content };
+
+    return { cards, text: text.trim() };
 };
 
-// Weather Card Component
-const WeatherCard = ({ data }: { data: any }) => {
-    const { colors } = useTheme();
-    const { t } = useTranslation();
-    
-    // Choose gradient based on condition/time
-    const getTheme = (cond: string, day: boolean) => {
-        const condition = (cond || "").toLowerCase();
-        let colors = ['#4FACFE', '#00F2FE']; // Default day
-        let icon: keyof typeof Ionicons.glyphMap = "sunny";
-        
-        if (!day) {
-            colors = ['#141E30', '#243B55']; // Night
-            icon = "moon";
-        }
-        
-        if (condition.includes('rain') || condition.includes('drizzle') || condition.includes('shower')) {
-            colors = ['#373B44', '#4286f4']; // Rain
-            icon = "rainy";
-        } else if (condition.includes('cloud') || condition.includes('overcast') || condition.includes('fog')) {
-            colors = ['#BDC3C7', '#2C3E50']; // Cloudy
-            icon = "cloudy";
-        } else if (condition.includes('snow') || condition.includes('ice')) {
-            colors = ['#E6DADA', '#274046']; // Snow
-            icon = "snow";
-        } else if (condition.includes('thunder') || condition.includes('storm')) {
-            colors = ['#141E30', '#434343']; // Storm
-            icon = "thunderstorm";
-        } else if (condition.includes('clear') || condition.includes('sunny')) {
-            if (!day) icon = "moon";
-            else icon = "sunny";
-        }
+/** Plain text for the clipboard: markdown emphasis and heading marks removed. */
+const toPlainText = (content: string) =>
+    content.replace(/\*\*(.+?)\*\*|__(.+?)__/g, "$1$2").replace(/^#{1,4}\s+/gm, "");
 
-        return { gradientColors: colors, iconName: icon };
-    };
-
-    const isDay = data.isDay ?? true;
-    const { gradientColors, iconName } = getTheme(data.condition, isDay);
-
+/** Renders **bold** / __bold__ anywhere inside a line. */
+const InlineText = ({ text, style, boldStyle }: { text: string; style: any; boldStyle?: any }) => {
+    const parts = text.split(/(\*\*.+?\*\*|__.+?__)/g).filter(Boolean);
     return (
-        <LinearGradient
-            colors={gradientColors as [string, string, ...string[]]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={formatStyles.weatherGradientCard}
-        >
-            <View style={formatStyles.weatherMain}>
-                <View>
-                    <Text style={formatStyles.weatherLocation}>{data.location}</Text>
-                    <Text style={formatStyles.weatherCondition}>{data.condition}</Text>
-                </View>
-                <Ionicons name={iconName} size={40} color="#FFF" />
-            </View>
-            
-            <View style={formatStyles.weatherTempContainer}>
-                <Text style={formatStyles.weatherBigTemp}>{data.temperature}°</Text>
-            </View>
-
-            <View style={formatStyles.weatherStats}>
-                <View style={formatStyles.weatherStatItem}>
-                    <Ionicons name="water-outline" size={16} color="#FFF" style={{opacity: 0.8}} />
-                    <Text style={formatStyles.weatherStatText}>{data.humidity}% {t('atlas.humidity')}</Text>
-                </View>
-                <View style={formatStyles.weatherStatItem}>
-                    <Ionicons name="speedometer-outline" size={16} color="#FFF" style={{opacity: 0.8}} />
-                    <Text style={formatStyles.weatherStatText}>{data.windSpeed} km/h {t('atlas.wind')}</Text>
-                </View>
-            </View>
-
-            {/* Forecast Section */}
-            {data.forecast && Array.isArray(data.forecast) && data.forecast.length > 0 && (
-                <View style={formatStyles.forecastContainer}>
-                    <View style={formatStyles.forecastDivider} />
-                    <View style={formatStyles.forecastRow}>
-                        {data.forecast.slice(0, 5).map((day: any, i: number) => {
-                             const { iconName: dayIcon } = getTheme(day.condition, true);
-                             return (
-                                <View key={i} style={formatStyles.forecastItem}>
-                                    <Text style={formatStyles.forecastDay}>{day.day}</Text>
-                                    <Ionicons name={dayIcon} size={20} color="#FFF" style={{marginVertical: 4}} />
-                                    <View>
-                                        <Text style={formatStyles.forecastHigh}>{day.high}°</Text>
-                                        <Text style={formatStyles.forecastLow}>{day.low}°</Text>
-                                    </View>
-                                </View>
-                             );
-                        })}
-                    </View>
-                </View>
-            )}
-        </LinearGradient>
-    );
-};
-
-// Restaurant Card Component
-const RestaurantCard = ({ restaurants, colors, isDarkMode }: { restaurants: any[]; colors: any; isDarkMode: boolean }) => {
-    const { t } = useTranslation();
-    const getRatingStars = (rating: number) => {
-        const full = Math.floor(rating);
-        const half = rating % 1 >= 0.3;
-        const stars: React.ReactNode[] = [];
-        for (let i = 0; i < full; i++) {
-            stars.push(<Ionicons key={`f${i}`} name="star" size={12} color="#FF8C00" />);
-        }
-        if (half) {
-            stars.push(<Ionicons key="h" name="star-half" size={12} color="#FF8C00" />);
-        }
-        return stars;
-    };
-
-    return (
-        <View style={restaurantStyles.container}>
-            <View style={restaurantStyles.header}>
-                <Ionicons name="restaurant" size={20} color={colors.primary} />
-                <Text style={[restaurantStyles.headerText, { color: colors.text }]}>
-                    {t('atlas.topRestaurants')}
-                </Text>
-                <View style={[restaurantStyles.badge, { backgroundColor: isDarkMode ? 'rgba(255,229,0,0.2)' : '#FFF3CD' }]}>
-                    <Text style={[restaurantStyles.badgeText, { color: colors.primary }]}>TripAdvisor</Text>
-                </View>
-            </View>
-            {restaurants.map((r: any, i: number) => (
-                <View
-                    key={i}
-                    style={[
-                        restaurantStyles.card,
-                        { backgroundColor: isDarkMode ? 'rgba(255,255,255,0.06)' : '#F8F9FA', borderColor: isDarkMode ? 'rgba(255,255,255,0.08)' : '#E9ECEF' },
-                    ]}
-                >
-                    <View style={restaurantStyles.cardTop}>
-                        <View style={{ flex: 1 }}>
-                            <Text style={[restaurantStyles.name, { color: colors.text }]} numberOfLines={1}>
-                                {r.name}
-                            </Text>
-                            <Text style={[restaurantStyles.cuisine, { color: colors.textMuted }]} numberOfLines={1}>
-                                {r.cuisine}
-                            </Text>
-                        </View>
-                        <View style={[restaurantStyles.priceBadge, { backgroundColor: isDarkMode ? 'rgba(255,229,0,0.15)' : '#FFF8E1' }]}>
-                            <Text style={[restaurantStyles.priceText, { color: colors.primary }]}>{r.priceRange}</Text>
-                        </View>
-                    </View>
-                    <View style={restaurantStyles.cardBottom}>
-                        <View style={restaurantStyles.ratingRow}>
-                            <View style={{ flexDirection: 'row', gap: 1 }}>{getRatingStars(r.rating)}</View>
-                            <Text style={[restaurantStyles.ratingNum, { color: colors.textMuted }]}>
-                                {r.rating} ({r.reviewCount.toLocaleString()})
-                            </Text>
-                        </View>
-                        <View style={restaurantStyles.addressRow}>
-                            <Ionicons name="location-outline" size={12} color={colors.textMuted} />
-                            <Text style={[restaurantStyles.address, { color: colors.textMuted }]} numberOfLines={1}>
-                                {r.address}
-                            </Text>
-                        </View>
-                    </View>
-                </View>
-            ))}
-        </View>
-    );
-};
-
-const restaurantStyles = StyleSheet.create({
-    container: {
-        marginBottom: 16,
-    },
-    header: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-        marginBottom: 12,
-    },
-    headerText: {
-        fontSize: 16,
-        fontWeight: '700',
-        flex: 1,
-    },
-    badge: {
-        paddingHorizontal: 8,
-        paddingVertical: 3,
-        borderRadius: 10,
-    },
-    badgeText: {
-        fontSize: 11,
-        fontWeight: '700',
-    },
-    card: {
-        borderRadius: 12,
-        padding: 14,
-        marginBottom: 8,
-        borderWidth: 1,
-    },
-    cardTop: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
-        marginBottom: 8,
-    },
-    name: {
-        fontSize: 15,
-        fontWeight: '600',
-    },
-    cuisine: {
-        fontSize: 13,
-        marginTop: 2,
-    },
-    priceBadge: {
-        paddingHorizontal: 8,
-        paddingVertical: 3,
-        borderRadius: 8,
-        marginLeft: 8,
-    },
-    priceText: {
-        fontSize: 12,
-        fontWeight: '700',
-    },
-    cardBottom: {
-        gap: 6,
-    },
-    ratingRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-    },
-    ratingNum: {
-        fontSize: 12,
-        fontWeight: '500',
-    },
-    addressRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-    },
-    address: {
-        fontSize: 12,
-        flex: 1,
-    },
-});
-
-// Parse and format message content with rich formatting
-const FormattedMessage = ({ content, colors, isDarkMode }: { content: string; colors: any; isDarkMode: boolean }) => {
-    const { weatherData, cleanContent: afterWeather } = extractWeatherJson(content);
-    const { restaurantData, cleanContent } = extractRestaurantJson(afterWeather);
-    
-    // Split content into sections
-    const lines = cleanContent.split('\n');
-    const elements: React.ReactNode[] = [];
-    let currentSection: string[] = [];
-    let sectionTitle = '';
-    let key = 0;
-
-    const flushSection = () => {
-        if (currentSection.length > 0 || sectionTitle) {
-            elements.push(
-                <View key={key++} style={formatStyles.section}>
-                    {sectionTitle && (
-                        <Text style={[formatStyles.sectionTitle, { color: colors.text }]}>
-                            {sectionTitle}
-                        </Text>
-                    )}
-                    {currentSection.map((line, i) => renderLine(line, i))}
-                </View>
-            );
-            currentSection = [];
-            sectionTitle = '';
-        }
-    };
-
-    const renderLine = (line: string, index: number) => {
-        const trimmed = line.trim();
-        
-        // Empty line
-        if (!trimmed) {
-            return <View key={`line-${index}`} style={{ height: 8 }} />;
-        }
-        
-        // Bullet point
-        if (trimmed.startsWith('•') || trimmed.startsWith('-') || trimmed.startsWith('*')) {
-            const bulletContent = trimmed.replace(/^[•\-\*]\s*/, '');
-            // Check if it has bold part (before colon)
-            const colonIndex = bulletContent.indexOf(':');
-            
-            return (
-                <View key={`line-${index}`} style={formatStyles.bulletContainer}>
-                    <View style={[formatStyles.bulletDot, { backgroundColor: colors.primary }]} />
-                    <Text style={[formatStyles.bulletText, { color: colors.text }]}>
-                        {colonIndex > -1 ? (
-                            <>
-                                <Text style={formatStyles.bulletBold}>{bulletContent.slice(0, colonIndex + 1)}</Text>
-                                {bulletContent.slice(colonIndex + 1)}
-                            </>
-                        ) : bulletContent}
+        <Text style={style}>
+            {parts.map((part, i) =>
+                (part.startsWith("**") && part.endsWith("**")) || (part.startsWith("__") && part.endsWith("__")) ? (
+                    <Text key={i} style={[{ fontWeight: "700" }, boldStyle]}>
+                        {part.slice(2, -2)}
                     </Text>
+                ) : (
+                    part
+                )
+            )}
+        </Text>
+    );
+};
+
+// Lightweight markdown for Atlas prose: headings, bullets, numbered steps, bold.
+const FormattedMessage = ({ content, colors }: { content: string; colors: any }) => {
+    const lines = content.split("\n");
+    const elements: React.ReactNode[] = [];
+    let lastWasBlank = false;
+
+    lines.forEach((raw, index) => {
+        const line = raw.trim();
+        const key = `l-${index}`;
+
+        if (!line) {
+            if (!lastWasBlank && elements.length > 0) elements.push(<View key={key} style={{ height: 6 }} />);
+            lastWasBlank = true;
+            return;
+        }
+        lastWasBlank = false;
+
+        // "### Heading", or a short line that only introduces what follows ("Tips:")
+        const heading = line.match(/^#{1,4}\s+(.+)/);
+        const isLabel = line.endsWith(":") && line.length < 50 && !/^([•\-–]|\*(?!\*)|\d+\.)/.test(line);
+        if (heading || isLabel) {
+            elements.push(
+                <InlineText
+                    key={key}
+                    text={heading ? heading[1] : line}
+                    style={[fmt.heading, { color: colors.text }]}
+                />
+            );
+            return;
+        }
+
+        // Bullets. A leading "**" is bold text, not a bullet.
+        const bullet = line.match(/^(?:[•\-–]|\*(?!\*))\s+(.+)/);
+        if (bullet) {
+            elements.push(
+                <View key={key} style={fmt.bulletRow}>
+                    <View style={[fmt.bulletDot, { backgroundColor: colors.text }]} />
+                    <InlineText text={bullet[1]} style={[fmt.body, { color: colors.text, flex: 1 }]} />
                 </View>
             );
+            return;
         }
-        
-        // Numbered list
-        const numberedMatch = trimmed.match(/^(\d+)\.\s*(.+)/);
-        if (numberedMatch) {
-            return (
-                <View key={`line-${index}`} style={formatStyles.numberedContainer}>
-                    <View style={[formatStyles.numberBadge, { backgroundColor: isDarkMode ? 'rgba(255,229,0,0.2)' : '#FFF3CD' }]}>
-                        <Text style={[formatStyles.numberText, { color: colors.primary }]}>{numberedMatch[1]}</Text>
+
+        const numbered = line.match(/^(\d+)[.)]\s+(.+)/);
+        if (numbered) {
+            elements.push(
+                <View key={key} style={fmt.numberRow}>
+                    <View style={fmt.numberBadge}>
+                        <Text style={fmt.numberText}>{numbered[1]}</Text>
                     </View>
-                    <Text style={[formatStyles.numberedText, { color: colors.text }]}>{numberedMatch[2]}</Text>
+                    <InlineText text={numbered[2]} style={[fmt.body, { color: colors.text, flex: 1 }]} />
                 </View>
             );
+            return;
         }
-        
-        // Bold text (between ** or __)
-        const boldPattern = /\*\*(.+?)\*\*|__(.+?)__/g;
-        if (boldPattern.test(trimmed)) {
-            const parts = trimmed.split(/(\*\*.+?\*\*|__.+?__)/g);
-            return (
-                <Text key={`line-${index}`} style={[formatStyles.paragraph, { color: colors.text }]}>
-                    {parts.map((part, i) => {
-                        if (part.startsWith('**') || part.startsWith('__')) {
-                            return <Text key={i} style={formatStyles.boldText}>{part.slice(2, -2)}</Text>;
-                        }
-                        return part;
-                    })}
-                </Text>
-            );
-        }
-        
-        // Regular paragraph
-        return (
-            <Text key={`line-${index}`} style={[formatStyles.paragraph, { color: colors.text }]}>
-                {trimmed}
-            </Text>
-        );
-    };
 
-    lines.forEach((line, index) => {
-        const trimmed = line.trim();
-        
-        // Check for section headers (ending with :)
-        if (trimmed.endsWith(':') && !trimmed.startsWith('-') && !trimmed.startsWith('•') && trimmed.length < 50) {
-            flushSection();
-            sectionTitle = trimmed;
-        } else {
-            currentSection.push(line);
-        }
+        elements.push(<InlineText key={key} text={line} style={[fmt.body, fmt.paragraph, { color: colors.text }]} />);
     });
-    
-    flushSection();
 
-    // Check if we have any special cards to render
-    const hasWeather = !!weatherData;
-    const hasRestaurants = restaurantData && restaurantData.length > 0;
-
-    if (hasWeather || hasRestaurants) {
-        return (
-            <View>
-                {hasWeather && <WeatherCard data={weatherData} />}
-                {hasRestaurants && <RestaurantCard restaurants={restaurantData!} colors={colors} isDarkMode={isDarkMode} />}
-                {elements}
-            </View>
-        );
-    }
-
-    // NOTE: this used to fall back to scraping a temperature out of the prose
-    // ("24°C" → mini weather card) when no JSON block was present. Cards now
-    // arrive as structured data from the server and are rendered by the caller,
-    // so that heuristic would double up the card on every weather answer — and
-    // it fired on any number followed by a degree sign, weather or not.
     return <View>{elements}</View>;
 };
 
-const formatStyles = StyleSheet.create({
-    section: {
-        marginBottom: 8,
-    },
-    sectionTitle: {
-        fontSize: 14,
-        fontWeight: '700',
-        marginBottom: 6,
-        marginTop: 4,
-    },
-    paragraph: {
-        fontSize: 15,
-        lineHeight: 22,
-        marginBottom: 4,
-    },
-    boldText: {
-        fontWeight: '700',
-    },
-    bulletContainer: {
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        marginBottom: 6,
-        paddingLeft: 4,
-    },
-    bulletDot: {
-        width: 6,
-        height: 6,
-        borderRadius: 3,
-        marginTop: 8,
-        marginRight: 10,
-    },
-    bulletText: {
-        flex: 1,
-        fontSize: 15,
-        lineHeight: 22,
-    },
-    bulletBold: {
-        fontWeight: '600',
-    },
-    numberedContainer: {
-        flexDirection: 'row',
-        alignItems: 'flex-start',
-        marginBottom: 8,
-    },
+const fmt = StyleSheet.create({
+    heading: { fontSize: 16, fontWeight: "800", letterSpacing: -0.2, marginTop: 6, marginBottom: 6 },
+    body: { fontSize: 15.5, lineHeight: 23 },
+    paragraph: { marginBottom: 4 },
+    bulletRow: { flexDirection: "row", alignItems: "flex-start", marginBottom: 6, paddingRight: 4 },
+    bulletDot: { width: 5, height: 5, borderRadius: 3, marginTop: 9, marginRight: 10, marginLeft: 2 },
+    numberRow: { flexDirection: "row", alignItems: "flex-start", marginBottom: 8 },
     numberBadge: {
-        width: 24,
-        height: 24,
-        borderRadius: 12,
-        justifyContent: 'center',
-        alignItems: 'center',
+        width: 22,
+        height: 22,
+        borderRadius: 11,
+        backgroundColor: YELLOW,
+        justifyContent: "center",
+        alignItems: "center",
         marginRight: 10,
+        marginTop: 1,
     },
-    numberText: {
-        fontSize: 13,
-        fontWeight: '700',
-    },
-    numberedText: {
-        flex: 1,
-        fontSize: 15,
-        lineHeight: 22,
-        paddingTop: 2,
-    },
-    weatherGradientCard: {
-        borderRadius: 16,
-        padding: 20,
-        marginBottom: 16,
-        overflow: 'hidden',
-    },
-    weatherMain: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
-    },
-    weatherLocation: {
-        color: '#FFF',
-        fontSize: 18,
-        fontWeight: 'bold',
-        textShadowColor: 'rgba(0,0,0,0.2)',
-        textShadowOffset: { width: 0, height: 1 },
-        textShadowRadius: 2,
-    },
-    weatherCondition: {
-        color: '#FFF',
-        fontSize: 14,
-        marginTop: 4,
-        opacity: 0.9,
-    },
-    weatherTempContainer: {
-        marginTop: 10,
-    },
-    weatherBigTemp: {
-        color: '#FFF',
-        fontSize: 56,
-        fontWeight: '200',
-        textShadowColor: 'rgba(0,0,0,0.2)',
-        textShadowOffset: { width: 0, height: 1 },
-        textShadowRadius: 4,
-    },
-    weatherStats: {
-        flexDirection: 'row',
-        marginTop: 15,
-        gap: 16,
-    },
-    weatherStatItem: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: 'rgba(255,255,255,0.15)',
-        paddingVertical: 4,
-        paddingHorizontal: 10,
-        borderRadius: 12,
-        gap: 6,
-    },
-    weatherStatText: {
-        color: '#FFF',
-        fontSize: 12,
-        fontWeight: '600',
-    },
-    // Forecast Styles
-    forecastContainer: {
-        marginTop: 16,
-    },
-    forecastDivider: {
-        height: 1,
-        backgroundColor: 'rgba(255,255,255,0.2)',
-        marginBottom: 16,
-    },
-    forecastRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-    },
-    forecastItem: {
-        alignItems: 'center',
-        gap: 2,
-    },
-    forecastDay: {
-        color: '#FFF',
-        fontSize: 13,
-        fontWeight: '600',
-        marginBottom: 2,
-    },
-    forecastHigh: {
-        color: '#FFF',
-        fontSize: 14,
-        fontWeight: 'bold',
-    },
-    forecastLow: {
-        color: 'rgba(255,255,255,0.7)',
-        fontSize: 12,
-        fontWeight: '500',
-    },
+    numberText: { fontSize: 12, fontWeight: "800", color: INK },
 });
 
-const EXAMPLE_PROMPTS = [
-    // The first three lead with what Atlas can now do that it couldn't before:
-    // resolve "my trip" from the user's own data, read their deal radar, and
-    // answer with live rates.
-    { labelKey: "atlas.myTripWeather", icon: "airplane" as const },
+// Prompts that lean on what only Atlas knows: the user's own trips, home
+// airport and saved travellers.
+const PERSONAL_PROMPTS = [
+    { labelKey: "atlas.myTripWeather", icon: "partly-sunny" as const },
     { labelKey: "atlas.dealsFromMe", icon: "pricetag" as const },
-    { labelKey: "atlas.currencyJapan", icon: "swap-horizontal" as const },
-    { labelKey: "atlas.visaJapan", icon: "document-text" as const },
-    { labelKey: "atlas.weatherRome", icon: "partly-sunny" as const },
-    { labelKey: "atlas.restaurantsParis", icon: "restaurant" as const },
-    { labelKey: "atlas.holidaysSpain", icon: "flag" as const },
-    { labelKey: "atlas.cashKorea", icon: "cash" as const },
-    { labelKey: "atlas.vaccinesThailand", icon: "medkit" as const },
-    { labelKey: "atlas.bestTimeBali", icon: "calendar" as const },
+    { labelKey: "atlas.passportPrompt", icon: "id-card" as const },
+];
+
+const TOPICS = [
+    { titleKey: "atlas.topics.entry", promptKey: "atlas.visaJapan", icon: "document-text" as const, tint: "#5B6CFF" },
+    { titleKey: "atlas.topics.money", promptKey: "atlas.currencyJapan", icon: "cash" as const, tint: "#22A45D" },
+    { titleKey: "atlas.topics.weather", promptKey: "atlas.weatherRome", icon: "sunny" as const, tint: "#1E9BF0" },
+    { titleKey: "atlas.topics.food", promptKey: "atlas.restaurantsParis", icon: "restaurant" as const, tint: "#FF6B35" },
+    { titleKey: "atlas.topics.holidays", promptKey: "atlas.holidaysSpain", icon: "flag" as const, tint: "#DD2A7B" },
+    { titleKey: "atlas.topics.health", promptKey: "atlas.vaccinesThailand", icon: "medkit" as const, tint: "#E5484D" },
 ];
 
 export default function AtlasScreen() {
@@ -660,20 +290,38 @@ export default function AtlasScreen() {
     const { colors, isDarkMode } = useTheme();
     const { t, i18n } = useTranslation();
     const insets = useSafeAreaInsets();
+    const reduceMotion = useReducedMotion();
     const flatListRef = useRef<FlatList>(null);
     const atlasChat = useAuthenticatedAction(api.atlas.chat, token);
-    
+
     // AI data consent (Apple guideline 5.1.1/5.1.2)
     // @ts-ignore
     const userSettings = useQuery(api.users.getSettings as any, { token: token || "skip" }) as any;
     const updateAiConsent = useMutation(api.users.updateAiConsent);
     const [showAiConsentModal, setShowAiConsentModal] = useState(false);
     const [pendingMessage, setPendingMessage] = useState<string | null>(null);
-    
+    // The consent modal re-sends through a sendMessage closure that still holds
+    // the pre-consent settings; this lets that re-send through.
+    const consentGrantedRef = useRef(false);
+
     const [messages, setMessages] = useState<Message[]>([]);
+    // Mirrors `messages` so a send (or retry) always builds history from the
+    // latest transcript, not the one captured when its closure was created.
+    const messagesRef = useRef<Message[]>([]);
+    useEffect(() => {
+        messagesRef.current = messages;
+    }, [messages]);
+
     const [inputText, setInputText] = useState("");
     const [isLoading, setIsLoading] = useState(false);
     const [keyboardVisible, setKeyboardVisible] = useState(false);
+    const [copiedId, setCopiedId] = useState<string | null>(null);
+
+    // Lets the tab bar's Atlas figure spin its globe while a reply is pending.
+    useEffect(() => {
+        setAtlasBusy(isLoading);
+    }, [isLoading]);
+    useEffect(() => () => setAtlasBusy(false), []);
 
     // Server-side thread this tab is appending to. Null until the first reply
     // comes back (or until a past thread is opened from history).
@@ -687,6 +335,11 @@ export default function AtlasScreen() {
         api.atlasDb.listConversations as any,
         token && showHistory ? { token, limit: 30 } : "skip"
     ) as any[] | undefined;
+    // The three most recent threads, shown on the welcome screen only.
+    const recentConversations = useQuery(
+        api.atlasDb.listConversations as any,
+        token && messages.length === 0 ? { token, limit: 3 } : "skip"
+    ) as any[] | undefined;
     const deleteConversation = useMutation(api.atlasDb.deleteConversation as any);
 
     const openConversation = useQuery(
@@ -695,8 +348,8 @@ export default function AtlasScreen() {
     ) as any;
 
     useEffect(() => {
-        const keyboardDidShow = Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true));
-        const keyboardDidHide = Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false));
+        const keyboardDidShow = Keyboard.addListener("keyboardDidShow", () => setKeyboardVisible(true));
+        const keyboardDidHide = Keyboard.addListener("keyboardDidHide", () => setKeyboardVisible(false));
         return () => {
             keyboardDidShow.remove();
             keyboardDidHide.remove();
@@ -721,14 +374,16 @@ export default function AtlasScreen() {
         setShowHistory(false);
     }, [pendingOpenId, openConversation]);
 
+    const tap = () => {
+        if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    };
+
     /** Reset to an empty thread; the next reply mints a new conversation id. */
     const startNewChat = () => {
         setMessages([]);
         setConversationId(null);
         setInputText("");
-        if (Platform.OS !== 'web') {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        }
+        tap();
     };
 
     const sendMessage = async (text?: string) => {
@@ -736,15 +391,13 @@ export default function AtlasScreen() {
         if (!messageText || isLoading) return;
 
         // Check AI data consent before sending to OpenAI (Apple guideline 5.1.1/5.1.2)
-        if (userSettings && userSettings.aiDataConsent !== true) {
+        if (userSettings && userSettings.aiDataConsent !== true && !consentGrantedRef.current) {
             setPendingMessage(messageText);
             setShowAiConsentModal(true);
             return;
         }
 
-        if (Platform.OS !== 'web') {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        }
+        tap();
 
         const userMessage: Message = {
             id: Date.now().toString(),
@@ -753,17 +406,23 @@ export default function AtlasScreen() {
             timestamp: new Date(),
         };
 
-        setMessages(prev => [...prev, userMessage]);
+        const history = [...messagesRef.current, userMessage];
+        messagesRef.current = history;
+        setMessages(history);
         setInputText("");
         setIsLoading(true);
 
         try {
             // Only the tail is sent — the server trims again, but there is no
-            // reason to pay upload cost for turns it will discard.
-            const chatMessages = [...messages, userMessage].slice(-12).map(msg => ({
-                role: msg.role as "user" | "assistant",
-                content: msg.content,
-            }));
+            // reason to pay upload cost for turns it will discard. Failed turns
+            // are left out so the model never sees our own error copy.
+            const chatMessages = history
+                .filter((msg) => !msg.retryText)
+                .slice(-12)
+                .map((msg) => ({
+                    role: msg.role as "user" | "assistant",
+                    content: msg.content,
+                }));
 
             const response = await atlasChat({
                 messages: chatMessages,
@@ -780,12 +439,15 @@ export default function AtlasScreen() {
                 // The server encodes the retry delay as RATE_LIMITED:<minutes>
                 // so the copy can be localised on this side.
                 const minutes = parseInt(String(response.text).split(":")[1] ?? "60", 10);
-                setMessages(prev => [...prev, {
-                    id: (Date.now() + 1).toString(),
-                    role: "assistant",
-                    content: t('atlas.rateLimited', { minutes }),
-                    timestamp: new Date(),
-                }]);
+                setMessages((prev) => [
+                    ...prev,
+                    {
+                        id: (Date.now() + 1).toString(),
+                        role: "assistant",
+                        content: t("atlas.rateLimited", { minutes }),
+                        timestamp: new Date(),
+                    },
+                ]);
                 return;
             }
 
@@ -793,124 +455,306 @@ export default function AtlasScreen() {
                 setConversationId(response.conversationId);
             }
 
-            const assistantMessage: Message = {
-                id: (Date.now() + 1).toString(),
-                role: "assistant",
-                content: response?.text ?? "",
-                timestamp: new Date(),
-                cards: Array.isArray(response?.cards) ? response.cards : [],
-                suggestions: Array.isArray(response?.suggestions) ? response.suggestions : [],
-            };
-
-            setMessages(prev => [...prev, assistantMessage]);
+            setMessages((prev) => [
+                ...prev,
+                {
+                    id: (Date.now() + 1).toString(),
+                    role: "assistant",
+                    content: response?.text ?? "",
+                    timestamp: new Date(),
+                    cards: Array.isArray(response?.cards) ? response.cards : [],
+                    suggestions: Array.isArray(response?.suggestions) ? response.suggestions : [],
+                },
+            ]);
         } catch (error) {
             console.error("Atlas error:", error);
-            const errorMessage: Message = {
-                id: (Date.now() + 1).toString(),
-                role: "assistant",
-                content: t('atlas.errorProcessing'),
-                timestamp: new Date(),
-            };
-            setMessages(prev => [...prev, errorMessage]);
+            setMessages((prev) => [
+                ...prev,
+                {
+                    id: (Date.now() + 1).toString(),
+                    role: "assistant",
+                    content: t("atlas.errorProcessing"),
+                    timestamp: new Date(),
+                    retryText: messageText,
+                },
+            ]);
         } finally {
             setIsLoading(false);
         }
     };
 
+    /** Drop the failed turn (question + error) and ask again. */
+    const retry = (failed: Message) => {
+        const idx = messagesRef.current.findIndex((m) => m.id === failed.id);
+        if (idx < 0 || !failed.retryText) return;
+        const trimmed = messagesRef.current.slice(0, Math.max(0, idx - 1));
+        messagesRef.current = trimmed;
+        setMessages(trimmed);
+        sendMessage(failed.retryText);
+    };
+
+    const copyReply = async (item: Message) => {
+        try {
+            await Clipboard.setStringAsync(toPlainText(item.content));
+            tap();
+            setCopiedId(item.id);
+            setTimeout(() => setCopiedId((id) => (id === item.id ? null : id)), 1600);
+        } catch (e) {
+            console.error("Copy failed:", e);
+        }
+    };
+
+    const formatWhen = (ts: number) => {
+        const d = new Date(ts);
+        const sameDay = d.toDateString() === new Date().toDateString();
+        try {
+            return new Intl.DateTimeFormat(
+                i18n.language,
+                sameDay ? { hour: "2-digit", minute: "2-digit" } : { day: "numeric", month: "short" }
+            ).format(d);
+        } catch {
+            return d.toLocaleDateString();
+        }
+    };
+
+    const confirmDelete = (c: any) => {
+        Alert.alert(t("atlas.deleteChat"), t("atlas.deleteChatConfirm"), [
+            { text: t("common.cancel"), style: "cancel" },
+            {
+                text: t("common.delete"),
+                style: "destructive",
+                onPress: async () => {
+                    try {
+                        await deleteConversation({ token: token || "", conversationId: c._id });
+                        // Clear the transcript if the open thread was the one removed.
+                        if (conversationId === c._id) {
+                            setMessages([]);
+                            setConversationId(null);
+                        }
+                    } catch (e) {
+                        console.error("Failed to delete conversation:", e);
+                    }
+                },
+            },
+        ]);
+    };
+
+    const styles = createStyles(colors, isDarkMode);
+
+    const AtlasLabel = ({ busy = false }: { busy?: boolean }) => (
+        <View style={styles.atlasLabelRow}>
+            <AtlasAvatar size={26} busy={busy} />
+            <Text style={[styles.atlasLabelText, { color: colors.text }]}>{t("atlas.atlas")}</Text>
+        </View>
+    );
+
     const renderMessage = ({ item, index }: { item: Message; index: number }) => {
-        const isUser = item.role === "user";
-        const cards = item.cards ?? [];
+        if (item.role === "user") {
+            return (
+                <View style={styles.userRow}>
+                    <View style={styles.userBubble}>
+                        <Text style={styles.userText}>{item.content}</Text>
+                    </View>
+                </View>
+            );
+        }
+
+        const legacy = extractLegacyCards(item.content);
+        const cards = [...(item.cards ?? []), ...legacy.cards];
         // Chips only make sense on the newest reply — older ones would offer
         // follow-ups to a question the conversation has already moved past.
         const isLast = index === messages.length - 1;
-        const suggestions = !isUser && isLast && !isLoading ? (item.suggestions ?? []) : [];
+        const suggestions = isLast && !isLoading ? item.suggestions ?? [] : [];
+        const copied = copiedId === item.id;
 
         return (
-            <View style={[
-                styles.messageContainer,
-                isUser ? styles.userMessageContainer : styles.assistantMessageContainer,
-            ]}>
-                {!isUser && (
-                    <View style={[styles.avatarContainer, { backgroundColor: colors.primary }]}>
-                        <Ionicons name="globe" size={16} color={colors.text} />
-                    </View>
-                )}
-                <View style={{ flexShrink: 1 }}>
-                    <View style={[
-                        styles.messageBubble,
-                        isUser
-                            ? [styles.userBubble, { backgroundColor: colors.primary }]
-                            : [styles.assistantBubble, { backgroundColor: colors.card, borderColor: colors.border }],
-                    ]}>
-                        {isUser ? (
-                            <Text style={[styles.messageText, { color: colors.text }]}>
-                                {item.content}
-                            </Text>
-                        ) : (
-                            <>
-                                {cards.map((card, i) => {
-                                    // Weather and restaurants keep their existing
-                                    // bespoke components; everything else goes
-                                    // through the shared renderer.
-                                    if (card.type === "weather") {
-                                        return <WeatherCard key={`c-${i}`} data={card.data} />;
-                                    }
-                                    if (card.type === "restaurants") {
-                                        return (
-                                            <RestaurantCard
-                                                key={`c-${i}`}
-                                                restaurants={card.data?.restaurants ?? []}
-                                                colors={colors}
-                                                isDarkMode={isDarkMode}
-                                            />
-                                        );
-                                    }
-                                    return <AtlasCardRenderer key={`c-${i}`} card={card} />;
-                                })}
-                                <FormattedMessage content={item.content} colors={colors} isDarkMode={isDarkMode} />
-                            </>
+            <View style={styles.assistantRow}>
+                <AtlasLabel />
+
+                {cards.map((card, i) => (
+                    <AtlasCardRenderer key={`c-${i}`} card={card} />
+                ))}
+
+                {item.retryText ? (
+                    <View style={[styles.errorBox, { borderColor: colors.border, backgroundColor: colors.card }]}>
+                        <Ionicons name="cloud-offline-outline" size={18} color={colors.textMuted} />
+                        <Text style={[styles.errorText, { color: colors.textSecondary }]}>{legacy.text}</Text>
+                        {isLast && !isLoading && (
+                            <TouchableOpacity style={styles.retryButton} onPress={() => retry(item)} activeOpacity={0.8}>
+                                <Ionicons name="refresh" size={14} color={INK} />
+                                <Text style={styles.retryText}>{t("common.retry")}</Text>
+                            </TouchableOpacity>
                         )}
                     </View>
+                ) : (
+                    !!legacy.text && <FormattedMessage content={legacy.text} colors={colors} />
+                )}
 
-                    {suggestions.length > 0 && (
-                        <View style={styles.suggestionsRow}>
-                            {suggestions.map((s, i) => (
-                                <TouchableOpacity
-                                    key={`s-${i}`}
-                                    style={[styles.suggestionChip, { backgroundColor: colors.card, borderColor: colors.border }]}
-                                    onPress={() => sendMessage(s)}
-                                    activeOpacity={0.7}
-                                >
-                                    <Text style={[styles.suggestionText, { color: colors.text }]} numberOfLines={1}>
-                                        {s}
-                                    </Text>
-                                </TouchableOpacity>
-                            ))}
-                        </View>
-                    )}
-                </View>
+                {!!legacy.text && !item.retryText && (
+                    <View style={styles.actionsRow}>
+                        <TouchableOpacity
+                            style={styles.actionButton}
+                            onPress={() => copyReply(item)}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            accessibilityLabel={t("atlas.copy")}
+                        >
+                            <Ionicons
+                                name={copied ? "checkmark" : "copy-outline"}
+                                size={14}
+                                color={copied ? "#22A45D" : colors.textMuted}
+                            />
+                            <Text style={[styles.actionText, { color: copied ? "#22A45D" : colors.textMuted }]}>
+                                {copied ? t("atlas.copied") : t("atlas.copy")}
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
+                )}
+
+                {suggestions.length > 0 && (
+                    <View style={styles.suggestions}>
+                        {suggestions.map((s, i) => (
+                            <TouchableOpacity
+                                key={`s-${i}`}
+                                style={[styles.suggestionChip, { backgroundColor: colors.card, borderColor: colors.border }]}
+                                onPress={() => sendMessage(s)}
+                                activeOpacity={0.7}
+                            >
+                                <Ionicons name="return-down-forward" size={14} color={colors.textMuted} />
+                                <Text style={[styles.suggestionText, { color: colors.text }]} numberOfLines={2}>
+                                    {s}
+                                </Text>
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+                )}
             </View>
         );
     };
 
-    const renderExamplePrompt = (prompt: { labelKey: string; icon: keyof typeof Ionicons.glyphMap }, index: number) => (
-        <TouchableOpacity
-            key={index}
-            style={[styles.examplePrompt, { backgroundColor: colors.card, borderColor: colors.border }]}
-            onPress={() => sendMessage(t(prompt.labelKey))}
-            activeOpacity={0.7}
+    const renderWelcome = () => (
+        <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={styles.welcomeContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
         >
-            <View style={[styles.examplePromptIcon, { backgroundColor: isDarkMode ? 'rgba(255,229,0,0.15)' : '#FFF8E1' }]}>
-                <Ionicons name={prompt.icon} size={18} color={colors.primary} />
-            </View>
-            <Text style={[styles.examplePromptText, { color: colors.text }]} numberOfLines={2}>
-                {t(prompt.labelKey)}
-            </Text>
-            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-        </TouchableOpacity>
-    );
+            {/* Atlas in the Planera office (looping) */}
+            <ExpoImage
+                source={ATLAS_OFFICE}
+                style={styles.heroScene}
+                contentFit="cover"
+                autoplay={!reduceMotion}
+                accessibilityLabel={t("atlas.atlas")}
+            />
 
-    const styles = createStyles(colors, isDarkMode);
+            <Text style={[styles.heroTitle, { color: colors.text }]}>{t("atlas.heroTitle")}</Text>
+            <Text style={[styles.heroSubtitle, { color: colors.textSecondary }]}>{t("atlas.heroSubtitle")}</Text>
+
+            {/* Personal prompts — the questions only Atlas can answer */}
+            <LinearGradient
+                colors={["#0B1736", "#1D3170"]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.personalCard}
+            >
+                <View style={styles.personalHeader}>
+                    <View style={styles.personalBadge}>
+                        <Ionicons name="sparkles" size={16} color={INK} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.personalTitle}>{t("atlas.forYou")}</Text>
+                        <Text style={styles.personalSubtitle}>{t("atlas.forYouSubtitle")}</Text>
+                    </View>
+                </View>
+                {PERSONAL_PROMPTS.map((p, i) => (
+                    <TouchableOpacity
+                        key={p.labelKey}
+                        style={[styles.personalRow, i === 0 && { borderTopWidth: 0 }]}
+                        onPress={() => sendMessage(t(p.labelKey))}
+                        activeOpacity={0.7}
+                    >
+                        <Ionicons name={p.icon} size={18} color={YELLOW} />
+                        <Text style={styles.personalRowText} numberOfLines={2}>
+                            {t(p.labelKey)}
+                        </Text>
+                        <Ionicons name="arrow-forward" size={16} color="rgba(255,255,255,0.55)" />
+                    </TouchableOpacity>
+                ))}
+            </LinearGradient>
+
+            {/* Topic grid */}
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>{t("atlas.exploreTopics")}</Text>
+            <View style={styles.topicGrid}>
+                {TOPICS.map((topic) => (
+                    <TouchableOpacity
+                        key={topic.titleKey}
+                        style={[styles.topicTile, { backgroundColor: colors.card, borderColor: colors.border }]}
+                        onPress={() => sendMessage(t(topic.promptKey))}
+                        activeOpacity={0.75}
+                    >
+                        <View style={[styles.topicIcon, { backgroundColor: `${topic.tint}1F` }]}>
+                            <Ionicons name={topic.icon} size={18} color={topic.tint} />
+                        </View>
+                        <Text style={[styles.topicTitle, { color: colors.text }]} numberOfLines={1}>
+                            {t(topic.titleKey)}
+                        </Text>
+                        <Text style={[styles.topicPrompt, { color: colors.textMuted }]} numberOfLines={2}>
+                            {t(topic.promptKey)}
+                        </Text>
+                    </TouchableOpacity>
+                ))}
+            </View>
+
+            {/* Recent threads */}
+            {!!recentConversations && recentConversations.length > 0 && (
+                <>
+                    <View style={styles.sectionHeader}>
+                        <Text style={[styles.sectionTitle, { color: colors.text, marginBottom: 0 }]}>
+                            {t("atlas.recentChats")}
+                        </Text>
+                        <TouchableOpacity onPress={() => setShowHistory(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                            <Text style={[styles.viewAll, { color: colors.textSecondary }]}>{t("common.viewAll")}</Text>
+                        </TouchableOpacity>
+                    </View>
+                    <View style={[styles.recentCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                        {recentConversations.map((c: any, i: number) => (
+                            <TouchableOpacity
+                                key={c._id}
+                                style={[
+                                    styles.recentRow,
+                                    i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+                                ]}
+                                onPress={() => setPendingOpenId(c._id)}
+                                activeOpacity={0.7}
+                            >
+                                <View style={[styles.recentIcon, { backgroundColor: colors.lightGray }]}>
+                                    {pendingOpenId === c._id ? (
+                                        <ActivityIndicator size="small" color={colors.textMuted} />
+                                    ) : (
+                                        <Ionicons name="chatbubble-ellipses-outline" size={16} color={colors.textSecondary} />
+                                    )}
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={[styles.recentTitle, { color: colors.text }]} numberOfLines={1}>
+                                        {c.title}
+                                    </Text>
+                                    <Text style={[styles.recentMeta, { color: colors.textMuted }]}>
+                                        {formatWhen(c.updatedAt)} · {c.messageCount} {t("atlas.messages")}
+                                    </Text>
+                                </View>
+                                <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+                            </TouchableOpacity>
+                        ))}
+                    </View>
+                </>
+            )}
+
+            <View style={styles.disclaimerRow}>
+                <Ionicons name="shield-checkmark-outline" size={13} color={colors.textMuted} />
+                <Text style={[styles.disclaimerText, { color: colors.textMuted }]}>{t("atlas.disclaimer")}</Text>
+            </View>
+        </ScrollView>
+    );
 
     // Show loading state while token is loading
     if (tokenLoading) {
@@ -918,9 +762,9 @@ export default function AtlasScreen() {
             <>
                 <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor="transparent" translucent={true} />
                 <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-                    <View style={styles.loadingContainer}>
+                    <View style={styles.centerFill}>
                         <BrandLoader />
-                        <Text style={[styles.loadingText, { color: colors.textMuted }]}>{t('common.loading')}</Text>
+                        <Text style={[styles.loadingText, { color: colors.textMuted }]}>{t("common.loading")}</Text>
                     </View>
                 </SafeAreaView>
             </>
@@ -933,117 +777,117 @@ export default function AtlasScreen() {
             <>
                 <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor="transparent" translucent={true} />
                 <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-                    <View style={styles.authContainer}>
-                        <Ionicons name="globe-outline" size={64} color={colors.primary} />
-                        <Text style={[styles.authTitle, { color: colors.text }]}>{t('atlas.atlas')}</Text>
-                        <Text style={[styles.authSubtitle, { color: colors.textMuted }]}>
-                            {t('atlas.signInToAccess')}
-                        </Text>
+                    <View style={[styles.centerFill, { padding: 40 }]}>
+                        <AtlasAvatar size={96} />
+                        <Text style={[styles.authTitle, { color: colors.text }]}>{t("atlas.atlas")}</Text>
+                        <Text style={[styles.authSubtitle, { color: colors.textMuted }]}>{t("atlas.signInToAccess")}</Text>
                     </View>
                 </SafeAreaView>
             </>
         );
     }
 
+    const canSend = !!inputText.trim() && !isLoading;
+
     return (
         <>
             <StatusBar barStyle={isDarkMode ? "light-content" : "dark-content"} backgroundColor="transparent" translucent={true} />
-            <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+            <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
                 {/* Header */}
-                <View style={[styles.header, { borderBottomColor: colors.border }]}>
-                    <View style={styles.headerContent}>
-                        <View style={[styles.headerIcon, { backgroundColor: colors.primary }]}>
-                            <Ionicons name="globe" size={24} color={colors.text} />
+                <View style={styles.header}>
+                    <AtlasAvatar size={42} busy={isLoading} />
+                    <View style={{ flex: 1 }}>
+                        <Text style={[styles.headerTitle, { color: colors.text }]}>{t("atlas.atlas")}</Text>
+                        <View style={styles.statusRow}>
+                            <View style={styles.statusDot} />
+                            <Text style={[styles.statusText, { color: colors.textMuted }]} numberOfLines={1}>
+                                {t("atlas.liveStatus")}
+                            </Text>
                         </View>
-                        <View style={{ flex: 1 }}>
-                            <Text style={[styles.headerTitle, { color: colors.text }]}>{t('atlas.atlas')}</Text>
-                            <Text style={[styles.headerSubtitle, { color: colors.textMuted }]}>{t('atlas.travelAssistant')}</Text>
-                        </View>
-
-                        <TouchableOpacity
-                            style={[styles.headerButton, { borderColor: colors.border }]}
-                            onPress={() => setShowHistory(true)}
-                            accessibilityLabel={t('atlas.history')}
-                        >
-                            <Ionicons name="time-outline" size={20} color={colors.text} />
-                        </TouchableOpacity>
-                        {messages.length > 0 && (
-                            <TouchableOpacity
-                                style={[styles.headerButton, { borderColor: colors.border }]}
-                                onPress={startNewChat}
-                                accessibilityLabel={t('atlas.newChat')}
-                            >
-                                <Ionicons name="create-outline" size={20} color={colors.text} />
-                            </TouchableOpacity>
-                        )}
                     </View>
+
+                    <TouchableOpacity
+                        style={[styles.headerButton, { backgroundColor: colors.card, borderColor: colors.border }]}
+                        onPress={() => setShowHistory(true)}
+                        accessibilityLabel={t("atlas.history")}
+                    >
+                        <Ionicons name="time-outline" size={19} color={colors.text} />
+                    </TouchableOpacity>
+                    {messages.length > 0 && (
+                        <TouchableOpacity
+                            style={[styles.headerButton, styles.headerButtonPrimary]}
+                            onPress={startNewChat}
+                            accessibilityLabel={t("atlas.newChat")}
+                        >
+                            <Ionicons name="add" size={22} color={INK} />
+                        </TouchableOpacity>
+                    )}
                 </View>
 
-                <KeyboardAvoidingView 
-                    style={styles.chatContainer}
-                    behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                <KeyboardAvoidingView
+                    style={{ flex: 1 }}
+                    behavior={Platform.OS === "ios" ? "padding" : undefined}
                     keyboardVerticalOffset={0}
                 >
                     {messages.length === 0 ? (
-                        // Welcome Screen
-                        <ScrollView 
-                            style={styles.welcomeScrollView}
-                            contentContainerStyle={styles.welcomeContainer}
-                            showsVerticalScrollIndicator={false}
-                        >
-                            <View style={[styles.welcomeIconContainer, { backgroundColor: isDarkMode ? 'rgba(255, 229, 0, 0.15)' : '#FFF8E1' }]}>
-                                <Ionicons name="globe" size={48} color={colors.primary} />
-                            </View>
-                            <Text style={[styles.welcomeTitle, { color: colors.text }]}>{t('atlas.hiImAtlas')}</Text>
-                            <Text style={[styles.welcomeSubtitle, { color: colors.textMuted }]}>
-                                {t('atlas.canHelpWith')}
-                            </Text>
-                            
-                            <Text style={[styles.exampleTitle, { color: colors.text }]}>{t('atlas.tryAsking')}</Text>
-                            <View style={styles.examplePromptsContainer}>
-                                {EXAMPLE_PROMPTS.map((prompt, index) => renderExamplePrompt(prompt, index))}
-                            </View>
-                        </ScrollView>
+                        renderWelcome()
                     ) : (
-                        // Chat Messages
                         <FlatList
                             ref={flatListRef}
                             data={messages}
                             renderItem={renderMessage}
-                            extraData={isLoading}
-                            keyExtractor={item => item.id}
-                            contentContainerStyle={[styles.messagesContent, { paddingBottom: 16 }]}
+                            extraData={[isLoading, copiedId]}
+                            keyExtractor={(item) => item.id}
+                            contentContainerStyle={styles.messagesContent}
                             showsVerticalScrollIndicator={false}
+                            keyboardShouldPersistTaps="handled"
+                            keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
                             onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+                            ListFooterComponent={
+                                isLoading ? (
+                                    <View style={styles.assistantRow}>
+                                        <AtlasLabel busy />
+                                        <View style={styles.thinkingRow}>
+                                            <TypingIndicator color={colors.textMuted} />
+                                            <Text style={[styles.thinkingText, { color: colors.textMuted }]}>
+                                                {t("atlas.thinking")}
+                                            </Text>
+                                        </View>
+                                    </View>
+                                ) : null
+                            }
                         />
                     )}
 
-                    {/* Typing Indicator */}
-                    {isLoading && (
-                        <View style={[styles.typingContainer, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                            <View style={[styles.avatarContainer, { backgroundColor: colors.primary }]}>
-                                <Ionicons name="globe" size={16} color={colors.text} />
-                            </View>
-                            <View style={{ marginLeft: 4 }}>
-                                <TypingIndicator colors={colors} />
-                            </View>
-                            <Text style={[styles.typingText, { color: colors.textMuted }]}>{t('atlas.thinking')}</Text>
-                        </View>
-                    )}
-
-                    {/* Input Area */}
-                    <View style={[
-                        styles.inputContainer, 
-                        { 
-                            backgroundColor: colors.background,
-                            borderTopColor: colors.border,
-                            paddingBottom: keyboardVisible ? 8 : Math.max(insets.bottom, 12) + 84,
-                        }
-                    ]}>
-                        <View style={[styles.inputWrapper, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                    {/* Composer */}
+                    <View
+                        style={[
+                            styles.composerWrap,
+                            {
+                                backgroundColor: colors.background,
+                                paddingBottom: keyboardVisible ? 8 : Math.max(insets.bottom, 12) + 84,
+                            },
+                        ]}
+                    >
+                        {/* Soft fade so content scrolls under the composer instead of hitting a hard edge */}
+                        <LinearGradient
+                            pointerEvents="none"
+                            colors={[`${colors.background}00`, colors.background]}
+                            style={styles.composerFade}
+                        />
+                        <View
+                            style={[
+                                styles.composer,
+                                {
+                                    backgroundColor: colors.card,
+                                    borderColor: colors.border,
+                                    shadowOpacity: isDarkMode ? 0 : 0.08,
+                                },
+                            ]}
+                        >
                             <TextInput
                                 style={[styles.input, { color: colors.text }]}
-                                placeholder={t('atlas.askPlaceholder')}
+                                placeholder={t("atlas.askPlaceholder")}
                                 placeholderTextColor={colors.textMuted}
                                 value={inputText}
                                 onChangeText={setInputText}
@@ -1054,16 +898,17 @@ export default function AtlasScreen() {
                             <TouchableOpacity
                                 style={[
                                     styles.sendButton,
-                                    { backgroundColor: inputText.trim() && !isLoading ? colors.primary : colors.border },
+                                    { backgroundColor: canSend ? YELLOW : colors.lightGray },
                                 ]}
                                 onPress={() => sendMessage()}
-                                disabled={!inputText.trim() || isLoading}
+                                disabled={!canSend}
+                                accessibilityLabel={t("common.continue")}
                             >
-                                <Ionicons 
-                                    name="send" 
-                                    size={18} 
-                                    color={inputText.trim() && !isLoading ? colors.text : colors.textMuted} 
-                                />
+                                {isLoading ? (
+                                    <ActivityIndicator size="small" color={colors.textMuted} />
+                                ) : (
+                                    <Ionicons name="arrow-up" size={20} color={canSend ? INK : colors.textMuted} />
+                                )}
                             </TouchableOpacity>
                         </View>
                     </View>
@@ -1078,76 +923,87 @@ export default function AtlasScreen() {
                 onRequestClose={() => setShowHistory(false)}
             >
                 <View style={styles.historyBackdrop}>
+                    <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setShowHistory(false)} />
                     <View style={[styles.historySheet, { backgroundColor: colors.background, paddingBottom: Math.max(insets.bottom, 16) }]}>
-                        <View style={[styles.historyHeader, { borderBottomColor: colors.border }]}>
-                            <Text style={[styles.historyTitle, { color: colors.text }]}>{t('atlas.history')}</Text>
-                            <TouchableOpacity onPress={() => setShowHistory(false)}>
-                                <Ionicons name="close" size={24} color={colors.textMuted} />
+                        <View style={[styles.sheetHandle, { backgroundColor: colors.border }]} />
+                        <View style={styles.historyHeader}>
+                            <Text style={[styles.historyTitle, { color: colors.text }]}>{t("atlas.history")}</Text>
+                            <TouchableOpacity
+                                style={[styles.headerButton, { backgroundColor: colors.card, borderColor: colors.border }]}
+                                onPress={() => setShowHistory(false)}
+                                accessibilityLabel={t("common.close")}
+                            >
+                                <Ionicons name="close" size={20} color={colors.text} />
                             </TouchableOpacity>
                         </View>
 
+                        <TouchableOpacity
+                            style={styles.newChatRow}
+                            onPress={() => {
+                                startNewChat();
+                                setShowHistory(false);
+                            }}
+                            activeOpacity={0.8}
+                        >
+                            <Ionicons name="add" size={20} color={INK} />
+                            <Text style={styles.newChatText}>{t("atlas.newChat")}</Text>
+                        </TouchableOpacity>
+
                         {conversations === undefined ? (
                             <View style={styles.historyEmpty}>
-                                <ActivityIndicator color={colors.primary} />
+                                <ActivityIndicator color={colors.textMuted} />
                             </View>
                         ) : conversations.length === 0 ? (
                             <View style={styles.historyEmpty}>
                                 <Ionicons name="chatbubbles-outline" size={40} color={colors.textMuted} />
-                                <Text style={[styles.historyEmptyText, { color: colors.textMuted }]}>
-                                    {t('atlas.noHistory')}
-                                </Text>
+                                <Text style={[styles.historyEmptyText, { color: colors.textMuted }]}>{t("atlas.noHistory")}</Text>
                             </View>
                         ) : (
-                            <ScrollView style={{ maxHeight: 420 }}>
-                                {conversations.map((c: any) => (
-                                    <View
-                                        key={c._id}
-                                        style={[styles.historyRow, { borderBottomColor: colors.border }]}
-                                    >
-                                        <TouchableOpacity
-                                            style={{ flex: 1 }}
-                                            onPress={() => setPendingOpenId(c._id)}
-                                            activeOpacity={0.7}
+                            <ScrollView style={{ maxHeight: 440 }} showsVerticalScrollIndicator={false}>
+                                {conversations.map((c: any) => {
+                                    const active = conversationId === c._id;
+                                    return (
+                                        <View
+                                            key={c._id}
+                                            style={[
+                                                styles.historyRow,
+                                                {
+                                                    backgroundColor: active ? colors.secondary : colors.card,
+                                                    borderColor: colors.border,
+                                                },
+                                            ]}
                                         >
-                                            <Text style={[styles.historyRowTitle, { color: colors.text }]} numberOfLines={1}>
-                                                {c.title}
-                                            </Text>
-                                            <Text style={[styles.historyRowMeta, { color: colors.textMuted }]}>
-                                                {new Date(c.updatedAt).toLocaleDateString()} · {c.messageCount} {t('atlas.messages')}
-                                            </Text>
-                                        </TouchableOpacity>
-                                        <TouchableOpacity
-                                            onPress={() => {
-                                                Alert.alert(
-                                                    t('atlas.deleteChat'),
-                                                    t('atlas.deleteChatConfirm'),
-                                                    [
-                                                        { text: t('common.cancel'), style: 'cancel' },
-                                                        {
-                                                            text: t('common.delete'),
-                                                            style: 'destructive',
-                                                            onPress: async () => {
-                                                                try {
-                                                                    await deleteConversation({ token: token || "", conversationId: c._id });
-                                                                    // Clear the transcript if the open thread was the one removed.
-                                                                    if (conversationId === c._id) {
-                                                                        setMessages([]);
-                                                                        setConversationId(null);
-                                                                    }
-                                                                } catch (e) {
-                                                                    console.error("Failed to delete conversation:", e);
-                                                                }
-                                                            },
-                                                        },
-                                                    ]
-                                                );
-                                            }}
-                                            style={{ padding: 8 }}
-                                        >
-                                            <Ionicons name="trash-outline" size={18} color={colors.textMuted} />
-                                        </TouchableOpacity>
-                                    </View>
-                                ))}
+                                            <TouchableOpacity
+                                                style={styles.historyRowMain}
+                                                onPress={() => setPendingOpenId(c._id)}
+                                                activeOpacity={0.7}
+                                            >
+                                                <View style={[styles.recentIcon, { backgroundColor: colors.lightGray }]}>
+                                                    {pendingOpenId === c._id ? (
+                                                        <ActivityIndicator size="small" color={colors.textMuted} />
+                                                    ) : (
+                                                        <Ionicons name="chatbubble-ellipses-outline" size={16} color={colors.textSecondary} />
+                                                    )}
+                                                </View>
+                                                <View style={{ flex: 1 }}>
+                                                    <Text style={[styles.recentTitle, { color: colors.text }]} numberOfLines={1}>
+                                                        {c.title}
+                                                    </Text>
+                                                    <Text style={[styles.recentMeta, { color: colors.textMuted }]}>
+                                                        {formatWhen(c.updatedAt)} · {c.messageCount} {t("atlas.messages")}
+                                                    </Text>
+                                                </View>
+                                            </TouchableOpacity>
+                                            <TouchableOpacity
+                                                onPress={() => confirmDelete(c)}
+                                                style={{ padding: 10 }}
+                                                accessibilityLabel={t("atlas.deleteChat")}
+                                            >
+                                                <Ionicons name="trash-outline" size={18} color={colors.textMuted} />
+                                            </TouchableOpacity>
+                                        </View>
+                                    );
+                                })}
                             </ScrollView>
                         )}
                     </View>
@@ -1161,12 +1017,12 @@ export default function AtlasScreen() {
                 onAccept={async () => {
                     try {
                         await updateAiConsent({ token: token || "", aiDataConsent: true });
+                        consentGrantedRef.current = true;
                         setShowAiConsentModal(false);
                         // Re-send the pending message after consent
                         if (pendingMessage) {
                             const msg = pendingMessage;
                             setPendingMessage(null);
-                            // Small delay to let userSettings re-query
                             setTimeout(() => sendMessage(msg), 300);
                         }
                     } catch (e) {
@@ -1176,285 +1032,228 @@ export default function AtlasScreen() {
                 onDecline={() => {
                     setShowAiConsentModal(false);
                     setPendingMessage(null);
-                    Alert.alert(
-                        t('atlas.aiDisabled'),
-                        t('atlas.aiDisabledMsg'),
-                    );
+                    Alert.alert(t("atlas.aiDisabled"), t("atlas.aiDisabledMsg"));
                 }}
             />
         </>
     );
 }
 
-const createStyles = (colors: any, isDarkMode: boolean) => StyleSheet.create({
-    container: {
-        flex: 1,
-    },
-    loadingContainer: {
-        flex: 1,
-        justifyContent: "center",
-        alignItems: "center",
-    },
-    loadingText: {
-        marginTop: 16,
-        fontSize: 16,
-    },
-    authContainer: {
-        flex: 1,
-        justifyContent: "center",
-        alignItems: "center",
-        padding: 40,
-    },
-    authTitle: {
-        fontSize: 28,
-        fontWeight: "bold",
-        marginTop: 24,
-    },
-    authSubtitle: {
-        fontSize: 16,
-        textAlign: "center",
-        marginTop: 12,
-        lineHeight: 24,
-    },
-    header: {
-        paddingHorizontal: 20,
-        paddingVertical: 16,
-        borderBottomWidth: 1,
-    },
-    headerContent: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 12,
-    },
-    headerIcon: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        justifyContent: "center",
-        alignItems: "center",
-    },
-    headerTitle: {
-        fontSize: 20,
-        fontWeight: "bold",
-    },
-    headerSubtitle: {
-        fontSize: 13,
-        marginTop: 2,
-    },
-    headerButton: {
-        width: 38,
-        height: 38,
-        borderRadius: 12,
-        borderWidth: 1,
-        alignItems: 'center',
-        justifyContent: 'center',
-        marginLeft: 8,
-    },
-    suggestionsRow: {
-        flexDirection: 'row',
-        flexWrap: 'wrap',
-        gap: 6,
-        marginTop: 8,
-        marginLeft: 4,
-    },
-    suggestionChip: {
-        borderRadius: 16,
-        borderWidth: 1,
-        paddingVertical: 7,
-        paddingHorizontal: 12,
-        maxWidth: '100%',
-    },
-    suggestionText: {
-        fontSize: 12,
-        fontWeight: '600',
-    },
-    historyBackdrop: {
-        flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.45)',
-        justifyContent: 'flex-end',
-    },
-    historySheet: {
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
-        paddingHorizontal: 16,
-        paddingTop: 8,
-    },
-    historyHeader: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingVertical: 14,
-        borderBottomWidth: 1,
-    },
-    historyTitle: {
-        fontSize: 18,
-        fontWeight: '700',
-    },
-    historyEmpty: {
-        alignItems: 'center',
-        justifyContent: 'center',
-        paddingVertical: 48,
-        gap: 12,
-    },
-    historyEmptyText: {
-        fontSize: 14,
-    },
-    historyRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingVertical: 14,
-        borderBottomWidth: 1,
-    },
-    historyRowTitle: {
-        fontSize: 14,
-        fontWeight: '600',
-    },
-    historyRowMeta: {
-        fontSize: 12,
-        marginTop: 3,
-    },
-    chatContainer: {
-        flex: 1,
-    },
-    welcomeScrollView: {
-        flex: 1,
-    },
-    welcomeContainer: {
-        alignItems: "center",
-        paddingHorizontal: 24,
-        paddingTop: 40,
-        paddingBottom: 40,
-    },
-    welcomeIconContainer: {
-        width: 96,
-        height: 96,
-        borderRadius: 48,
-        justifyContent: "center",
-        alignItems: "center",
-        marginBottom: 24,
-    },
-    welcomeTitle: {
-        fontSize: 24,
-        fontWeight: "bold",
-        marginBottom: 12,
-    },
-    welcomeSubtitle: {
-        fontSize: 15,
-        textAlign: "center",
-        lineHeight: 22,
-        marginBottom: 32,
-    },
-    exampleTitle: {
-        fontSize: 14,
-        fontWeight: "600",
-        marginBottom: 16,
-    },
-    examplePromptsContainer: {
-        width: "100%",
-        gap: 10,
-    },
-    examplePrompt: {
-        flexDirection: "row",
-        alignItems: "center",
-        padding: 14,
-        borderRadius: 14,
-        borderWidth: 1,
-    },
-    examplePromptIcon: {
-        width: 36,
-        height: 36,
-        borderRadius: 10,
-        justifyContent: "center",
-        alignItems: "center",
-        marginRight: 12,
-    },
-    examplePromptText: {
-        flex: 1,
-        fontSize: 15,
-        fontWeight: "500",
-    },
-    messagesContent: {
-        paddingHorizontal: 16,
-        paddingTop: 16,
-    },
-    messageContainer: {
-        flexDirection: "row",
-        marginBottom: 16,
-        alignItems: "flex-end",
-    },
-    userMessageContainer: {
-        justifyContent: "flex-end",
-    },
-    assistantMessageContainer: {
-        justifyContent: "flex-start",
-    },
-    avatarContainer: {
-        width: 28,
-        height: 28,
-        borderRadius: 14,
-        justifyContent: "center",
-        alignItems: "center",
-        marginRight: 8,
-    },
-    messageBubble: {
-        maxWidth: "85%",
-        padding: 14,
-        borderRadius: 18,
-    },
-    userBubble: {
-        borderBottomRightRadius: 6,
-    },
-    assistantBubble: {
-        borderBottomLeftRadius: 6,
-        borderWidth: 1,
-    },
-    messageText: {
-        fontSize: 15,
-        lineHeight: 22,
-    },
-    typingContainer: {
-        flexDirection: "row",
-        alignItems: "center",
-        marginHorizontal: 16,
-        marginBottom: 8,
-        padding: 12,
-        paddingRight: 16,
-        borderRadius: 18,
-        borderBottomLeftRadius: 6,
-        borderWidth: 1,
-        alignSelf: "flex-start",
-    },
-    typingText: {
-        fontSize: 13,
-        marginLeft: 10,
-        fontStyle: "italic",
-    },
-    inputContainer: {
-        paddingHorizontal: 16,
-        paddingTop: 12,
-        borderTopWidth: 1,
-    },
-    inputWrapper: {
-        flexDirection: "row",
-        alignItems: "flex-end",
-        borderRadius: 24,
-        borderWidth: 1,
-        paddingHorizontal: 16,
-        paddingVertical: 8,
-        minHeight: 48,
-    },
-    input: {
-        flex: 1,
-        fontSize: 16,
-        maxHeight: 100,
-        paddingVertical: 8,
-    },
-    sendButton: {
-        width: 36,
-        height: 36,
-        borderRadius: 18,
-        justifyContent: "center",
-        alignItems: "center",
-        marginLeft: 8,
-    },
-});
+const createStyles = (colors: any, isDarkMode: boolean) =>
+    StyleSheet.create({
+        container: { flex: 1 },
+        centerFill: { flex: 1, justifyContent: "center", alignItems: "center" },
+        loadingText: { marginTop: 16, fontSize: 16 },
+        authTitle: { fontSize: 28, fontWeight: "800", marginTop: 20, letterSpacing: -0.6 },
+        authSubtitle: { fontSize: 16, textAlign: "center", marginTop: 10, lineHeight: 23 },
+
+        // Header
+        header: {
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 10,
+            paddingHorizontal: 20,
+            paddingTop: 8,
+            paddingBottom: 12,
+        },
+        headerTitle: { fontSize: 22, fontWeight: "800", letterSpacing: -0.5 },
+        statusRow: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 1 },
+        statusDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: "#34C759" },
+        statusText: { fontSize: 12, fontWeight: "500" },
+        headerButton: {
+            width: 40,
+            height: 40,
+            borderRadius: 20,
+            borderWidth: 1,
+            alignItems: "center",
+            justifyContent: "center",
+        },
+        headerButtonPrimary: { backgroundColor: YELLOW, borderColor: YELLOW },
+
+        // Welcome
+        welcomeContent: { paddingHorizontal: 20, paddingTop: 12, paddingBottom: 28 },
+        heroScene: {
+            width: "100%",
+            aspectRatio: 4 / 3,
+            borderRadius: 24,
+            marginBottom: 18,
+            backgroundColor: colors.card,
+        },
+        heroTitle: { fontSize: 32, fontWeight: "800", letterSpacing: -1, lineHeight: 38 },
+        heroSubtitle: { fontSize: 15, lineHeight: 22, marginTop: 8, marginBottom: 20 },
+        personalCard: { borderRadius: 24, padding: 18, paddingBottom: 6, marginBottom: 28 },
+        personalHeader: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 10 },
+        personalBadge: {
+            width: 36,
+            height: 36,
+            borderRadius: 12,
+            backgroundColor: YELLOW,
+            alignItems: "center",
+            justifyContent: "center",
+        },
+        personalTitle: { color: "#FFF", fontSize: 17, fontWeight: "800", letterSpacing: -0.3 },
+        personalSubtitle: { color: "rgba(255,255,255,0.65)", fontSize: 12.5, marginTop: 2, lineHeight: 17 },
+        personalRow: {
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 12,
+            paddingVertical: 14,
+            borderTopWidth: StyleSheet.hairlineWidth,
+            borderTopColor: "rgba(255,255,255,0.15)",
+        },
+        personalRowText: { flex: 1, color: "#FFF", fontSize: 15, fontWeight: "600" },
+        sectionHeader: {
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginTop: 28,
+            marginBottom: 12,
+        },
+        sectionTitle: { fontSize: 19, fontWeight: "800", letterSpacing: -0.4, marginBottom: 12 },
+        viewAll: { fontSize: 14, fontWeight: "600" },
+        topicGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", rowGap: 10 },
+        topicTile: {
+            width: "48.5%",
+            minHeight: 128,
+            borderRadius: 20,
+            borderWidth: 1,
+            padding: 14,
+        },
+        topicIcon: {
+            width: 36,
+            height: 36,
+            borderRadius: 12,
+            alignItems: "center",
+            justifyContent: "center",
+            marginBottom: 12,
+        },
+        topicTitle: { fontSize: 15, fontWeight: "700", letterSpacing: -0.2 },
+        topicPrompt: { fontSize: 12.5, lineHeight: 17, marginTop: 4 },
+        recentCard: { borderRadius: 20, borderWidth: 1, paddingHorizontal: 14 },
+        recentRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12 },
+        recentIcon: { width: 34, height: 34, borderRadius: 11, alignItems: "center", justifyContent: "center" },
+        recentTitle: { fontSize: 14.5, fontWeight: "600" },
+        recentMeta: { fontSize: 12, marginTop: 2 },
+        disclaimerRow: { flexDirection: "row", alignItems: "flex-start", gap: 6, marginTop: 24, paddingHorizontal: 4 },
+        disclaimerText: { flex: 1, fontSize: 11.5, lineHeight: 16 },
+
+        // Transcript
+        messagesContent: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 24 },
+        userRow: { alignItems: "flex-end", marginBottom: 20, paddingLeft: 48 },
+        userBubble: {
+            backgroundColor: YELLOW,
+            borderRadius: 22,
+            borderBottomRightRadius: 6,
+            paddingHorizontal: 16,
+            paddingVertical: 11,
+        },
+        userText: { color: INK, fontSize: 15.5, lineHeight: 22, fontWeight: "500" },
+        assistantRow: { marginBottom: 24 },
+        atlasLabelRow: { flexDirection: "row", alignItems: "center", gap: 7, marginBottom: 10 },
+        atlasLabelText: { fontSize: 13, fontWeight: "700" },
+        thinkingRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 4 },
+        thinkingText: { fontSize: 14 },
+        actionsRow: { flexDirection: "row", marginTop: 6 },
+        actionButton: { flexDirection: "row", alignItems: "center", gap: 5, paddingVertical: 4 },
+        actionText: { fontSize: 12, fontWeight: "600" },
+        suggestions: { marginTop: 14, gap: 8, alignItems: "flex-start" },
+        suggestionChip: {
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 8,
+            borderRadius: 16,
+            borderWidth: 1,
+            paddingVertical: 10,
+            paddingHorizontal: 14,
+            maxWidth: "100%",
+        },
+        suggestionText: { fontSize: 14, fontWeight: "600", flexShrink: 1 },
+        errorBox: {
+            flexDirection: "row",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: 10,
+            borderRadius: 16,
+            borderWidth: 1,
+            padding: 12,
+        },
+        errorText: { flex: 1, minWidth: 160, fontSize: 14, lineHeight: 20 },
+        retryButton: {
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 5,
+            backgroundColor: YELLOW,
+            borderRadius: 12,
+            paddingHorizontal: 12,
+            paddingVertical: 7,
+        },
+        retryText: { color: INK, fontSize: 13, fontWeight: "700" },
+
+        // Composer
+        composerWrap: { paddingHorizontal: 16, paddingTop: 6 },
+        composerFade: { position: "absolute", left: 0, right: 0, top: -24, height: 24 },
+        composer: {
+            flexDirection: "row",
+            alignItems: "flex-end",
+            borderRadius: 26,
+            borderWidth: 1,
+            paddingLeft: 18,
+            paddingRight: 6,
+            paddingVertical: 6,
+            minHeight: 52,
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 6 },
+            shadowRadius: 16,
+            elevation: isDarkMode ? 0 : 3,
+        },
+        input: {
+            flex: 1,
+            fontSize: 16,
+            maxHeight: 110,
+            paddingTop: Platform.OS === "ios" ? 10 : 8,
+            paddingBottom: Platform.OS === "ios" ? 10 : 8,
+        },
+        sendButton: {
+            width: 40,
+            height: 40,
+            borderRadius: 20,
+            justifyContent: "center",
+            alignItems: "center",
+            marginLeft: 8,
+        },
+
+        // History sheet
+        historyBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.45)" },
+        historySheet: { borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingHorizontal: 16, paddingTop: 8 },
+        sheetHandle: { alignSelf: "center", width: 40, height: 5, borderRadius: 3, marginBottom: 6 },
+        historyHeader: {
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            paddingVertical: 10,
+        },
+        historyTitle: { fontSize: 22, fontWeight: "800", letterSpacing: -0.5 },
+        newChatRow: {
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 6,
+            backgroundColor: YELLOW,
+            borderRadius: 16,
+            paddingVertical: 13,
+            marginBottom: 14,
+        },
+        newChatText: { color: INK, fontSize: 15, fontWeight: "700" },
+        historyEmpty: { alignItems: "center", justifyContent: "center", paddingVertical: 48, gap: 12 },
+        historyEmptyText: { fontSize: 14 },
+        historyRow: {
+            flexDirection: "row",
+            alignItems: "center",
+            borderRadius: 16,
+            borderWidth: 1,
+            paddingLeft: 12,
+            paddingRight: 2,
+            marginBottom: 8,
+        },
+        historyRowMain: { flex: 1, flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12 },
+    });

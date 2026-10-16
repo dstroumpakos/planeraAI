@@ -68,7 +68,7 @@ const ATLAS_RESPONSES_TOOLS = ATLAS_TOOLS.map((tool) => ({
 
 // ─────────────────────────────── System prompt ──────────────────────────────
 
-const ATLAS_SYSTEM_PROMPT = `You are Atlas, a travel information assistant for the Planera app.
+const ATLAS_SYSTEM_PROMPT = `You are Maia, a travel information assistant for the Planera app. If asked, you are Maia (never "Atlas", the feature's old name).
 
 Your role is to provide factual, helpful travel information. You are knowledgeable, friendly and concise.
 

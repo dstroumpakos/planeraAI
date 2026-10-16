@@ -9,13 +9,16 @@ import * as Haptics from "expo-haptics";
 import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming } from "react-native-reanimated";
 import { useTheme } from "@/lib/ThemeContext";
 import { useTabBarTranslateY } from "@/lib/tabBarVisibility";
+import { useAtlasBusy } from "@/lib/atlasActivity";
+import { AtlasMark } from "@/components/AtlasMark";
 
-// Icon set per tab route. `create` is the raised yellow center button.
-const TAB_ICONS: Record<string, { active: keyof typeof Ionicons.glyphMap; inactive: keyof typeof Ionicons.glyphMap } | "create"> = {
+// Icon set per tab route. `create` is the raised yellow center button;
+// `atlas` is the animated Atlas character (see components/AtlasMark).
+const TAB_ICONS: Record<string, { active: keyof typeof Ionicons.glyphMap; inactive: keyof typeof Ionicons.glyphMap } | "create" | "atlas"> = {
     index: { active: "home", inactive: "home-outline" },
     trips: { active: "map", inactive: "map-outline" },
     create: "create",
-    insights: { active: "globe", inactive: "globe-outline" },
+    insights: "atlas",
     profile: { active: "person", inactive: "person-outline" },
 };
 
@@ -66,6 +69,7 @@ export default function FloatingTabBar({ state, descriptors, navigation }: Botto
     const insets = useSafeAreaInsets();
     const router = useRouter();
     const translateY = useTabBarTranslateY();
+    const atlasBusy = useAtlasBusy();
 
     const [pillWidth, setPillWidth] = useState(0);
     const measured = useRef(false);
@@ -167,12 +171,26 @@ export default function FloatingTabBar({ state, descriptors, navigation }: Botto
                                 activeOpacity={0.7}
                                 style={styles.slot}
                             >
-                                <TabIcon
-                                    focused={isFocused}
-                                    activeIcon={cfg.active}
-                                    inactiveIcon={cfg.inactive}
-                                    activeColor={colors.primary}
-                                />
+                                {cfg === "atlas" ? (
+                                    // Remounts on focus change: yellow + a hop when selected,
+                                    // a still grey figure otherwise. Its globe keeps spinning
+                                    // while Atlas is answering, whichever tab is open.
+                                    <AtlasMark
+                                        key={isFocused ? "active" : "inactive"}
+                                        size={36}
+                                        color={isFocused ? "yellow" : "grey"}
+                                        intro={isFocused ? "hop" : null}
+                                        idleWave={isFocused}
+                                        busy={atlasBusy}
+                                    />
+                                ) : (
+                                    <TabIcon
+                                        focused={isFocused}
+                                        activeIcon={cfg.active}
+                                        inactiveIcon={cfg.inactive}
+                                        activeColor={colors.primary}
+                                    />
+                                )}
                             </TouchableOpacity>
                         );
                     })}
