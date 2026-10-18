@@ -45,7 +45,7 @@ test("scores are ordered so the chosen offer is the max for its tier", async () 
 });
 
 test("hotel floor relaxes when nothing clears it (thin pool still yields a package)", async () => {
-  const subFloor = (await pricedHotels()).filter((h) => (h.offer.starRating ?? 0) < 4); // only the 2* budget hotel
+  const subFloor = (await pricedHotels()).filter((h) => (h.offer.starRating ?? 0) < 3); // only the 2* budget hotel
   const res = selectTier(await pricedFlights(), subFloor, "premium");
   assert.ok(res.hotel, "premium still returns a hotel by relaxing the floor");
   assert.equal(res.hotel?.cand.offer.offerId, "mock-hotel:H1");

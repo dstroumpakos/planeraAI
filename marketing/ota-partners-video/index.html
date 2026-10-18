@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="el">
+<head>
+<meta charset="utf-8">
+<title>Planera OTA Partners Film</title>
+<link rel="stylesheet" href="assets/tw.out.css">
+<style>
+  @font-face { font-family: Inter; font-weight: 400; src: url(assets/Inter-Regular.ttf); }
+  @font-face { font-family: Inter; font-weight: 500 650; src: url(assets/Inter-SemiBold.ttf); }
+  @font-face { font-family: Inter; font-weight: 700 900; src: url(assets/Inter-ExtraBold.ttf); }
+  html, body { width: 1080px; height: 1350px; overflow: hidden; margin: 0; background: #0a0a0a; font-family: Inter, "Segoe UI Emoji", system-ui, sans-serif; }
+  #stage { position: relative; width: 1080px; height: 1350px; overflow: hidden; background: radial-gradient(ellipse 70% 45% at 20% -5%, rgba(255,229,0,0.10), transparent 70%), #0a0a0a; }
+  svg.lu { display: inline-block; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ---------- browser window: the partner dashboard (planeraai-web/src/app/partners/products) ---------- */
+  #cam { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
+  #win { position: relative; width: 960px; border-radius: 18px; overflow: hidden; background: #0a0a0a; box-shadow: 0 40px 120px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.08); }
+  #chrome { height: 46px; background: #17191e; display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+  #chrome i { width: 12px; height: 12px; border-radius: 6px; display: block; }
+  #url { margin-left: 18px; flex: 1; height: 28px; border-radius: 8px; background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.6); font-size: 13px; display: flex; align-items: center; gap: 8px; padding: 0 12px; }
+  #vp { position: relative; width: 960px; height: 1560px; overflow: hidden; }
+  #spot { position: absolute; left: 0; top: 0; border-radius: 16px; box-shadow: 0 0 0 4000px rgba(4,5,8,0.62), 0 0 0 2px rgba(255,229,0,0.6); z-index: 40; pointer-events: none; }
+  .flash { box-shadow: 0 0 0 2px rgba(255,229,0,0.8), 0 0 22px rgba(255,229,0,0.25) !important; }
+  .inp { margin-top: 4px; width: 100%; border-radius: 8px; border: 1px solid #404040; background: #0a0a0a; padding: 8px 12px; font-size: 14px; color: #fff; min-height: 38px; }
+  .inp .ph { color: #525252; }
+  .caret { display: inline-block; width: 2px; height: 16px; background: #FFE500; vertical-align: -3px; margin-left: 1px; }
+  #picker { position: absolute; inset: 0; z-index: 30; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; padding: 16px; }
+
+  /* ---------- the traveller's phone (components/PartnerToursRow.tsx), authored in points ---------- */
+  .phone { position: absolute; width: 560px; height: 1176px; border-radius: 82px; background: #0B0B0F; padding: 16px; box-shadow: 0 50px 120px rgba(0,0,0,0.6), inset 0 0 0 2px #2A2A33; z-index: 30; will-change: transform; }
+  .scr { position: relative; width: 528px; height: 1144px; border-radius: 68px; overflow: hidden; background: #FAF9F6; }
+  .island { position: absolute; top: 14px; left: 50%; width: 150px; height: 42px; margin-left: -75px; border-radius: 21px; background: #000; z-index: 50; }
+  .app { position: absolute; left: 0; top: 0; width: 400px; height: 867px; transform: scale(1.32); transform-origin: 0 0; color: #1A1A1A; overflow: hidden; }
+  .app .sb { position: absolute; left: 0; right: 0; top: 0; height: 50px; display: flex; align-items: center; justify-content: space-between; padding: 8px 32px 0 36px; font-weight: 600; font-size: 15px; z-index: 30; background: rgba(250,249,246,0.96); }
+  .app .scroll { position: absolute; left: 0; right: 0; top: 0; will-change: transform; }
+  .app .sec { margin-bottom: 24px; }
+  .app .hd { padding: 0 20px; margin-bottom: 14px; }
+  .app .hd b { display: block; font-size: 20px; font-weight: 800; letter-spacing: -0.01em; }
+  .app .hd span { display: block; font-size: 13px; font-weight: 600; color: #9B9B9B; margin-top: 2px; }
+  .app .row { display: flex; gap: 16px; padding: 0 20px; will-change: transform; }
+  .app .card { position: relative; flex: none; width: 260px; height: 300px; border-radius: 24px; overflow: hidden; background: #2C2C2E; }
+  .app .card img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .app .card .g { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.25) 45%, rgba(0,0,0,0.85) 100%); }
+  .app .pill { position: absolute; top: 14px; left: 14px; display: flex; align-items: center; gap: 5px; background: rgba(255,255,255,0.92); padding: 5px 10px; border-radius: 999px; font-size: 12px; font-weight: 800; }
+  .app .body { position: absolute; left: 16px; right: 16px; bottom: 16px; }
+  .app .ag { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; font-size: 13px; font-weight: 800; color: #FFE500; letter-spacing: 0.2px; }
+  .app .ct { font-size: 19px; font-weight: 800; color: #fff; letter-spacing: -0.3px; line-height: 24px; }
+  .app .cf { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; gap: 10px; }
+  .app .pl { display: flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.85); }
+  .app .pr { display: flex; align-items: baseline; gap: 4px; background: #FFE500; padding: 6px 12px; border-radius: 999px; }
+  .app .pr small { font-size: 11px; font-weight: 600; color: rgba(0,0,0,0.65); }
+  .app .pr b { font-size: 16px; font-weight: 800; color: #000; }
+  .app .radar { margin: 0 20px 26px; border: 2px solid #FFE500; border-radius: 22px; background: #fff; height: 120px; padding: 16px; }
+  .app .tbar { position: absolute; left: 14px; right: 14px; bottom: 26px; height: 64px; border-radius: 32px; background: #2C2C2E; display: flex; align-items: center; justify-content: space-around; z-index: 30; }
+  .app .tbar .plus { width: 62px; height: 62px; border-radius: 31px; background: #FFE500; border: 4px solid #1A1A1A; display: flex; align-items: center; justify-content: center; margin-top: -14px; box-shadow: 0 0 0 8px rgba(255,229,0,0.18); }
+  .app .tbar .home { width: 58px; height: 44px; border-radius: 16px; background: rgba(255,229,0,0.15); display: flex; align-items: center; justify-content: center; }
+  .app .bd { position: absolute; inset: 0; background: rgba(0,0,0,0.45); z-index: 40; }
+  .app .sheet { position: absolute; left: 0; right: 0; bottom: 0; background: #fff; border-radius: 28px 28px 0 0; overflow: hidden; z-index: 41; padding-bottom: 34px; will-change: transform; }
+  .app .sheet .im { position: relative; height: 200px; background: #2C2C2E; }
+  .app .sheet .im img { width: 100%; height: 100%; object-fit: cover; }
+  .app .sheet .x { position: absolute; top: 14px; right: 14px; width: 34px; height: 34px; border-radius: 17px; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; }
+  .app .sheet .c { padding: 20px; }
+  .app .sheet .sa { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 800; color: #6B6B6B; }
+  .app .sheet h3 { font-size: 22px; font-weight: 800; letter-spacing: -0.4px; margin-top: 2px; }
+  .app .sheet .meta { display: flex; align-items: center; justify-content: space-between; margin-top: 10px; }
+  .app .sheet .meta span { display: flex; align-items: center; gap: 4px; font-size: 14px; font-weight: 600; color: #9B9B9B; }
+  .app .sheet .meta b { font-size: 18px; font-weight: 800; }
+  .app .sheet p { font-size: 15px; line-height: 22px; color: #6B6B6B; margin-top: 14px; }
+  .app .cta { margin: 4px 20px 0; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 15px 0; border-radius: 16px; background: #FFE500; font-size: 16px; font-weight: 800; color: #000; will-change: transform; }
+  .app .disc { font-size: 12px; text-align: center; margin-top: 10px; color: #9B9B9B; padding: 0 20px; }
+  /* the OTA's own site, after the tap */
+  .app .site { position: absolute; inset: 0; background: #fff; z-index: 45; }
+  .app .site .hero { height: 260px; position: relative; }
+  .app .site .hero img { width: 100%; height: 100%; object-fit: cover; }
+  .app .site .bar { position: absolute; left: 12px; right: 12px; bottom: 30px; height: 46px; border-radius: 23px; background: rgba(240,240,242,0.96); box-shadow: 0 6px 20px rgba(0,0,0,0.12); display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 15px; color: #1A1A1A; z-index: 3; }
+  .sk { background: #ECEAE4; border-radius: 8px; }
+
+  /* captions (LinkedIn autoplays muted) */
+  .cap { position: absolute; left: 0; right: 0; display: flex; justify-content: center; z-index: 80; pointer-events: none; }
+  .cap span { display: inline-block; max-width: 980px; background: rgba(10,10,10,0.92); color: #fff; border: 1px solid rgba(255,255,255,0.12); border-radius: 26px; padding: 22px 34px 24px; font-weight: 800; font-size: 50px; letter-spacing: -0.025em; line-height: 1.12; text-align: center; box-shadow: 0 18px 50px rgba(0,0,0,0.45); will-change: transform; }
+  .cap b { color: #FFE500; font-weight: 800; }
+  #ptr { position: absolute; left: 0; top: 0; z-index: 60; pointer-events: none; filter: drop-shadow(0 3px 6px rgba(0,0,0,0.5)); }
+  #tap { position: absolute; width: 84px; height: 84px; margin: -42px 0 0 -42px; border-radius: 42px; background: rgba(30,30,30,0.25); border: 4px solid rgba(255,255,255,0.9); z-index: 61; }
+
+  /* end card */
+  #end { position: absolute; inset: 0; z-index: 90; display: flex; flex-direction: column; align-items: center; justify-content: center; background: radial-gradient(ellipse 70% 45% at 50% 0%, rgba(255,229,0,0.12), transparent 70%), #0a0a0a; }
+  #endLogo { position: relative; width: 760px; height: 210px; }
+  #mark { position: absolute; left: 0; top: 0; width: 140px; height: 210px; transform-origin: 50% 60%; z-index: 2; }
+  #wmMask { position: absolute; left: 151px; top: 0; width: 609px; height: 210px; overflow: hidden; }
+  #wm { width: 609px; height: 210px; display: block; }
+  #endEyebrow { margin-top: 26px; font-weight: 800; font-size: 30px; letter-spacing: 0.24em; color: #FFE500; }
+  #endLine1 { margin-top: 30px; font-weight: 800; font-size: 64px; letter-spacing: -0.035em; color: #fff; text-align: center; line-height: 1.08; }
+  #endLine2 { margin-top: 22px; font-weight: 600; font-size: 36px; color: rgba(255,255,255,0.6); text-align: center; line-height: 1.35; }
+  #endUrl { margin-top: 60px; background: #FFE500; color: #0a0a0a; border-radius: 999px; padding: 22px 44px; font-weight: 800; font-size: 44px; box-shadow: 0 14px 40px rgba(255,229,0,0.25); }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="cam">
+    <div id="win">
+      <div id="chrome"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i><div id="url"><span id="lockI"></span>planeraai.app/partners/products</div></div>
+      <div id="vp"><div id="dash"></div></div>
+      <div id="spot"></div>
+    </div>
+  </div>
+  <div class="phone" id="phone"><div class="scr"><div class="island"></div><div class="app" id="app"></div></div></div>
+  <div id="ptr"><svg width="34" height="40" viewBox="0 0 17 20"><path d="M1.5 1.2v15.6l4.1-3.7 2.6 5.7 2.6-1.2-2.6-5.5 5.6-.4z" fill="#fff" stroke="#0a0a0a" stroke-width="1.2" stroke-linejoin="round"/></svg></div>
+  <div id="tap"></div>
+  <div class="cap" id="cap"><span id="capText"></span></div>
+  <div id="end">
+    <div id="endLogo"><img id="mark" src="assets/mark.png" alt=""><div id="wmMask"><img id="wm" src="assets/wordmark.png" alt=""></div></div>
+    <div id="endEyebrow">ΓΙΑ ΤΑΞΙΔΙΩΤΙΚΑ ΓΡΑΦΕΙΑ & OTA</div>
+    <div id="endLine1">Γίνετε ιδρυτικός<br>συνεργάτης.</div>
+    <div id="endLine2">Τα πακέτα σας, μπροστά σε ταξιδιώτες<br>που σχεδιάζουν το επόμενο ταξίδι τους.</div>
+    <div id="endUrl">planeraai.app/partners</div>
+  </div>
+</div>
+
+<script src="assets/icons.js"></script>
+<script src="timemap.js"></script>
+<script>
+const DURATION = 29.5;
+const FPS = 30;
+const $ = (id) => document.getElementById(id);
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const lerp = (a, b, p) => a + (b - a) * p;
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const outCubic = (p) => 1 - Math.pow(1 - p, 3);
+const inCubic = (p) => p * p * p;
+const inOutCubic = (p) => p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+const outBack = (p, s = 1.7) => 1 + (s + 1) * Math.pow(p - 1, 3) + s * Math.pow(p - 1, 2);
+function show(el, v) { el.style.opacity = v; el.style.visibility = v <= 0.001 ? "hidden" : "visible"; }
+const ic = (name, size = 16, cls = "") => `<svg class="lu ${cls}" width="${size}" height="${size}" viewBox="0 0 24 24">${LUCIDE[name]}</svg>`;
+$("lockI").innerHTML = ic("lock", 13);
+// Ionicons-style glyphs for the mobile app
+const io = {
+  storefront: (c, s = 13) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24"><path d="M3 9l1.5-5h15L21 9a3 3 0 0 1-6 0 3 3 0 0 1-6 0 3 3 0 0 1-6 0zM5 12v8h5v-5h4v5h5v-8" fill="none" stroke="${c}" stroke-width="2.2" stroke-linejoin="round"/></svg>`,
+  location: (c, s = 13) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24"><path d="M12 22s-7-6.5-7-12a7 7 0 0 1 14 0c0 5.5-7 12-7 12z" fill="${c}"/><circle cx="12" cy="10" r="2.6" fill="#fff" fill-opacity=".85"/></svg>`,
+  bus: (s = 12) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="15" rx="3" fill="#1A1A1A"/><rect x="6" y="6" width="12" height="6" rx="1" fill="#fff"/><circle cx="8" cy="15" r="1.3" fill="#fff"/><circle cx="16" cy="15" r="1.3" fill="#fff"/><path d="M7 18v3M17 18v3" stroke="#1A1A1A" stroke-width="2.4" stroke-linecap="round"/></svg>`,
+  open: (s = 18) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" fill="none" stroke="#000" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  close: (s = 20) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/></svg>`,
+  home: `<svg width="30" height="30" viewBox="0 0 24 24"><path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" fill="#FFE500"/></svg>`,
+  map: `<svg width="28" height="28" viewBox="0 0 24 24"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2zM9 4v14M15 6v14" fill="none" stroke="#8E8E93" stroke-width="1.8" stroke-linejoin="round"/></svg>`,
+  globe: `<svg width="28" height="28" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="#8E8E93" stroke-width="1.8"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18" fill="none" stroke="#8E8E93" stroke-width="1.6"/></svg>`,
+  person: `<svg width="28" height="28" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" fill="none" stroke="#8E8E93" stroke-width="1.8"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6" fill="none" stroke="#8E8E93" stroke-width="1.8" stroke-linecap="round"/></svg>`,
+  plus: `<svg width="26" height="26" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="#1A1A1A" stroke-width="2.6" stroke-linecap="round"/></svg>`,
+};
+
+/* ===================== the partner dashboard ===================== */
+const AGENCY = "Your Agency";
+const NEW = { title: "Μετέωρα & Ζαγοροχώρια · 3 ημέρες", desc: "Μονές των Μετεώρων, πέτρινα γεφύρια και φαράγγι του Βίκου. Με ξενοδοχείο και πρωινό.", dest: "Μετέωρα, Ελλάδα", price: "189", url: "https://youragency.gr/meteora" };
+const GREEK = ["ATH", "SKG", "HER", "RHO", "CFU", "JTR", "JMK", "CHQ", "KGS", "ZTH", "JSI", "EFL"];
+const label = (txt, inner, extra = "") => `<label class="block text-xs font-medium text-neutral-400 ${extra}">${txt}${inner}</label>`;
+$("dash").innerHTML = `
+<div class="min-h-screen bg-neutral-950 text-white" style="min-height:1560px">
+  <div class="mx-auto max-w-3xl px-5 py-8">
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-3"><img src="assets/logo.png" alt="" style="height:24px;width:auto"><div><div class="text-sm font-semibold leading-tight">${AGENCY}</div><div class="text-xs text-neutral-500">Προϊόντα συνεργάτη</div></div></div>
+      <span class="inline-flex items-center gap-1.5 rounded-lg border border-neutral-800 px-3 py-1.5 text-sm text-neutral-300">${ic("log-out", 16)} Αποσύνδεση</span>
+    </div>
+    <section class="mt-8" id="overview" style="display:none">
+      <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-neutral-400">Επισκόπηση</h2>
+      <div class="grid grid-cols-4 gap-3">
+        ${[["Σύνολο", "boxes", "text-[#FFE500]", "1"], ["Εγκεκριμένα", "circle-check", "text-emerald-400", "1"], ["Σε εκκρεμότητα", "clock", "text-amber-400", "0"], ["Απορριφθέντα", "circle-x", "text-red-400", "0"]].map(([l, i, c, v]) => `<div class="rounded-2xl border border-neutral-800 bg-neutral-900 p-4"><div class="flex items-center justify-between"><span class="text-xs text-neutral-500">${l}</span>${ic(i, 16, c)}</div><div class="mt-1.5 text-2xl font-bold">${v}</div></div>`).join("")}
+      </div>
+      <div class="mt-3 grid grid-cols-3 gap-3" id="reach">
+        ${[["Άτομα που το είδαν", "users", "rPeople"], ["Πατήματα", "mouse-pointer-click", "rTaps"], ["Επισκέψεις στον ιστότοπό σας", "external-link", "rSite"]].map(([l, i, id]) => `<div class="rounded-2xl border border-neutral-800 bg-neutral-900 p-4"><div class="flex items-center justify-between gap-2"><span class="text-xs text-neutral-500">${l}</span>${ic(i, 16, "shrink-0 text-[#FFE500]")}</div><div class="mt-1.5 text-2xl font-bold tabular-nums" id="${id}">0</div></div>`).join("")}
+      </div>
+      <p class="mt-1.5 text-[11px] text-neutral-500">Υπολογίζεται από τα πατήματα στις καταχωρίσεις σας στην εφαρμογή και τον ιστότοπο της Planera.</p>
+    </section>
+    <div class="mt-8 flex flex-wrap items-center justify-between gap-3">
+      <h1 class="text-xl font-bold">Τα προϊόντα σας</h1>
+      <div class="flex flex-wrap gap-2" id="topBtns">
+        <span id="csvBtn" class="inline-flex items-center gap-1.5 rounded-lg border border-neutral-700 px-3.5 py-2 text-sm font-medium text-neutral-200">${ic("upload", 16)} Εισαγωγή CSV</span>
+        <span id="addBtn" class="inline-flex items-center gap-1.5 rounded-lg bg-[#FFE500] px-3.5 py-2 text-sm font-semibold text-neutral-950">${ic("plus", 16)} Προσθήκη προϊόντος</span>
+      </div>
+    </div>
+    <p class="mt-1 text-sm text-neutral-500">Οι νέες και επεξεργασμένες καταχωρίσεις ελέγχονται από την ομάδα μας πριν δημοσιευτούν.</p>
+
+    <div id="form" class="mt-5 rounded-2xl border border-neutral-800 bg-neutral-900 p-5" style="display:none">
+      <h2 class="text-base font-semibold">Νέο προϊόν</h2>
+      <div class="mt-4 grid grid-cols-2 gap-4">
+        ${label("Τύπος", `<div class="inp flex items-center justify-between"><span>Εκδρομή</span><span class="text-neutral-500">▾</span></div><span class="mt-1 block text-[11px] font-normal text-neutral-500">Οι πτήσεις προστίθενται μόνο μέσω Εισαγωγής / API.</span>`)}
+        ${label("Τίτλος", `<div class="inp" id="fTitle"><span class="ph">3ήμερη ξενάγηση στην Αθήνα</span></div>`)}
+        ${label("Περιγραφή", `<div class="inp" id="fDesc" style="min-height:70px"><span class="ph">Τι περιλαμβάνεται, σημεία ενδιαφέροντος, όροι…</span></div>`, "col-span-2")}
+        ${label("Προορισμός", `<div class="inp" id="fDest"><span class="ph">Αθήνα, Ελλάδα</span></div>`)}
+        <div class="grid grid-cols-2 gap-3">${label("Τιμή", `<div class="inp" id="fPrice"><span class="ph">120</span></div>`)}${label("Νόμισμα", `<div class="inp">EUR</div>`)}</div>
+        ${label("URL κράτησης", `<div class="inp" id="fUrl"><span class="ph">https://…</span></div>`, "col-span-2")}
+        <div class="col-span-2" id="imgBlock">
+          <div class="text-xs font-medium text-neutral-400">Εικόνα εξωφύλλου</div>
+          <p class="mt-0.5 text-[11px] text-neutral-500">Κάθε καταχώριση χρειάζεται φωτογραφία εξωφύλλου. Επιλέξτε μια δωρεάν από το Unsplash ή επικολλήστε δικούς σας συνδέσμους εικόνων.</p>
+          <div class="mt-2 flex items-center gap-3">
+            <div class="relative overflow-hidden rounded-lg border border-neutral-800 bg-neutral-950" style="width:192px;aspect-ratio:16/10">
+              <div id="noImg" class="absolute inset-0 flex flex-col items-center justify-center gap-1 text-xs text-neutral-500">${ic("images", 20)} Χωρίς εικόνα</div>
+              <img id="coverImg" src="assets/photos/meteora.jpg" class="absolute inset-0 h-full w-full object-cover" style="display:none" alt="">
+            </div>
+            <div class="min-w-0"><span id="unsBtn" class="inline-flex items-center gap-1.5 rounded-lg border border-neutral-700 px-3.5 py-2 text-sm font-medium text-neutral-200">${ic("images", 16, "text-[#FFE500]")} Αναζήτηση στο Unsplash</span>
+              <p id="credit" class="mt-2 text-[11px] text-neutral-500" style="visibility:hidden">Φωτογραφία από ricardo frantz · Unsplash</p></div>
+          </div>
+        </div>
+        <div class="col-span-2" id="marketsBlock">
+          <div class="text-xs font-medium text-neutral-400">Αγορές (αεροδρόμια αναχώρησης)</div>
+          <p class="mt-0.5 text-[11px] text-neutral-500">Ποιοι ταξιδιώτες πρέπει να το βλέπουν; Προσθέστε κωδικούς αεροδρομίων όπως ATH ή επιλέξτε «Όλοι». Η Planera μπορεί να το προσαρμόσει κατά τον έλεγχο.</p>
+          <div class="mt-2 flex flex-wrap items-center gap-1.5" id="mkts">
+            <span id="mktChips" class="contents"></span>
+            <span class="w-28 rounded-full border border-neutral-700 bg-neutral-950 px-3 py-1 text-xs text-neutral-600">ATH, SKG…</span>
+            <span class="rounded-full border border-neutral-700 px-2.5 py-1 text-xs text-neutral-300 opacity-40">Προσθήκη</span>
+            <span id="allGr" class="rounded-full border border-neutral-700 px-2.5 py-1 text-xs text-neutral-300">+ Όλη η Ελλάδα</span>
+            <span class="rounded-full border border-neutral-700 px-2.5 py-1 text-xs text-neutral-300">Όλοι</span>
+          </div>
+        </div>
+      </div>
+      <div class="mt-4 flex gap-3"><span class="rounded-lg border border-neutral-800 px-4 py-2 text-sm text-neutral-300">Άκυρο</span><span id="submitBtn" class="rounded-lg bg-[#FFE500] px-4 py-2 text-sm font-semibold text-neutral-950">Υποβολή για έλεγχο</span></div>
+    </div>
+
+    <div id="empty" class="mt-8 rounded-2xl border border-dashed border-neutral-800 p-10 text-center">${ic("package-open", 32, "mx-auto text-neutral-600")}<p class="mt-3 text-sm text-neutral-400">Δεν υπάρχουν ακόμη προϊόντα. Προσθέστε την πρώτη σας καταχώριση για να ξεκινήσετε.</p></div>
+
+    <div id="list" class="mt-5 space-y-3" style="display:none">
+      <div class="rounded-2xl border border-neutral-800 bg-neutral-900 p-4" id="prodCard">
+        <div class="flex items-start justify-between gap-3">
+          <div class="relative shrink-0 overflow-hidden rounded-lg border border-neutral-800 bg-neutral-950" style="width:112px;aspect-ratio:16/10"><img src="assets/photos/meteora.jpg" class="absolute inset-0 h-full w-full object-cover" alt=""></div>
+          <div class="min-w-0 flex-1">
+            <div class="flex items-center gap-2"><span id="statusBadge" class="rounded border px-1.5 py-0.5 text-[10px] font-medium"></span><span class="text-[11px] uppercase tracking-wide text-neutral-500">Εκδρομή</span></div>
+            <h3 class="mt-1.5 truncate text-sm font-semibold">${NEW.title}</h3>
+            <p class="mt-0.5 text-xs text-neutral-500">${NEW.dest} · EUR ${NEW.price}</p>
+            <div class="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">${ic("globe", 12, "text-neutral-500")}<span class="text-neutral-500">Εμφανίζεται σε:</span>${GREEK.map((m) => `<span class="rounded-full bg-[#FFE500]/10 px-2 py-0.5 font-mono font-bold text-[#FFE500]">${m}</span>`).join("")}</div>
+            <p id="prodStats" class="mt-1.5 flex items-center gap-1.5 text-[11px] text-neutral-400" style="display:none">${ic("mouse-pointer-click", 12, "text-neutral-500")}<span id="prodStatsText">Κανένα πάτημα ακόμη</span></p>
+          </div>
+          <div class="flex shrink-0 gap-1.5"><span class="inline-flex items-center gap-1 rounded-lg border border-neutral-800 px-2.5 py-1.5 text-xs text-neutral-300">${ic("pencil", 14)} Επεξεργασία</span><span class="inline-flex items-center gap-1 rounded-lg border border-neutral-800 px-2.5 py-1.5 text-xs text-neutral-400">${ic("archive", 14)}</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mt-10 border-t border-neutral-800 pt-6"><span id="apiBtn" class="flex items-center gap-2 text-sm font-semibold text-neutral-300">${ic("key-round", 16, "text-[#FFE500]")} Πρόσβαση API</span></div>
+  </div>
+
+  <div id="picker" style="display:none">
+    <div class="w-full rounded-2xl border border-neutral-800 bg-neutral-900 text-white" style="max-width:860px">
+      <div class="flex items-start justify-between gap-3 border-b border-neutral-800 px-5 py-4"><div class="min-w-0"><h2 class="flex items-center gap-2 font-semibold">${ic("images", 16, "text-[#FFE500]")} Επιλέξτε φωτογραφία από το Unsplash</h2><p class="mt-1 truncate text-xs text-white/40">${NEW.title}</p></div>${ic("x", 20, "text-white/40")}</div>
+      <div class="flex gap-2 px-5 pt-4"><div class="relative flex-1"><span class="absolute left-3 top-1/2 -translate-y-1/2 text-white/30">${ic("search", 16)}</span><div class="w-full rounded-lg border border-neutral-800 bg-neutral-950 py-2 pl-9 pr-3 text-sm">Μετέωρα, Ελλάδα</div></div><span class="shrink-0 rounded-lg bg-[#FFE500] px-4 py-2 text-sm font-semibold text-neutral-950">Αναζήτηση</span></div>
+      <div class="grid grid-cols-3 gap-3 px-5 py-4" id="grid">
+        ${[["meteora", "50% 40%", "ricardo frantz"], ["meteora", "80% 20%", "ricardo frantz"], ["meteora", "20% 80%", "ricardo frantz"], ["meteora", "60% 90%", "ricardo frantz"], ["meteora", "10% 30%", "ricardo frantz"], ["meteora", "90% 60%", "ricardo frantz"]].map(([f, pos, ph], i) => `<div class="pk relative overflow-hidden rounded-lg border-2 ${i === 0 ? "" : "border-transparent"}" style="aspect-ratio:4/3;border-color:transparent"><img src="assets/photos/${f}.jpg" class="absolute inset-0 h-full w-full object-cover" style="object-position:${pos};transform:scale(${[1, 1.9, 1.5, 2.4, 1.25, 2.0][i]}) scaleX(${i % 2 ? -1 : 1});filter:${["none", "saturate(1.15) brightness(1.05)", "hue-rotate(-8deg) saturate(.9)", "brightness(.92) contrast(1.08)", "saturate(1.25)", "sepia(.18) brightness(1.04)"][i]}" alt=""><span class="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/80 to-transparent px-2 py-1 text-[10px] text-white/80">${ph}</span>${i === 0 ? `<span class="pkCheck absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-[#FFE500] text-neutral-950" style="display:none">${ic("check", 16)}</span>` : ""}</div>`).join("")}
+      </div>
+      <div class="flex items-center justify-between gap-3 border-t border-neutral-800 px-5 py-3"><p class="truncate text-[11px] text-white/40" id="pkCredit">Φωτογραφίες από το Unsplash — ο φωτογράφος αναφέρεται στην κάρτα.</p><div class="flex shrink-0 gap-2"><span class="rounded-lg border border-neutral-800 px-4 py-2 text-sm font-semibold text-white/70">Άκυρο</span><span id="useBtn" class="rounded-lg bg-[#FFE500] px-4 py-2 text-sm font-semibold text-neutral-950">Χρήση αυτής της φωτογραφίας</span></div></div>
+    </div>
+  </div>
+</div>`;
+
+/* ===================== the traveller's app home ===================== */
+const CARDS = [
+  { id: "meteora", img: "meteora.jpg", pos: "50% 45%", title: NEW.title, place: "Μετέωρα", price: "189 €", isNew: true },
+  { id: "nafplio", img: "nafplio.jpg", pos: "50% 50%", title: "Ναύπλιο & Μυκήνες · μονοήμερη", place: "Ναύπλιο", price: "49 €" },
+  { id: "santorini", img: "santorini.jpg", pos: "60% 50%", title: "Σαντορίνη · 4 ημέρες με πλοίο", place: "Σαντορίνη", price: "329 €" },
+];
+const cardHTML = (c) => `<div class="card" id="card-${c.id}"><img src="assets/photos/${c.img}" style="object-position:${c.pos}" alt=""><div class="g"></div>
+  <div class="pill">${io.bus()}Εκδρομή</div>
+  <div class="body"><div class="ag">${io.storefront("#FFE500")}<span class="agName">${AGENCY}</span></div><div class="ct">${c.title}</div>
+  <div class="cf"><span class="pl">${io.location("rgba(255,255,255,0.8)")}${c.place}</span><span class="pr"><small>από</small><b>${c.price}</b></span></div></div></div>`;
+$("app").innerHTML = `
+  <div class="sb"><span>9:41</span><span style="font-size:13px">●●● ᯤ ▮</span></div>
+  <div class="scroll" id="hs">
+    <div style="height:64px"></div>
+    <div class="hd"><b style="display:flex;align-items:center;gap:8px">Ραντάρ Χαμηλών Ναύλων <span style="display:inline-flex;font-size:11px;font-weight:800;color:#22A861;background:rgba(34,168,97,0.12);padding:2px 8px;border-radius:999px;letter-spacing:.08em;margin:0">● LIVE</span></b></div>
+    <div class="radar"><div class="sk" style="width:120px;height:14px"></div><div class="sk" style="width:220px;height:22px;margin-top:12px"></div><div class="sk" style="width:160px;height:14px;margin-top:12px"></div></div>
+    <div class="sec" id="partnerSec">
+      <div class="hd"><b>Εκδρομές από τοπικούς συνεργάτες</b><span>Επιλεγμένα ταξίδια από ταξιδιωτικά γραφεία</span></div>
+      <div class="row" id="row">${CARDS.map(cardHTML).join("")}</div>
+    </div>
+    <div class="sec"><div class="hd"><b>Δημοφιλή Τώρα</b></div>
+      <div class="row"><div class="card" style="width:300px;height:200px"><img src="assets/photos/lisbon-tram.jpg" alt=""><div class="g"></div><div class="body"><div class="ct">Λισαβόνα</div></div></div><div class="card" style="width:300px;height:200px;background:linear-gradient(135deg,#FFE500,#F5A623 55%,#2C2C2E)"></div></div></div>
+    <div style="height:200px"></div>
+  </div>
+  <div class="tbar"><span class="home">${io.home}</span>${io.map}<span class="plus">${io.plus}</span>${io.globe}${io.person}</div>
+  <div class="bd" id="bd" style="display:none"></div>
+  <div class="sheet" id="sheet" style="display:none">
+    <div class="im"><img src="assets/photos/meteora.jpg" alt=""><span class="x">${io.close()}</span></div>
+    <div class="c"><div class="sa">${io.storefront("#6B6B6B", 14)}${AGENCY}</div><h3>${NEW.title}</h3>
+      <div class="meta"><span>${io.location("#9B9B9B", 14)}Μετέωρα</span><b>από 189 €</b></div>
+      <p>${NEW.desc}</p></div>
+    <div class="cta" id="cta">Δες το στο ${AGENCY}${io.open()}</div>
+    <div class="disc">Η προσφορά και η κράτηση γίνονται απευθείας με ${AGENCY}.</div>
+  </div>
+  <div class="site" id="site" style="display:none">
+    <div class="hero"><img src="assets/photos/meteora.jpg" alt=""></div>
+    <div style="padding:22px 22px 0"><div style="font-size:12px;font-weight:800;letter-spacing:.14em;color:#6B6B6B">YOUR AGENCY</div>
+      <div style="font-size:24px;font-weight:800;letter-spacing:-.02em;margin-top:6px;line-height:1.15">${NEW.title}</div>
+      <div class="sk" style="width:90%;height:12px;margin-top:16px"></div><div class="sk" style="width:76%;height:12px;margin-top:9px"></div><div class="sk" style="width:84%;height:12px;margin-top:9px"></div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-top:22px"><div style="font-size:22px;font-weight:800">189 €</div><div style="background:#1A1A1A;color:#fff;font-weight:800;font-size:15px;padding:13px 22px;border-radius:12px">Κράτηση</div></div></div>
+    <div class="bar">🔒 youragency.gr</div>
+  </div>`;
+
+/* ===================== beats ===================== */
+const B = {
+  phoneIn: 0.15, homeScroll: [1.0, 2.0], hl: 2.6, toDash: [4.3, 4.85],
+  tapAdd: 5.25, typeTitle: [5.6, 6.35], typeDesc: [6.4, 7.0], typeDest: [7.05, 7.35], typePrice: [7.4, 7.55], typeUrl: [7.6, 7.95],
+  tapUns: 8.25, pickerIn: 8.35, tapPhoto: 8.85, tapUse: 9.25, tapAllGr: 9.85, tapSubmit: 10.55,
+  csvSpot: [10.95, 12.3], approve: 12.75, toPhone: [13.85, 14.35], rowSlide: [14.5, 15.05], tapCard: 15.75,
+  sheetIn: [15.85, 16.3], tapCta: 18.5, siteIn: [18.65, 19.05], toDash2: [21.25, 21.75], stats: [22.0, 23.6],
+  end: [24.75, 25.2], logo: 25.2, slide: 25.85, line1: 26.2, line2: 26.55, url: 26.9,
+};
+window.BEATS = B;
+const CAPS = [
+  [0.55, 2.45, "Οι ταξιδιώτες σχεδιάζουν ήδη<br>τα ταξίδια τους στο Planera.", 1110],
+  [2.6, 4.35, "Αυτό θα μπορούσε να είναι<br><b>το δικό σας πακέτο.</b>", 1110],
+  [4.95, 8.15, "Καταχωρίστε τα πακέτα σας<br><b>σε λίγα λεπτά.</b>", 1110],
+  [9.55, 10.75, "Εσείς διαλέγετε<br><b>ποιοι ταξιδιώτες τα βλέπουν.</b>", 1110],
+  [10.95, 12.35, "Όλος ο κατάλογος;<br><b>Με CSV ή API.</b>", 1110],
+  [12.6, 13.8, "Τα ελέγχουμε και <b>μπαίνουν live.</b>", 1150],
+  [14.45, 17.9, "Εμφανίζονται στην αρχική<br><b>της εφαρμογής Planera.</b>", 1110],
+  [18.0, 21.15, "Η κράτηση γίνεται<br><b>απευθείας σε εσάς.</b>", 1110],
+  [21.9, 24.6, "Βλέπετε <b>πόσοι ενδιαφέρθηκαν</b><br>και πόσοι ήρθαν στο site σας.", 1110],
+];
+
+/* camera over the dashboard: whole elements, scale capped to fit, slow drift on holds */
+function centre(el) { let x = el.offsetWidth / 2, y = el.offsetHeight / 2, n = el; while (n && n.id !== "win") { x += n.offsetLeft; y += n.offsetTop; n = n.offsetParent; } return [x, y]; }
+const page = () => $("dash").firstElementChild.firstElementChild; // the max-w-3xl column
+const fitW = (el, want) => Math.min(want, 1000 / el.offsetWidth);
+const at = (get, want = 1.12, dy = 0, wide = true) => () => { const el = get(); const [x, y] = centre(el); const sc = wide ? fitW(page(), want) : fitW(el, want); return [wide ? centre(page())[0] : x, y + dy, sc]; };
+const CAM = [
+  [4.3, at(() => $("topBtns"), 1.05, 260), 1], [5.0, at(() => $("topBtns"), 1.25, 150), 1],
+  [5.45, at(() => $("form"), 1.25, -240), 1], [7.0, at(() => $("form"), 1.25, -160), 1.02],
+  [7.7, at(() => $("imgBlock"), 1.25, 20), 1], [8.3, at(() => $("imgBlock"), 1.25, 20), 1],
+  [8.4, () => [480, 560, 1.12], 1], [9.2, () => [480, 560, 1.12], 1.02],
+  [9.5, at(() => $("marketsBlock"), 1.25, 0), 1], [10.4, at(() => $("marketsBlock"), 1.25, 30), 1.02],
+  [10.9, at(() => $("topBtns"), 1.25, 120), 1], [12.4, at(() => $("topBtns"), 1.25, 120), 1.03],
+  [12.6, at(() => $("prodCard"), 1.4, 0, false), 1], [13.8, at(() => $("prodCard"), 1.4, 0, false), 1.04],
+  [21.3, at(() => $("overview"), 1.12, 40), 1], [24.6, at(() => $("overview"), 1.12, 40), 1.04],
+];
+function camAt(t) {
+  const ev = (k) => { const [x, y, s] = CAM[k][1](); return [x, y, s * CAM[k][2]]; };
+  if (t <= CAM[0][0]) return ev(0);
+  for (let i = 0; i < CAM.length - 1; i++) {
+    const t0 = CAM[i][0], t1 = CAM[i + 1][0];
+    if (t >= t0 && t <= t1) { const a = ev(i), b = ev(i + 1), hold = CAM[i][1] === CAM[i + 1][1]; const p = hold ? prog(t, t0, t1) : inOutCubic(prog(t, t0, t1)); return a.map((v, k) => lerp(v, b[k], p)); }
+  }
+  return ev(CAM.length - 1);
+}
+const SPOTS = [
+  [7.75, 8.3, () => $("imgBlock"), 10], [9.55, 10.45, () => $("marketsBlock"), 10],
+  [10.95, 12.3, () => $("topBtns"), 8], [10.95, 12.3, () => $("apiBtn"), 8], [12.7, 13.8, () => $("prodCard"), 6], [22.0, 24.6, () => $("reach"), 8],
+];
+function spotAt(t) {
+  for (const [a, b, get, pad] of SPOTS) if (t > a - 0.05 && t < b + 0.3) {
+    const el = get(); if (!el || !el.offsetWidth) continue;
+    const [x, y] = centre(el), w = el.offsetWidth + pad * 2, h = el.offsetHeight + pad * 2;
+    return { x: x - w / 2, y: y - h / 2, w, h, o: clamp(prog(t, a, a + 0.3)) * (1 - clamp(prog(t, b, b + 0.3))) };
+  }
+  return null;
+}
+const typed = (el, text, a, b, ph) => { const n = Math.round(prog(window.__t, a, b) * text.length); el.innerHTML = n ? `${text.slice(0, n)}${window.__t < b + 0.1 && window.__t > a ? '<span class="caret"></span>' : ""}` : `<span class="ph">${ph}</span>`; };
+
+/* ===================== render ===================== */
+function render(t) {
+  window.__t = t;
+  /* ----- dashboard state ----- */
+  const formOpen = t >= B.tapAdd + 0.08 && t < B.tapSubmit + 0.1;
+  $("form").style.display = formOpen ? "block" : "none";
+  $("empty").style.display = t < B.tapSubmit + 0.1 ? "block" : "none";
+  $("list").style.display = t >= B.tapSubmit + 0.1 ? "block" : "none";
+  $("topBtns").style.display = formOpen ? "none" : "flex";
+  typed($("fTitle"), NEW.title, ...B.typeTitle, "3ήμερη ξενάγηση στην Αθήνα");
+  typed($("fDesc"), NEW.desc, ...B.typeDesc, "Τι περιλαμβάνεται, σημεία ενδιαφέροντος, όροι…");
+  typed($("fDest"), NEW.dest, ...B.typeDest, "Αθήνα, Ελλάδα");
+  typed($("fPrice"), NEW.price, ...B.typePrice, "120");
+  typed($("fUrl"), NEW.url, ...B.typeUrl, "https://…");
+  const picked = t >= B.tapUse + 0.05;
+  $("coverImg").style.display = picked ? "block" : "none"; $("noImg").style.display = picked ? "none" : "flex";
+  $("credit").style.visibility = picked ? "visible" : "hidden";
+  const pk = t >= B.pickerIn && t < B.tapUse + 0.1;
+  $("picker").style.display = pk ? "flex" : "none";
+  const sel = t >= B.tapPhoto;
+  const first = document.querySelector("#grid .pk"); first.style.borderColor = sel ? "#FFE500" : "transparent";
+  first.querySelector(".pkCheck").style.display = sel ? "flex" : "none";
+  $("pkCredit").innerHTML = sel ? 'Φωτογραφία από <u>ricardo frantz</u> στο Unsplash' : "Φωτογραφίες από το Unsplash — ο φωτογράφος αναφέρεται στην κάρτα.";
+  const mk = t >= B.tapAllGr + 0.05;
+  $("mktChips").innerHTML = mk ? GREEK.map((m, i) => `<span class="inline-flex items-center gap-1 rounded-full bg-[#FFE500]/10 px-2.5 py-1 font-mono text-xs font-bold text-[#FFE500]" style="opacity:${clamp(prog(t, B.tapAllGr + 0.05 + i * 0.03, B.tapAllGr + 0.2 + i * 0.03))}">${m}${ic("x", 12)}</span>`).join("") : "";
+  const approved = t >= B.approve;
+  $("statusBadge").className = `rounded border px-1.5 py-0.5 text-[10px] font-medium ${approved ? "bg-emerald-950 text-emerald-400 border-emerald-900" : "bg-amber-950 text-amber-400 border-amber-900"}`;
+  $("statusBadge").textContent = approved ? "Εγκρίθηκε" : "Σε εκκρεμότητα";
+  $("statusBadge").style.transform = approved ? `scale(${lerp(1.6, 1, outBack(prog(t, B.approve, B.approve + 0.35), 2.5))})` : "";
+  $("prodStats").style.display = approved ? "flex" : "none";
+  const stP = outCubic(prog(t, B.stats[0], B.stats[1]));
+  const people = Math.round(146 * stP), taps = Math.round(212 * stP), site = Math.round(58 * stP);
+  $("prodStatsText").textContent = t >= B.toDash2[0] && stP > 0 ? `${people} άτομα · ${taps} πατήματα · ${site} επισκέψεις στον ιστότοπό σας` : "Κανένα πάτημα ακόμη";
+  $("overview").style.display = t >= B.toDash2[0] ? "block" : "none";
+  $("rPeople").textContent = people; $("rTaps").textContent = taps; $("rSite").textContent = site;
+  ["addBtn", "unsBtn", "useBtn", "allGr", "submitBtn"].forEach((id) => { $(id).style.transform = ""; });
+
+  /* ----- camera + window ----- */
+  const winOn = inOutCubic(prog(t, B.toDash[0], B.toDash[1])) * (1 - inOutCubic(prog(t, B.toPhone[0], B.toPhone[1]))) + inOutCubic(prog(t, B.toDash2[0], B.toDash2[1]));
+  const cam = camAt(t);
+  $("cam").style.transform = `translate(${540 - cam[0] * cam[2]}px, ${675 - cam[1] * cam[2] + (1 - clamp(winOn)) * 160}px) scale(${cam[2]})`;
+  show($("cam"), clamp(winOn));
+  const sp = spotAt(t);
+  if (sp && sp.o > 0.001) { const st = $("spot").style; st.transform = `translate(${sp.x}px, ${sp.y}px)`; st.width = sp.w + "px"; st.height = sp.h + "px"; show($("spot"), sp.o); } else show($("spot"), 0);
+
+  /* ----- the traveller's phone ----- */
+  const p1 = outCubic(prog(t, B.phoneIn, B.phoneIn + 0.8)) * (1 - inCubic(prog(t, B.toDash[0], B.toDash[1])));
+  const p2 = outCubic(prog(t, B.toPhone[0], B.toPhone[1] + 0.2)) * (1 - inCubic(prog(t, B.toDash2[0], B.toDash2[1])));
+  const ph = t < B.toPhone[0] ? p1 : p2;
+  const drift = 1 + 0.03 * (t < B.toDash[0] ? prog(t, 1, B.toDash[0]) : prog(t, B.toPhone[1], B.toDash2[0]));
+  $("phone").style.left = "260px"; $("phone").style.top = "70px";
+  $("phone").style.transform = `translateY(${(1 - ph) * 1400}px) scale(${drift})`;
+  show($("phone"), ph > 0.001 ? 1 : 0);
+  // home scroll to the partner row
+  const sec = $("partnerSec");
+  const scrollTo = sec.offsetTop - 90;
+  $("hs").style.transform = `translateY(${-scrollTo * inOutCubic(prog(t, B.homeScroll[0], B.homeScroll[1])) - (t > B.toPhone[0] ? scrollTo * 0 : 0)}px)`;
+  if (t > B.toPhone[0]) $("hs").style.transform = `translateY(${-scrollTo}px)`;
+  // before approval the row starts with the other cards; after, the new Meteora card slides in first
+  const newIn = t > B.toPhone[0] ? outCubic(prog(t, B.rowSlide[0], B.rowSlide[1])) : 0;
+  $("card-meteora").style.display = t > B.toPhone[0] ? "block" : "none";
+  $("row").style.transform = t > B.toPhone[0] ? `translateX(${(1 - newIn) * -276}px)` : "none";
+  $("card-meteora").style.boxShadow = newIn > 0 ? `0 0 0 ${3 * Math.exp(-Math.max(0, t - B.rowSlide[1]) * 1.5)}px #FFE500` : "";
+  // hook: highlight the agency name on the first card
+  const hlP = t < B.toDash[0] ? outBack(prog(t, B.hl, B.hl + 0.4), 2) : 0;
+  document.querySelectorAll("#row .agName").forEach((n, i) => { n.style.background = i === 1 && hlP > 0 ? `rgba(255,229,0,${0.22 * clamp(hlP)})` : ""; n.style.borderRadius = "6px"; n.style.padding = "1px 5px"; n.style.outline = i === 1 && hlP > 0 ? "2px solid #FFE500" : ""; });
+  $("card-nafplio").style.transform = t < B.toDash[0] ? `scale(${1 + 0.04 * clamp(hlP)})` : "";
+  // detail sheet
+  const sh = outCubic(prog(t, B.sheetIn[0], B.sheetIn[1]));
+  $("bd").style.display = $("sheet").style.display = sh > 0 && t < B.siteIn[1] ? "block" : "none";
+  $("bd").style.opacity = sh; $("sheet").style.transform = `translateY(${(1 - sh) * 100}%)`;
+  $("cta").style.transform = `scale(${1 - 0.05 * Math.sin(prog(t, B.tapCta, B.tapCta + 0.2) * Math.PI)})`;
+  const si = outCubic(prog(t, B.siteIn[0], B.siteIn[1]));
+  $("site").style.display = si > 0 ? "block" : "none"; $("site").style.transform = `translateX(${(1 - si) * 100}%)`;
+
+  /* ----- pointer on the dashboard, finger on the phone ----- */
+  const CL = [[B.tapAdd, $("addBtn")], [B.tapUns, $("unsBtn")], [B.tapPhoto, document.querySelector("#grid .pk")], [B.tapUse, $("useBtn")], [B.tapAllGr, $("allGr")], [B.tapSubmit, $("submitBtn")]];
+  let px = null, py = null, pressed = false;
+  for (const [atT, el] of CL) {
+    if (t > atT - 0.45 && t < atT + 0.3 && el.offsetWidth) {
+      const [cx, cy] = centre(el); const sx = 540 - cam[0] * cam[2] + (cx + 8) * cam[2], sy = 675 - cam[1] * cam[2] + (cy + 6) * cam[2];
+      const p = inOutCubic(prog(t, atT - 0.45, atT - 0.04)); px = lerp(sx + 160, sx, p); py = lerp(sy + 120, sy, p); pressed = t > atT - 0.02 && t < atT + 0.12;
+    }
+  }
+  if (px !== null) { $("ptr").style.transform = `translate(${px}px, ${py}px) scale(${pressed ? 0.85 : 1})`; show($("ptr"), 1); } else show($("ptr"), 0);
+  const TP = [[B.tapCard, () => $("card-meteora")], [B.tapCta, () => $("cta")]];
+  let tapped = false;
+  for (const [atT, get] of TP) if (t > atT - 0.18 && t < atT + 0.3) { const r = get().getBoundingClientRect(); $("tap").style.left = (r.left + r.width / 2) + "px"; $("tap").style.top = (r.top + r.height / 2) + "px"; show($("tap"), Math.sin(prog(t, atT - 0.18, atT + 0.3) * Math.PI)); tapped = true; }
+  if (!tapped) show($("tap"), 0);
+
+  /* ----- captions ----- */
+  let cap = null; for (const c of CAPS) if (t > c[0] && t < c[1] + 0.25) cap = c;
+  if (cap) {
+    $("capText").innerHTML = cap[2];
+    const ci = outBack(prog(t, cap[0], cap[0] + 0.4), 1.8), co = inCubic(prog(t, cap[1], cap[1] + 0.25));
+    $("capText").style.transform = `translateY(${(1 - ci) * 40}px) scale(${lerp(0.85, 1, ci)})`;
+    show($("cap"), clamp(prog(t, cap[0], cap[0] + 0.12)) * (1 - co)); $("cap").style.top = cap[3] + "px";
+  } else show($("cap"), 0);
+
+  /* ----- end card ----- */
+  show($("end"), inOutCubic(prog(t, B.end[0], B.end[1])));
+  const mInP = prog(t, B.logo, B.logo + 0.7), slide = inOutCubic(prog(t, B.slide, B.slide + 0.7)), markX = lerp(310, 0, slide);
+  $("mark").style.transform = `translateX(${markX}px) scale(${Math.max(0.0001, outBack(mInP, 2.4) * lerp(1.3, 1, slide))}) rotate(${(1 - outCubic(mInP)) * -140}deg)`;
+  $("wm").style.transform = `translateX(${lerp(-105, 0, slide)}%)`;
+  $("wmMask").style.clipPath = `inset(0 0 0 ${markX}px)`;
+  [["endEyebrow", B.slide + 0.3], ["endLine1", B.line1], ["endLine2", B.line2], ["endUrl", B.url]].forEach(([id, s]) => { const p = outCubic(prog(t, s, s + 0.5)); $(id).style.opacity = p; $(id).style.transform = `translateY(${(1 - p) * 30}px)`; });
+}
+
+// the film plays the story clock back at per-section speeds (timemap.js)
+const renderStory = render; // keep the story renderer: reassigning window.render rebinds the global name
+window.render = (vt) => renderStory(TIMEMAP.videoToStory(vt));
+window.DURATION = TIMEMAP.VIDEO_END;
+window.FPS = FPS;
+window.ready = document.fonts.ready.then(() => Promise.all([...document.images].map((im) => im.complete ? 0 : new Promise((r) => { im.onload = im.onerror = r; }))));
+const q = new URLSearchParams(location.search);
+window.ready.then(() => {
+  if (q.has("t")) window.render(parseFloat(q.get("t")));
+  else if (!navigator.webdriver) { const t0 = performance.now(); const loop = () => { window.render(((performance.now() - t0) / 1000) % window.DURATION); requestAnimationFrame(loop); }; loop(); }
+});
+</script>
+</body>
+</html>

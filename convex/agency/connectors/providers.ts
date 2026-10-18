@@ -1098,6 +1098,37 @@ interface ViatorProduct {
 /** How many products to ask for. Enough to score against, small enough to be fast. */
 const ACTIVITY_PAGE_SIZE = 20;
 
+/**
+ * One 0..1 quality signal from an average rating AND how many people gave it.
+ *
+ * A bare average is a trap: Viator returned a dozen 5.0 products for Barcelona
+ * with a handful of reviews each, every one scored a perfect 1.0, and a niche
+ * tour with three reviews beat the Sagrada Família on a client's quote. So the
+ * average is shrunk toward a typical 4.0 by `PRIOR_WEIGHT` phantom reviews (a
+ * 5.0 from 3 people lands near 4.1; a 4.6 from 40,000 stays 4.6), mapped from
+ * the 3.5..5 band that real products occupy, and blended with popularity on a
+ * log scale (10 reviews ≈ 0.25, 10,000 ≈ 1).
+ *
+ * `outOf` is the provider's scale (Viator and Tiqets both rate out of 5).
+ */
+export function activityQuality(
+  average: number | undefined,
+  outOf: number,
+  reviewCount: number | undefined,
+): number | undefined {
+  if (typeof average !== "number" || !Number.isFinite(average) || average <= 0 || outOf <= 0) {
+    return undefined;
+  }
+  const PRIOR = 4.0;
+  const PRIOR_WEIGHT = 50;
+  const stars = Math.min(5, (average / outOf) * 5);
+  const n = typeof reviewCount === "number" && reviewCount > 0 ? reviewCount : 0;
+  const shrunk = (stars * n + PRIOR * PRIOR_WEIGHT) / (n + PRIOR_WEIGHT);
+  const rating = Math.min(1, Math.max(0, (shrunk - 3.5) / 1.5));
+  const popularity = Math.min(1, Math.log10(n + 1) / 4);
+  return Math.round((0.7 * rating + 0.3 * popularity) * 1000) / 1000;
+}
+
 viator.search = {
   kinds: ["activity"],
   requiresDestinationId: true,
@@ -1113,9 +1144,11 @@ viator.search = {
           startDate: query.departDate,
           ...(query.returnDate ? { endDate: query.returnDate } : {}),
         },
-        // Rating-first: the scoring engine re-ranks on price, so bringing back
-        // the best-reviewed products gives it something worth ranking.
-        sorting: { sort: "TRAVELER_RATING", order: "DESCENDING" },
+        // Viator's own featured order (bookings, popularity, rating). Sorting
+        // by TRAVELER_RATING looked sensible and was not: it surfaces 5.0
+        // products with a handful of reviews, so the city's landmark tours never
+        // made the page and the scoring engine had nothing worth ranking.
+        sorting: { sort: "DEFAULT" },
         pagination: { start: 1, count: ACTIVITY_PAGE_SIZE },
         currency: query.sellCurrency,
       },
@@ -1185,8 +1218,9 @@ viator.search = {
           durationMinutes:
             product.duration?.fixedDurationInMinutes ??
             product.duration?.variableDurationFromMinutes,
-          // Viator rates out of 5; the model wants 0..1.
-          qualityScore: typeof rating === "number" ? Math.min(1, rating / 5) : undefined,
+          qualityScore: activityQuality(rating, 5, product.reviews?.totalReviews),
+          rating: typeof rating === "number" ? Math.round(rating * 10) / 10 : undefined,
+          reviewCount: product.reviews?.totalReviews,
         };
         out.push(offer);
       } catch (e) {
@@ -1360,7 +1394,8 @@ interface TiqetsProduct {
   min_price?: number | string;
   currency?: string;
   sale_status?: string;
-  ratings?: { average?: number; count?: number };
+  /** `total` is the documented field; `count` is accepted from older payloads. */
+  ratings?: { average?: number; total?: number; count?: number };
   venue?: { name?: string };
   tagline?: string;
 }
@@ -1419,6 +1454,7 @@ tiqets.search = {
         if (!price) continue;
 
         const rating = product.ratings?.average;
+        const tiqetsReviews = product.ratings?.total ?? product.ratings?.count;
         const offer: NormalizedActivityOffer = {
           kind: "activity",
           offerId: `tiqets:${product.id}`,
@@ -1440,8 +1476,11 @@ tiqets.search = {
           quotedAt: now,
           title: product.title,
           category: product.venue?.name,
-          // Tiqets rates out of 10; the model wants 0..1.
-          qualityScore: typeof rating === "number" ? Math.min(1, rating / 10) : undefined,
+          // Tiqets rates out of 5, NOT 10. Dividing by 10 halved every Tiqets
+          // product (Sagrada Família 4.6 → 0.46), so they lost to anything else.
+          qualityScore: activityQuality(rating, 5, tiqetsReviews),
+          rating: typeof rating === "number" ? Math.round(rating * 10) / 10 : undefined,
+          reviewCount: tiqetsReviews,
         };
         out.push(offer);
       } catch (e) {

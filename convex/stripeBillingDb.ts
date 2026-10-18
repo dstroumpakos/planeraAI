@@ -204,6 +204,23 @@ export const applyStripeSubscription = internalMutation({
  * seen it. Stripe retries until it gets a 2xx and may redeliver even after
  * one, so every handler runs behind this check.
  */
+/**
+ * Undo a claim when processing failed, so Stripe's automatic retry of the
+ * same event is processed instead of being dropped as a duplicate.
+ */
+export const releaseStripeEvent = internalMutation({
+    args: { eventId: v.string() },
+    returns: v.null(),
+    handler: async (ctx, { eventId }) => {
+        const row = await ctx.db
+            .query("stripeEvents")
+            .withIndex("by_event", (q) => q.eq("eventId", eventId))
+            .first();
+        if (row) await ctx.db.delete(row._id);
+        return null;
+    },
+});
+
 export const claimStripeEvent = internalMutation({
     args: { eventId: v.string(), type: v.string() },
     returns: v.object({ isNew: v.boolean() }),

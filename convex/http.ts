@@ -1,4 +1,4 @@
-import { httpRouter } from "convex/server";
+import { httpRouter, makeFunctionReference } from "convex/server";
 import { httpAction } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import {
@@ -554,7 +554,8 @@ http.route({
 // Partner Products API — bulk product ingestion for supplier partners.
 //   POST /v1/products  — body { products: [ { type, title, ... } ] }
 // Auth: per-partner Bearer key (same keys as /v1/itineraries). Ingested rows
-// land in the review queue (status "pending") under the key's partner account.
+// land in the review queue (status "pending", or "draft" for a supplier without
+// a paid listing subscription) under the key's partner account.
 // ---------------------------------------------------------------------------
 
 const MAX_PRODUCTS_PER_REQUEST = 1000;
@@ -766,6 +767,127 @@ http.route({
       `<h1 style="font-size:22px;margin:0 0 12px;">Έγινε</h1>
        <p style="color:#4A4A4A;">Η διεύθυνσή σας αφαιρέθηκε. Συγγνώμη για την ενόχληση.<br/><span style="font-size:13px;">You have been removed. Sorry for the interruption.</span></p>`
     );
+  }),
+});
+
+/**
+ * Agency client payments (see `agency/payments.ts`). The agency points its OWN
+ * Viva / Stripe account at these. A webhook body is never trusted: it only
+ * names an order, and the order is then re-read from the provider on the
+ * agency's keys. That is why neither route needs a signing secret, and why
+ * both answer 200 whatever happens (a provider retries anything else).
+ */
+const agencyWebhookVerifyRef = makeFunctionReference<
+  "action",
+  { provider: "viva" | "stripe"; orderId: string; transactionId?: string },
+  null
+>("agency/payments:_webhookVerify");
+const agencyVivaKeyRef = makeFunctionReference<"action", { accountId: string }, string | null>(
+  "agency/payments:_vivaWebhookKey",
+);
+
+http.route({
+  path: "/agency/payments/viva/webhook",
+  method: "GET",
+  handler: httpAction(async (ctx, request) => {
+    const accountId = new URL(request.url).searchParams.get("a") ?? "";
+    const key = /^[a-z0-9]{10,64}$/.test(accountId)
+      ? await ctx.runAction(agencyVivaKeyRef, { accountId })
+      : null;
+    if (!key) return new Response("not found", { status: 404 });
+    return new Response(JSON.stringify({ Key: key }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }),
+});
+
+http.route({
+  path: "/agency/payments/viva/webhook",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const text = (await request.text()).slice(0, 64_000);
+    // OrderCode is a 16-digit number: read it from the raw text so it is never
+    // rounded through a JS number.
+    const orderId = /"OrderCode"\s*:\s*"?(\d{10,20})/i.exec(text)?.[1];
+    const transactionId = /"TransactionId"\s*:\s*"([0-9a-f-]{36})"/i.exec(text)?.[1];
+    if (orderId) {
+      await ctx.scheduler.runAfter(0, agencyWebhookVerifyRef, { provider: "viva", orderId, transactionId });
+    }
+    return new Response("ok", { status: 200 });
+  }),
+});
+
+http.route({
+  path: "/agency/payments/stripe/webhook",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    const text = (await request.text()).slice(0, 256_000);
+    let orderId: string | undefined;
+    try {
+      const evt = JSON.parse(text) as { type?: string; data?: { object?: { id?: string; object?: string } } };
+      const obj = evt.data?.object;
+      if (obj?.object === "checkout.session" && obj.id && /^cs_(test|live)_[A-Za-z0-9]+$/.test(obj.id)) {
+        orderId = obj.id;
+      }
+    } catch {
+      /* not JSON: ignore */
+    }
+    if (orderId) {
+      await ctx.scheduler.runAfter(0, agencyWebhookVerifyRef, { provider: "stripe", orderId });
+    }
+    return new Response("ok", { status: 200 });
+  }),
+});
+
+// ===========================================================================
+// Partner portal: e-sign a commission agreement (partnerAgreements.ts).
+//
+// An HTTP action rather than a mutation so the signer's IP address can go in
+// the evidence record. Auth is the partner-portal session token in the body.
+// ===========================================================================
+
+http.route({
+  path: "/partners/agreement/sign",
+  method: "OPTIONS",
+  handler: httpAction(async () => corsPreflight()),
+});
+
+http.route({
+  path: "/partners/agreement/sign",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => {
+    let body: any;
+    try {
+      body = await request.json();
+    } catch {
+      return partnerJson({ ok: false, error: "Invalid request." }, 400);
+    }
+    const ip =
+      request.headers.get("cf-connecting-ip") ||
+      request.headers.get("x-real-ip") ||
+      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      undefined;
+    try {
+      const result = await ctx.runMutation(internal.partnerAgreements.signInternal, {
+        token: String(body?.token ?? ""),
+        agreementId: body?.agreementId,
+        bodyHash: String(body?.bodyHash ?? ""),
+        signerName: String(body?.signerName ?? ""),
+        signerTitle: String(body?.signerTitle ?? ""),
+        signatureKind: body?.signatureKind === "typed" ? "typed" : "drawn",
+        signatureDataUrl: typeof body?.signatureDataUrl === "string" ? body.signatureDataUrl : undefined,
+        accepted: body?.accepted === true,
+        ip,
+        userAgent: request.headers.get("user-agent") ?? undefined,
+      });
+      return partnerJson(result);
+    } catch (e: any) {
+      const message =
+        typeof e?.data === "string" ? e.data : "Could not sign the agreement. Reload the page and try again.";
+      if (typeof e?.data !== "string") console.error("[agreement sign]", e);
+      return partnerJson({ ok: false, error: message }, 400);
+    }
   }),
 });
 

@@ -31,11 +31,21 @@ import type { Id } from "../_generated/dataModel";
 import type { PackageTier, TravelPackage } from "./model/types";
 import { toCustomerPackages, type CustomerPackage } from "./quoteView";
 import { guard, notFound } from "./errors";
+import { cityForIata } from "../lib/radarDestinations";
 
+/**
+ * gpt-5.6-terra, the model Planera's own newsletter copy runs on. gpt-4o-mini
+ * wrote Greek a client would notice ("επιβατικά αποσκευές", "ωφέλιμες
+ * υπηρεσίες όπως επιστροφές χρημάτων") and called a hotel 5-star unprompted,
+ * which on a sales document reads as a promise. Env-switchable as before.
+ */
 const MODEL = process.env.AGENCY_COPY_MODEL || OPENAI_MODEL;
 
-/** Copy is a nicety; it must never hold a search open. */
-const OPENAI_TIMEOUT_MS = 20_000;
+/**
+ * Copy is scheduled after the quote is saved, so nothing waits on it — the
+ * timeout only has to fit a reasoning model, not a person.
+ */
+const OPENAI_TIMEOUT_MS = 60_000;
 
 export interface TierCopy {
   /** A short, concrete name for this option. Not "Comfort" — that is the tier. */
@@ -90,7 +100,13 @@ function describePackage(pkg: CustomerPackage): Record<string, unknown> {
           freeCancellation: o.conditions.refundable,
         };
       case "activity":
-        return { type: "activity", title: o.title, durationMinutes: o.durationMinutes };
+        return {
+          type: "activity",
+          title: o.title,
+          durationMinutes: o.durationMinutes,
+          rating: o.rating,
+          reviews: o.reviewCount,
+        };
       case "transfer":
         return { type: "transfer", mode: o.mode, from: o.fromLabel, to: o.toLabel };
       case "service":
@@ -113,6 +129,33 @@ function describePackage(pkg: CustomerPackage): Record<string, unknown> {
   };
 }
 
+/**
+ * The trip in words the copy can use. The raw search params carry IATA codes,
+ * which is how the model ended up writing "BCN" into a client's paragraph.
+ */
+function describeTrip(trip: unknown): Record<string, unknown> {
+  const t = (trip ?? {}) as {
+    originIata?: string;
+    destinationIata?: string;
+    departDate?: string;
+    returnDate?: string;
+    nights?: number;
+    adults?: number;
+    childrenAges?: number[];
+    travelers?: number;
+  };
+  return {
+    from: t.originIata ? cityForIata(t.originIata) : undefined,
+    to: t.destinationIata ? cityForIata(t.destinationIata) : undefined,
+    departDate: t.departDate,
+    returnDate: t.returnDate,
+    nights: t.nights,
+    adults: t.adults,
+    childrenAges: t.childrenAges?.length ? t.childrenAges : undefined,
+    travellers: t.travelers,
+  };
+}
+
 const SYSTEM_PROMPT = [
   "You write short sales copy for a travel agency's client-facing quote.",
   "You are given three packages (basic, comfort, premium) for ONE trip, already priced.",
@@ -123,6 +166,16 @@ const SYSTEM_PROMPT = [
   "- Never state or guess the agency's cost, commission, markup or profit.",
   "- Never promise availability, and never say a price is guaranteed.",
   "- Do not repeat the price in the copy; the document already shows it.",
+  "- A hotel's star rating is exactly the `stars` given. Never call a hotel",
+  "  luxury, boutique or 5-star unless the data says so.",
+  "- Name the destination city, not airport codes.",
+  "",
+  "LANGUAGE: write as a senior travel consultant who is a native speaker of the",
+  "requested language would write to a client — warm, precise, never salesy or",
+  "translated-sounding. In Greek use the terms Greek agencies use: «απευθείας",
+  "πτήση», «με ενδιάμεση στάση», «χειραποσκευή», «αποσκευή στο αμπάρι», «με",
+  "πρωινό», «μόνο διαμονή», «δωρεάν ακύρωση», «μη επιστρεπτέο». Address the",
+  "client in the polite plural (εσείς). No exclamation marks, no emoji.",
   "",
   "For EACH package supply:",
   '  "headline": max 6 words, concrete and specific to THIS option.',
@@ -185,14 +238,16 @@ async function askOpenAi(
         response_format: { type: "json_object" },
         // No `temperature`: reasoning models reject it and the model is
         // env-switchable, same as the other AI modules here.
-        max_completion_tokens: 900,
+        // Reasoning tokens count toward this limit; too low and the JSON comes
+        // back truncated, which reads here as "no copy".
+        max_completion_tokens: 4000,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           {
             role: "user",
             content: [
               `Write in ${language}.`,
-              `Trip: ${JSON.stringify(trip)}`,
+              `Trip: ${JSON.stringify(describeTrip(trip))}`,
               `Packages: ${JSON.stringify(withLines.map(describePackage))}`,
             ].join("\n\n"),
           },

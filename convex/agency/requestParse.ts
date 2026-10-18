@@ -18,8 +18,13 @@ import { action, internalMutation } from "../_generated/server";
 import { guard, invalid } from "./errors";
 import { consumeLimit, requireAccessRW } from "./store";
 
-const MODEL = process.env.AGENCY_COPY_MODEL || OPENAI_MODEL;
-const TIMEOUT_MS = 25_000;
+/**
+ * Its own variable now: the copy writer moved to a slower reasoning model, and
+ * this one runs while an agent watches the button spin. gpt-5.4-mini is what
+ * the partner itinerary generator already runs on in production.
+ */
+const MODEL = process.env.AGENCY_PARSE_MODEL || OPENAI_MODEL;
+const TIMEOUT_MS = 30_000;
 
 export interface ParsedRequest {
   originIata: string | null;
@@ -66,6 +71,12 @@ const SYSTEM = [
   "- originIata / destinationIata: the main IATA airport code for the city named",
   "  (e.g. Athens ATH, Rome FCO, London LHR, Paris CDG, Thessaloniki SKG).",
   "  If the client names no departure city, origin is null.",
+  "  A town with no airport gets its nearest practical one, stated in",
+  "  assumptions (Igoumenitsa → CFU Corfu or PVK Preveza; Patras → ATH;",
+  "  Kalamata → KLX; Volos → VOL). originCity/destinationCity keep the place",
+  "  as the client wrote it.",
+  "- If they ask for a ferry, a cruise, a car or insurance, keep it in notes:",
+  "  the agent adds those by hand.",
   "- If a duration is given with a start date, compute returnDate.",
   '- kinds: which services they want among "flight","hotel","activity","transfer".',
   "  If unclear, use [\"flight\",\"hotel\"].",
@@ -161,7 +172,8 @@ export const parseRequest = action({
           body: JSON.stringify({
             model: MODEL,
             response_format: { type: "json_object" },
-            max_completion_tokens: 700,
+            // Reasoning tokens count toward this limit.
+            max_completion_tokens: 3000,
             messages: [
               { role: "system", content: SYSTEM },
               { role: "user", content: `Today: ${today}\n\nRequest:\n${text}` },

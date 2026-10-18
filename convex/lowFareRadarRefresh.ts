@@ -342,6 +342,15 @@ export const refreshManualDealPrices = internalAction({
             ...(ceiling != null ? { ceiling } : {}),
             // Persisted on the deal for the newsletter's "% below typical" badge.
             ...(typical != null ? { typicalPrice: typical } : {}),
+            // Range + grade for the app's buy-or-wait verdict (adults: 1, so
+            // already per person).
+            ...(result.typicalPriceRange
+              ? {
+                  typicalLow: result.typicalPriceRange[0],
+                  typicalHigh: result.typicalPriceRange[1],
+                }
+              : {}),
+            ...(result.priceLevel ? { priceLevel: result.priceLevel } : {}),
             ...(baggage ? { baggage } : {}),
           });
 

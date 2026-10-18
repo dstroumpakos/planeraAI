@@ -32,6 +32,8 @@ import { getAvgDailySpend, getAvgStay } from "./destinationSpend";
 import { lookupCountryFacts } from "./lib/countryFacts";
 import { hasTerraApiKey, terraTopRestaurantsNearby } from "./lib/tripadvisorTerra";
 import { geocodeDestinationServer } from "./lib/geocoding";
+import { searchAirbnb, searchBooking } from "./lib/searchApiAccommodations";
+import { buildStaysOutcome, prepareStaySearch, type StayArgs, type StayProvider } from "./lib/atlasStays";
 
 // ─────────────────────────────── Shared types ───────────────────────────────
 
@@ -709,6 +711,282 @@ async function toolFlightPrices(
     }
 }
 
+// ─────────────────────────────── Flight search ──────────────────────────────
+
+/** How many itineraries the model (and the card) gets per search. */
+const FLIGHT_SEARCH_MAX_OPTIONS = 5;
+
+/** 445 → "7h25m" — compact enough to sit in a card meta line. */
+const fmtMinutes = (m: number | null | undefined) =>
+    typeof m === "number" && m > 0 ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}m` : "?";
+
+/** "2027-04-12 06:10" or "06:10" → "06:10". */
+const hhmm = (t: string | null | undefined) => {
+    const m = String(t ?? "").match(/(\d{1,2}:\d{2})\s*$/);
+    return m ? m[1] : null;
+};
+
+/**
+ * One itinerary, trimmed to what a chat answer needs: times, carriers, stops
+ * and how long each connection is. Shared by the card and the model summary.
+ */
+function compactItinerary(o: any) {
+    const segs: any[] = Array.isArray(o?.flights) ? o.flights : [];
+    const first = segs[0];
+    const last = segs[segs.length - 1];
+    const airlines = Array.from(
+        new Set(segs.map((s) => s?.airline).filter((a): a is string => !!a))
+    );
+    return {
+        price: typeof o?.price === "number" ? o.price : null,
+        airlines,
+        airlineLogo: o?.airlineLogo ?? first?.airlineLogo ?? null,
+        flightNumbers: segs.map((s) => s?.flightNumber).filter(Boolean),
+        from: first?.departureAirport?.id ?? null,
+        to: last?.arrivalAirport?.id ?? null,
+        departTime: hhmm(first?.departureAirport?.time),
+        arriveTime: hhmm(last?.arrivalAirport?.time),
+        durationMinutes: typeof o?.totalDurationMinutes === "number" ? o.totalDurationMinutes : null,
+        stops: Math.max(segs.length - 1, 0),
+        layovers: ((Array.isArray(o?.layovers) ? o.layovers : []) as any[]).map((l: any) => ({
+            airport: l?.id ?? null,
+            durationMinutes: typeof l?.durationMinutes === "number" ? l.durationMinutes : null,
+            overnight: !!l?.overnight,
+        })),
+        selfTransfer: (o?.extensions ?? []).some((e: string) => /self.?transfer|separate tickets/i.test(e)),
+    };
+}
+
+type CompactItinerary = ReturnType<typeof compactItinerary>;
+
+function describeItinerary(it: CompactItinerary): string {
+    const stops =
+        it.stops === 0
+            ? "nonstop"
+            : `${it.stops} stop${it.stops > 1 ? "s" : ""} via ` +
+              it.layovers
+                  .map((l) => `${l.airport ?? "?"} (${fmtMinutes(l.durationMinutes)} layover${l.overnight ? ", overnight" : ""})`)
+                  .join(", ");
+    return (
+        `${it.airlines.join(" + ") || "Unknown airline"} ${it.flightNumbers.join("/")}` +
+        ` · ${it.departTime ?? "?"}→${it.arriveTime ?? "?"} · ${fmtMinutes(it.durationMinutes)} total · ${stops}` +
+        (it.selfTransfer ? " · SELF-TRANSFER (separate tickets)" : "")
+    );
+}
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Real, dated flight search — the same searchapi.io Google Flights search the
+ * Flight Search screen runs (and its per-user rate limit + 30-min cache).
+ *
+ * `get_flight_prices` only knows the cheapest day in a window; it cannot price
+ * a chosen pair of dates, and knows nothing about stops, layovers or airlines.
+ * This is the tool for "flights 12–17 April", "is there a direct one?",
+ * "how long is the connection?".
+ *
+ * For a round trip Google prices the whole trip but lists outbound legs only;
+ * the return legs for the top option are fetched with its departure_token so
+ * the answer can describe both directions.
+ */
+async function toolSearchFlights(
+    ctx: any,
+    tc: AtlasToolContext,
+    args: {
+        destinationIata: string;
+        originIata?: string;
+        outboundDate: string;
+        returnDate?: string;
+        stops?: string;
+        adults?: number;
+    }
+): Promise<ToolOutcome> {
+    const departureId = (args.originIata || tc.homeIata || "").toUpperCase();
+    const arrivalId = (args.destinationIata || "").toUpperCase();
+
+    if (!departureId) {
+        return {
+            result:
+                "No origin airport is available. Ask the user to set a home airport in their profile, or to name their departure city.",
+        };
+    }
+    if (!arrivalId) return { result: "No destination airport code was provided." };
+    if (!ISO_DAY.test(args.outboundDate)) {
+        return { result: `outboundDate must be YYYY-MM-DD; got "${args.outboundDate}".` };
+    }
+    if (args.returnDate && !ISO_DAY.test(args.returnDate)) {
+        return { result: `returnDate must be YYYY-MM-DD; got "${args.returnDate}".` };
+    }
+    const todayIso = new Date().toISOString().slice(0, 10);
+    if (args.outboundDate < todayIso) {
+        return { result: `${args.outboundDate} is in the past. Ask the user for a future date.` };
+    }
+    if (args.returnDate && args.returnDate < args.outboundDate) {
+        return { result: `The return date ${args.returnDate} is before the outbound date ${args.outboundDate}.` };
+    }
+
+    const stops =
+        args.stops === "nonstop" || args.stops === "one_stop_or_fewer" || args.stops === "two_stops_or_fewer"
+            ? args.stops
+            : undefined;
+    const adults =
+        typeof args.adults === "number" && args.adults >= 1 && args.adults <= 9 ? Math.round(args.adults) : 1;
+
+    const input: any = {
+        departureId,
+        arrivalId,
+        outboundDate: args.outboundDate,
+        ...(args.returnDate ? { returnDate: args.returnDate } : {}),
+        type: args.returnDate ? "round_trip" : "one_way",
+        currency: tc.currency,
+        adults,
+        ...(stops ? { stops } : {}),
+    };
+    const route = `${departureId}→${arrivalId} ${args.outboundDate}${args.returnDate ? `/${args.returnDate}` : ""}`;
+
+    let res: any;
+    try {
+        res = await ctx.runAction(api.flightsSearchApi.searchFlights, { token: tc.token, input });
+    } catch (error: any) {
+        console.error("[Atlas] Flight search error:", error);
+        const msg = String(error?.message ?? "");
+        return {
+            result: /searched a lot/i.test(msg)
+                ? "The user hit the flight-search rate limit. Tell them to wait a few minutes and try again."
+                : `Flight search failed for ${route}. Tell the user to try Flight Search directly.`,
+        };
+    }
+
+    const all: any[] = [...(res?.bestFlights ?? []), ...(res?.otherFlights ?? [])].filter(
+        (o) => typeof o?.price === "number"
+    );
+    if (all.length === 0) {
+        return {
+            result: stops
+                ? `No ${stops.replace(/_/g, " ")} flights found for ${route}. Say so, and offer to search again with connections allowed.`
+                : `No flights found for ${route}. Say so plainly and suggest nearby dates.`,
+        };
+    }
+
+    // Google's own "best" picks first (already balanced for price, duration
+    // and stops), topped up with the cheapest of the rest.
+    const best = (res?.bestFlights ?? []).filter((o: any) => typeof o?.price === "number");
+    const rest = (res?.otherFlights ?? [])
+        .filter((o: any) => typeof o?.price === "number")
+        .sort((a: any, b: any) => a.price - b.price);
+    const picked = [...best, ...rest].slice(0, FLIGHT_SEARCH_MAX_OPTIONS);
+    const options = picked.map(compactItinerary);
+
+    // Whole-result facts, so "is there a direct one?" is answerable even when
+    // the nonstop isn't among the five listed.
+    const compactAll = all.map(compactItinerary);
+    const nonstop = compactAll.filter((o) => o.stops === 0);
+    const connecting = compactAll.filter((o) => o.stops > 0);
+    const minPrice = (xs: CompactItinerary[]) =>
+        xs.length ? Math.min(...xs.map((x) => x.price ?? Infinity)) : null;
+    const summary = {
+        total: compactAll.length,
+        nonstopCount: nonstop.length,
+        cheapestNonstop: minPrice(nonstop),
+        connectingCount: connecting.length,
+        cheapestConnecting: minPrice(connecting),
+    };
+
+    // Return legs for the top option. Non-fatal: the outbound answer stands
+    // on its own if this extra call fails.
+    let returnOptions: CompactItinerary[] = [];
+    const topToken = picked[0]?.departureToken;
+    if (args.returnDate && topToken) {
+        try {
+            const ret: any = await ctx.runAction(api.flightsSearchApi.searchFlights, {
+                token: tc.token,
+                input: { ...input, departureToken: topToken },
+            });
+            returnOptions = [...(ret?.bestFlights ?? []), ...(ret?.otherFlights ?? [])]
+                .slice(0, 3)
+                .map(compactItinerary);
+        } catch (error) {
+            console.error("[Atlas] Return-leg lookup failed:", error);
+        }
+    }
+
+    const currency = tc.currency;
+    const insights = res?.priceInsights;
+    const priceWord = args.returnDate ? "round-trip total" : "one-way";
+
+    const lines: string[] = [
+        `Live Google Flights results for ${route}, ${adults} adult${adults > 1 ? "s" : ""}, prices in ${currency} (${priceWord}${adults > 1 ? " for all travellers" : ""}).`,
+        `Across all ${summary.total} results: ${summary.nonstopCount} nonstop` +
+            (summary.cheapestNonstop != null ? ` (from ${summary.cheapestNonstop})` : "") +
+            `, ${summary.connectingCount} with connections` +
+            (summary.cheapestConnecting != null ? ` (from ${summary.cheapestConnecting})` : "") +
+            (stops ? ` — filtered to ${stops.replace(/_/g, " ")}` : "") +
+            ".",
+        `Outbound options:`,
+        ...options.map((o, i) => `${i + 1}) ${o.price} — ${describeItinerary(o)}`),
+    ];
+    if (returnOptions.length) {
+        lines.push(
+            `Return flights available with option 1 (${args.returnDate}; price already included in the total):`,
+            ...returnOptions.map((o, i) => `  r${i + 1}) ${describeItinerary(o)}`)
+        );
+    } else if (args.returnDate) {
+        lines.push(`Return flights (${args.returnDate}) are chosen in Flight Search after picking an outbound.`);
+    }
+    if (insights?.priceLevel) {
+        lines.push(
+            `Google rates these prices "${insights.priceLevel}"` +
+                (Array.isArray(insights.typicalPriceRange) && insights.typicalPriceRange.length === 2
+                    ? `; typical for this route is ${insights.typicalPriceRange[0]}–${insights.typicalPriceRange[1]}.`
+                    : ".")
+        );
+    }
+    lines.push(
+        "Prices are live but can change before booking. Point the user to the card / Flight Search to book. Flag any self-transfer itinerary as separate tickets with no protection if the first flight is late."
+    );
+
+    const card: AtlasCard = {
+        type: "flightOptions",
+        data: {
+            origin: departureId,
+            destination: arrivalId,
+            outboundDate: args.outboundDate,
+            returnDate: args.returnDate ?? null,
+            adults,
+            currency,
+            stopsFilter: stops ?? null,
+            options,
+            returnOptions,
+            summary,
+            priceLevel: insights?.priceLevel ?? null,
+        },
+    };
+
+    return { result: lines.join("\n"), card };
+}
+
+/**
+ * Live stays for specific dates: Booking.com hotels (`search_hotels`) or
+ * Airbnb homes (`search_airbnb`), via the same searchapi.io code trip
+ * generation uses. Formatting lives in lib/atlasStays.
+ */
+async function toolSearchStays(provider: StayProvider, tc: AtlasToolContext, args: StayArgs): Promise<ToolOutcome> {
+    const prepared = prepareStaySearch(args, tc.currency);
+    if ("error" in prepared) return { result: prepared.error };
+    const { input } = prepared;
+
+    let results;
+    try {
+        results = provider === "booking" ? await searchBooking(input) : await searchAirbnb(input);
+    } catch (error) {
+        console.error(`[Atlas] ${provider} search error:`, error);
+        return {
+            result: `The ${provider === "booking" ? "Booking.com" : "Airbnb"} search failed for ${input.destination}. Say so and suggest trying again in a moment.`,
+        };
+    }
+    return buildStaysOutcome(provider, input, results, args.maxPricePerNight);
+}
+
 async function toolDeals(ctx: any, tc: AtlasToolContext, destination?: string): Promise<ToolOutcome> {
     try {
         const res = await ctx.runQuery(api.lowFareRadar.getDealsForUser, { token: tc.token });
@@ -1082,7 +1360,7 @@ export const ATLAS_TOOLS = [
         function: {
             name: "get_flight_prices",
             description:
-                "Cheapest round-trip dates between two airports, as indicative (non-bookable) teaser fares. Origin defaults to the user's home airport. Omit `month` for the next couple of weeks; pass it whenever the user names a month or season, and the scan covers that whole month instead.",
+                "Cheapest round-trip dates between two airports, as indicative (non-bookable) teaser fares. Origin defaults to the user's home airport. Omit `month` for the next couple of weeks; pass it whenever the user names a month or season, and the scan covers that whole month instead. For exact dates, or questions about stops/connections/airlines, use search_flights instead — this tool has no itinerary details.",
             parameters: {
                 type: "object",
                 properties: {
@@ -1095,6 +1373,71 @@ export const ATLAS_TOOLS = [
                     },
                 },
                 required: ["destinationIata"],
+            },
+        },
+    },
+    {
+        type: "function" as const,
+        function: {
+            name: "search_flights",
+            description:
+                "Live flight search for SPECIFIC dates (the same search as the app's Flight Search screen): real itineraries with price, airlines, flight numbers, departure/arrival times, total duration, number of stops, connection airports and layover lengths, plus how many nonstop vs connecting options exist. Use it whenever the user gives exact dates, or asks about direct/nonstop flights, connections, layovers, airlines or flight times. For a follow-up like \"with a connection?\" or \"is there a direct one?\", call it again with the dates and route already in the conversation.",
+            parameters: {
+                type: "object",
+                properties: {
+                    destinationIata: { type: "string", description: "Destination IATA airport code, e.g. EDI" },
+                    originIata: { type: "string", description: "Origin IATA code. Omit to use the home airport." },
+                    outboundDate: {
+                        type: "string",
+                        description: "Departure date YYYY-MM-DD. Resolve the year from today's date: a month already past this year means next year.",
+                    },
+                    returnDate: { type: "string", description: "Return date YYYY-MM-DD for a round trip. Omit for one-way." },
+                    stops: {
+                        type: "string",
+                        enum: ["any", "nonstop", "one_stop_or_fewer", "two_stops_or_fewer"],
+                        description: "Stops filter. Omit (or \"any\") to see both direct and connecting options, which is usually best.",
+                    },
+                    adults: { type: "number", description: "Number of adult travellers (default 1)." },
+                },
+                required: ["destinationIata", "outboundDate"],
+            },
+        },
+    },
+    {
+        type: "function" as const,
+        function: {
+            name: "search_hotels",
+            description:
+                "Live Booking.com hotels and apartments for SPECIFIC dates in a place: name, star class, guest score /10 and review count, the total price for the stay including taxes (and per night), free cancellation, with links that open Booking.com on those dates. Use when the user asks where to stay, for hotel prices or hotels for given dates. Needs check-in and check-out dates: ask for them, or take them from get_my_trips when the user means their trip.",
+            parameters: {
+                type: "object",
+                properties: {
+                    destination: { type: "string", description: "City, neighbourhood or area, e.g. \"Lisbon\" or \"Alfama, Lisbon\"" },
+                    checkInDate: { type: "string", description: "Check-in YYYY-MM-DD. Resolve the year from today's date: a month already past this year means next year." },
+                    checkOutDate: { type: "string", description: "Check-out YYYY-MM-DD (after check-in)." },
+                    adults: { type: "number", description: "Number of adult guests (default 2)." },
+                    maxPricePerNight: { type: "number", description: "Optional budget: only hotels at or under this nightly price, in the user's currency." },
+                },
+                required: ["destination", "checkInDate", "checkOutDate"],
+            },
+        },
+    },
+    {
+        type: "function" as const,
+        function: {
+            name: "search_airbnb",
+            description:
+                "Live Airbnb homes and apartments for SPECIFIC dates in a place: title, guest rating /5 and review count, badges like Superhost or Guest favorite, the total price for the stay after Airbnb's discounts (and per night), with links that open Airbnb on those dates. Use when the user asks for an Airbnb, an apartment or a home rental, or wants to compare with hotels. Needs check-in and check-out dates.",
+            parameters: {
+                type: "object",
+                properties: {
+                    destination: { type: "string", description: "City, neighbourhood or area, e.g. \"Lisbon\" or \"Alfama, Lisbon\"" },
+                    checkInDate: { type: "string", description: "Check-in YYYY-MM-DD. Resolve the year from today's date: a month already past this year means next year." },
+                    checkOutDate: { type: "string", description: "Check-out YYYY-MM-DD (after check-in)." },
+                    adults: { type: "number", description: "Number of adult guests (default 2)." },
+                    maxPricePerNight: { type: "number", description: "Optional budget: only homes at or under this nightly price, in the user's currency." },
+                },
+                required: ["destination", "checkInDate", "checkOutDate"],
             },
         },
     },
@@ -1196,8 +1539,13 @@ const CACHE_TTL_MS: Record<string, number> = {
     // round-trip to avoid an in-memory one.
     get_public_holidays: 30 * 24 * 60 * 60 * 1000,
     get_top_sights: 24 * 60 * 60 * 1000,
+    search_hotels: 3 * 60 * 60 * 1000,    // 3h — live prices, but a repeat ask shouldn't re-bill searchapi
+    search_airbnb: 3 * 60 * 60 * 1000,
     find_guides: 60 * 60 * 1000,
 };
+
+/** Cached tools whose results are priced in the user's currency. */
+const CURRENCY_SCOPED_TOOLS = new Set(["search_hotels", "search_airbnb"]);
 
 /**
  * Dispatch one tool call.
@@ -1213,7 +1561,9 @@ export async function executeAtlasTool(
     args: any
 ): Promise<ToolOutcome> {
     const ttl = CACHE_TTL_MS[name];
-    const cacheKey = ttl ? `${name}:${JSON.stringify(args ?? {})}`.toLowerCase() : null;
+    // Stay prices come back in the user's currency, which isn't a tool argument.
+    const scope = CURRENCY_SCOPED_TOOLS.has(name) ? `:${tc.currency}` : "";
+    const cacheKey = ttl ? `${name}:${JSON.stringify(args ?? {})}${scope}`.toLowerCase() : null;
 
     if (cacheKey) {
         try {
@@ -1269,6 +1619,34 @@ export async function executeAtlasTool(
                 args?.originIata ? String(args.originIata) : undefined,
                 args?.month ? String(args.month) : undefined
             );
+            break;
+        case "search_flights":
+            outcome = await toolSearchFlights(ctx, tc, {
+                destinationIata: String(args?.destinationIata ?? ""),
+                originIata: args?.originIata ? String(args.originIata) : undefined,
+                outboundDate: String(args?.outboundDate ?? "").trim(),
+                returnDate: args?.returnDate ? String(args.returnDate).trim() : undefined,
+                stops: args?.stops ? String(args.stops) : undefined,
+                adults: args?.adults != null ? Number(args.adults) : undefined,
+            });
+            break;
+        case "search_hotels":
+            outcome = await toolSearchStays("booking", tc, {
+                destination: String(args?.destination ?? ""),
+                checkInDate: String(args?.checkInDate ?? "").trim(),
+                checkOutDate: String(args?.checkOutDate ?? "").trim(),
+                adults: args?.adults != null ? Number(args.adults) : undefined,
+                maxPricePerNight: args?.maxPricePerNight != null ? Number(args.maxPricePerNight) : undefined,
+            });
+            break;
+        case "search_airbnb":
+            outcome = await toolSearchStays("airbnb", tc, {
+                destination: String(args?.destination ?? ""),
+                checkInDate: String(args?.checkInDate ?? "").trim(),
+                checkOutDate: String(args?.checkOutDate ?? "").trim(),
+                adults: args?.adults != null ? Number(args.adults) : undefined,
+                maxPricePerNight: args?.maxPricePerNight != null ? Number(args.maxPricePerNight) : undefined,
+            });
             break;
         case "get_deals":
             outcome = await toolDeals(ctx, tc, args?.destination ? String(args.destination) : undefined);

@@ -182,11 +182,18 @@ function normalizeAirbnb(
         .slice(0, MAX_IMAGES_PER_LISTING)
     : [];
 
+  // `extracted_total_price` is the whole stay AFTER Airbnb's discounts;
+  // `extracted_price_per_qualifier` is the nightly rate BEFORE them ("7 nights
+  // x $169.86"). Deriving the nightly price from the total is what the guest
+  // actually pays; the pre-discount rate becomes the struck-through price.
   const total = toNumber(raw.price?.extracted_total_price);
-  let pricePerNight = toNumber(raw.price?.extracted_price_per_qualifier);
-  if (pricePerNight === undefined && total !== undefined && nights > 0) {
-    pricePerNight = Math.round(total / nights);
-  }
+  const listNightly = toNumber(raw.price?.extracted_price_per_qualifier);
+  let pricePerNight =
+    total !== undefined && nights > 0 ? Math.round(total / nights) : listNightly;
+  const originalNightly =
+    listNightly !== undefined && pricePerNight !== undefined && listNightly > pricePerNight
+      ? Math.round(listNightly)
+      : undefined;
 
   return {
     type: "airbnb",
@@ -199,7 +206,8 @@ function normalizeAirbnb(
     stars: undefined,
     pricePerNight: pricePerNight || 0,
     totalPrice: total,
-    originalPrice: toNumber(raw.price?.extracted_original_price),
+    // Nightly, like `pricePerNight` (the API's original_price is a stay total).
+    originalPrice: originalNightly,
     currency,
     link: typeof raw.link === "string" ? raw.link : undefined,
     bookingLink:

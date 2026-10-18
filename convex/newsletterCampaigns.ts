@@ -79,11 +79,13 @@ import {
   type PackageForEmail,
   type RouteBlockMeta,
   type RouteFare,
+  type CampaignRoute,
   type DestinationFocus,
   type DestinationHero,
 } from "./newsletter";
 import { calendarCacheKey, exploreDestCacheKey } from "./lib/searchCacheKeys";
 import type { FlightCalendar, ExploreDestinationFlights } from "../types/flights";
+import { resolveHomeIata, airportCityName } from "../lib/homeAirport";
 
 // Self-referential + cross-file internal references hit the type-inference wall
 // until `convex dev` regenerates types; the `as any` cast is the same trick
@@ -1051,7 +1053,7 @@ async function fetchExtrasForCampaign(
   const itinMax = itineraryFetchCount(campaign);
   const route = routeBlockInputs(campaign);
   const focus = focusArgs(campaign);
-  const [fetchedItins, sights, attractions, packages, calendar, teaser, hero] = await Promise.all([
+  const [fetchedItins, sights, attractions, packages, routeBlock, hero] = await Promise.all([
     itinMax
       ? ctx.runQuery(internal.newsletter.getFeaturedItineraries, { country, max: itinMax, ...focus })
       : Promise.resolve<ItineraryForEmail[]>([]),
@@ -1065,53 +1067,16 @@ async function fetchExtrasForCampaign(
       ? ctx.runQuery(internal.newsletter.getFeaturedPackages, { country, max: clampCount(campaign.packageCount, 2, 3), ...focus })
       : Promise.resolve<PackageForEmail[]>([]),
     // Route-block prices are fetched live (cache-backed, so at most one
-    // searchapi call per TTL window across all batches of a send).
-    route?.kind === "calendar"
-      ? ctx.runAction(internal.flightCalendar.fetchForCampaign, {
-          departureId: route.origin, arrivalId: route.destination, currency: route.currency,
-          startOffsetDays: route.startOffsetDays, returnGapDays: route.returnGapDays,
-        })
-      : Promise.resolve<FlightCalendar | null>(null),
-    route?.kind === "teaser"
-      ? ctx.runAction(internal.exploreDestination.fetchTeaserForCampaign, {
-          departureId: route.origin, arrivalId: route.destination, currency: route.currency,
-          hl: campaign.languageFilter, timePeriod: route.timePeriod,
-        })
-      : Promise.resolve<ExploreDestinationFlights | null>(null),
+    // searchapi call per TTL window across all batches of a send). This is the
+    // campaign's own origin; the fan-out re-prices it per subscriber home
+    // airport (see `recipientRouteOrigin`).
+    fetchRouteBlock(ctx, campaign, route?.origin),
     fetchDestinationHero(ctx, campaign),
   ]);
 
-  // Live fares for every campaign route. Sequential and capped: each lookup is
-  // cache-backed, so a whole send costs at most one call per route per TTL
-  // window, and the calendar (a real route search) is tried before the
-  // city-oriented teaser because its coverage is better.
-  const routeFares: RouteFare[] = [];
-  for (const r of (campaign.routes ?? []).slice(0, MAX_CAMPAIGN_ROUTES)) {
-    const base = {
-      departureId: r.origin,
-      arrivalId: r.destination,
-      currency: r.currency,
-    };
-    // Price the dates the route was picked for, not the next fortnight.
-    const window = routePriceWindow(r);
-    const cal: FlightCalendar | null = await ctx.runAction(
-      internal.flightCalendar.fetchForCampaign,
-      {
-        ...base,
-        startOffsetDays: window.startOffsetDays,
-        returnGapDays: window.returnGapDays,
-      },
-    );
-    let fare = fareFromCalendar(r, cal);
-    if (!fare) {
-      const tsr: ExploreDestinationFlights | null = await ctx.runAction(
-        internal.exploreDestination.fetchTeaserForCampaign,
-        { ...base, hl: campaign.languageFilter, timePeriod: window.timePeriod },
-      );
-      fare = fareFromTeaser(r, tsr);
-    }
-    if (fare) routeFares.push(fare);
-  }
+  // Live fares for every campaign route, from the routes' own origins. The
+  // fan-out re-prices them per subscriber home airport (`routesFromHome`).
+  const routeFares = await fetchRouteFares(ctx, campaign, campaign.routes ?? []);
 
   return {
     deals: campaign.includeDeals
@@ -1121,10 +1086,116 @@ async function fetchExtrasForCampaign(
     sights,
     attractions,
     packages,
-    calendar,
-    teaser,
+    ...routeBlock,
     routeFares,
     hero,
+  };
+}
+
+/**
+ * The live-price route block (calendar or teaser) for the campaign's pinned
+ * route, priced FROM `origin`. Both lookups are cache-backed, so pricing the
+ * same route from a dozen home airports costs one searchapi call per origin
+ * per TTL window, not one per subscriber.
+ */
+async function fetchRouteBlock(
+  ctx: any,
+  campaign: CampaignContent & { languageFilter?: string },
+  origin: string | undefined,
+): Promise<Pick<CampaignExtras, "calendar" | "teaser">> {
+  const route = routeBlockInputs(campaign);
+  if (!route || !origin) return { calendar: null, teaser: null };
+  const base = { departureId: origin, arrivalId: route.destination, currency: route.currency };
+  if (route.kind === "calendar") {
+    const calendar: FlightCalendar | null = await ctx.runAction(
+      internal.flightCalendar.fetchForCampaign,
+      { ...base, startOffsetDays: route.startOffsetDays, returnGapDays: route.returnGapDays },
+    );
+    return { calendar, teaser: null };
+  }
+  const teaser: ExploreDestinationFlights | null = await ctx.runAction(
+    internal.exploreDestination.fetchTeaserForCampaign,
+    { ...base, hl: campaign.languageFilter, timePeriod: route.timePeriod },
+  );
+  return { calendar: null, teaser };
+}
+
+/**
+ * Live "from" price for each route. Capped, and every lookup is cache-backed,
+ * so a whole send costs at most one call per (origin, route) per TTL window;
+ * the calendar (a real route search) is tried before the city-oriented teaser
+ * because its coverage is better. A route with no price is dropped.
+ */
+async function fetchRouteFares(
+  ctx: any,
+  campaign: { languageFilter?: string },
+  routes: CampaignRoute[],
+): Promise<RouteFare[]> {
+  const fares = await Promise.all(
+    routes.slice(0, MAX_CAMPAIGN_ROUTES).map(async (r): Promise<RouteFare | null> => {
+      const base = { departureId: r.origin, arrivalId: r.destination, currency: r.currency };
+      // Price the dates the route was picked for, not the next fortnight.
+      const window = routePriceWindow(r);
+      const cal: FlightCalendar | null = await ctx.runAction(
+        internal.flightCalendar.fetchForCampaign,
+        { ...base, startOffsetDays: window.startOffsetDays, returnGapDays: window.returnGapDays },
+      );
+      const fare = fareFromCalendar(r, cal);
+      if (fare) return fare;
+      const tsr: ExploreDestinationFlights | null = await ctx.runAction(
+        internal.exploreDestination.fetchTeaserForCampaign,
+        { ...base, hl: campaign.languageFilter, timePeriod: window.timePeriod },
+      );
+      return fareFromTeaser(r, tsr);
+    }),
+  );
+  return fares.filter((f): f is RouteFare => !!f);
+}
+
+/**
+ * The campaign's fare-card routes as one subscriber sees them: flown from their
+ * home airport. A route to where they already live is dropped, and routes that
+ * collapse onto the same destination (ATH→LIS and SKG→LIS, seen from Paris)
+ * keep only the first. Without a home airport the routes are unchanged.
+ */
+function routesFromHome(routes: CampaignRoute[], homeIata: string | undefined): CampaignRoute[] {
+  if (!homeIata) return routes;
+  const originCity = airportCityName(homeIata) ?? homeIata;
+  const seen = new Set<string>();
+  const out: CampaignRoute[] = [];
+  for (const r of routes) {
+    const dest = r.destination.toUpperCase();
+    if (dest === homeIata || seen.has(dest)) continue;
+    seen.add(dest);
+    out.push({ ...r, origin: homeIata, originCity });
+  }
+  return out;
+}
+
+/**
+ * Which airport a recipient's route block should be priced from: their own
+ * home airport when we know it, else the campaign's origin. Null means "leave
+ * the block out" — someone who lives at the destination has no flight to take.
+ */
+function recipientRouteOrigin(
+  campaign: CampaignContent,
+  homeIata: string | undefined,
+): string | null {
+  if (!campaign.routeBlock || !campaign.routeOrigin || !campaign.routeDestination) return null;
+  const origin = homeIata || campaign.routeOrigin;
+  return origin === campaign.routeDestination.toUpperCase() ? null : origin;
+}
+
+/**
+ * The campaign as one recipient sees it: route block re-pointed at their
+ * origin, so the block's "from" city and its search links match the prices.
+ */
+function campaignForOrigin<T extends CampaignContent>(campaign: T, origin: string | null): T {
+  if (!origin || origin === campaign.routeOrigin) return campaign;
+  return {
+    ...campaign,
+    routeOrigin: origin,
+    routeOriginCity: airportCityName(origin) ?? origin,
   };
 }
 
@@ -1146,7 +1217,10 @@ export const resolveAdminEmail = internalQuery({
       .query("userSettings")
       .withIndex("by_user", (q: any) => q.eq("userId", userId))
       .first();
-    return { email: settings?.email ?? null };
+    return {
+      email: settings?.email ?? null,
+      homeIata: resolveHomeIata(settings?.homeAirport) ?? null,
+    };
   },
 });
 
@@ -1191,7 +1265,7 @@ export const sendTestEmail = action({
   },
   returns: v.object({ success: v.boolean(), error: v.optional(v.string()) }),
   handler: async (ctx, args): Promise<{ success: boolean; error?: string }> => {
-    const admin: { email: string | null } = await ctx.runQuery(
+    const admin: { email: string | null; homeIata: string | null } = await ctx.runQuery(
       internal.newsletterCampaigns.resolveAdminEmail,
       { token: args.token },
     );
@@ -1212,11 +1286,25 @@ export const sendTestEmail = action({
       ? await ctx.runQuery(internal.newsletter.getFeaturedDeals, {})
       : [];
     const extras: CampaignExtras = await fetchExtrasForCampaign(ctx, campaign, allDeals);
+    // The route block and fare cards are priced from the admin's own home
+    // airport, exactly as a subscriber with that home airport would get them.
+    const origin = recipientRouteOrigin(campaign, admin.homeIata ?? undefined);
+    const routeBlock = origin === campaign.routeOrigin
+      ? { calendar: extras.calendar, teaser: extras.teaser }
+      : await fetchRouteBlock(ctx, campaign, origin ?? undefined);
+    const routeFares = admin.homeIata && campaign.routes?.length
+      ? await fetchRouteFares(ctx, campaign, routesFromHome(campaign.routes, admin.homeIata))
+      : extras.routeFares;
 
     // Test emails use a throwaway unsubscribe token — they never touch the
     // list. Preview shows the country-targeted deals if a country is set,
     // else the global top picks.
-    const mail = renderCampaignEmail(campaign, undefined, "test-preview-token", extras);
+    const mail = renderCampaignEmail(
+      campaignForOrigin(campaign, origin),
+      undefined,
+      "test-preview-token",
+      { ...extras, ...routeBlock, routeFares },
+    );
     const res: { success: boolean; error?: string } = await ctx.runAction(
       internal.postmark.sendRawEmail,
       {
@@ -1372,6 +1460,16 @@ export const getCampaign = internalQuery({
 });
 
 /** One page of active subscribers matching the campaign's targeting filter. */
+/** Resolved home-airport IATA of an app user's settings, if any. */
+async function subscriberHomeIata(ctx: any, userId?: string): Promise<string | undefined> {
+  if (!userId) return undefined;
+  const settings = await ctx.db
+    .query("userSettings")
+    .withIndex("by_user", (q: any) => q.eq("userId", userId))
+    .first();
+  return resolveHomeIata(settings?.homeAirport);
+}
+
 export const getCampaignRecipientsPage = internalQuery({
   args: {
     languageFilter: v.optional(v.string()),
@@ -1386,15 +1484,22 @@ export const getCampaignRecipientsPage = internalQuery({
       .withIndex("by_status", (q) => q.eq("status", "active"))
       .paginate({ numItems: args.numItems, cursor: args.cursor });
 
-    const page = result.page
-      .filter((s) => matchesFilter(s, args.languageFilter, args.sourceFilter, args.countryFilter))
-      .map((s) => ({
+    const matched = result.page.filter((s) =>
+      matchesFilter(s, args.languageFilter, args.sourceFilter, args.countryFilter),
+    );
+    const page = await Promise.all(
+      matched.map(async (s) => ({
         _id: s._id,
         email: s.email,
         language: s.language,
         country: s.country,
         unsubscribeToken: s.unsubscribeToken,
-      }));
+        // Home airport of the linked app account, so a route block can be
+        // priced from where this subscriber actually flies. Undefined for
+        // web-only subscribers and unreadable labels.
+        homeIata: await subscriberHomeIata(ctx, s.userId),
+      })),
+    );
 
     return {
       page,
@@ -1561,6 +1666,7 @@ export const processCampaignSend = internalAction({
         language?: string;
         country?: string;
         unsubscribeToken: string;
+        homeIata?: string;
       }>;
       continueCursor: string;
       isDone: boolean;
@@ -1593,11 +1699,40 @@ export const processCampaignSend = internalAction({
       suppressed: boolean;
     }> = [];
 
+    // Route block priced per subscriber home airport, memoised per origin for
+    // this batch. The campaign's own origin is already in `batchExtras`.
+    const routeBlocks = new Map<string, Pick<CampaignExtras, "calendar" | "teaser">>();
+    if (campaign.routeOrigin) {
+      routeBlocks.set(campaign.routeOrigin, {
+        calendar: batchExtras.calendar,
+        teaser: batchExtras.teaser,
+      });
+    }
+
+    // Fare cards likewise, keyed by home airport ("" = the routes' own
+    // origins, already priced in `batchExtras`).
+    const fareCards = new Map<string, RouteFare[]>([["", batchExtras.routeFares]]);
+
     for (const sub of pageResult.page) {
       if (!unsentSet.has(String(sub._id))) continue;
-      // Deals re-slice per subscriber country; the other blocks are shared.
-      const mail = renderCampaignEmail(campaign, sub.language, sub.unsubscribeToken, {
+      const home = campaign.routes?.length ? sub.homeIata ?? "" : "";
+      let routeFares = fareCards.get(home);
+      if (!routeFares) {
+        routeFares = await fetchRouteFares(ctx, campaign, routesFromHome(campaign.routes ?? [], home));
+        fareCards.set(home, routeFares);
+      }
+      const origin = recipientRouteOrigin(campaign, sub.homeIata);
+      let routeBlock: Pick<CampaignExtras, "calendar" | "teaser"> = { calendar: null, teaser: null };
+      if (origin) {
+        routeBlock = routeBlocks.get(origin) ?? (await fetchRouteBlock(ctx, campaign, origin));
+        routeBlocks.set(origin, routeBlock);
+      }
+      // Deals re-slice per subscriber country, the route block and fare cards
+      // per home airport; the other blocks are shared.
+      const mail = renderCampaignEmail(campaignForOrigin(campaign, origin), sub.language, sub.unsubscribeToken, {
         ...batchExtras,
+        ...routeBlock,
+        routeFares,
         deals: campaign.includeDeals
           ? pickTopDeals(allDeals, sub.country, clampCount(campaign.dealCount, 3, 5), focus)
           : [],

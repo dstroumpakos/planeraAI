@@ -1,0 +1,389 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Planera Brand Film</title>
+<style>
+  @font-face { font-family: Inter; font-weight: 400; src: url(assets/Inter-Regular.ttf); }
+  @font-face { font-family: Inter; font-weight: 600; src: url(assets/Inter-SemiBold.ttf); }
+  @font-face { font-family: Inter; font-weight: 800; src: url(assets/Inter-ExtraBold.ttf); }
+  :root { --y: #FFE500; --ink: #121212; --fg: #FFFFFF; --mute: #9B9B9B; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--ink); }
+  body { font-family: Inter, system-ui, sans-serif; color: var(--fg); }
+  .layer { position: absolute; inset: 0; }
+  #stage { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: radial-gradient(120% 70% at 50% 45%, #15171c 0%, #0b0c0f 60%, #050506 100%); }
+  #earth { position: absolute; inset: 0; width: 1080px; height: 1920px; }
+
+  /* globe + flight path */
+  svg.full { position: absolute; inset: 0; width: 1080px; height: 1920px; }
+
+  /* headline */
+  .center { position: absolute; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; }
+  .mask { overflow: hidden; padding: 0 20px 18px; margin-bottom: -18px; }
+  .line { font-weight: 800; letter-spacing: -0.045em; line-height: 1; will-change: transform; }
+  #hl { top: 700px; }
+  #hl .line { font-size: 210px; }
+  .yel { color: var(--y); }
+
+  /* destination roll */
+  #roll { top: 0; }
+  #eyebrow { position: absolute; top: 760px; left: 0; right: 0; text-align: center; font-weight: 600; font-size: 34px; letter-spacing: 0.42em; color: var(--y); text-indent: 0.42em; }
+  .city { position: absolute; top: 830px; left: 0; right: 0; text-align: center; font-weight: 800; letter-spacing: -0.045em; line-height: 1.05; white-space: nowrap; font-size: 200px; will-change: transform, filter; }
+  .coord { position: absolute; top: 1112px; left: 0; right: 0; text-align: center; font-weight: 400; font-size: 36px; letter-spacing: 0.12em; color: var(--mute); font-variant-numeric: tabular-nums; text-shadow: 0 2px 18px rgba(0,0,0,0.9); }
+  #bar { position: absolute; top: 1080px; left: 340px; width: 400px; height: 8px; border-radius: 4px; background: rgba(255,255,255,0.12); overflow: hidden; }
+  #barFill { height: 100%; width: 100%; background: var(--y); transform-origin: left center; }
+
+  /* yellow scene */
+  #wipeY { background: var(--y); }
+  #plan { top: 640px; color: var(--ink); }
+  #plan .line { font-size: 230px; }
+  .word { display: inline-block; will-change: transform; }
+
+  /* planning flow (on the yellow card) */
+  #flow { position: absolute; inset: 0; color: var(--ink); }
+  #prompt { position: absolute; left: 70px; top: 860px; width: 940px; height: 150px; border-radius: 75px; background: #fff; box-shadow: 0 24px 60px rgba(60,50,0,0.22); display: flex; align-items: center; padding: 0 22px 0 38px; transform-origin: 50% 50%; will-change: transform; }
+  #prompt .spark { width: 54px; height: 54px; flex: none; }
+  #promptText { flex: 1; margin-left: 24px; font-weight: 600; font-size: 40px; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; color: #1A1A1A; }
+  #placeholder { color: #9B9B9B; font-weight: 400; }
+  #caret { display: inline-block; width: 4px; height: 46px; margin-left: 3px; background: #1A1A1A; vertical-align: -8px; border-radius: 2px; }
+  #send { width: 108px; height: 108px; border-radius: 54px; background: var(--ink); flex: none; display: flex; align-items: center; justify-content: center; will-change: transform; }
+  #status { position: absolute; left: 0; right: 0; top: 452px; text-align: center; font-weight: 600; font-size: 38px; color: rgba(18,18,18,0.72); }
+  #status svg { width: 34px; height: 34px; vertical-align: -5px; margin-right: 10px; }
+  #tripHead { position: absolute; left: 70px; top: 530px; width: 940px; height: 236px; border-radius: 48px; background: var(--ink); color: #fff; padding: 36px 48px; will-change: transform; }
+  #tripHead .eyebrow { font-weight: 600; font-size: 26px; letter-spacing: 0.32em; color: var(--y); }
+  #tripHead .title { font-weight: 800; font-size: 72px; letter-spacing: -0.035em; margin-top: 6px; line-height: 1.05; }
+  #tripHead .title span { color: #8E8E93; font-weight: 600; }
+  #tripHead .tags { font-weight: 400; font-size: 30px; color: #B3B3B3; margin-top: 12px; }
+  #tripHead .chips { position: absolute; right: 44px; top: 40px; display: flex; gap: 12px; }
+  .chip { font-weight: 600; font-size: 24px; color: var(--y); border: 2px solid rgba(255,229,0,0.55); border-radius: 999px; padding: 8px 18px; }
+  .day { position: absolute; left: 70px; width: 940px; height: 150px; border-radius: 40px; background: #fff; box-shadow: 0 14px 34px rgba(60,50,0,0.16); display: flex; align-items: center; padding: 0 40px 0 30px; will-change: transform; }
+  .day .num { width: 88px; height: 88px; border-radius: 44px; background: var(--ink); color: var(--y); font-weight: 800; font-size: 44px; display: flex; align-items: center; justify-content: center; flex: none; }
+  .day .txt { margin-left: 30px; flex: 1; }
+  .day .txt b { display: block; font-weight: 800; font-size: 44px; letter-spacing: -0.025em; color: var(--ink); line-height: 1.1; }
+  .day .txt small { display: block; font-weight: 400; font-size: 29px; color: #6B6B6B; margin-top: 4px; }
+  .day .tick { width: 54px; height: 54px; border-radius: 27px; background: var(--y); display: flex; align-items: center; justify-content: center; flex: none; }
+
+  /* logo end card */
+  #logo { position: absolute; top: 560px; left: 110px; width: 860px; height: 238px; }
+  #mark { position: absolute; left: 0; top: 0; width: 159px; height: 238px; transform-origin: 50% 60%; will-change: transform; z-index: 2; }
+  #wmMask { position: absolute; left: 171px; top: 0; width: 689px; height: 238px; overflow: hidden; }
+  #wm { width: 689px; height: 238px; display: block; will-change: transform; }
+  #tag { position: absolute; top: 870px; left: 0; right: 0; text-align: center; font-weight: 600; font-size: 50px; letter-spacing: -0.01em; color: #CFCFCF; line-height: 1.3; }
+  #tag b { color: var(--fg); font-weight: 800; }
+  #url { position: absolute; top: 1048px; background: rgba(8,9,12,0.55); left: 50%; transform: translateX(-50%); padding: 22px 46px; border-radius: 999px; border: 3px solid var(--y); color: var(--y); font-weight: 800; font-size: 44px; letter-spacing: 0.01em; white-space: nowrap; }
+
+  #badges { position: absolute; top: 1196px; left: 0; right: 0; display: flex; justify-content: center; gap: 26px; }
+  #badges img { height: 104px; display: block; will-change: transform; filter: drop-shadow(0 6px 18px rgba(0,0,0,0.55)); }
+  #grain { position: absolute; inset: 0; width: 1080px; height: 1920px; opacity: 0.07; mix-blend-mode: overlay; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="stage">
+
+  <!-- Realistic Earth (WebGL) -->
+  <canvas id="earth" width="1080" height="1920"></canvas>
+
+  <!-- Flight path + plane + pin -->
+  <svg class="full" id="flight" viewBox="0 0 1080 1920">
+    <defs>
+      <mask id="reveal" maskUnits="userSpaceOnUse" x="0" y="0" width="1080" height="1920">
+        <path id="revealPath" fill="none" stroke="#fff" stroke-width="40" stroke-linecap="round"/>
+      </mask>
+    </defs>
+    <path id="route" fill="none" stroke="#FFE500" stroke-width="10" stroke-linecap="round" stroke-dasharray="0.1 30" mask="url(#reveal)"/>
+    <g id="rings" fill="none" stroke="#FFE500"></g>
+    <circle id="pin" cx="540" cy="960" r="26" fill="#FFE500"/>
+    <circle id="pinCore" cx="540" cy="960" r="10" fill="#121212"/>
+    <g id="plane">
+      <!-- plane pointing +x, centred on origin -->
+      <path fill="#FFFFFF" transform="scale(3.2) rotate(90) translate(-12 -12)"
+        d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>
+    </g>
+  </svg>
+
+  <!-- Scene 2: Where to next? -->
+  <div class="center" id="hl">
+    <div class="mask"><div class="line" id="hl1">Where to</div></div>
+    <div class="mask"><div class="line yel" id="hl2">next?</div></div>
+  </div>
+
+  <!-- Scene 3: destination roll -->
+  <div class="layer" id="roll">
+    <div id="eyebrow">NEXT STOP</div>
+    <div id="cities"></div>
+    <div id="bar"><div id="barFill"></div></div>
+    <div id="coords"></div>
+  </div>
+
+  <!-- Scene 4: yellow wipe, Let's plan it. -->
+  <div class="layer" id="wipeY">
+    <div class="center" id="plan">
+      <div class="line"><span class="word" id="w1">Let’s</span></div>
+      <div class="line"><span class="word" id="w2">plan</span> <span class="word" id="w3">it.</span></div>
+    </div>
+    <div id="flow">
+      <div id="status"><svg viewBox="0 0 24 24"><path id="statusIcon" fill="#121212" d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z"/></svg><span id="statusText">Building your trip…</span></div>
+      <div id="tripHead">
+        <div class="eyebrow">YOUR TRIP</div>
+        <div class="title">Lisbon <span>· 5 days</span></div>
+        <div class="tags">Food · Sunsets · Old town · Day trips</div>
+        <div class="chips"><span class="chip">Flights</span><span class="chip">Stays</span><span class="chip">Tours</span></div>
+      </div>
+      <div id="days"></div>
+      <div id="prompt">
+        <svg class="spark" viewBox="0 0 24 24"><path fill="#121212" d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z"/><path fill="#FFD400" d="M19 1l.9 2.6L22.5 4.5l-2.6.9L19 8l-.9-2.6-2.6-.9 2.6-.9z"/></svg>
+        <div id="promptText"><span id="placeholder">Plan your next trip</span><span id="typed"></span><span id="caret"></span></div>
+        <div id="send"><svg width="52" height="52" viewBox="0 0 24 24"><path fill="none" stroke="#FFE500" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" d="M5 12h13M13 6l6 6-6 6"/></svg></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scene 5: dark wipe, logo -->
+  <div class="layer" id="wipeD">
+    <svg class="full" viewBox="0 0 1080 1920"><g id="endRings" fill="none" stroke="#FFE500"></g></svg>
+    <div id="logo">
+      <img id="mark" src="assets/mark.png" alt="">
+      <div id="wmMask"><img id="wm" src="assets/wordmark.png" alt=""></div>
+    </div>
+    <div id="tag">Built for <b>travelers</b>,<br>not spreadsheets.</div>
+    <div id="url">planeraai.app</div>
+    <div id="badges">
+      <img id="bApple" src="assets/badges/app-store.svg" alt="Download on the App Store">
+      <img id="bGoogle" src="assets/badges/google-play-cropped.png" alt="Get it on Google Play">
+    </div>
+  </div>
+
+  <svg id="grain" viewBox="0 0 1080 1920">
+    <filter id="noise"><feTurbulence id="turb" type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="1" stitchTiles="stitch"/></filter>
+    <rect width="1080" height="1920" filter="url(#noise)"/>
+  </svg>
+</div>
+
+<script src="node_modules/three/build/three.min.js"></script>
+<script src="earth.js"></script>
+<script>
+// The planning scene sits between "Let's plan it." and the logo; everything after it is pushed back by PLAN_LEN
+const PLAN_LEN = 4.5;
+const DURATION = 16 + PLAN_LEN;
+const FPS = 30;
+const $ = (id) => document.getElementById(id);
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const lerp = (a, b, p) => a + (b - a) * p;
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const outCubic = (p) => 1 - Math.pow(1 - p, 3);
+const inOutCubic = (p) => p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+const outExpo = (p) => p === 1 ? 1 : 1 - Math.pow(2, -10 * p);
+const inCubic = (p) => p * p * p;
+const outBack = (p, s = 1.7) => 1 + (s + 1) * Math.pow(p - 1, 3) + s * Math.pow(p - 1, 2);
+
+const NS = "http://www.w3.org/2000/svg";
+const mk = (tag, attrs, parent) => { const el = document.createElementNS(NS, tag); for (const k in attrs) el.setAttribute(k, attrs[k]); parent.appendChild(el); return el; };
+
+/* ---------- Flight path ---------- */
+const ROUTE = "M 150 1820 C 120 1300, 1000 1420, 920 920 C 860 560, 380 600, 540 960";
+$("route").setAttribute("d", ROUTE);
+$("revealPath").setAttribute("d", ROUTE);
+const routeEl = $("route");
+const L = routeEl.getTotalLength();
+$("revealPath").setAttribute("stroke-dasharray", `${L} ${L}`);
+const rings = [0, 1, 2].map(() => mk("circle", { cx: 540, cy: 960, r: 0, "stroke-width": 4 }, $("rings")));
+const endRings = [0, 1, 2].map(() => mk("circle", { cx: 190, cy: 679, r: 0, "stroke-width": 4 }, $("endRings")));
+
+/* ---------- Destination roll ---------- */
+const CITIES = [
+  ["Lisbon", "38.72° N  ·  9.14° W", 0.62],
+  ["Kyoto", "35.01° N  ·  135.77° E", 0.55],
+  ["Santorini", "36.39° N  ·  25.46° E", 0.48],
+  ["Marrakech", "31.63° N  ·  7.99° W", 0.42],
+  ["Reykjavík", "64.15° N  ·  21.94° W", 0.38],
+  ["New York", "40.71° N  ·  74.01° W", 0.34],
+  ["Anywhere.", "YOUR NEXT TRIP STARTS HERE", 99],
+];
+const ROLL_START = 5.35;
+let acc = ROLL_START;
+const cityEls = CITIES.map(([name, coord, step], i) => {
+  const c = document.createElement("div"); c.className = "city" + (i === CITIES.length - 1 ? " yel" : ""); c.textContent = name; $("cities").appendChild(c);
+  const k = document.createElement("div"); k.className = "coord"; k.textContent = coord; $("coords").appendChild(k);
+  const item = { c, k, start: acc, step };
+  acc += step;
+  return item;
+});
+// Fit wide names into the safe width
+for (const { c } of cityEls) { const w = c.scrollWidth; const max = 960; if (w > max) c.style.fontSize = (200 * max / w) + "px"; }
+
+/* ---------- Planning flow ---------- */
+const PROMPT = "5 days in Lisbon, food & sunsets";
+const TYPE_FROM = 11.1, TYPE_TO = 12.3, PRESS = 12.45;
+const DAYS = [
+  ["Alfama & fado night", "Old town · 4 stops"],
+  ["Belém & pastéis de nata", "Riverside · 3 stops"],
+  ["Sintra palaces", "Day trip · 40 min by train"],
+  ["LX Factory & the Tagus", "Design & food · 3 stops"],
+  ["Sunset in Cascais", "Beach day · golden hour"],
+];
+const DAY_TOP = 800, DAY_GAP = 172, DAY_FROM = 13.55, DAY_STEP = 0.2;
+const dayEls = DAYS.map(([title, sub], i) => {
+  const d = document.createElement("div"); d.className = "day"; d.style.top = (DAY_TOP + i * DAY_GAP) + "px";
+  d.innerHTML = `<div class="num">${i + 1}</div><div class="txt"><b>${title}</b><small>${sub}</small></div><div class="tick"><svg width="30" height="30" viewBox="0 0 24 24"><path fill="none" stroke="#121212" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>`;
+  $("days").appendChild(d); return d;
+});
+
+/* ---------- Render ---------- */
+function show(el, v) { el.style.opacity = v; el.style.visibility = v <= 0.001 ? "hidden" : "visible"; }
+
+function render(t) {
+  $("turb").setAttribute("seed", Math.floor(t * FPS) % 97 + 1);
+
+  renderEarth(t <= 11 ? t : Math.max(11, t - PLAN_LEN));
+  // the landing pin rides down with the planet as it sinks into the horizon
+  $("flight").style.transform = `translateY(${t < 3.2 ? window.earthCenterY - 960 : 0}px)`;
+
+  // Scene 1: route draws, plane flies, lands on the pin
+  const fp = inOutCubic(prog(t, 0.15, 2.05));
+  $("revealPath").setAttribute("stroke-dashoffset", L * (1 - fp));
+  const pt = routeEl.getPointAtLength(L * fp);
+  const pt2 = routeEl.getPointAtLength(Math.min(L, L * fp + 2));
+  const pt0 = routeEl.getPointAtLength(Math.max(0, L * fp - 2));
+  const ang = Math.atan2(pt2.y - pt0.y, pt2.x - pt0.x) * 180 / Math.PI;
+  const planeScale = lerp(1.2, 0.55, prog(t, 1.6, 2.1)) * (1 - prog(t, 2.0, 2.15));
+  $("plane").setAttribute("transform", `translate(${pt.x} ${pt.y}) rotate(${ang}) scale(${Math.max(0.0001, planeScale)})`);
+  $("plane").style.opacity = t < 0.15 ? 0 : 1;
+  const pinIn = outBack(prog(t, 1.95, 2.35), 3);
+  const pinOut = 1 - inCubic(prog(t, 2.55, 2.85));
+  const pinS = Math.max(0, pinIn * pinOut);
+  $("pin").setAttribute("r", 26 * pinS);
+  $("pinCore").setAttribute("r", 10 * pinS);
+  rings.forEach((r, i) => {
+    const p = prog(t, 2.0 + i * 0.16, 2.9 + i * 0.16);
+    r.setAttribute("r", 30 + outCubic(p) * (260 + i * 90));
+    r.setAttribute("stroke-opacity", p > 0 && p < 1 ? (1 - p) * 0.9 : 0);
+  });
+  show($("route"), 1 - prog(t, 2.3, 2.9));
+
+  // Scene 2: Where to / next?
+  const l1 = outExpo(prog(t, 2.55, 3.3)), l2 = outExpo(prog(t, 2.72, 3.47));
+  const ex1 = inCubic(prog(t, 4.85, 5.2)), ex2 = inCubic(prog(t, 4.92, 5.27));
+  $("hl1").style.transform = `translateY(${(1 - l1) * 115 - ex1 * 115}%)`;
+  $("hl2").style.transform = `translateY(${(1 - l2) * 115 - ex2 * 115}%) scale(${1 + 0.04 * Math.sin(prog(t, 3.4, 4.8) * Math.PI)})`;
+  show($("hl"), t > 2.5 && t < 5.3 ? 1 : 0);
+
+  // Scene 3: destination roll
+  const rollVis = t > 5.1 && t < 9.7;
+  show($("roll"), rollVis ? 1 : 0);
+  const eb = outCubic(prog(t, 5.2, 5.6));
+  $("eyebrow").style.opacity = eb; $("eyebrow").style.transform = `translateY(${(1 - eb) * 30}px)`;
+  $("bar").style.opacity = eb * (1 - prog(t, 8.0, 8.2));
+  cityEls.forEach(({ c, k, start, step }, i) => {
+    const last = i === cityEls.length - 1;
+    const td = Math.min(0.3, step * 0.62);
+    const pin = outCubic(prog(t, start, start + td));
+    const pout = last ? 0 : inCubic(prog(t, start + step - td * 0.5, start + step + td * 0.5));
+    const y = (1 - pin) * 140 - pout * 140;
+    const blur = (1 - pin) * 14 + pout * 14;
+    const op = pin * (1 - pout);
+    const lastPop = last ? 1 + 0.06 * outBack(prog(t, start, start + 0.5)) - 0.06 * prog(t, start + 0.5, start + 0.8) : 1;
+    c.style.transform = `translateY(${y}px) scale(${lastPop})`;
+    c.style.filter = `blur(${blur.toFixed(2)}px)`;
+    show(c, op);
+    show(k, t >= start && (last || t < start + step) ? 1 : 0);
+    if (t >= start && t < start + step && !last) $("barFill").style.transform = `scaleX(${prog(t, start, start + step)})`;
+  });
+
+  // Scene 4: yellow circle wipe + Let's plan it.
+  const wy = inOutCubic(prog(t, 8.95, 9.55));
+  $("wipeY").style.clipPath = `circle(${wy * 1150}px at 540px 960px)`;
+  show($("wipeY"), wy > 0 && t < 11.9 + PLAN_LEN ? 1 : 0);
+  [["w1", 9.45], ["w2", 9.65], ["w3", 9.85]].forEach(([id, s]) => {
+    const p = prog(t, s, s + 0.55);
+    const sc = lerp(0.6, 1, outBack(p, 2.2));
+    $(id).style.transform = `translateY(${(1 - outCubic(p)) * 80}px) scale(${sc})`;
+    $(id).style.opacity = clamp(p * 3);
+  });
+  // "Let's plan it." lifts away as the prompt bar drops in
+  const planOut = inCubic(prog(t, 10.55, 10.95));
+  $("plan").style.transform = `translateY(${-planOut * 260}px) scale(${1 + 0.03 * Math.sin(prog(t, 10.1, 10.6) * Math.PI) - planOut * 0.25})`;
+  $("plan").style.opacity = 1 - planOut;
+
+  // Scene 4b: the planning flow
+  show($("flow"), t > 10.6 ? 1 : 0);
+  const pIn = outBack(prog(t, 10.75, 11.25), 1.6);
+  const press = prog(t, PRESS, PRESS + 0.22);
+  const up = inOutCubic(prog(t, 12.6, 13.15));
+  $("prompt").style.transform = `translateY(${(1 - pIn) * 220 - up * 610}px) scale(${lerp(0.85, 1, pIn) * lerp(1, 0.92, up)})`;
+  $("prompt").style.opacity = clamp(prog(t, 10.75, 10.95));
+  const typedN = Math.round(prog(t, TYPE_FROM, TYPE_TO) * PROMPT.length);
+  $("typed").textContent = PROMPT.slice(0, typedN);
+  $("placeholder").style.display = t < TYPE_FROM ? "inline" : "none";
+  $("caret").style.opacity = (t > TYPE_TO + 0.05 && t < PRESS) ? (Math.floor(t * 3.4) % 2 ? 1 : 0) : t >= PRESS ? 0 : 1;
+  $("send").style.transform = `scale(${1 - 0.14 * Math.sin(press * Math.PI)})`;
+  $("send").style.background = t >= PRESS && t < PRESS + 0.3 ? "#3A3A3A" : "";
+  const st = outCubic(prog(t, 12.95, 13.3));
+  $("status").style.opacity = st * (1 - prog(t, 15.2, 15.5));
+  $("status").style.transform = `translateY(${(1 - st) * 20}px)`;
+  const ready = t >= 13.6;
+  $("statusText").textContent = ready ? "Your trip is ready" : "Building your trip" + ".".repeat(1 + Math.floor(t * 4) % 3);
+  $("statusIcon").setAttribute("d", ready ? "M4 12.5l5 5L20 6.5" : "M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z");
+  $("statusIcon").setAttribute("fill", ready ? "none" : "#121212");
+  $("statusIcon").setAttribute("stroke", ready ? "#121212" : "none");
+  $("statusIcon").setAttribute("stroke-width", "3");
+  $("statusIcon").setAttribute("transform", ready ? "" : `rotate(${t * 140} 12 12)`);
+  const th = prog(t, 13.25, 13.75);
+  $("tripHead").style.transform = `translateY(${(1 - outCubic(th)) * 140}px) scale(${lerp(0.9, 1, outBack(th, 1.6))})`;
+  $("tripHead").style.opacity = clamp(th * 3);
+  dayEls.forEach((d, i) => {
+    const p = prog(t, DAY_FROM + i * DAY_STEP, DAY_FROM + i * DAY_STEP + 0.55);
+    d.style.transform = `translateY(${(1 - outCubic(p)) * 180}px) scale(${lerp(0.88, 1, outBack(p, 1.7))})`;
+    d.style.opacity = clamp(p * 3);
+    const tk = outBack(prog(t, DAY_FROM + i * DAY_STEP + 0.35, DAY_FROM + i * DAY_STEP + 0.7), 2.5);
+    d.querySelector(".tick").style.transform = `scale(${Math.max(0.0001, tk)})`;
+  });
+  // gentle push-in on the finished itinerary
+  $("flow").style.transform = `scale(${1 + 0.035 * inOutCubic(prog(t, 13.4, 15.7))})`;
+
+  // Scene 5: dark circle wipe + logo (authored on the original clock, shifted by the planning scene)
+  t -= PLAN_LEN;
+  const wd = inOutCubic(prog(t, 11.15, 11.7));
+  $("wipeD").style.clipPath = `circle(${wd * 1150}px at 540px 960px)`;
+  show($("wipeD"), wd > 0 ? 1 : 0);
+  // The yellow card opens from the centre onto the Earth behind it
+  const hole = wd > 0 ? `radial-gradient(circle at 540px 960px, transparent ${wd * 1150}px, #000 ${wd * 1150 + 1}px)` : "none";
+  $("wipeY").style.maskImage = hole; $("wipeY").style.webkitMaskImage = hole;
+  const mIn = prog(t, 11.6, 12.3);
+  const slide = inOutCubic(prog(t, 12.4, 13.15));
+  const markX = lerp(350, 0, slide);
+  const markS = Math.max(0.0001, outBack(mIn, 2.4) * lerp(1.35, 1, slide));
+  $("mark").style.transform = `translateX(${markX}px) scale(${markS}) rotate(${(1 - outCubic(mIn)) * -140}deg)`;
+  $("wm").style.transform = `translateX(${lerp(-105, 0, slide)}%)`;
+  // Wordmark only exists to the right of the mark, so it reads as sliding out from behind it
+  $("wmMask").style.clipPath = `inset(0 0 0 ${markX}px)`;
+  endRings.forEach((r, i) => {
+    const p = prog(t, 11.95 + i * 0.14, 12.85 + i * 0.14);
+    r.setAttribute("cx", 110 + 80 + markX);
+    r.setAttribute("cy", 679);
+    r.setAttribute("r", 40 + outCubic(p) * (230 + i * 80));
+    r.setAttribute("stroke-opacity", p > 0 && p < 1 ? (1 - p) * 0.8 : 0);
+  });
+  const tg = outCubic(prog(t, 13.2, 13.8));
+  $("tag").style.opacity = tg; $("tag").style.transform = `translateY(${(1 - tg) * 40}px)`;
+  const ul = outBack(prog(t, 13.6, 14.15), 2);
+  $("url").style.opacity = clamp(prog(t, 13.6, 13.8));
+  $("url").style.transform = `translateX(-50%) scale(${lerp(0.7, 1, ul)})`;
+  [["bApple", 13.85], ["bGoogle", 14.0]].forEach(([id, s]) => {
+    const p = prog(t, s, s + 0.5);
+    $(id).style.opacity = clamp(p * 4);
+    $(id).style.transform = `translateY(${(1 - outCubic(p)) * 40}px) scale(${lerp(0.75, 1, outBack(p, 1.8))})`;
+  });
+}
+
+window.render = render;
+window.DURATION = DURATION;
+window.FPS = FPS;
+const q = new URLSearchParams(location.search);
+window.ready.then(() => {
+if (q.has("t")) render(parseFloat(q.get("t")));
+else if (!navigator.webdriver) { const t0 = performance.now(); const loop = () => { render(((performance.now() - t0) / 1000) % DURATION); requestAnimationFrame(loop); }; loop(); }
+});
+</script>
+</body>
+</html>

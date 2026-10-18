@@ -1,0 +1,554 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Planera Friends Film</title>
+<style>
+  @font-face { font-family: Inter; font-weight: 400; src: url(assets/Inter-Regular.ttf); }
+  @font-face { font-family: Inter; font-weight: 600; src: url(assets/Inter-SemiBold.ttf); }
+  @font-face { font-family: Inter; font-weight: 800; src: url(assets/Inter-ExtraBold.ttf); }
+  :root { --y: #FFE500; --ink: #121212; --cream: #FAF9F6; --line: #E8E6E1; --mute: #6B6B6B; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1080px; height: 1920px; overflow: hidden; background: var(--cream); }
+  body { font-family: Inter, "Segoe UI Emoji", system-ui, sans-serif; color: var(--ink); }
+  #stage { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: #ECEAE4; }
+  .layer { position: absolute; inset: 0; }
+  .center { position: absolute; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; text-align: center; }
+  .mask { overflow: hidden; padding: 0 20px 16px; margin-bottom: -16px; }
+  .line { font-weight: 800; letter-spacing: -0.045em; line-height: 1.02; white-space: nowrap; will-change: transform; }
+  svg.i { display: block; }
+
+  /* ---------- group chat (outside the app) ---------- */
+  #chat { background: var(--cream); will-change: transform; }
+  #chatHead { position: absolute; left: 0; right: 0; top: 0; height: 250px; background: var(--cream); border-bottom: 2px solid var(--line); display: flex; align-items: center; padding: 70px 40px 0; gap: 26px; z-index: 5; }
+  #back { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 40px; }
+  #unread { background: var(--ink); color: var(--y); border-radius: 999px; padding: 4px 16px; font-size: 32px; font-weight: 800; font-variant-numeric: tabular-nums; min-width: 64px; text-align: center; }
+  #groupAv { position: relative; width: 120px; height: 96px; flex: none; }
+  #groupAv span { position: absolute; top: 12px; width: 72px; height: 72px; border-radius: 36px; border: 4px solid var(--cream); display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 800; font-size: 30px; }
+  #chatTitle b { display: block; font-weight: 800; font-size: 44px; letter-spacing: -0.02em; }
+  #chatTitle small { display: block; font-weight: 400; font-size: 28px; color: var(--mute); margin-top: 4px; }
+  #msgs { position: absolute; inset: 0; }
+  .msg { position: absolute; top: 0; left: 36px; right: 36px; display: flex; align-items: flex-end; gap: 18px; will-change: transform; }
+  .msg.me { justify-content: flex-end; }
+  .av { width: 76px; height: 76px; border-radius: 38px; flex: none; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 800; font-size: 34px; }
+  .who { font-weight: 600; font-size: 28px; margin: 0 0 6px 24px; }
+  .bubble { display: inline-block; max-width: 780px; background: #ECEAE4; border-radius: 44px; padding: 24px 34px; font-weight: 600; font-size: 46px; letter-spacing: -0.01em; line-height: 1.2; position: relative; }
+  .msg.me .bubble { background: var(--y); }
+  .bubble a { display: block; color: #1A1A1A; font-weight: 400; font-size: 38px; text-decoration: underline; margin-top: 6px; }
+  .seen { text-align: right; font-weight: 600; font-size: 26px; color: #A0A0A0; margin-top: 10px; }
+  .react { position: absolute; right: -14px; bottom: -22px; background: #fff; border-radius: 999px; padding: 4px 12px; font-size: 34px; box-shadow: 0 6px 16px rgba(0,0,0,0.12); }
+  #inputBar { position: absolute; left: 36px; right: 36px; bottom: 50px; height: 110px; border-radius: 55px; background: #fff; border: 2px solid var(--line); display: flex; align-items: center; padding: 0 16px 0 40px; font-size: 38px; color: #A0A0A0; z-index: 5; }
+  #inputBar i { margin-left: auto; width: 80px; height: 80px; border-radius: 40px; background: var(--ink); display: flex; align-items: center; justify-content: center; }
+  #dim { background: rgba(18,18,18,0.38); z-index: 6; }
+  #stamp { position: absolute; left: 90px; right: 90px; top: 720px; background: var(--y); border: 8px solid var(--ink); border-radius: 48px; padding: 50px 40px; text-align: center; z-index: 7; box-shadow: 14px 14px 0 var(--ink); will-change: transform; }
+  #stamp b { display: block; font-weight: 800; font-size: 108px; letter-spacing: -0.045em; line-height: 1.02; }
+
+  /* ---------- the Planera app screen, authored in points (400 × 711) and scaled ---------- */
+  .app { position: absolute; left: 0; top: 0; width: 400px; height: 711px; overflow: hidden; background: #F8F8F5; transform-origin: 0 0; color: #1A1A1A; font-family: Inter, "Segoe UI Emoji", sans-serif; }
+  .app .sb { position: absolute; left: 0; right: 0; top: 0; height: 47px; display: flex; align-items: center; justify-content: space-between; padding: 6px 30px 0 34px; font-weight: 600; font-size: 15px; z-index: 30; }
+  .app .sb .ic { display: flex; gap: 6px; align-items: center; }
+  .app .topbar { position: absolute; left: 16px; right: 16px; top: 47px; height: 40px; display: flex; align-items: center; z-index: 20; }
+  .app .ib { width: 40px; height: 40px; border-radius: 20px; background: rgba(255,255,255,0.9); display: flex; align-items: center; justify-content: center; margin-right: 8px; flex: none; }
+  .app .ib.orange { background: rgba(245,166,35,0.95); }
+  .app .ai { display: flex; align-items: center; gap: 4px; background: rgba(255,255,255,0.9); padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: 600; }
+  .app .scroll { position: absolute; left: 0; right: 0; top: 0; will-change: transform; }
+  .app .hero { position: relative; height: 280px; overflow: hidden; }
+  .app .hero img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 62%; display: block; }
+  .app .hero .shade { position: absolute; inset: 0; background: rgba(0,0,0,0.2); }
+  .app .hero .grad { position: absolute; inset: 0; background: linear-gradient(180deg, transparent 25%, rgba(0,0,0,0.7) 100%); }
+  .app .hero .tt { position: absolute; left: 16px; bottom: 68px; }
+  .app .hero .tt h1 { font-size: 32px; font-weight: 800; letter-spacing: -0.01em; color: #fff; margin-bottom: 12px; }
+  .app .hero .bdg { display: flex; gap: 8px; }
+  .app .hero .bdg span { display: flex; align-items: center; gap: 4px; background: rgba(255,255,255,0.15); padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 600; color: #fff; }
+  .app .hero .attr { position: absolute; left: 12px; bottom: 10px; font-size: 11px; line-height: 16px; color: #fff; text-shadow: 0 1px 4px rgba(0,0,0,0.6); }
+  .app .hero .attr u { text-decoration: underline; }
+  .app .hero .route { position: absolute; right: 16px; bottom: 16px; background: #fff; display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 20px; font-size: 14px; font-weight: 600; box-shadow: 0 4px 24px rgba(0,0,0,0.08); }
+  .app .nudge { margin: 16px 20px 4px; display: flex; gap: 12px; padding: 14px; border-radius: 14px; border: 1px solid #E8E6E1; background: #fff; }
+  .app .nudge .nic { width: 40px; height: 40px; border-radius: 20px; background: #FFF8E1; display: flex; align-items: center; justify-content: center; flex: none; }
+  .app .nudge b { display: block; font-size: 15px; font-weight: 800; }
+  .app .nudge p { font-size: 13px; line-height: 18px; color: #6B6B6B; margin-top: 2px; }
+  .app .nudge .acts { display: flex; align-items: center; gap: 14px; margin-top: 10px; }
+  .app .nudge .inv { background: #FFE500; padding: 8px 14px; border-radius: 999px; font-size: 13px; font-weight: 800; }
+  .app .nudge .no { font-size: 13px; font-weight: 600; color: #9B9B9B; }
+  .app .chips { display: flex; gap: 12px; padding: 24px 16px; white-space: nowrap; }
+  .app .chip { display: flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 20px; background: #fff; border: 1px solid #E8E6E1; font-size: 14px; font-weight: 600; color: #9B9B9B; flex: none; }
+  .app .chip.on { background: #1A1A1A; border-color: #1A1A1A; color: #fff; }
+  .app .days { padding: 0 20px; }
+  .app .day { margin-bottom: 32px; }
+  .app .dh { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; gap: 12px; }
+  .app .dh h2 { font-size: 24px; font-weight: 800; letter-spacing: -0.01em; }
+  .app .dh h2 span { font-size: 14px; font-weight: 600; color: #9B9B9B; letter-spacing: 0; }
+  .app .dh .sub { font-size: 14px; font-weight: 600; color: #9B9B9B; margin-top: 2px; }
+  .app .dh .walk { display: flex; align-items: center; gap: 4px; margin-top: 4px; font-size: 12px; font-weight: 600; color: #9B9B9B; }
+  .app .dh .right { display: flex; align-items: center; gap: 8px; }
+  .app .energy { background: rgba(249,245,6,0.2); padding: 6px 12px; border-radius: 12px; font-size: 11px; font-weight: 800; letter-spacing: 0.5px; white-space: nowrap; }
+  .app .rb { width: 32px; height: 32px; border-radius: 16px; border: 1px solid #E8E6E1; display: flex; align-items: center; justify-content: center; }
+  .app .ti { display: flex; gap: 16px; margin-bottom: 24px; position: relative; }
+  .app .tl { width: 48px; display: flex; flex-direction: column; align-items: center; flex: none; position: relative; }
+  .app .tic { width: 40px; height: 40px; border-radius: 20px; background: #FFF8E1; display: flex; align-items: center; justify-content: center; z-index: 1; }
+  .app .tic.local { background: #FFE500; }
+  .app .tt2 { margin-top: 6px; font-size: 12px; font-weight: 600; color: #9B9B9B; font-variant-numeric: tabular-nums; }
+  .app .tline { position: absolute; top: 72px; bottom: -24px; width: 2px; background: #E8E6E1; }
+  .app .tc { flex: 1; background: #fff; border-radius: 16px; padding: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+  .app .tc .tr { display: flex; align-items: center; gap: 6px; }
+  .app .tc h3 { flex: 1; font-size: 16px; font-weight: 800; margin-bottom: 4px; letter-spacing: -0.01em; }
+  .app .tc .loc { background: #FFE500; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: 800; }
+  .app .tc p { font-size: 14px; line-height: 20px; margin-bottom: 12px; color: #1A1A1A; }
+  .app .meta { display: flex; align-items: center; gap: 8px; }
+  .app .mb { background: #FFF8E1; padding: 4px 8px; border-radius: 6px; font-size: 11px; }
+  .app .md { display: flex; align-items: center; gap: 3px; font-size: 12px; font-weight: 600; color: #9B9B9B; }
+  .app .seg { display: flex; gap: 16px; margin: -8px 0 16px; }
+  .app .seg .sl { width: 48px; display: flex; justify-content: center; flex: none; }
+  .app .seg .sl i { width: 0; border-left: 2px dashed #E8E6E1; }
+  .app .seg .sc { flex: 1; background: rgba(0,0,0,0.03); border-radius: 12px; padding: 10px 14px; display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: #9B9B9B; }
+  .app .addf { display: flex; gap: 10px; margin-top: 4px; }
+  .app .addb { flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 12px 0; border-radius: 12px; border: 1px dashed #D5D2CB; font-size: 14px; font-weight: 600; white-space: nowrap; }
+  .app .new .tc { box-shadow: 0 0 0 2px #FFE500, 0 6px 18px rgba(0,0,0,0.08); }
+  .app .modal { position: absolute; inset: 0; background: rgba(0,0,0,0.45); z-index: 40; }
+  .app .mcard { position: absolute; left: 24px; right: 24px; top: 150px; background: #fff; border-radius: 18px; padding: 20px; }
+  .app .mcard .mh { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 18px; font-weight: 800; }
+  .app .mcard .msub { font-size: 14px; line-height: 20px; color: #9B9B9B; margin-bottom: 14px; }
+  .app .inp { border: 1px solid #E8E6E1; border-radius: 12px; padding: 12px 14px; font-size: 16px; margin-bottom: 14px; background: #fff; }
+  .app .inp.multi { min-height: 80px; }
+  .app .inp .ph { color: #9B9B9B; }
+  .app .caret { display: inline-block; width: 2px; height: 19px; background: #1A1A1A; vertical-align: -3px; margin-left: 1px; }
+  .app .ex { display: flex; flex-wrap: wrap; gap: 8px; margin: -4px 0 16px; }
+  .app .ex span { border: 1px solid #E8E6E1; border-radius: 20px; padding: 7px 12px; font-size: 13px; font-weight: 600; color: #9B9B9B; }
+  .app .lbl { font-size: 13px; font-weight: 600; color: #9B9B9B; margin-bottom: 6px; }
+  .app .mact { display: flex; justify-content: flex-end; align-items: center; gap: 16px; }
+  .app .mact .cn { font-size: 16px; font-weight: 600; color: #9B9B9B; padding: 10px 8px; }
+  .app .mact .go { display: flex; align-items: center; gap: 6px; padding: 11px 20px; border-radius: 12px; background: #FFE500; font-size: 16px; font-weight: 800; }
+  /* iOS share sheet */
+  .app .sheetBg { position: absolute; inset: 0; background: rgba(0,0,0,0.25); z-index: 45; }
+  .app .sheet { position: absolute; left: 0; right: 0; bottom: 0; height: 360px; background: #F2F2F7; border-radius: 14px 14px 0 0; z-index: 46; padding: 16px 16px 0; }
+  .app .sheet .hd { display: flex; align-items: center; gap: 12px; padding-bottom: 14px; border-bottom: 1px solid #DCDCE0; }
+  .app .sheet .hd img { width: 46px; height: 46px; border-radius: 11px; }
+  .app .sheet .hd b { display: block; font-size: 15px; font-weight: 600; }
+  .app .sheet .hd small { display: block; font-size: 13px; color: #8E8E93; margin-top: 2px; }
+  .app .sheet .x { margin-left: auto; width: 30px; height: 30px; border-radius: 15px; background: #E3E3E8; display: flex; align-items: center; justify-content: center; color: #8E8E93; font-size: 16px; font-weight: 800; }
+  .app .people { display: flex; gap: 22px; padding: 18px 4px 16px; }
+  .app .pp { width: 66px; text-align: center; font-size: 11px; line-height: 13px; }
+  .app .pa { position: relative; width: 62px; height: 62px; border-radius: 31px; margin: 0 auto 6px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 800; font-size: 24px; }
+  .app .pa.grp { background: #D1D1D6; }
+  .app .pa.grp i { position: absolute; width: 26px; height: 26px; border-radius: 13px; border: 2px solid #D1D1D6; }
+  .app .pa em { position: absolute; right: -2px; bottom: -2px; width: 22px; height: 22px; border-radius: 6px; background: #34C759; border: 2px solid #F2F2F7; display: flex; align-items: center; justify-content: center; }
+  .app .acts2 { background: #fff; border-radius: 12px; }
+  .app .acts2 div { display: flex; justify-content: space-between; align-items: center; padding: 14px 16px; font-size: 16px; border-bottom: 1px solid #E5E5EA; }
+  .app .acts2 div:last-child { border-bottom: 0; }
+  /* "Joining trip…" (app/invite/[token].tsx) */
+  .app .joining { position: absolute; inset: 0; background: #FAF9F6; z-index: 50; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; }
+  .app .joining .lot { width: 110px; height: 110px; }
+  .app .joining p { font-size: 15px; color: #6B6B6B; }
+
+  /* scenes */
+  #owner { z-index: 3; will-change: transform; }
+  #grid { z-index: 4; }
+  .phone { position: absolute; width: 444px; height: 767px; border-radius: 66px; background: #0B0B0F; padding: 14px; box-shadow: 0 30px 70px rgba(0,0,0,0.18), inset 0 0 0 2px #2A2A33; will-change: transform; }
+  .phone .scr { position: relative; width: 416px; height: 739px; border-radius: 54px; overflow: hidden; }
+  .phone .island { position: absolute; top: 12px; left: 50%; width: 112px; height: 32px; margin-left: -56px; border-radius: 16px; background: #000; z-index: 60; }
+  .phone .name { position: absolute; top: -30px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; background: #fff; border-radius: 999px; padding: 8px 22px 8px 8px; font-weight: 800; font-size: 30px; box-shadow: 0 8px 20px rgba(0,0,0,0.12); white-space: nowrap; z-index: 70; }
+  .phone .name .av { width: 46px; height: 46px; font-size: 22px; }
+  .tap { position: absolute; width: 96px; height: 96px; margin: -48px 0 0 -48px; border-radius: 48px; background: rgba(30,30,30,0.28); border: 4px solid rgba(255,255,255,0.85); z-index: 90; pointer-events: none; }
+  .cap { position: absolute; left: 0; right: 0; display: flex; justify-content: center; z-index: 80; pointer-events: none; }
+  .cap span { display: inline-block; white-space: nowrap; background: var(--ink); color: var(--y); border-radius: 40px; padding: 24px 46px 28px; font-weight: 800; font-size: 72px; letter-spacing: -0.035em; line-height: 1.08; text-align: center; box-shadow: 0 18px 40px rgba(0,0,0,0.25); will-change: transform; }
+
+  /* end */
+  #wipeY { background: var(--y); z-index: 95; }
+  #tag { top: 820px; } #tag .line { font-size: 128px; }
+  #logo { position: absolute; top: 470px; left: 110px; width: 860px; height: 238px; }
+  #mark { position: absolute; left: 0; top: 0; width: 159px; height: 238px; transform-origin: 50% 60%; filter: brightness(0); z-index: 2; will-change: transform; }
+  #wmMask { position: absolute; left: 171px; top: 0; width: 689px; height: 238px; overflow: hidden; }
+  #wm { width: 689px; height: 238px; display: block; filter: brightness(0); will-change: transform; }
+  #url { position: absolute; top: 1140px; left: 0; right: 0; text-align: center; font-weight: 800; font-size: 50px; }
+  #badges { position: absolute; top: 1250px; left: 0; right: 0; display: flex; justify-content: center; gap: 26px; }
+  #badges img { height: 104px; display: block; will-change: transform; }
+</style>
+</head>
+<body>
+<div id="stage">
+
+  <!-- ===== group chat ===== -->
+  <div class="layer" id="chat">
+    <div id="msgs"></div>
+    <div id="chatHead">
+      <div id="back"><svg width="34" height="56" viewBox="0 0 12 20"><path d="M10 2L2 10l8 8" fill="none" stroke="#121212" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span id="unread">0</span></div>
+      <div id="groupAv"></div>
+      <div id="chatTitle"><b>Summer trip 🌴</b><small>Maria, Nikos, Eleni, Alex, You</small></div>
+    </div>
+    <div id="inputBar">Message<i><svg width="40" height="40" viewBox="0 0 24 24"><path d="M5 12h13M13 6l6 6-6 6" fill="none" stroke="#FFE500" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/></svg></i></div>
+    <div class="layer" id="dim"></div>
+    <div id="stamp"><b>47 messages.</b><b>0 plans.</b></div>
+  </div>
+
+  <!-- ===== the owner's Planera app, full screen ===== -->
+  <div class="layer" id="owner"></div>
+
+  <!-- ===== friends' phones ===== -->
+  <div class="layer" id="grid"></div>
+
+  <div class="tap" id="tap"></div>
+  <div class="cap" id="cap"><span id="capText"></span></div>
+
+  <!-- ===== end ===== -->
+  <div class="layer" id="wipeY">
+    <div id="logo">
+      <img id="mark" src="assets/mark.png" alt="">
+      <div id="wmMask"><img id="wm" src="assets/wordmark.png" alt=""></div>
+    </div>
+    <div class="center" id="tag">
+      <div class="mask"><div class="line" id="g1">Plan together.</div></div>
+      <div class="mask"><div class="line" id="g2">Go together.</div></div>
+    </div>
+    <div id="url">planeraai.app</div>
+    <div id="badges">
+      <img id="bApple" src="assets/badges/app-store.svg" alt="Download on the App Store">
+      <img id="bGoogle" src="assets/badges/google-play-cropped.png" alt="Get it on Google Play">
+    </div>
+  </div>
+</div>
+
+<script src="node_modules/lottie-web/build/player/lottie_svg.min.js"></script>
+<script src="assets/loader.js"></script>
+<script>
+const DURATION = 21;
+const FPS = 30;
+const $ = (id) => document.getElementById(id);
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const lerp = (a, b, p) => a + (b - a) * p;
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const outCubic = (p) => 1 - Math.pow(1 - p, 3);
+const inCubic = (p) => p * p * p;
+const inOutCubic = (p) => p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+const outExpo = (p) => p === 1 ? 1 : 1 - Math.pow(2, -10 * p);
+const outBack = (p, s = 1.7) => 1 + (s + 1) * Math.pow(p - 1, 3) + s * Math.pow(p - 1, 2);
+function show(el, v) { el.style.opacity = v; el.style.visibility = v <= 0.001 ? "hidden" : "visible"; }
+function lineIn(el, t, a, b, d = 0.75) { const p = outExpo(prog(t, a, a + d)), x = inCubic(prog(t, b, b + 0.35)); el.style.transform = `translateY(${(1 - p) * 115 - x * 115}%)`; }
+
+/* ---------- icons (Ionicons-style, 24-unit grid) ---------- */
+const I = {
+  back: '<path d="M15 4.5L7.5 12l7.5 7.5" fill="none" stroke="#1A1A1A" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>',
+  image: '<rect x="3" y="4.5" width="18" height="15" rx="2.5" fill="none" stroke="#fff" stroke-width="1.8"/><circle cx="15.5" cy="9" r="1.7" fill="#fff"/><path d="M3.5 17l5-5 4 4 2.5-2.5 5.5 5" fill="none" stroke="#fff" stroke-width="1.8" stroke-linejoin="round"/>',
+  share: '<path d="M8 8.5H6.5a1.5 1.5 0 0 0-1.5 1.5v9a1.5 1.5 0 0 0 1.5 1.5h11a1.5 1.5 0 0 0 1.5-1.5v-9a1.5 1.5 0 0 0-1.5-1.5H16M12 14V3m-3.5 3.5L12 3l3.5 3.5" fill="none" stroke="#1A1A1A" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>',
+  people: '<circle cx="9" cy="8.5" r="3.2" fill="none" stroke="#1A1A1A" stroke-width="1.8"/><path d="M2.8 19c.6-3.3 3.1-5 6.2-5s5.6 1.7 6.2 5" fill="none" stroke="#1A1A1A" stroke-width="1.8" stroke-linecap="round"/><circle cx="16.8" cy="9" r="2.6" fill="none" stroke="#1A1A1A" stroke-width="1.8"/><path d="M17.2 14.2c2.2.3 3.6 1.9 4 4.3" fill="none" stroke="#1A1A1A" stroke-width="1.8" stroke-linecap="round"/>',
+  peopleFill: '<circle cx="9" cy="8" r="3.4" fill="#1A1A1A"/><path d="M2.5 19.5c.5-3.6 3.2-5.6 6.5-5.6s6 2 6.5 5.6z" fill="#1A1A1A"/><circle cx="17" cy="8.6" r="2.7" fill="#1A1A1A"/><path d="M16.6 13.9c2.6.2 4.4 2 4.9 5.6h-4.3c-.2-2.2-.5-3.9-.6-5.6z" fill="#1A1A1A"/>',
+  cal: '<rect x="3.5" y="5" width="17" height="15.5" rx="2.5" fill="none" stroke="#1A1A1A" stroke-width="1.8"/><path d="M3.5 10h17M8 3v4M16 3v4" stroke="#1A1A1A" stroke-width="1.8" stroke-linecap="round"/>',
+  calW: '<rect x="3.5" y="5" width="17" height="15.5" rx="2.5" fill="none" stroke="#fff" stroke-width="2"/><path d="M3.5 10h17M8 3v4M16 3v4" stroke="#fff" stroke-width="2" stroke-linecap="round"/>',
+  peopleW: '<circle cx="9" cy="8.5" r="3.2" fill="none" stroke="#fff" stroke-width="2"/><path d="M2.8 19c.6-3.3 3.1-5 6.2-5s5.6 1.7 6.2 5" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/><circle cx="16.8" cy="9" r="2.6" fill="none" stroke="#fff" stroke-width="2"/>',
+  spark: (c) => `<path d="M10 2.5l1.9 5.6L17.5 10l-5.6 1.9L10 17.5l-1.9-5.6L2.5 10l5.6-1.9z" fill="${c}"/><path d="M18.5 13l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9z" fill="${c}"/>`,
+  map: '<path d="M3 6.5l5.5-2 7 2.5 5.5-2v13l-5.5 2-7-2.5-5.5 2z" fill="#FFE500"/><path d="M8.5 4.5v13M15.5 7v13" stroke="#fff" stroke-width="1.4"/>',
+  pie: '<path d="M11 3.2a8.8 8.8 0 1 0 9.8 9.8H11z" fill="#9B9B9B"/><path d="M13 2.2v8.8h8.8A8.8 8.8 0 0 0 13 2.2z" fill="#9B9B9B"/>',
+  calChip: (c) => `<rect x="3.5" y="5" width="17" height="15.5" rx="2.5" fill="${c}"/><rect x="5.5" y="10.5" width="13" height="8" rx="1" fill="${c === "#fff" ? "#1A1A1A" : "#fff"}"/><path d="M8 3v4M16 3v4" stroke="${c}" stroke-width="2" stroke-linecap="round"/>`,
+  plane: (c) => `<path fill="${c}" d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/>`,
+  bed: '<path d="M3 18.5V6m0 7.5h18v5M21 13.5V11a3 3 0 0 0-3-3h-7v5.5" fill="none" stroke="#9B9B9B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="7" cy="10" r="2" fill="#9B9B9B"/>',
+  food: (c) => `<path d="M7 3v8m-2.5-8v5a2.5 2.5 0 0 0 5 0V3M7 11v10M16.5 21V3c-2 1-3.5 3.5-3.5 7h3.5" fill="none" stroke="${c}" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>`,
+  ticket: '<path d="M4 7.5h16v3a1.8 1.8 0 0 0 0 3.6v3H4v-3a1.8 1.8 0 0 0 0-3.6z" fill="#1A1A1A"/><path d="M14 8v8.5" stroke="#FFF8E1" stroke-width="1.4" stroke-dasharray="1.6 1.6"/>',
+  star: '<path d="M12 3.2l2.6 5.5 6 .7-4.4 4.1 1.2 5.9L12 16.5l-5.4 2.9 1.2-5.9-4.4-4.1 6-.7z" fill="#1A1A1A"/>',
+  wine: '<path d="M7.5 3h9c.3 4.6-1.2 8-4.5 8.6C8.7 11 7.2 7.6 7.5 3zM12 11.6V20m-3.5 0h7" fill="none" stroke="#1A1A1A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 6.5h8c-.3 2.6-1.6 4.2-4 4.4-2.4-.2-3.7-1.8-4-4.4z" fill="#1A1A1A"/>',
+  pin: '<path d="M12 21s-6.5-6-6.5-11a6.5 6.5 0 0 1 13 0c0 5-6.5 11-6.5 11z" fill="#1A1A1A"/><circle cx="12" cy="10" r="2.4" fill="#FFF8E1"/>',
+  time: '<circle cx="12" cy="12" r="8.5" fill="none" stroke="#9B9B9B" stroke-width="2"/><path d="M12 7v5.2l3.2 2" fill="none" stroke="#9B9B9B" stroke-width="2" stroke-linecap="round"/>',
+  walk: '<circle cx="13" cy="4.5" r="1.9" fill="#9B9B9B"/><path d="M10.2 21l1.8-6.5 2.5 2.5V21M9 11.5l1.5-3.3 3-.5 2 3.3 2.5 1.2M12 14.5l1.5-6" fill="none" stroke="#9B9B9B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+  sparkO: '<path d="M10 3l1.7 5.3L17 10l-5.3 1.7L10 17l-1.7-5.3L3 10l5.3-1.7z" fill="none" stroke="#1A1A1A" stroke-width="1.7" stroke-linejoin="round"/><path d="M18 14l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z" fill="none" stroke="#1A1A1A" stroke-width="1.5" stroke-linejoin="round"/>',
+  create: '<path d="M4 20h4.5L19 9.5 14.5 5 4 15.5zM13 6.5l4.5 4.5" fill="none" stroke="#1A1A1A" stroke-width="1.8" stroke-linejoin="round"/>',
+  reorder: '<path d="M5 8h14M5 12h14M5 16h14" stroke="#9B9B9B" stroke-width="2" stroke-linecap="round"/>',
+  branch: '<circle cx="6.5" cy="5.5" r="2" fill="none" stroke="#9B9B9B" stroke-width="1.8"/><circle cx="6.5" cy="18.5" r="2" fill="none" stroke="#9B9B9B" stroke-width="1.8"/><circle cx="17.5" cy="8" r="2" fill="none" stroke="#9B9B9B" stroke-width="1.8"/><path d="M6.5 7.5v9M17.5 10c0 4-11 3-11 6.5" fill="none" stroke="#9B9B9B" stroke-width="1.8"/>',
+  copy: '<rect x="8" y="8" width="12" height="12" rx="2.5" fill="none" stroke="#1A1A1A" stroke-width="1.8"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8" fill="none" stroke="#1A1A1A" stroke-width="1.8"/>',
+  bubble: '<path d="M12 4.5c-4.7 0-8.5 3-8.5 6.7 0 2.1 1.2 4 3.1 5.2L6 20l3.8-2.2c.7.1 1.4.2 2.2.2 4.7 0 8.5-3 8.5-6.8S16.7 4.5 12 4.5z" fill="#fff"/>',
+};
+const svg = (name, size, arg) => `<svg class="i" width="${size}" height="${size}" viewBox="0 0 24 24">${typeof I[name] === "function" ? I[name](arg) : I[name]}</svg>`;
+const statusIcons = (c) => `<div class="ic"><svg width="18" height="12" viewBox="0 0 18 12"><rect x="0" y="8" width="3" height="4" rx="1" fill="${c}"/><rect x="5" y="5.5" width="3" height="6.5" rx="1" fill="${c}"/><rect x="10" y="3" width="3" height="9" rx="1" fill="${c}"/><rect x="15" y="0" width="3" height="12" rx="1" fill="${c}"/></svg><svg width="16" height="12" viewBox="0 0 16 12"><path d="M8 11.5l2.4-2.6a3.4 3.4 0 0 0-4.8 0zM3.6 6.8a6.3 6.3 0 0 1 8.8 0l1.4-1.5a8.4 8.4 0 0 0-11.6 0zM.8 3.8a10.4 10.4 0 0 1 14.4 0L16 3A11.6 11.6 0 0 0 0 3z" fill="${c}"/></svg><svg width="26" height="12" viewBox="0 0 26 12"><rect x=".5" y=".5" width="22" height="11" rx="3.5" fill="none" stroke="${c}" stroke-opacity=".45"/><rect x="2" y="2" width="16" height="8" rx="2" fill="${c}"/><rect x="23.5" y="4" width="1.8" height="4" rx=".9" fill="${c}" fill-opacity=".45"/></svg></div>`;
+
+/* ---------- the trip, as the app renders it ---------- */
+const DAY2_BASE = [
+  { time: "10:00", end: "11:30", icon: "ticket", title: "Belém Tower", desc: "16th-century fortress on the Tagus and a UNESCO World Heritage site.", type: "attraction", dur: "1h 30m" },
+  { walk: "6 min walk · 0.5 km" },
+  { time: "12:00", end: "12:45", icon: "star", local: true, title: "Pastéis de Belém", desc: "The original custard tarts, warm from the oven since 1837.", type: "bakery", price: "€", dur: "45m" },
+];
+const NEW_ACT = { time: "21:00", end: "23:00", icon: "wine", title: "Fado night in Alfama", desc: "Live fado in a candle-lit tavern in the old town.", type: "bar", price: "€€", dur: "2h" };
+function actHTML(a, last) {
+  if (a.walk) return `<div class="seg"><div class="sl"><i></i></div><div class="sc">${svg("walk", 16)}${a.walk}</div></div>`;
+  return `<div class="ti"><div class="tl"><div class="tic${a.local ? " local" : ""}">${svg(a.icon, 20)}</div><div class="tt2">${a.time}</div><div class="tt2" style="margin-top:2px;font-size:10px;font-weight:600">${a.end}</div>${last ? "" : '<div class="tline"></div>'}</div>
+    <div class="tc"><div class="tr"><h3>${a.title}</h3>${a.local ? '<span class="loc">Local</span>' : ""}</div><p>${a.desc}</p>
+    <div class="meta"><span class="mb">${a.type}</span>${a.price ? `<span class="md" style="color:#9B9B9B">${a.price}</span>` : ""}<span class="md">${svg("time", 12)}${a.dur}</span></div></div></div>`;
+}
+function buildScreen(owner) {
+  const el = document.createElement("div"); el.className = "app";
+  el.innerHTML = `
+  <div class="sb"><span class="clock">9:41</span>${statusIcons("#fff")}</div>
+  <div class="topbar">
+    <div class="ib">${svg("back", 24)}</div><div style="flex:1"></div>
+    <div class="ib orange">${svg("image", 20)}</div><div class="ib">${svg("share", 20)}</div><div class="ib">${svg("people", 20)}</div><div class="ib">${svg("cal", 20)}</div>
+    <div class="ai">${svg("spark", 12, "#FFE500")}AI Generated</div>
+  </div>
+  <div class="scroll">
+    <div class="hero"><img src="assets/photos/lisbon-tram.jpg" alt=""><div class="shade"></div><div class="grad"></div>
+      <div class="tt"><h1>Lisbon</h1><div class="bdg"><span>${svg("calW", 14)}Jun 12 - Jun 16</span><span>${svg("peopleW", 14)}5 travelers</span></div></div>
+      <div class="attr">Photo by <u>Sarah Markstaller</u> on <u>Unsplash</u></div>
+      <div class="route">${svg("map", 20)}Explore Route</div>
+    </div>
+    ${owner ? `<div class="nudge"><div class="nic">${svg("peopleFill", 20)}</div><div style="flex:1"><b>Plan this together</b><p>5 travellers on this trip. Invite them and everyone sees the same plan.</p><div class="acts"><span class="inv">Invite</span><span class="no">Not now</span></div></div></div>` : ""}
+    <div class="chips"><span class="chip">${svg("pie", 18)}Budget</span><span class="chip on">${svg("calChip", 18, "#fff")}Itinerary</span><span class="chip">${svg("plane", 18, "#9B9B9B")}Flights</span><span class="chip">${svg("bed", 18)}Stays</span><span class="chip">${svg("food", 18, "#9B9B9B")}Culinary</span></div>
+    <div class="days">
+      <div class="day"><div class="dh"><div><h2>Day 1 <span>· Fri, Jun 12</span></h2><div class="sub">Alfama &amp; the old town</div><div class="walk">${svg("walk", 13)}3 of 3 stops within a 15-min walk</div></div><div class="right"><span class="energy">MEDIUM ENERGY</span></div></div>
+        ${actHTML({ time: "10:00", end: "12:00", icon: "ticket", title: "São Jorge Castle", desc: "Moorish hilltop castle with the best views over Lisbon's rooftops.", type: "attraction", dur: "2h" })}
+        ${actHTML({ walk: "8 min walk · 0.6 km" })}
+        ${actHTML({ time: "12:30", end: "13:15", icon: "pin", title: "Miradouro de Santa Luzia", desc: "Tiled terrace overlooking Alfama and the river.", type: "viewpoint", dur: "45m" })}
+        ${actHTML({ time: "13:30", end: "14:30", icon: "food", title: "Lunch in Alfama", desc: "Grilled sardines and vinho verde in a family tasca.", type: "restaurant", price: "€€", dur: "1h" }, true)}
+      </div>
+      <div class="day d2"><div class="dh"><div><h2>Day 2 <span>· Sat, Jun 13</span></h2><div class="sub">Belém &amp; the riverside</div></div><div class="right"><span class="energy">LOW ENERGY</span><span class="rb">${svg("reorder", 18)}</span></div></div>
+        <div class="acts">${DAY2_BASE.map((a, i) => actHTML(a, false)).join("")}</div>
+        <div class="newWrap" style="overflow:hidden"><div class="new">${actHTML(NEW_ACT, true)}</div></div>
+        <div class="addf"><span class="addb ai1">${svg("sparkO", 16)}<span class="aiTxt">Tell AI what to add ✨</span></span><span class="addb">${svg("create", 16)}Add manually</span></div>
+      </div>
+      <div class="day"><div class="dh"><div><h2>Day 3 <span>· Sun, Jun 14</span></h2><div class="sub">Sintra day trip</div></div><div class="right"><span class="energy">LOW ENERGY</span></div></div></div>
+    </div>
+  </div>
+  ${owner ? `
+  <div class="modal" style="display:none"><div class="mcard">
+    <div class="mh">${svg("spark", 18, "#FFE500")}Add to Day 2 with AI</div>
+    <div class="msub">Tell us what you'd like to see or do. The AI will find the right place and fit it into your day.</div>
+    <div class="inp multi"><span class="req"></span><span class="ph">e.g. a rooftop bar with a sunset view</span><span class="caret c1"></span></div>
+    <div class="ex"><span>A local food market</span><span>Best gelato nearby</span><span>A viewpoint for sunset</span></div>
+    <div class="lbl">Preferred time (optional)</div>
+    <div class="inp"><span class="tm"></span><span class="ph2" style="color:#9B9B9B">14:00</span><span class="caret c2" style="display:none"></span></div>
+    <div class="mact"><span class="cn">Cancel</span><span class="go">${svg("spark", 15, "#1A1A1A")}Find &amp; add</span></div>
+  </div></div>
+  <div class="sheetBg" style="display:none"></div>
+  <div class="sheet" style="display:none">
+    <div class="hd"><img src="assets/appicon.png" alt=""><div><b>Join my trip to Lisbon!</b><small>planeraai.app</small></div><span class="x">✕</span></div>
+    <div class="people">
+      <div class="pp"><div class="pa grp"><i style="left:6px;top:8px;background:#FF6B5A"></i><i style="left:28px;top:8px;background:#2F80ED"></i><i style="left:17px;top:28px;background:#22A861"></i><em>${svg("bubble", 14)}</em></div>Summer trip 🌴</div>
+      <div class="pp"><div class="pa" style="background:#FF6B5A">M<em>${svg("bubble", 14)}</em></div>Maria</div>
+      <div class="pp"><div class="pa" style="background:#2F80ED">N<em>${svg("bubble", 14)}</em></div>Nikos</div>
+      <div class="pp"><div class="pa" style="background:#22A861">E<em>${svg("bubble", 14)}</em></div>Eleni</div>
+    </div>
+    <div class="acts2"><div>Copy${svg("copy", 20)}</div><div>Add to Reading List<span style="font-size:20px">👓</span></div></div>
+  </div>` : `
+  <div class="joining"><div class="lot"></div><p>Joining trip…</p></div>`}
+  `;
+  const q = (s) => el.querySelector(s);
+  const api = {
+    el, owner, scroll: q(".scroll"), sb: q(".sb"), newWrap: q(".newWrap"), newCard: q(".new"), energy2: q(".d2 .energy"),
+    aiBtn: q(".ai1"), aiTxt: q(".aiTxt"), day2: q(".d2"), modal: q(".modal"), sheet: q(".sheet"), sheetBg: q(".sheetBg"),
+    joining: q(".joining"), lot: q(".lot"), invite: q(".inv"), group: q(".people .pp"), go: q(".go"),
+  };
+  if (api.lot) api.anim = lottie.loadAnimation({ container: api.lot, renderer: "svg", loop: true, autoplay: false, animationData: JSON.parse(JSON.stringify(window.LOADER_JSON)) });
+  return api;
+}
+// screen state: scroll (design px), whether the new activity is in, highlight amount, status-bar tint
+function setScreen(s, { scroll = 0, added = 0, glow = 0, adding = false }) {
+  s.scroll.style.transform = `translateY(${-scroll}px)`;
+  const dark = scroll > 200;
+  s.sb.style.color = dark ? "#1A1A1A" : "#fff";
+  s.sb.querySelectorAll("rect, path").forEach((p) => { if (p.getAttribute("fill") && p.getAttribute("fill") !== "none") p.setAttribute("fill", dark ? "#1A1A1A" : "#fff"); if (p.getAttribute("stroke") && p.getAttribute("stroke") !== "none") p.setAttribute("stroke", dark ? "#1A1A1A" : "#fff"); });
+  s.sb.style.background = dark ? "rgba(248,248,245,0.94)" : "transparent";
+  const h = s.newCard.offsetHeight;
+  s.newWrap.style.height = (h * outCubic(added)) + "px";
+  s.newCard.style.transform = `scale(${lerp(0.85, 1, outBack(added, 1.8))})`;
+  s.newCard.style.opacity = clamp(added * 2);
+  s.newCard.querySelector(".tc").style.boxShadow = `0 0 0 ${2 + 3 * glow}px rgba(255,229,0,${0.35 + 0.65 * glow}), 0 6px 18px rgba(0,0,0,0.08)`;
+  s.energy2.textContent = added > 0.5 ? "MEDIUM ENERGY" : "LOW ENERGY";
+  // the last base activity grows a connector once something follows it
+  s.day2.querySelectorAll(".acts .ti .tl").forEach((tl, i, all) => { if (i === all.length - 1) { let ln = tl.querySelector(".tline"); if (!ln) { ln = document.createElement("div"); ln.className = "tline"; tl.appendChild(ln); } ln.style.opacity = added > 0.2 ? 1 : 0; } });
+  s.aiTxt.textContent = adding ? "Adding activity…" : "Tell AI what to add ✨";
+}
+
+/* ---------- cast ---------- */
+const P = {
+  maria: { name: "Maria", c: "#FF6B5A", i: "M" }, nikos: { name: "Nikos", c: "#2F80ED", i: "N" },
+  eleni: { name: "Eleni", c: "#22A861", i: "E" }, alex: { name: "Alex", c: "#9B51E0", i: "A" },
+};
+[P.maria, P.nikos, P.eleni].forEach((p, k) => { const s = document.createElement("span"); s.style.left = (k * 24) + "px"; s.style.background = p.c; s.style.zIndex = 3 - k; s.textContent = p.i; $("groupAv").appendChild(s); });
+
+/* ---------- story beats (music.js mirrors these) ---------- */
+const CHAOS = [
+  [0.45, "maria", "so where are we going??"], [0.9, "nikos", "Lisbon?"], [1.3, "eleni", "too far. Mykonos!"],
+  [1.65, "alex", "who's booking flights"], [1.95, "maria", "what dates even"], [2.2, "nikos", "I can't do June"],
+  [2.42, "eleni", "Porto??"], [2.6, "alex", "budget??"], [2.75, "maria", "ok but WHERE"], [2.88, "nikos", "🙃🙃🙃"],
+  [2.99, "eleni", "guys"], [3.09, "alex", "guys"], [3.18, "maria", "GUYS"], [3.27, "alex", "I'll make a spreadsheet"],
+];
+const PAYOFF = [[16.0, "eleni", "fado night?? YES 🎶"], [16.4, "nikos", "flights booked ✈️"], [16.8, "alex", "deleting my spreadsheet"]];
+const B = {
+  stamp: 3.45, toApp: [4.45, 4.9], tapInvite: 5.35, sheet: [5.5, 5.85], tapGroup: 6.3, toChat: [6.5, 6.9], sent: 6.95,
+  toGrid: [7.45, 7.9], joins: [8.35, 8.7, 9.05, 9.4], toOwner: [10.2, 10.6], scrollDay2: [10.5, 11.0],
+  tapAI: 11.15, modal: [11.25, 11.45], typeReq: [11.55, 12.2], typeTime: [12.3, 12.55], tapGo: 12.75, adding: [12.85, 13.25], added: 13.25,
+  toGrid2: [13.6, 14.0], live: 14.25, toChat2: [15.6, 15.95], heart: 17.15,
+  wipe: [17.5, 18.0], tag: 17.85, logo: 18.4, slide: 19.05, url: 19.6, badges: [19.8, 19.95],
+};
+window.BEATS = { ...B, chaos: CHAOS.map((m) => m[0]), payoff: PAYOFF.map((m) => m[0]) };
+
+/* ---------- chat ---------- */
+const BOTTOM = 1760, GAP = 26;
+function msgEl(who, text) {
+  const p = P[who], d = document.createElement("div"); d.className = "msg";
+  d.innerHTML = `<div class="av" style="background:${p.c}">${p.i}</div><div><div class="who" style="color:${p.c}">${p.name}</div><div class="bubble">${text}</div></div>`;
+  $("msgs").appendChild(d); return d;
+}
+const chat = [];
+CHAOS.forEach(([at, who, text]) => chat.push({ el: msgEl(who, text), at, clear: B.toApp[0] }));
+const link = document.createElement("div"); link.className = "msg me";
+link.innerHTML = `<div><div class="bubble" id="lb">Join my trip to Lisbon!<a>https://planeraai.app/invite/7Kq2mX</a></div><div class="seen">Delivered</div></div>`;
+$("msgs").appendChild(link); chat.push({ el: link, at: B.sent, clear: 99 });
+PAYOFF.forEach(([at, who, text]) => chat.push({ el: msgEl(who, text), at, clear: 99 }));
+const lastBubble = chat[chat.length - 1].el.querySelector(".bubble");
+const heart = document.createElement("span"); heart.className = "react"; heart.textContent = "❤️"; lastBubble.appendChild(heart);
+
+/* ---------- screens ---------- */
+const OWN = buildScreen(true);
+OWN.el.style.transform = "scale(2.7)";
+$("owner").appendChild(OWN.el);
+const FRIENDS = [P.maria, P.nikos, P.eleni, P.alex];
+const PHONE_POS = [[66, 140], [570, 140], [66, 960], [570, 960]];
+const phones = FRIENDS.map((p, i) => {
+  const ph = document.createElement("div"); ph.className = "phone"; ph.style.left = PHONE_POS[i][0] + "px"; ph.style.top = PHONE_POS[i][1] + "px";
+  ph.innerHTML = `<div class="name"><div class="av" style="background:${p.c}">${p.i}</div>${p.name}</div><div class="scr"><div class="island"></div></div>`;
+  const s = buildScreen(false); s.el.style.transform = `scale(${416 / 400})`; ph.querySelector(".scr").appendChild(s.el);
+  $("grid").appendChild(ph); return { ph, s };
+});
+
+/* ---------- captions ---------- */
+const CAPS = [
+  // [from, to, text, top px, font px] — placed so they never cover the UI being shown
+  [5.55, 7.3, "Send one link.", 800, 72], [8.2, 10.15, "Everyone’s in.", 1748, 72],
+  [11.3, 13.0, "Add anything with AI.", 262, 64], [14.1, 15.55, "Everyone sees the same plan.", 1748, 58],
+];
+
+/* ---------- render ---------- */
+const day2Scroll = (s) => (s._d2 = s._d2 || s.day2.offsetTop - 96);
+function render(t) {
+  /* ===== chat ===== */
+  let y = BOTTOM;
+  for (let i = chat.length - 1; i >= 0; i--) {
+    const m = chat[i], grow = outCubic(prog(t, m.at, m.at + 0.22)), h = m.el.offsetHeight;
+    const gone = inCubic(prog(t, m.clear, m.clear + 0.3));
+    const pop = outBack(prog(t, m.at, m.at + 0.3), 2.2);
+    if (t >= m.at && gone < 1) {
+      const top = y - h * grow;
+      m.el.style.transformOrigin = m.el.classList.contains("me") ? "100% 100%" : "0% 100%";
+      m.el.style.transform = `translateY(${top}px) scale(${lerp(0.6, 1, pop)})`;
+      m.el.style.opacity = clamp(prog(t, m.at, m.at + 0.08)) * (1 - gone) * clamp((top + h - 250) / 140);
+      m.el.style.visibility = "visible";
+      if (gone === 0) y = top - GAP * grow;
+    } else m.el.style.visibility = "hidden";
+  }
+  heart.style.transform = `scale(${Math.max(0.0001, outBack(prog(t, B.heart, B.heart + 0.35), 3))})`;
+  const shown = CHAOS.filter((m) => t >= m[0]).length;
+  $("unread").textContent = Math.round(lerp(0, 47, clamp(shown / CHAOS.length)));
+  const shake = t > 2.4 && t < B.stamp + 0.25 ? (prog(t, 2.4, B.stamp) * 9) * Math.sin(t * 95) : 0;
+  const st = outBack(prog(t, B.stamp, B.stamp + 0.3), 2.2), stOut = inCubic(prog(t, B.toApp[0] - 0.15, B.toApp[0] + 0.15));
+  $("stamp").style.transform = `scale(${lerp(2.2, 1, st) * (1 - stOut * 0.3)}) rotate(${lerp(-14, -5, st)}deg)`;
+  show($("stamp"), clamp(prog(t, B.stamp, B.stamp + 0.06)) * (1 - stOut));
+  show($("dim"), 0.9 * clamp(prog(t, B.stamp, B.stamp + 0.1)) * (1 - stOut));
+
+  /* ===== app switching: chat ⇄ Planera ⇄ friends' phones ===== */
+  const inApp = inOutCubic(prog(t, B.toApp[0], B.toApp[1])) - inOutCubic(prog(t, B.toChat[0], B.toChat[1]));
+  const backOwner = inOutCubic(prog(t, B.toOwner[0], B.toOwner[1])) - inOutCubic(prog(t, B.toGrid2[0], B.toGrid2[1]));
+  const ownerOn = t < B.toGrid[0] ? inApp : backOwner;
+  $("owner").style.transform = t < B.toGrid[0] ? `translateX(${(1 - inApp) * 1080}px)` : `scale(${lerp(0.92, 1, backOwner)})`;
+  show($("owner"), t < B.toGrid[0] ? (inApp > 0 ? 1 : 0) : clamp(backOwner * 1.5));
+  const gridIn = inOutCubic(prog(t, B.toGrid[0], B.toGrid[1])), gridOut = inOutCubic(prog(t, B.toOwner[0], B.toOwner[1]));
+  const grid2In = inOutCubic(prog(t, B.toGrid2[0], B.toGrid2[1])), grid2Out = inOutCubic(prog(t, B.toChat2[0], B.toChat2[1]));
+  const gridOn = t < B.toOwner[1] + 0.01 ? gridIn * (1 - gridOut) : grid2In * (1 - grid2Out);
+  show($("grid"), gridOn > 0.001 ? 1 : 0);
+  $("grid").style.background = `rgba(236,234,228,${clamp(gridOn * 1.4)})`;
+  const chatBack = inOutCubic(prog(t, B.toChat2[0], B.toChat2[1]));
+  $("chat").style.transform = t < B.toGrid[0] ? `translateX(${-inApp * 320 + (t < B.toApp[0] ? shake : 0)}px)` : `translateY(${(1 - chatBack) * 1920}px)`;
+  show($("chat"), t < B.toGrid[1] + 0.05 || t > B.toChat2[0] ? 1 : 0);
+  $("chat").style.filter = t < B.toGrid[0] ? `brightness(${1 - 0.25 * inApp})` : "none";
+
+  /* ===== owner screen ===== */
+  const sc = inOutCubic(prog(t, B.scrollDay2[0], B.scrollDay2[1]));
+  const ownScroll = t > B.toGrid[0] ? sc * day2Scroll(OWN) : 0;
+  const addP = prog(t, B.added, B.added + 0.45), glowO = Math.exp(-Math.max(0, t - B.added) * 1.6) * (t >= B.added ? 1 : 0);
+  setScreen(OWN, { scroll: ownScroll, added: addP, glow: glowO, adding: t > B.adding[0] && t < B.adding[1] });
+  // share sheet
+  const sh = outCubic(prog(t, B.sheet[0], B.sheet[1])) * (1 - inCubic(prog(t, B.tapGroup + 0.12, B.tapGroup + 0.35)));
+  OWN.sheet.style.display = OWN.sheetBg.style.display = sh > 0.001 ? "block" : "none";
+  OWN.sheet.style.transform = `translateY(${(1 - sh) * 380}px)`; OWN.sheetBg.style.opacity = sh;
+  // Add with AI dialog
+  const mo = outCubic(prog(t, B.modal[0], B.modal[1])) * (1 - prog(t, B.tapGo + 0.1, B.tapGo + 0.25));
+  OWN.modal.style.display = mo > 0.001 ? "block" : "none"; OWN.modal.style.opacity = mo;
+  OWN.modal.querySelector(".mcard").style.transform = `scale(${lerp(0.94, 1, mo)})`;
+  const REQ = "Fado night in Alfama", TM = "21:00";
+  const rn = Math.round(prog(t, B.typeReq[0], B.typeReq[1]) * REQ.length), tn = Math.round(prog(t, B.typeTime[0], B.typeTime[1]) * TM.length);
+  OWN.modal.querySelector(".req").textContent = REQ.slice(0, rn);
+  OWN.modal.querySelector(".ph").style.display = rn ? "none" : "inline";
+  OWN.modal.querySelector(".tm").textContent = TM.slice(0, tn);
+  OWN.modal.querySelector(".ph2").style.display = tn ? "none" : "inline";
+  const blink = Math.floor(t * 3) % 2 ? 1 : 0;
+  OWN.modal.querySelector(".c1").style.display = t < B.typeTime[0] - 0.05 ? "inline-block" : "none";
+  OWN.modal.querySelector(".c1").style.opacity = t > B.typeReq[1] ? blink : 1;
+  OWN.modal.querySelector(".c2").style.display = t >= B.typeTime[0] - 0.05 ? "inline-block" : "none";
+  OWN.go.style.transform = `scale(${1 - 0.08 * Math.sin(prog(t, B.tapGo, B.tapGo + 0.18) * Math.PI)})`;
+  OWN.invite.style.transform = `scale(${1 - 0.1 * Math.sin(prog(t, B.tapInvite, B.tapInvite + 0.18) * Math.PI)})`;
+  OWN.aiBtn.style.background = t > B.tapAI && t < B.tapAI + 0.2 ? "rgba(0,0,0,0.05)" : "";
+
+  /* ===== friends' phones ===== */
+  phones.forEach(({ ph, s }, i) => {
+    const d = i * 0.08;
+    const pin = outBack(prog(t, B.toGrid[0] + d, B.toGrid[1] + d), 1.4), pin2 = outBack(prog(t, B.toGrid2[0] + d, B.toGrid2[1] + d), 1.4);
+    const p = t < B.toOwner[1] + 0.01 ? pin * (1 - gridOut) : pin2 * (1 - grid2Out);
+    ph.style.transform = `translateY(${(1 - p) * 900}px) rotate(${(1 - p) * (i % 2 ? 6 : -6)}deg)`;
+    // joining → the shared trip loads
+    const j = B.joins[i], jo = prog(t, j, j + 0.3);
+    s.joining.style.opacity = 1 - jo; s.joining.style.display = jo >= 1 ? "none" : "flex";
+    if (s.anim && jo < 1) s.anim.goToAndStop(((t * 60) % 120), true);
+    // the live update: friends are on Day 2 when the owner's new activity lands
+    const fsc = t > B.toGrid2[0] ? day2Scroll(s) : 0;
+    const fAdd = prog(t, B.live + i * 0.03, B.live + 0.45 + i * 0.03), fGlow = t >= B.live ? Math.exp(-(t - B.live) * 1.4) : 0;
+    setScreen(s, { scroll: fsc, added: fAdd, glow: fGlow });
+  });
+
+  /* ===== finger taps ===== */
+  const taps = [[B.tapInvite, OWN.invite], [B.tapGroup, OWN.group], [B.tapAI, OWN.aiBtn], [B.tapGo, OWN.go]];
+  let tapShown = false;
+  for (const [at, target] of taps) {
+    if (t > at - 0.18 && t < at + 0.32) {
+      const r = target.getBoundingClientRect(); const k = prog(t, at - 0.18, at + 0.32);
+      $("tap").style.left = (r.left + r.width / 2) + "px"; $("tap").style.top = (r.top + r.height / 2) + "px";
+      $("tap").style.transform = `scale(${t < at ? lerp(1.3, 1, prog(t, at - 0.18, at)) : lerp(1, 0.8, prog(t, at, at + 0.32))})`;
+      show($("tap"), Math.sin(k * Math.PI) * 1.2); tapShown = true;
+    }
+  }
+  if (!tapShown) show($("tap"), 0);
+
+  /* ===== captions ===== */
+  let cap = null; for (const c of CAPS) if (t > c[0] && t < c[1] + 0.3) cap = c;
+  if (cap) {
+    $("capText").textContent = cap[2];
+    const ci = outBack(prog(t, cap[0], cap[0] + 0.4), 2), co = inCubic(prog(t, cap[1], cap[1] + 0.25));
+    $("capText").style.transform = `scale(${lerp(0.6, 1, ci) * (1 - co * 0.3)})`;
+    show($("cap"), clamp(prog(t, cap[0], cap[0] + 0.1)) * (1 - co));
+    $("cap").style.top = cap[3] + "px";
+    $("capText").style.fontSize = cap[4] + "px";
+  } else show($("cap"), 0);
+
+  /* ===== end ===== */
+  const wy = inOutCubic(prog(t, B.wipe[0], B.wipe[1]));
+  $("wipeY").style.clipPath = `circle(${wy * 1150}px at 540px 960px)`;
+  show($("wipeY"), wy > 0 ? 1 : 0);
+  lineIn($("g1"), t, B.tag, 99); lineIn($("g2"), t, B.tag + 0.15, 99);
+  const mIn = prog(t, B.logo, B.logo + 0.7), slide = inOutCubic(prog(t, B.slide, B.slide + 0.75)), markX = lerp(350, 0, slide);
+  $("mark").style.transform = `translateX(${markX}px) scale(${Math.max(0.0001, outBack(mIn, 2.4) * lerp(1.35, 1, slide))}) rotate(${(1 - outCubic(mIn)) * -140}deg)`;
+  $("wm").style.transform = `translateX(${lerp(-105, 0, slide)}%)`;
+  $("wmMask").style.clipPath = `inset(0 0 0 ${markX}px)`;
+  const ul = outCubic(prog(t, B.url, B.url + 0.5));
+  $("url").style.opacity = ul; $("url").style.transform = `translateY(${(1 - ul) * 30}px)`;
+  [["bApple", B.badges[0]], ["bGoogle", B.badges[1]]].forEach(([id, s]) => {
+    const p = prog(t, s, s + 0.5);
+    $(id).style.opacity = clamp(p * 4);
+    $(id).style.transform = `translateY(${(1 - outCubic(p)) * 40}px) scale(${lerp(0.75, 1, outBack(p, 1.8))})`;
+  });
+}
+
+window.render = render;
+window.DURATION = DURATION;
+window.FPS = FPS;
+window.ready = document.fonts.ready.then(() => Promise.all([...document.images].map((im) => im.complete ? 0 : new Promise((r) => { im.onload = im.onerror = r; }))));
+const q = new URLSearchParams(location.search);
+window.ready.then(() => {
+  if (q.has("t")) render(parseFloat(q.get("t")));
+  else if (!navigator.webdriver) { const t0 = performance.now(); const loop = () => { render(((performance.now() - t0) / 1000) % DURATION); requestAnimationFrame(loop); }; loop(); }
+});
+</script>
+</body>
+</html>

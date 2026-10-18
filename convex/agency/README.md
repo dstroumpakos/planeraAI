@@ -394,3 +394,48 @@ revalidation (quotes are short-lived, so they are never stored).
 Built from Duffel's docs, NOT yet run live. Stays is off by default: the agency
 must request access from Duffel; until then hotel searches fail with
 "Duffel Stays is not enabled on this Duffel account".
+
+## Client payments to the agency (2026-10-16, web `2026.10.11`, Convex deploy pending)
+
+The client pays the AGENCY. Planera never receives, holds or forwards the
+money. Policy in `clientPayments.ts` (pure), provider calls in
+`paymentProviders.ts` (pure, `fetch` injected), Convex adapter in `payments.ts`.
+
+1. **Bank details / payment link** (`agencies.payments`): beneficiary, IBAN
+   (mod-97 checked), BIC, the agency's own payment link, instructions, deposit %,
+   and when the client sees it (`on_accept`, or `on_request` after the agent
+   presses "ask for payment"). Shown on the client link once an option is chosen.
+2. **Online, on the agency's OWN Viva Wallet or Stripe** (`agencyPaymentAccounts`,
+   vault-sealed like a supplier key). **Off until `checkAccount` passes**
+   (`isOnlineActive` needs `lastHealthOk === true`), so an agency without keys
+   never shows a "pay" button. One account per agency.
+   - Viva: Smart Checkout client id/secret + 4-digit source code. The source's
+     success/failure URL must be `<site>/q/paid` (Viva appends `s` and `t`).
+     Optional Merchant ID + API key enable the webhook
+     (`/agency/payments/viva/webhook?a=<accountId>`, GET returns the key). EUR only.
+   - Stripe: `sk_`/`rk_` key, mode taken from the key. Checkout Session with
+     `?p=<publicId>&session_id=...`. Optional webhook `/agency/payments/stripe/webhook`.
+   - **The Stripe check creates, it does not just read.** A `GET` only proves
+     read access, so `checkProviderKeys` creates a Checkout Session the same way
+     `stripeCreateSession` does (inline `price_data`, €0.50 = the EUR minimum,
+     success/cancel = `<site>/q/paid?healthcheck=1`,
+     `metadata[planera_healthcheck]=1`, a fresh Idempotency-Key per check,
+     `expires_at` +35 min), then immediately `POST .../{id}/expire`s it. Nobody
+     is sent to it and nothing is charged. It shows in the agency's Stripe
+     dashboard as an expired session. A 403 on create is reported with the
+     permission Stripe names (`rak_checkout_session_write` → "set Checkout
+     Sessions to Write", and the same for Products/Prices if Stripe ever asks
+     for them for inline prices), so the agent knows exactly what to change.
+     If the expire call fails, the key still passes. The failure is only
+     logged, and the session expires on its own at `expires_at`.
+
+Every payment (`agencyPayments`) is marked paid ONLY after the provider confirms
+it on the agency's keys: the return page, webhooks, the scheduler (+40 min,
++25 h) and the agent's "check" button all go through `verifyPayment`. Webhook
+bodies and URLs only name an order. Paid is final (`reconcile`), is recorded at
+the amount the provider confirmed, is added to the fulfilment ledger once
+(`applyOnlinePayment`, or summed in when `startFulfilment` opens the record),
+and emails the agency owner (`notify.quoteEvent`, event `paid`).
+
+Viva order codes are 16 digits and are read from raw text, never via
+`JSON.parse`. A checkout opened in the last 30 min is reused, not duplicated.

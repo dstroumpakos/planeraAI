@@ -988,6 +988,12 @@ export default defineSchema({
         // typical" badge in newsletters and the low-fare expiry ceiling. Absent
         // until the deal's first refresh.
         typicalPrice: v.optional(v.float64()),
+        // Google's typical range [typicalLow, typicalHigh] (per person) and its
+        // low/typical grade for the deal's dates, from the seed search and each
+        // price refresh. Feed the buy-or-wait verdict (lib/fareVerdict.ts).
+        typicalLow: v.optional(v.float64()),
+        typicalHigh: v.optional(v.float64()),
+        priceLevel: v.optional(v.string()),
         // Baggage
         cabinBaggage: v.optional(v.string()),   // "1x 8kg"
         checkedBaggage: v.optional(v.string()),  // "1x 23kg"
@@ -1539,11 +1545,78 @@ export default defineSchema({
         // carried over from their earlier application so they accept only once.
         acceptedTermsAt: v.optional(v.float64()),
         termsVersion: v.optional(v.string()),
+        // Supplier listing subscription (€20/month + VAT, Stripe). true = the
+        // account must hold a live subscription before its products are
+        // submitted for review or shown in the app; set on every supplier
+        // created from 2026-10 on. Unset = grandfathered free (pre-existing
+        // suppliers), and the operator can waive it per account.
+        billingRequired: v.optional(v.boolean()),
+        // Invoicing details for the Greek Τιμολόγιο Παροχής Υπηρεσιών.
+        billingDetails: v.optional(v.object({
+            legalName: v.string(),          // Επωνυμία
+            vatNumber: v.string(),          // ΑΦΜ / VAT id, no country prefix
+            taxOffice: v.optional(v.string()), // ΔΟΥ (Greek customers)
+            profession: v.optional(v.string()), // Δραστηριότητα
+            address: v.string(),
+            city: v.string(),
+            postalCode: v.string(),
+            country: v.string(),            // ISO 3166-1 alpha-2
+            phone: v.optional(v.string()),
+            invoiceEmail: v.optional(v.string()),
+            viesValid: v.optional(v.boolean()), // EU non-GR: VIES confirmed
+            updatedAt: v.float64(),
+        })),
+        stripeCustomerId: v.optional(v.string()),
+        stripeSubscriptionId: v.optional(v.string()),
+        subscriptionStatus: v.optional(v.string()), // Stripe status, verbatim
+        subscriptionPeriodEnd: v.optional(v.float64()),
+        subscriptionCancelAtPeriodEnd: v.optional(v.boolean()),
+        // Set while a signed commission agreement is in force: the listing
+        // fee is lifted and the supplier's listings take quote requests.
+        // A copy of the agreement's key terms, for cheap reads.
+        commission: v.optional(v.object({
+            agreementId: v.id("partnerAgreements"),
+            commissionPct: v.float64(),
+            attributionDays: v.float64(),
+            since: v.float64(),
+        })),
     })
         .index("by_email", ["email"])
         .index("by_inviteTokenHash", ["inviteTokenHash"])
         .index("by_emailVerifyTokenHash", ["emailVerifyTokenHash"])
-        .index("by_partnerRef", ["partnerRef"]),
+        .index("by_partnerRef", ["partnerRef"])
+        .index("by_stripeCustomerId", ["stripeCustomerId"]),
+
+    // One row per paid supplier-subscription invoice. Stripe takes the money;
+    // the legal Greek invoice (Τιμολόγιο Παροχής Υπηρεσιών, transmitted to
+    // myDATA) is issued by Planera's own invoicing software from these rows.
+    // `billing` is a snapshot, so a later edit of the account's details never
+    // rewrites what a past invoice was issued to.
+    partnerInvoices: defineTable({
+        accountId: v.id("partnerAccounts"),
+        partnerName: v.string(),
+        email: v.string(),
+        stripeInvoiceId: v.string(),
+        stripeInvoiceNumber: v.optional(v.string()),
+        stripeSubscriptionId: v.optional(v.string()),
+        hostedInvoiceUrl: v.optional(v.string()),
+        currency: v.string(),
+        netMinor: v.float64(),
+        vatMinor: v.float64(),
+        totalMinor: v.float64(),
+        vatRatePct: v.float64(),
+        vatNote: v.optional(v.string()),
+        periodStart: v.optional(v.float64()),
+        periodEnd: v.optional(v.float64()),
+        paidAt: v.float64(),
+        billing: v.any(),
+        // Filled by the operator once the Τιμολόγιο is issued.
+        issuedAt: v.optional(v.float64()),
+        invoiceNumber: v.optional(v.string()),
+    })
+        .index("by_stripeInvoiceId", ["stripeInvoiceId"])
+        .index("by_account_paid", ["accountId", "paidAt"])
+        .index("by_paid", ["paidAt"]),
 
     // Partner portal sessions (separate from app user sessions). Token is
     // stored hashed; the raw token lives only in the partner's browser.
@@ -1712,6 +1785,9 @@ export default defineSchema({
         bookingUrl: v.optional(v.string()),
         imageUrls: v.optional(v.array(v.string())),
         status: v.union(
+            // Saved by a supplier without a live listing subscription; moves
+            // to "pending" automatically when they subscribe.
+            v.literal("draft"),
             v.literal("pending"),
             v.literal("approved"),
             v.literal("rejected"),
@@ -1736,9 +1812,152 @@ export default defineSchema({
                 photographerUrl: v.optional(v.string()),
             })
         ),
+        // Tailor-made listing with no fixed price: cards say "On request"
+        // and travellers send a quote request instead of seeing a price.
+        priceOnRequest: v.optional(v.boolean()),
     })
         .index("by_account", ["accountId"])
         .index("by_status_created", ["status", "createdAt"]),
+
+    // Commission agreement offered to one supplier and signed by them in the
+    // partner portal (simple electronic signature, eIDAS). `bodyText` is the
+    // frozen canonical text and `bodyHash` its SHA-256, so what was signed can
+    // always be shown byte for byte. See convex/lib/partnerCommission.ts.
+    partnerAgreements: defineTable({
+        accountId: v.id("partnerAccounts"),
+        reference: v.string(),              // PLN-AGR-0001
+        templateVersion: v.string(),
+        status: v.union(
+            v.literal("offered"),
+            v.literal("signed"),
+            v.literal("withdrawn"),
+            v.literal("terminated")
+        ),
+        terms: v.object({
+            commissionPct: v.float64(),
+            attributionDays: v.float64(),
+            replyBusinessDays: v.float64(),
+            paymentDays: v.float64(),
+            noticeDays: v.float64(),
+        }),
+        partner: v.object({
+            legalName: v.string(),
+            vatNumber: v.string(),
+            address: v.string(),
+            representative: v.string(),
+            representativeTitle: v.string(),
+            email: v.string(),
+        }),
+        bodyText: v.string(),
+        bodyHash: v.string(),
+        offeredAt: v.float64(),
+        offeredBy: v.string(),              // admin userId
+        expiresAt: v.float64(),
+        signedAt: v.optional(v.float64()),
+        signerName: v.optional(v.string()),
+        signerTitle: v.optional(v.string()),
+        signerEmail: v.optional(v.string()),
+        signerIp: v.optional(v.string()),
+        signerUserAgent: v.optional(v.string()),
+        signatureKind: v.optional(v.union(v.literal("drawn"), v.literal("typed"))),
+        signatureDataUrl: v.optional(v.string()), // PNG data URL when drawn
+        withdrawnAt: v.optional(v.float64()),
+        terminatedAt: v.optional(v.float64()),
+        terminationNote: v.optional(v.string()),
+    })
+        .index("by_account", ["accountId"])
+        .index("by_reference", ["reference"])
+        .index("by_status", ["status"]),
+
+    // A traveller's quote request for a supplier listing, and what came of it.
+    // The supplier records the outcome and booking value; commission is a
+    // snapshot of the agreement's rate when the request arrived.
+    partnerLeads: defineTable({
+        reference: v.string(),              // PLN-7K3F
+        accountId: v.id("partnerAccounts"),
+        productId: v.optional(v.id("partnerProducts")),
+        productTitle: v.string(),
+        agreementId: v.optional(v.id("partnerAgreements")),
+        commissionPct: v.float64(),
+        attributionDays: v.float64(),
+        // "request" = sent through Planera; "link" = the supplier reported a
+        // booking that came through a Planera tracked link (clause 3.3).
+        origin: v.union(v.literal("request"), v.literal("link")),
+        source: v.string(),                 // ios | android | web | portal
+        userId: v.optional(v.string()),
+        tripId: v.optional(v.id("trips")),
+        destination: v.optional(v.string()),
+        startDate: v.optional(v.float64()),
+        endDate: v.optional(v.float64()),
+        travelers: v.optional(v.float64()),
+        contactName: v.string(),
+        contactEmail: v.optional(v.string()),
+        contactPhone: v.optional(v.string()),
+        preferredContactMethod: v.optional(v.string()),
+        message: v.optional(v.string()),
+        consentGiven: v.boolean(),
+        status: v.union(
+            v.literal("new"),
+            v.literal("quoted"),
+            v.literal("booked"),
+            v.literal("not_booked"),
+            v.literal("cancelled")
+        ),
+        currency: v.string(),
+        bookingValueMinor: v.optional(v.float64()),
+        refundedMinor: v.optional(v.float64()),
+        bookedAt: v.optional(v.float64()),
+        partnerNote: v.optional(v.string()),
+        emailStatus: v.optional(v.union(v.literal("pending"), v.literal("sent"), v.literal("failed"))),
+        emailError: v.optional(v.string()),
+        createdAt: v.float64(),
+        updatedAt: v.float64(),
+    })
+        .index("by_account_created", ["accountId", "createdAt"])
+        .index("by_account_booked", ["accountId", "bookedAt"])
+        .index("by_reference", ["reference"])
+        .index("by_user", ["userId"]),
+
+    // Monthly commission statement per supplier (clause 8). `lines` is a
+    // snapshot, so later edits to a lead show up as a difference, never as a
+    // silent rewrite of a statement already sent.
+    partnerCommissionStatements: defineTable({
+        accountId: v.id("partnerAccounts"),
+        partnerName: v.string(),
+        month: v.string(),                  // "2026-11", Athens time
+        currency: v.string(),
+        lines: v.array(v.object({
+            leadId: v.id("partnerLeads"),
+            reference: v.string(),
+            productTitle: v.string(),
+            customer: v.string(),
+            bookedAt: v.float64(),
+            bookingValueMinor: v.float64(),
+            refundedMinor: v.float64(),
+            commissionPct: v.float64(),
+            commissionMinor: v.float64(),
+        })),
+        netMinor: v.float64(),
+        vatRatePct: v.float64(),
+        vatMinor: v.float64(),
+        totalMinor: v.float64(),
+        vatNote: v.optional(v.string()),
+        status: v.union(
+            v.literal("open"),
+            v.literal("disputed"),
+            v.literal("invoiced"),
+            v.literal("paid")
+        ),
+        publishedAt: v.float64(),
+        disputeDeadline: v.float64(),
+        disputeNote: v.optional(v.string()),
+        disputedAt: v.optional(v.float64()),
+        invoiceNumber: v.optional(v.string()),
+        invoicedAt: v.optional(v.float64()),
+        paidAt: v.optional(v.float64()),
+    })
+        .index("by_account_month", ["accountId", "month"])
+        .index("by_month", ["month"]),
 
     // Cron-computed singleton holding the destination aggregates behind the
     // home "Trending Now" strip and the /destinations screen. Trip documents
@@ -2064,6 +2283,23 @@ export default defineSchema({
         // (day, event, surface) prefix scans the cron does.
         .index("by_day_event_surface_variant", ["day", "event", "surface", "variant"])
         .index("by_day", ["day"]),
+
+    // Cron-cached singleton of third-party marketing numbers for the admin
+    // dashboard: Google Analytics 4 (Data API) and Meta Ads (Marketing API
+    // insights). Fetched by the `refresh-external-analytics` cron (see
+    // externalAnalytics.ts) so a dashboard load never calls Google or Meta.
+    // The vendor blobs are `v.any()` because their shape follows the vendor
+    // reports and is only ever read back by the admin UI. Each source keeps its
+    // last good payload when a refresh fails; `*Error` says why.
+    externalAnalytics: defineTable({
+        ga4: v.optional(v.any()),
+        ga4FetchedAt: v.optional(v.float64()),
+        ga4Error: v.optional(v.string()),
+        meta: v.optional(v.any()),
+        metaFetchedAt: v.optional(v.float64()),
+        metaError: v.optional(v.string()),
+        attemptedAt: v.optional(v.float64()),
+    }),
 
     // Newsletter funnel subscribers (double opt-in + drip sequence).
     // Captured from the marketing site and in-app opt-in card.

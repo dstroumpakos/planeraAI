@@ -489,6 +489,16 @@
     "cards": {
       "cheapestDates": "Günstigste Termine",
       "indicativeFares": "Richtpreise — zum Buchen die Flugsuche öffnen.",
+      "flightOptions": "Flugoptionen",
+      "nonstop": "Nonstop",
+      "oneStop": "1 Stopp",
+      "multiStops": "{{count}} Stopps",
+      "nonstopFrom": "Nonstop ab {{price}}",
+      "noNonstop": "Keine Nonstop-Flüge an diesen Tagen",
+      "returnFlights": "Rückflüge",
+      "overnight": "über Nacht",
+      "selfTransfer": "Selbst umsteigen",
+      "liveFares": "Live-Preise, die sich ändern können. Tippe auf einen Flug, um ihn in der Flugsuche zu buchen.",
       "dealsFromYou": "Angebote für dich",
       "from": "ab",
       "notableSights": "Sehenswürdigkeiten",
@@ -521,7 +531,14 @@
       "sixMonthRule": "Viele Länder verlangen 6 Monate Gültigkeit über das Einreisedatum hinaus.",
       "guides": "Planera-Guides",
       "nowWatching": "{{destination}} wird jetzt auf Preisstürze beobachtet",
-      "addedToWishlist": "{{destination}} zu deiner Wunschliste hinzugefügt"
+      "addedToWishlist": "{{destination}} zu deiner Wunschliste hinzugefügt",
+      "staysBooking": "Unterkünfte auf Booking.com",
+      "staysAirbnb": "Wohnungen auf Airbnb",
+      "nights_one": "{{count}} Nacht",
+      "nights_other": "{{count}} Nächte",
+      "freeCancellation": "Kostenlose Stornierung",
+      "perNightShort": "/Nacht",
+      "staysDisclaimer": "Live-Preise, die sich ändern können. Gebucht wird auf {{provider}}; Planera nimmt keine Buchung an."
     },
     "myTripWeather": "Wie wird das Wetter auf meiner nächsten Reise?",
     "dealsFromMe": "Gibt es Angebote ab meinem Heimatflughafen?",
@@ -2069,6 +2086,11 @@
     "inclDays": "{{count}} Tage geplant"
   },
   "packages": {
+    "onRequest": "Auf Anfrage",
+    "tailorMade": "Maßgeschneidert",
+    "requestQuote": "Angebot anfragen",
+    "visitPartner": "Beim Partner ansehen",
+    "successWithRef": "{{partner}} hat Ihre Anfrage erhalten und antwortet Ihnen direkt. Ihre Referenz ist {{ref}}. Eine Kopie haben wir Ihnen per E-Mail geschickt.",
     "title": "Kuratierte Pakete",
     "subtitle": "Handverlesene Angebote unserer Partner — perfekt für deine Reise",
     "emptyTitle": "Keine passenden Pakete",
@@ -2318,6 +2340,26 @@
     "titleIn": "Tickets für Top-Sehenswürdigkeiten in {{place}}",
     "desc": "Spar dir die Warteschlange mit sofortigen Handytickets für Museen, Wahrzeichen und Erlebnisse.",
     "cta": "Tickets auf Tiqets finden"
+  },
+  "fareVerdict": {
+    "title": "Kaufen oder warten?",
+    "buy": "Guter Zeitpunkt zum Kaufen",
+    "fair": "Fairer Preis",
+    "wait": "Warten lohnt sich",
+    "disclaimer": "Unsere Einschätzung der Google-Preisdaten für diese Daten, keine Prognose.",
+    "reason": {
+      "belowRange": "{{amount}} unter den üblichen {{low}}–{{high}} für diese Strecke",
+      "underTypical": "{{amount}} unter dem typischen Preis von {{typical}}",
+      "aboveTypical": "{{amount}} über dem typischen Preis von {{typical}}",
+      "aboveRange": "{{amount}} über den üblichen {{low}}–{{high}} für diese Strecke",
+      "googleLow": "Google stuft diesen Preis für die Strecke als niedrig ein",
+      "googleHigh": "Google stuft diesen Preis für die Strecke als hoch ein",
+      "lowestSeen": "Niedrigster Preis für diese Daten in den letzten {{days}} Tagen",
+      "pricesRising": "Die Preise für diese Daten steigen",
+      "pricesFalling": "Die Preise für diese Daten fallen",
+      "departingSoon": "Noch {{days}} Tage: So spät fallen die Preise selten",
+      "plentyOfTime": "Noch {{months}} Monate: Sie haben Zeit, den Preis zu beobachten"
+    }
   },
   "metaConsent": {
     "title": "Hilf uns, unsere Werbung zu messen",

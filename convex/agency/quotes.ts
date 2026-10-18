@@ -35,6 +35,7 @@ import { fulfilmentStage, toCustomerBooking, type Fulfilment, type TravellerDeta
 import { searchForQuote, revalidateSelected, type ConnectorRunResult } from "./orchestrator";
 import { bindingsById, buildBindings, type StoredConnectionRow } from "./runtime";
 import { autoResolveMissing } from "./destinationMap";
+import { loadCustomerPayment } from "./payments";
 import { isBookable } from "./connectors/factory";
 import {
   scrubForStorage,
@@ -664,6 +665,7 @@ export const get = query({
         travellers: (row!.travellers ?? null) as TravellerDetails | null,
         fulfilment: (row!.fulfilment ?? null) as Fulfilment | null,
         fulfilmentStage: row!.fulfilment ? fulfilmentStage(row!.fulfilment as Fulfilment) : null,
+        paymentRequestedAt: row!.paymentRequestedAt ?? null,
         // Which suppliers on this quote Planera can book directly; the rest are
         // booked in the agency's own system and recorded by hand.
         bookableConnectors: [
@@ -1062,6 +1064,10 @@ export const resolveCustomerLink = internalMutation({
           !!row.travellers,
           (row.searchParams as { travelers?: number })?.travelers ?? 1,
         ),
+        // How to pay the AGENCY: its bank details, and a checkout on its own
+        // Viva / Stripe account once that is connected. Null until there is
+        // something to pay and a way to pay it.
+        payment: await loadCustomerPayment(ctx, row, agency),
         agency: {
           name: agency.branding?.legalName ?? agency.name,
           primaryColor: agency.branding?.primaryColor ?? null,

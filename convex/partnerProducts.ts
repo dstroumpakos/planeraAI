@@ -5,6 +5,8 @@ import { internal } from "./_generated/api";
 import { searchUnsplashPhotos, pingUnsplashDownload, type UnsplashSearchResult } from "./lib/unsplashSearch";
 import { sha256Hex } from "./partnerApiAuth";
 import { resolveHomeIata } from "../lib/homeAirport";
+import { partnerListingActive } from "./lib/partnerListingAccess";
+import { withReferral } from "./lib/partnerCommission";
 
 /**
  * Partner product listings — the self-serve supplier surface.
@@ -15,7 +17,17 @@ import { resolveHomeIata } from "../lib/homeAirport";
  * listing back to status "pending"; an operator approves it in /partner-admin
  * (see `partnerApiAdmin.listPendingProducts` / `setProductStatus`) before it
  * goes live. All ops are scoped to the caller's own `accountId`.
+ *
+ * Paid listings: a supplier with `billingRequired` and no live subscription
+ * can still build its catalogue, but every write lands in "draft" instead of
+ * "pending" — nothing reaches the review queue or the app until they pay.
+ * `partnerBillingDb.applyPartnerSubscription` promotes drafts on activation.
  */
+
+/** Status a new or edited listing enters for this account. */
+function submitStatus(account: any): "pending" | "draft" {
+  return partnerListingActive(account) ? "pending" : "draft";
+}
 
 const PRODUCT_TYPE = v.union(
   v.literal("flight"),
@@ -26,7 +38,7 @@ const PRODUCT_TYPE = v.union(
 );
 
 /** Resolve a partner account from a session token, or null if invalid. */
-async function accountFromToken(ctx: any, token: string) {
+export async function accountFromToken(ctx: any, token: string) {
   const tokenHash = await sha256Hex(token);
   const session = await ctx.db
     .query("partnerAccountSessions")
@@ -50,6 +62,8 @@ const PRODUCT_FIELDS = {
   currency: v.optional(v.string()),
   bookingUrl: v.optional(v.string()),
   imageUrls: v.optional(v.array(v.string())),
+  // Tailor-made: no fixed price, travellers ask for a quote.
+  priceOnRequest: v.optional(v.boolean()),
   // Home-airport IATA codes this listing is for; ["*"] = everyone. The
   // operator can adjust during review.
   markets: v.optional(v.array(v.string())),
@@ -95,7 +109,9 @@ function cleanFields(args: any) {
     destination: clean(args.destination),
     city: clean(args.city),
     country: clean(args.country),
-    price: args.price != null ? args.price : undefined,
+    // "On request" listings carry no price, so a stale one can never show.
+    price: args.priceOnRequest ? undefined : args.price != null ? args.price : undefined,
+    priceOnRequest: args.priceOnRequest ? true : undefined,
     currency: clean(args.currency)?.toUpperCase(),
     bookingUrl: clean(args.bookingUrl),
     imageUrls: imageUrls && imageUrls.length ? imageUrls : undefined,
@@ -163,6 +179,7 @@ export const listMyProducts = query({
         city: p.city ?? null,
         country: p.country ?? null,
         price: p.price ?? null,
+        priceOnRequest: !!p.priceOnRequest,
         currency: p.currency ?? null,
         bookingUrl: p.bookingUrl ?? null,
         imageUrls: p.imageUrls ?? [],
@@ -201,7 +218,7 @@ export const createProduct = mutation({
       accountId: account._id,
       partnerRef: account.partnerRef,
       ...cleanFields(args),
-      status: "pending",
+      status: submitStatus(account),
       createdAt: now,
       updatedAt: now,
     });
@@ -234,7 +251,7 @@ export const updateProduct = mutation({
       imageUrls,
       markets,
       imageCredit,
-      status: "pending",
+      status: submitStatus(account),
       rejectionReason: undefined,
       updatedAt: Date.now(),
     });
@@ -250,6 +267,8 @@ async function insertRows(
   products: any[]
 ): Promise<{ created: number; errors: { row: number; message: string }[] }> {
   const now = Date.now();
+  const account = await ctx.db.get(accountId);
+  const status = account ? submitStatus(account) : "draft";
   let created = 0;
   const errors: { row: number; message: string }[] = [];
   for (let i = 0; i < products.length; i++) {
@@ -259,7 +278,7 @@ async function insertRows(
         accountId,
         partnerRef,
         ...fields,
-        status: "pending",
+        status,
         createdAt: now,
         updatedAt: now,
       });
@@ -370,7 +389,7 @@ export const archiveProduct = mutation({
 const HOME_TYPES = new Set(["tour", "experience", "hotel", "other"]);
 
 /** Suppliers often paste bare domains ("www.x.gr"); make them openable. */
-function normalizeUrl(url?: string): string | undefined {
+export function normalizeUrl(url?: string): string | undefined {
   const u = url?.trim();
   if (!u) return undefined;
   if (/^https?:\/\//i.test(u)) return u;
@@ -425,20 +444,24 @@ export const listForHome = query({
       .order("desc")
       .take(40);
 
-    const accountNames = new Map<string, string | null>();
+    const accounts = new Map<string, { name: string; requestable: boolean } | null>();
     const out = [];
     for (const p of approved) {
       if (!HOME_TYPES.has(p.type)) continue;
       if (!productVisibleTo(p.markets, homeIata)) continue;
-      if (!accountNames.has(p.accountId)) {
+      if (!accounts.has(p.accountId)) {
         const account = await ctx.db.get(p.accountId);
-        accountNames.set(
+        // Disabled supplier, or a paid supplier whose subscription lapsed.
+        accounts.set(
           p.accountId,
-          account && account.status === "active" ? account.partnerName : null
+          account && account.status === "active" && partnerListingActive(account)
+            ? { name: account.partnerName, requestable: !!account.commission }
+            : null
         );
       }
-      const partnerName = accountNames.get(p.accountId);
-      if (!partnerName) continue; // disabled supplier → hide their listings
+      const acct = accounts.get(p.accountId);
+      if (!acct) continue;
+      const partnerName = acct.name;
       out.push({
         _id: p._id,
         type: p.type,
@@ -446,9 +469,12 @@ export const listForHome = query({
         description: p.description,
         destination: p.city || p.destination || p.country,
         country: p.country,
-        price: p.price,
+        price: p.priceOnRequest ? undefined : p.price,
+        priceOnRequest: !!p.priceOnRequest,
+        // Commission partners take quote requests through Planera (partnerLeads).
+        requestable: acct.requestable,
         currency: p.currency ?? "EUR",
-        bookingUrl: normalizeUrl(p.bookingUrl),
+        bookingUrl: withReferral(normalizeUrl(p.bookingUrl)),
         imageUrl: p.imageUrls?.[0],
         // Unsplash credit, only while the picked photo is still the cover.
         imageCredit:

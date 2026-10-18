@@ -31,6 +31,7 @@ import {
     subscriptionPeriodEndMs,
     type StripeSubscription,
 } from "./lib/stripe";
+import { handlePartnerStripeEvent } from "./partnerBilling";
 
 const WEB_URL = () => process.env.PLANERA_WEB_URL || "https://planeraai.app";
 
@@ -425,6 +426,22 @@ export const processWebhookEvent = internalAction({
             { eventId: String(event?.id ?? ""), type }
         );
         if (!claim.isNew) return { action: "duplicate" };
+
+        // Supplier listing subscriptions share this endpoint; they are tagged
+        // `metadata.kind = "partner"` and never touch `userPlans`.
+        let partner: { action: string } | null;
+        try {
+            partner = await handlePartnerStripeEvent(ctx, type, object);
+        } catch (e) {
+            // Release the claim so Stripe's retry (it gets a 500) is
+            // processed rather than swallowed as a duplicate.
+            await ctx.runMutation(internal.stripeBillingDb.releaseStripeEvent, {
+                eventId: String(event?.id ?? ""),
+            });
+            await reportError(ctx, "stripeBilling:partnerWebhook", e, { type });
+            throw e;
+        }
+        if (partner) return partner;
 
         switch (type) {
             case "checkout.session.completed":

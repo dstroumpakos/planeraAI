@@ -122,6 +122,10 @@ export const listActivePublic = query({
         originalPrice: d.originalPrice,
         currency: d.currency,
         typicalPrice: d.typicalPrice,
+        // Buy-or-wait verdict inputs (lib/fareVerdict.ts)
+        typicalLow: d.typicalLow,
+        typicalHigh: d.typicalHigh,
+        priceLevel: d.priceLevel,
         // Baggage
         cabinBaggage: d.cabinBaggage,
         checkedBaggage: d.checkedBaggage,
@@ -1008,6 +1012,11 @@ export const applyPriceRefresh = internalMutation({
     // Persisted on the deal so downstream surfaces (newsletter deal cards) can
     // show "X% below typical" without another API call. Omitted → left as-is.
     typicalPrice: v.optional(v.float64()),
+    // Google's typical range + grade from the same search (buy-or-wait
+    // verdict). Each is optional; a missing one leaves the stored value as-is.
+    typicalLow: v.optional(v.float64()),
+    typicalHigh: v.optional(v.float64()),
+    priceLevel: v.optional(v.string()),
     // Parsed baggage allowance, sent only when backfilling a deal without one.
     baggage: v.optional(dealBaggageValidator),
   },
@@ -1027,10 +1036,26 @@ export const applyPriceRefresh = internalMutation({
 
     // Refresh the stored typical price whenever the caller measured one; a
     // missing/junk value leaves the previous reading in place.
-    const typicalPatch =
-      args.typicalPrice != null && args.typicalPrice > 0
+    const hasRange =
+      args.typicalLow != null &&
+      args.typicalHigh != null &&
+      args.typicalLow > 0 &&
+      args.typicalHigh >= args.typicalLow;
+    const level = (args.priceLevel || "").toLowerCase();
+    const typicalPatch = {
+      ...(args.typicalPrice != null && args.typicalPrice > 0
         ? { typicalPrice: Math.round(args.typicalPrice) }
-        : {};
+        : {}),
+      ...(hasRange
+        ? {
+            typicalLow: Math.round(args.typicalLow!),
+            typicalHigh: Math.round(args.typicalHigh!),
+          }
+        : {}),
+      ...(level === "low" || level === "typical" || level === "high"
+        ? { priceLevel: level }
+        : {}),
+    };
     const baggagePatch = args.baggage ? { baggage: args.baggage } : {};
 
     // Preserve a multi-passenger total by scaling it proportionally with the

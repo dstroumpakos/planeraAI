@@ -35,6 +35,11 @@ interface Props {
         partner: { _id: string; name: string };
     } | null;
     tripId?: string;
+    /**
+     * Set for a supplier listing on a commission agreement: the request goes
+     * to partnerLeads.submitRequest (PLN-XXXX reference) instead of an OTA lead.
+     */
+    partnerProductId?: string;
 }
 
 type ContactMethod = "email" | "phone" | "any";
@@ -44,6 +49,7 @@ export const PackageInquiryModal: React.FC<Props> = ({
     onClose,
     packageInfo,
     tripId,
+    partnerProductId,
 }) => {
     const { colors, isDarkMode } = useTheme();
     const { t } = useTranslation();
@@ -55,6 +61,8 @@ export const PackageInquiryModal: React.FC<Props> = ({
     );
 
     const submitLeadMut = useMutation((api as any).otaPackages.submitLead);
+    const submitPartnerRequest = useMutation((api as any).partnerLeads.submitRequest);
+    const [reference, setReference] = useState<string | null>(null);
 
     const [name, setName] = useState("");
     const [email, setEmail] = useState("");
@@ -75,6 +83,7 @@ export const PackageInquiryModal: React.FC<Props> = ({
             setConsent(false);
             setSubmitting(false);
             setSuccess(false);
+            setReference(null);
         }
     }, [visible, userSettings]);
 
@@ -92,6 +101,23 @@ export const PackageInquiryModal: React.FC<Props> = ({
         }
         setSubmitting(true);
         try {
+            if (partnerProductId) {
+                const res: any = await submitPartnerRequest({
+                    token,
+                    productId: partnerProductId as Id<"partnerProducts">,
+                    tripId: tripId ? (tripId as Id<"trips">) : undefined,
+                    contactName: name.trim(),
+                    contactEmail: email.trim(),
+                    contactPhone: phone.trim() || undefined,
+                    preferredContactMethod: contactMethod,
+                    message: message.trim() || undefined,
+                    consentGiven: true,
+                    source: Platform.OS,
+                });
+                setReference(res?.reference ?? null);
+                setSuccess(true);
+                return;
+            }
             await submitLeadMut({
                 token,
                 packageId: packageInfo._id as Id<"otaPackages">,
@@ -158,7 +184,9 @@ export const PackageInquiryModal: React.FC<Props> = ({
                         {success ? (
                             <View style={styles.successBody}>
                                 <Text style={[styles.successText, { color: colors.text }]}>
-                                    {t("packages.successMessage", { partner: partnerName })}
+                                    {reference
+                                        ? t("packages.successWithRef", { partner: partnerName, ref: reference })
+                                        : t("packages.successMessage", { partner: partnerName })}
                                 </Text>
                                 <TouchableOpacity
                                     style={[styles.primaryBtn, { backgroundColor: colors.primary }]}

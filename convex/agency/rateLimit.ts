@@ -72,6 +72,10 @@ export const LIMITS = {
   travellers: { limit: 10, windowMs: 60 * 60_000 },
   /** AI reading of a client's request into a search. */
   parseRequest: { limit: 60, windowMs: 60 * 60_000 },
+  /** A client opening a checkout on the agency's Viva / Stripe account. */
+  payCheckout: { limit: 20, windowMs: 60 * 60_000 },
+  /** Re-checking a payment with the provider (return page, webhook, agent). */
+  payVerify: { limit: 120, windowMs: 15 * 60_000 },
 } as const satisfies Record<string, RateLimitSpec>;
 
 export type LimitName = keyof typeof LIMITS;

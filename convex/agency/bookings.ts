@@ -8,7 +8,8 @@
  *
  * MONEY: Planera never takes payment from a traveller. The agency is the seller
  * and collects from its client itself; `payment` below is the agency's own note
- * of what it has received. An API booking is paid from the AGENCY's supplier
+ * of what it has received. Online payments (payments.ts) run on the agency's
+ * OWN Viva / Stripe account and are added to that note once confirmed. An API booking is paid from the AGENCY's supplier
  * account (Duffel balance, Hotelbeds credit), on the agency's own credentials.
  *
  * Rules the code enforces, not just documents:
@@ -43,6 +44,8 @@ import { SupplierHttpError } from "./connectors/http";
 import { AgencyError, conflict, guard, invalid, notFound } from "./errors";
 import { sha256Hex } from "./crypto";
 import { assertTenant, audit, consumeLimit, requireAccessRW, vaultMasterKey } from "./store";
+import { applyOnlinePayment } from "./clientPayments";
+import { paidOnlineMinor } from "./payments";
 
 const tierArg = v.union(v.literal("basic"), v.literal("comfort"), v.literal("premium"));
 
@@ -227,7 +230,9 @@ export const startFulfilment = mutation({
       if (row.fulfilment) throw conflict("booking has already started for this quote");
       const tier = (args.tier ?? row.acceptedTier) as PackageTier | undefined;
       if (!tier) throw invalid("which option did the client choose?");
-      const f = openRecord((row.packages ?? []) as TravelPackage[], tier, Date.now(), access.userId);
+      const opened = openRecord((row.packages ?? []) as TravelPackage[], tier, Date.now(), access.userId);
+      // Money the client already paid online, before the record existed.
+      const f = applyOnlinePayment(opened, await paidOnlineMinor(ctx, row._id), Date.now());
       await ctx.db.patch(row._id, { fulfilment: f, acceptedTier: tier, updatedAt: Date.now() });
       await audit(ctx, {
         agencyId: access.agencyId,

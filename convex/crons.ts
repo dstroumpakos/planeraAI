@@ -101,6 +101,16 @@ crons.interval(
     {},
 );
 
+// Pull Google Analytics 4 + Meta Ads numbers into the externalAnalytics
+// singleton for the admin dashboard. Each source is a no-op until its env vars
+// are set (see externalAnalytics.ts), so this is safe to ship unconfigured.
+crons.interval(
+    "refresh-external-analytics",
+    { hours: 3 },
+    internal.externalAnalytics.refreshExternalAnalytics,
+    {},
+);
+
 // Recompute the destination aggregates singleton behind home's "Trending Now"
 // strip and the /destinations screen. Both used to aggregate completed trips
 // inline; trips carry the whole itinerary blob, so the all-time scan blew the
@@ -195,6 +205,16 @@ crons.daily(
     "dormancy-ladder",
     { hourUTC: 9, minuteUTC: 0 },
     internal.retention.dormancyTick,
+    {},
+);
+
+// Commission partners: publish last month's statements on the first business
+// day (Athens). Runs daily and does nothing outside days 1 to 3 or at weekends;
+// already-published statements are skipped, so the repeats are harmless.
+crons.daily(
+    "partner-commission-statements",
+    { hourUTC: 6, minuteUTC: 30 },
+    internal.partnerLeads.statementTick,
     {},
 );
 

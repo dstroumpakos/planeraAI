@@ -39,7 +39,7 @@ test("capability gating: wrong-kind connector is skipped, not called", async () 
 test("searchForQuote runs flight + hotel in parallel and splits results", async () => {
   const res = await searchForQuote([airB, hotelB], base);
   assert.equal(res.flights.length, 3);
-  assert.equal(res.hotels.length, 3);
+  assert.equal(res.hotels.length, 5); // the sandbox hotel feed returns five
   assert.ok(res.flights.every((f) => f.kind === "flight"));
   assert.ok(res.hotels.every((h) => h.kind === "hotel"));
 });

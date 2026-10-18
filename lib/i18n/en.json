@@ -489,6 +489,16 @@
     "cards": {
       "cheapestDates": "Cheapest dates",
       "indicativeFares": "Indicative prices — open Flight Search to book.",
+      "flightOptions": "Flight options",
+      "nonstop": "Nonstop",
+      "oneStop": "1 stop",
+      "multiStops": "{{count}} stops",
+      "nonstopFrom": "Nonstop from {{price}}",
+      "noNonstop": "No nonstop flights on these dates",
+      "returnFlights": "Return flights",
+      "overnight": "overnight",
+      "selfTransfer": "Self-transfer",
+      "liveFares": "Live prices that can change. Tap a flight to book it in Flight Search.",
       "dealsFromYou": "Deals for you",
       "from": "from",
       "notableSights": "Notable sights",
@@ -521,7 +531,14 @@
       "sixMonthRule": "Many countries require 6 months' validity beyond your entry date.",
       "guides": "Planera guides",
       "nowWatching": "Now watching {{destination}} for fare drops",
-      "addedToWishlist": "Added {{destination}} to your wishlist"
+      "addedToWishlist": "Added {{destination}} to your wishlist",
+      "staysBooking": "Stays on Booking.com",
+      "staysAirbnb": "Homes on Airbnb",
+      "nights_one": "{{count}} night",
+      "nights_other": "{{count}} nights",
+      "freeCancellation": "Free cancellation",
+      "perNightShort": "/night",
+      "staysDisclaimer": "Live prices that can change. You book on {{provider}}; Planera doesn't take the booking."
     },
     "myTripWeather": "What's the weather for my next trip?",
     "dealsFromMe": "Any deals from my home airport?",
@@ -2069,6 +2086,11 @@
     "inclDays": "{{count}} days planned"
   },
   "packages": {
+    "onRequest": "On request",
+    "tailorMade": "Tailor-made",
+    "requestQuote": "Request a quote",
+    "visitPartner": "View on partner site",
+    "successWithRef": "{{partner}} has your request and will reply to you directly. Your reference is {{ref}}. We've also emailed you a copy.",
     "title": "Curated Packages",
     "subtitle": "Hand-picked deals from our partners — perfect match for your trip",
     "emptyTitle": "No matching packages",
@@ -2318,6 +2340,26 @@
     "titleIn": "Tickets for top attractions in {{place}}",
     "desc": "Skip the queue with instant mobile tickets for museums, landmarks and experiences.",
     "cta": "Find tickets on Tiqets"
+  },
+  "fareVerdict": {
+    "title": "Buy or wait?",
+    "buy": "Good time to buy",
+    "fair": "Fair price",
+    "wait": "Worth waiting",
+    "disclaimer": "Our read of Google's price data for these dates, not a forecast.",
+    "reason": {
+      "belowRange": "{{amount}} below the usual {{low}}–{{high}} for this route",
+      "underTypical": "{{amount}} under the typical {{typical}}",
+      "aboveTypical": "{{amount}} above the typical {{typical}}",
+      "aboveRange": "{{amount}} above the usual {{low}}–{{high}} for this route",
+      "googleLow": "Google rates this fare low for the route",
+      "googleHigh": "Google rates this fare high for the route",
+      "lowestSeen": "Lowest price for these dates in the last {{days}} days",
+      "pricesRising": "Prices for these dates have been rising",
+      "pricesFalling": "Prices for these dates have been falling",
+      "departingSoon": "{{days}} days to go: fares rarely drop this late",
+      "plentyOfTime": "{{months}} months out: there's time to watch it"
+    }
   },
   "metaConsent": {
     "title": "Help us measure our ads",

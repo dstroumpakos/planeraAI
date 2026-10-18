@@ -10,6 +10,7 @@ import type {
   NormalizedOffer,
 } from "../model/types";
 import { money } from "../model/types";
+import { cityForIata } from "../../lib/radarDestinations";
 import type {
   BookingRequest,
   BookingResult,
@@ -48,6 +49,17 @@ async function mockBook(req: BookingRequest, kind: "flight" | "hotel"): Promise<
         supplierReference: `MH-${ref}`,
         message: "mock booking (sandbox — nothing was really booked)",
       };
+}
+
+/** Nights between two YYYY-MM-DD dates; 4 when the stay has no end date. */
+function stayNights(depart?: string, ret?: string): number {
+  if (!depart || !ret) return 4;
+  const n = Math.round((Date.parse(`${ret}T00:00:00Z`) - Date.parse(`${depart}T00:00:00Z`)) / 86_400_000);
+  return Number.isFinite(n) && n > 0 ? n : 4;
+}
+
+function addDaysISO(dateYMD: string, days: number): string {
+  return new Date(Date.parse(`${dateYMD}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 }
 
 function isoAt(dateYMD: string, hour: number): string {
@@ -102,7 +114,7 @@ export const mockAirConnector: SupplierConnector = {
 
 export const mockHotelConnector: SupplierConnector = {
   id: "mock-hotel",
-  displayName: "Mock Hotel (sandbox)",
+  displayName: "Sandbox hotels",
   capabilities: {
     kinds: ["hotel"],
     supports: { search: true, retrieveOffer: false, revalidate: true, createBooking: true, retrieveBooking: false, cancelBooking: false, getCancellationTerms: false, healthCheck: true },
@@ -112,31 +124,52 @@ export const mockHotelConnector: SupplierConnector = {
   },
   async search(_creds, q: SearchQuery): Promise<NormalizedOffer[]> {
     const cur = q.sellCurrency;
-    const nights = 4;
+    // The stay the agent actually asked for. This used to be a hardcoded 4, so
+    // a 5-night Barcelona quote showed a 4-night hotel at a 4-night price.
+    const nights = stayNights(q.departDate, q.returnDate);
+    const rooms = Math.max(1, q.rooms ?? 1);
+    const city = q.destinationCity || cityForIata(q.destinationIata ?? "") || "City";
+    // Free cancellation until three days before check-in — a date that is
+    // always ahead of the stay, unlike the fixed one it replaces.
+    const freeUntil = q.departDate ? addDaysISO(q.departDate, -3) : undefined;
     const mk = (
-      i: number, priceMinor: number, stars: number, review: number, dist: number,
-      board: NormalizedHotelOffer["boardType"], freeCancel: boolean,
-    ): NormalizedHotelOffer => ({
-      kind: "hotel",
-      offerId: `mock-hotel:H${i}`,
-      connectorId: "mock-hotel",
-      supplierOfferId: `H${i}`,
-      cost: { rateType: "net", base: money(priceMinor, cur), taxes: money(Math.round(priceMinor * 0.12), cur) },
-      conditions: { refundable: freeCancel, changeable: freeCancel, summary: freeCancel ? "Free cancellation" : "Non-refundable" },
-      revalidationToken: `tok-H${i}`,
-      quotedAt: Date.now(),
-      name: `Mock Hotel ${i}`,
-      starRating: stars,
-      reviewScore: review,
-      distanceFromCentreM: dist,
-      boardType: board,
-      nights,
-      freeCancellationUntilISO: freeCancel ? "2026-08-25T00:00:00" : undefined,
-    });
+      i: number, perNightMinor: number, stars: number, review: number, dist: number,
+      board: NormalizedHotelOffer["boardType"], freeCancel: boolean, name: string, room: string,
+    ): NormalizedHotelOffer => {
+      const priceMinor = perNightMinor * nights * rooms;
+      return {
+        kind: "hotel",
+        offerId: `mock-hotel:H${i}`,
+        connectorId: "mock-hotel",
+        supplierOfferId: `H${i}`,
+        cost: { rateType: "net", base: money(priceMinor, cur), taxes: money(Math.round(priceMinor * 0.12), cur) },
+        conditions: {
+          refundable: freeCancel,
+          changeable: freeCancel,
+          summary: freeCancel ? "Free cancellation" : "Non-refundable",
+        },
+        revalidationToken: `tok-H${i}`,
+        quotedAt: Date.now(),
+        name,
+        starRating: stars,
+        reviewScore: review,
+        distanceFromCentreM: dist,
+        boardType: board,
+        roomCategory: room,
+        nights,
+        freeCancellationUntilISO: freeCancel && freeUntil ? `${freeUntil}T00:00:00` : undefined,
+      };
+    };
+    // Sandbox inventory with a believable shape: names carry the destination
+    // so a demo reads like the trip being quoted, and the five options span the
+    // range an agent actually chooses between. H1..H3 are the budget / central /
+    // flagship archetypes the scoring tests are written against.
     return [
-      mk(1, 24000, 2, 6.8, 3200, "room_only", false), // budget, far, basic
-      mk(2, 46000, 4, 8.1, 900, "breakfast", true), // 4*, central, breakfast
-      mk(3, 82000, 5, 9.0, 300, "breakfast", true), // 5*, very central, flexible
+      mk(1, 6000, 2, 6.8, 3200, "room_only", false, `Hotel ${city} Station`, "Standard Double"),
+      mk(2, 11500, 4, 8.1, 900, "breakfast", true, `${city} Central Hotel`, "Superior Double"),
+      mk(3, 20500, 5, 9.0, 300, "breakfast", true, `The ${city} Grand`, "Deluxe Double"),
+      mk(4, 9800, 3, 7.6, 1800, "breakfast", false, `${city} Old Town Rooms`, "Standard Double"),
+      mk(5, 14500, 4, 8.7, 600, "breakfast", true, `Boutique ${city} Garden`, "Junior Suite"),
     ];
   },
   async revalidate(_creds, token: string): Promise<RevalidateResult> {

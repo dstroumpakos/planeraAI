@@ -165,6 +165,10 @@ export interface NormalizedActivityOffer extends OfferBase {
   durationMinutes?: number;
   /** Editorial/quality signal 0..1 if the provider exposes one. */
   qualityScore?: number;
+  /** The provider's own average, out of 5, for display ("4.6★"). */
+  rating?: number;
+  /** How many reviews that average rests on. */
+  reviewCount?: number;
 }
 
 export interface NormalizedTransferOffer extends OfferBase {

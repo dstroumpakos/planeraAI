@@ -439,7 +439,11 @@ test("Viator prices per person and multiplies by the whole party", async () => {
   // 32.50 per person × (2 adults + 1 child) = 97.50, not 32.50.
   assert.equal(offers[0].cost.base.amountMinor, 9750);
   assert.equal(offers[0].durationMinutes, 150);
-  assert.equal(offers[0].qualityScore, 0.9);
+  // 4.5 from 1,200 reviews: well-rated AND well-proven, so clearly above the
+  // middle — but below a perfect 1, which needs both a top score and volume.
+  assert.equal(offers[0].rating, 4.5);
+  assert.equal(offers[0].reviewCount, 1200);
+  assert.ok(offers[0].qualityScore! > 0.6 && offers[0].qualityScore! < 0.9);
   assert.equal(offers[0].conditions.refundable, true);
 });
 

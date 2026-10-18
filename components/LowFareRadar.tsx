@@ -21,6 +21,8 @@ import { useTranslation } from "react-i18next";
 import { AirlineLogo } from "@/components/AirlineLogo";
 import { isChristmasTrip, isWorthBuying } from "@/lib/christmas";
 import { PlaneraLottie } from "@/components/PlaneraLottie";
+import { fareVerdict, type FareVerdictResult } from "@/lib/fareVerdict";
+import { FareVerdictView } from "@/components/flights/FareVerdictView";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const CARD_WIDTH = SCREEN_WIDTH - 64;
@@ -63,6 +65,10 @@ interface FlightDeal {
   originalPrice?: number;
   /** Route's typical fare from the last refresh — the "worth buying" benchmark. */
   typicalPrice?: number;
+  /** Google's typical range (per person) + grade — the buy-or-wait inputs. */
+  typicalLow?: number;
+  typicalHigh?: number;
+  priceLevel?: string;
   currency: string;
   cabinBaggage?: string;
   checkedBaggage?: string;
@@ -680,6 +686,15 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
       >
         {filteredDeals.map((deal) => {
           const priceChange = getPriceChange(deal);
+          const verdict: FareVerdictResult | null = fareVerdict({
+            price: deal.price,
+            priceLevel: deal.priceLevel,
+            typicalRange:
+              deal.typicalLow != null && deal.typicalHigh != null
+                ? [deal.typicalLow, deal.typicalHigh]
+                : null,
+            departureDate: deal.outboundDate,
+          });
           const animValue = getAnimValue(deal._id);
           const isExpanded = allExpanded;
           const flightAnim = getFlightAnim(deal._id);
@@ -1078,10 +1093,38 @@ export function LowFareRadar({ deals, homeIata, wishlistDestinations, onPlanTrip
                 </View>
               </View>
 
+              {/* Buy-or-wait: the strongest reason on the card. A promoted
+                  deal never shows "wait" up front — that read stays in the
+                  expanded details where the full reasoning sits beside it. */}
+              {verdict && !deal.isExpired && verdict.verdict !== "wait" && !isExpanded && (
+                <FareVerdictView
+                  result={verdict}
+                  money={(n) => `${getCurrencySymbol(deal.currency)}${n}`}
+                  compact
+                />
+              )}
+
               {/* Expanded Details */}
               {isExpanded && (
                 <View style={styles.expandedSection}>
                 <View style={styles.expandedContent}>
+                  {verdict && !deal.isExpired && (
+                    <View style={styles.detailSection}>
+                      <Text
+                        style={[
+                          styles.detailSectionTitle,
+                          { color: colors.text },
+                        ]}
+                      >
+                        <Ionicons name="pricetag-outline" size={14} />{" "}
+                        {t("fareVerdict.title", { defaultValue: "Buy or wait?" })}
+                      </Text>
+                      <FareVerdictView
+                        result={verdict}
+                        money={(n) => `${getCurrencySymbol(deal.currency)}${n}`}
+                      />
+                    </View>
+                  )}
                   {/* Baggage info */}
                   <View style={styles.detailSection}>
                     <Text

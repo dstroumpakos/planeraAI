@@ -1187,6 +1187,14 @@ export default function TripDetails() {
         token && id ? { token, tripId: id as string } : "skip"
     );
     const trackOtaView = useMutation((api as any).otaPackages.trackView);
+    // Local supplier tours/experiences matching this trip's destination
+    // (partnerLeads.listForTrip). Commission partners take quote requests.
+    const partnerExperiences = useQuery(
+        (api as any).partnerLeads.listForTrip,
+        token && id ? { token, tripId: id as string } : "skip"
+    ) as any[] | undefined;
+    const trackPartnerClick = useMutation((api as any).partnerProducts.trackHomeClick);
+    const packagesCount = (otaPackages?.length ?? 0) + (partnerExperiences?.length ?? 0);
 
     // ─── Trip detail guide state ───
     const [detailGuideStep, setDetailGuideStep] = useState(-1);
@@ -2996,7 +3004,7 @@ export default function TripDetails() {
                         <Ionicons name="airplane" size={18} color={activeFilter === 'flights' ? colors.card : colors.textMuted} />
                         <Text style={[styles.filterText, { color: colors.textMuted }, activeFilter === 'flights' && { color: colors.card }]}>{t('tripDetail.flightsTab')}</Text>
                     </TouchableOpacity>
-                    {otaPackages && otaPackages.length > 0 && (
+                    {packagesCount > 0 && (
                         <TouchableOpacity
                             style={[styles.filterChip, { backgroundColor: colors.card, borderColor: colors.border }, activeFilter === 'packages' && { backgroundColor: colors.text, borderColor: colors.text }]}
                             onPress={() => setActiveFilter('packages')}
@@ -3004,7 +3012,7 @@ export default function TripDetails() {
                             <Ionicons name="briefcase" size={18} color={activeFilter === 'packages' ? colors.card : colors.textMuted} />
                             <Text style={[styles.filterText, { color: colors.textMuted }, activeFilter === 'packages' && { color: colors.card }]}>{t('tripDetail.packagesTab')}</Text>
                             <View style={{ marginLeft: 4, backgroundColor: '#10b981', minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 5, alignItems: 'center', justifyContent: 'center' }}>
-                                <Text style={{ color: '#fff', fontSize: 10, fontWeight: '800' }}>{otaPackages.length}</Text>
+                                <Text style={{ color: '#fff', fontSize: 10, fontWeight: '800' }}>{packagesCount}</Text>
                             </View>
                         </TouchableOpacity>
                     )}
@@ -3937,11 +3945,11 @@ export default function TripDetails() {
                             <Text style={{ color: colors.textMuted, fontSize: 13, marginTop: 4, marginBottom: 14, lineHeight: 18 }}>
                                 {t('packages.subtitle')}
                             </Text>
-                            {!otaPackages ? (
+                            {!otaPackages && !partnerExperiences ? (
                                 <View style={{ paddingVertical: 30, alignItems: 'center' }}>
                                     <ActivityIndicator color={colors.primary} />
                                 </View>
-                            ) : otaPackages.length === 0 ? (
+                            ) : packagesCount === 0 ? (
                                 <View style={{ paddingVertical: 36, alignItems: 'center' }}>
                                     <Ionicons name="briefcase-outline" size={42} color={colors.textMuted} />
                                     <Text style={{ color: colors.text, fontSize: 15, fontWeight: '700', marginTop: 12 }}>
@@ -3952,7 +3960,23 @@ export default function TripDetails() {
                                     </Text>
                                 </View>
                             ) : (
-                                otaPackages.map((pkg: any) => (
+                                <>
+                                {(partnerExperiences ?? []).map((item: any) => (
+                                    <PackageCard
+                                        key={item._id}
+                                        pkg={item}
+                                        onPressInquire={() => {
+                                            if (item.requestable) {
+                                                setInquiryPackage(item);
+                                                trackPartnerClick({ productId: item._id, kind: "open", source: Platform.OS, ...(token ? { token } : {}) }).catch(() => {});
+                                            } else if (item.bookingUrl) {
+                                                trackPartnerClick({ productId: item._id, kind: "site", source: Platform.OS, ...(token ? { token } : {}) }).catch(() => {});
+                                                Linking.openURL(item.bookingUrl).catch(() => {});
+                                            }
+                                        }}
+                                    />
+                                ))}
+                                {(otaPackages ?? []).map((pkg: any) => (
                                     <PackageCard
                                         key={pkg._id}
                                         pkg={pkg}
@@ -3963,7 +3987,8 @@ export default function TripDetails() {
                                             }
                                         }}
                                     />
-                                ))
+                                ))}
+                                </>
                             )}
                         </View>
                     )}
@@ -5443,6 +5468,7 @@ export default function TripDetails() {
                 onClose={() => setInquiryPackage(null)}
                 packageInfo={inquiryPackage}
                 tripId={id as string}
+                partnerProductId={inquiryPackage?.kind === "partnerProduct" ? inquiryPackage._id : undefined}
             />
 
             {/* ===== Editable itinerary modals (Phase 3) ===== */}

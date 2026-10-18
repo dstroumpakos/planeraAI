@@ -1,0 +1,446 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Planera Radar Film</title>
+<style>
+  @font-face { font-family: Inter; font-weight: 400; src: url(assets/Inter-Regular.ttf); }
+  @font-face { font-family: Inter; font-weight: 600; src: url(assets/Inter-SemiBold.ttf); }
+  @font-face { font-family: Inter; font-weight: 800; src: url(assets/Inter-ExtraBold.ttf); }
+  :root { --y: #FFE500; --ink: #121212; --fg: #FFFFFF; --red: #EF4444; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1080px; height: 1920px; overflow: hidden; background: #050816; }
+  body { font-family: Inter, system-ui, sans-serif; color: var(--fg); }
+  #stage { position: relative; width: 1080px; height: 1920px; overflow: hidden; background: #050816; }
+  .layer { position: absolute; inset: 0; }
+  svg.full { position: absolute; inset: 0; width: 1080px; height: 1920px; overflow: visible; }
+
+  /* clock */
+  #clock { position: absolute; top: 150px; left: 0; right: 0; text-align: center; }
+  #clockLabel { font-weight: 600; font-size: 26px; letter-spacing: 0.4em; text-indent: 0.4em; color: rgba(255,255,255,0.55); }
+  #clockTime { font-weight: 600; font-size: 76px; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; margin-top: 6px; }
+
+  /* headlines on the night sky */
+  .center { position: absolute; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; text-align: center; }
+  .mask { overflow: hidden; padding: 0 20px 16px; margin-bottom: -16px; }
+  .line { font-weight: 800; letter-spacing: -0.045em; line-height: 1.02; will-change: transform; white-space: nowrap; }
+  #t1 { top: 640px; } #t1 .line { font-size: 132px; }
+  #t2 { top: 360px; } #t2 .line { font-size: 118px; }
+  .yel { color: var(--y); }
+
+  /* fare card */
+  #card { position: absolute; left: 90px; top: 500px; width: 900px; height: 860px; border-radius: 56px; background: rgba(12,17,40,0.94); border: 2px solid rgba(255,229,0,0.28); box-shadow: 0 40px 120px rgba(0,0,0,0.55); padding: 56px 60px; will-change: transform; }
+  #route { display: flex; align-items: flex-start; justify-content: space-between; }
+  .apt b { display: block; font-weight: 800; font-size: 70px; letter-spacing: -0.02em; line-height: 1; }
+  .apt small { display: block; font-weight: 400; font-size: 30px; color: #9AA3C7; margin-top: 8px; }
+  .apt.r { text-align: right; }
+  #routeLine { position: relative; flex: 1; height: 70px; margin: 0 30px; }
+  #eyebrow { margin-top: 54px; font-weight: 600; font-size: 26px; letter-spacing: 0.3em; color: var(--y); }
+  #priceBox { position: relative; height: 250px; margin-top: 6px; overflow: hidden; }
+  .price { position: absolute; left: 0; top: 0; font-weight: 800; font-size: 232px; letter-spacing: -0.05em; line-height: 1.05; font-variant-numeric: tabular-nums; will-change: transform; }
+  #was { position: absolute; left: 60px; top: 590px; font-weight: 600; font-size: 34px; color: #8D94B5; text-decoration: line-through; text-decoration-thickness: 3px; }
+  #lowest { position: absolute; right: 60px; top: 418px; background: var(--red); color: #fff; border-radius: 999px; padding: 14px 26px; font-weight: 800; font-size: 26px; letter-spacing: 0.12em; display: flex; align-items: center; gap: 10px; will-change: transform; }
+  #chart { position: absolute; left: 60px; top: 650px; width: 780px; height: 170px; overflow: visible; }
+
+  /* phone */
+  #phone { position: absolute; left: 190px; top: 300px; width: 700px; height: 1420px; border-radius: 110px; background: #0B0B0F; padding: 20px; box-shadow: 0 60px 140px rgba(40,10,30,0.55), inset 0 0 0 3px #2A2A33; will-change: transform; transform-origin: 350px 610px; }
+  #screen { position: relative; width: 100%; height: 100%; border-radius: 92px; overflow: hidden; background: linear-gradient(180deg, #3B3F8F 0%, #B0608A 45%, #F59A6B 75%, #FFD27A 100%); }
+  #island { position: absolute; top: 26px; left: 50%; width: 200px; height: 58px; margin-left: -100px; border-radius: 30px; background: #000; }
+  #lockDate { position: absolute; top: 150px; left: 0; right: 0; text-align: center; font-weight: 600; font-size: 36px; color: rgba(255,255,255,0.88); }
+  #lockTime { position: absolute; top: 190px; left: 0; right: 0; text-align: center; font-weight: 600; font-size: 210px; letter-spacing: -0.03em; color: #fff; line-height: 1.05; }
+  #notif { position: absolute; left: 22px; right: 22px; top: 520px; border-radius: 44px; background: rgba(255,255,255,0.82); color: #111; padding: 26px 30px 28px; display: flex; gap: 24px; box-shadow: 0 18px 50px rgba(60,20,40,0.25); will-change: transform; }
+  #nIcon { width: 84px; height: 84px; border-radius: 20px; background: var(--ink); flex: none; display: flex; align-items: center; justify-content: center; }
+  #nIcon img { height: 60px; }
+  #nText { flex: 1; min-width: 0; }
+  #nHead { display: flex; justify-content: space-between; font-weight: 600; font-size: 24px; letter-spacing: 0.06em; color: #6B6B6B; }
+  #nTitle { font-weight: 800; font-size: 34px; letter-spacing: -0.015em; margin-top: 6px; }
+  #nBody { font-weight: 400; font-size: 29px; line-height: 1.3; color: #333; margin-top: 4px; }
+
+  /* yellow world */
+  #wipeY { background: var(--y); color: var(--ink); }
+  #hl { top: 600px; } #hl .line { font-size: 150px; }
+  #logo { position: absolute; top: 560px; left: 110px; width: 860px; height: 238px; }
+  #mark { position: absolute; left: 0; top: 0; width: 159px; height: 238px; transform-origin: 50% 60%; filter: brightness(0); z-index: 2; will-change: transform; }
+  #wmMask { position: absolute; left: 171px; top: 0; width: 689px; height: 238px; overflow: hidden; }
+  #wm { width: 689px; height: 238px; display: block; filter: brightness(0); will-change: transform; }
+  #live { position: absolute; top: 900px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--y); border-radius: 999px; padding: 20px 36px; font-weight: 800; font-size: 38px; white-space: nowrap; display: flex; align-items: center; gap: 16px; }
+  #live i { width: 18px; height: 18px; border-radius: 9px; background: #34D058; display: block; }
+  #live span { color: #fff; font-weight: 600; font-size: 26px; letter-spacing: 0.22em; }
+  #url { position: absolute; top: 1030px; left: 0; right: 0; text-align: center; font-weight: 800; font-size: 50px; letter-spacing: -0.01em; }
+  #badges { position: absolute; top: 1150px; left: 0; right: 0; display: flex; justify-content: center; gap: 26px; }
+  #badges img { height: 104px; display: block; will-change: transform; }
+
+  #grain { position: absolute; inset: 0; width: 1080px; height: 1920px; opacity: 0.06; mix-blend-mode: overlay; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="layer" id="sky"></div>
+  <svg class="full" id="heavens" viewBox="0 0 1080 1920">
+    <defs>
+      <radialGradient id="moonGlow"><stop offset="0" stop-color="#F6F1DE" stop-opacity="0.55"/><stop offset="1" stop-color="#F6F1DE" stop-opacity="0"/></radialGradient>
+      <radialGradient id="sunGlow"><stop offset="0" stop-color="#FFE9A0" stop-opacity="0.9"/><stop offset="0.35" stop-color="#FFC16B" stop-opacity="0.45"/><stop offset="1" stop-color="#FF9A6B" stop-opacity="0"/></radialGradient>
+      <radialGradient id="sunDisc"><stop offset="0" stop-color="#FFF6C8"/><stop offset="0.7" stop-color="#FFE500"/><stop offset="1" stop-color="#FFC400"/></radialGradient>
+    </defs>
+    <g id="stars"></g>
+    <g id="moon"><circle r="230" fill="url(#moonGlow)"/><circle r="62" fill="#F4F0E2"/><circle cx="-18" cy="-12" r="11" fill="#E2DCC8"/><circle cx="20" cy="16" r="8" fill="#E2DCC8"/></g>
+    <g id="sun"><circle r="620" fill="url(#sunGlow)"/><circle r="150" fill="url(#sunDisc)"/></g>
+  </svg>
+  <svg class="full" id="city" viewBox="0 0 1080 1920"><g id="cityG"></g></svg>
+
+  <!-- radar -->
+  <svg class="full" id="radar" viewBox="0 0 1080 1920">
+    <g id="radarG" transform="translate(540 960)">
+      <g id="rings" fill="none" stroke="#FFE500"></g>
+      <g id="sweep"></g>
+      <g id="blips"></g>
+      <g id="lock" fill="none" stroke="#FFE500" stroke-width="6" stroke-linecap="round"></g>
+      <circle r="14" fill="#FFE500"/><text id="home" y="52" text-anchor="middle" fill="#FFE500" font-family="Inter" font-weight="800" font-size="30">ATH</text>
+    </g>
+  </svg>
+
+  <div id="clock"><div id="clockLabel">TONIGHT</div><div id="clockTime">23:47</div></div>
+
+  <div class="center" id="t1">
+    <div class="mask"><div class="line" id="t1a">You go</div></div>
+    <div class="mask"><div class="line" id="t1b">to sleep.</div></div>
+  </div>
+  <div class="center" id="t2">
+    <div class="mask"><div class="line" id="t2a"><span class="yel">Planera</span></div></div>
+    <div class="mask"><div class="line" id="t2b">doesn’t.</div></div>
+  </div>
+
+  <!-- fare card -->
+  <div id="card">
+    <div id="route">
+      <div class="apt"><b>ATH</b><small>Athens</small></div>
+      <svg id="routeLine" viewBox="0 0 400 70" preserveAspectRatio="none">
+        <line x1="0" y1="35" x2="400" y2="35" stroke="#FFE500" stroke-opacity="0.5" stroke-width="3" stroke-dasharray="2 12" stroke-linecap="round"/>
+        <g id="cardPlane"><path fill="#FFE500" transform="scale(1.7) rotate(90) translate(-12 -12)" d="M21 16v-2l-8-5V3.5c0-.83-.67-1.5-1.5-1.5S10 2.67 10 3.5V9l-8 5v2l8-2.5V19l-2 1.5V22l3.5-1 3.5 1v-1.5L13 19v-5.5l8 2.5z"/></g>
+      </svg>
+      <div class="apt r"><b>FCO</b><small>Rome</small></div>
+    </div>
+    <div id="eyebrow">RETURN · TRACKING</div>
+    <div id="priceBox"></div>
+    <svg id="chart" viewBox="0 0 780 170">
+      <defs><linearGradient id="area" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#FFE500" stop-opacity="0.35"/><stop offset="1" stop-color="#FFE500" stop-opacity="0"/></linearGradient></defs>
+      <line x1="0" y1="168" x2="780" y2="168" stroke="#FFFFFF" stroke-opacity="0.12" stroke-width="2"/>
+      <path id="chartArea" fill="url(#area)"/>
+      <path id="chartLine" fill="none" stroke="#FFE500" stroke-width="6" stroke-linejoin="round" stroke-linecap="round"/>
+      <circle id="chartDot" r="12" fill="#FFE500"/>
+    </svg>
+  </div>
+  <div id="cardExtras">
+    <div id="was">€189</div>
+  </div>
+
+  <!-- phone -->
+  <div id="phone"><div id="screen">
+    <div id="island"></div>
+    <div id="lockDate">Saturday, 14 June</div>
+    <div id="lockTime">7:00</div>
+    <div id="notif">
+      <div id="nIcon"><img src="assets/mark.png" alt=""></div>
+      <div id="nText">
+        <div id="nHead"><span>PLANERA</span><span>now</span></div>
+        <div id="nTitle">Athens → Rome for €39</div>
+        <div id="nBody">Fare dropped 79% overnight. Found while you were sleeping.</div>
+      </div>
+    </div>
+  </div></div>
+
+  <!-- yellow world -->
+  <div class="layer" id="wipeY">
+    <div class="center" id="hl">
+      <div class="mask"><div class="line" id="h1">Cheap fares,</div></div>
+      <div class="mask"><div class="line" id="h2">hunted while</div></div>
+      <div class="mask"><div class="line" id="h3">you sleep.</div></div>
+    </div>
+    <div id="end">
+      <div id="logo">
+        <img id="mark" src="assets/mark.png" alt="">
+        <div id="wmMask"><img id="wm" src="assets/wordmark.png" alt=""></div>
+      </div>
+      <div id="live"><i></i>Low-Fare Radar<span>LIVE</span></div>
+      <div id="url">planeraai.app</div>
+      <div id="badges">
+        <img id="bApple" src="assets/badges/app-store.svg" alt="Download on the App Store">
+        <img id="bGoogle" src="assets/badges/google-play-cropped.png" alt="Get it on Google Play">
+      </div>
+    </div>
+  </div>
+
+  <svg id="grain" viewBox="0 0 1080 1920">
+    <filter id="noise"><feTurbulence id="turb" type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="1" stitchTiles="stitch"/></filter>
+    <rect width="1080" height="1920" filter="url(#noise)"/>
+  </svg>
+</div>
+
+<script>
+const DURATION = 19.5;
+const FPS = 30;
+const $ = (id) => document.getElementById(id);
+const NS = "http://www.w3.org/2000/svg";
+const mk = (tag, attrs, parent) => { const el = document.createElementNS(NS, tag); for (const k in attrs) el.setAttribute(k, attrs[k]); parent.appendChild(el); return el; };
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const lerp = (a, b, p) => a + (b - a) * p;
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const outCubic = (p) => 1 - Math.pow(1 - p, 3);
+const inCubic = (p) => p * p * p;
+const inOutCubic = (p) => p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+const outExpo = (p) => p === 1 ? 1 : 1 - Math.pow(2, -10 * p);
+const outBack = (p, s = 1.7) => 1 + (s + 1) * Math.pow(p - 1, 3) + s * Math.pow(p - 1, 2);
+let seed = 11;
+const rnd = () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+const hex = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+const mixHex = (a, b, p) => { const A = hex(a), B = hex(b); return `rgb(${A.map((v, i) => Math.round(lerp(v, B[i], p))).join(",")})`; };
+function show(el, v) { el.style.opacity = v; el.style.visibility = v <= 0.001 ? "hidden" : "visible"; }
+
+/* ---------- story beats (music.js mirrors these) ---------- */
+const B = {
+  tilt: [3.0, 3.8], radarIn: 3.5, sweepFrom: 3.7, lockOn: 6.25, card: 6.6,
+  drops: [7.2, 7.8, 8.3, 8.75, 9.15], prices: [189, 152, 118, 87, 64, 39], lowest: 9.2,
+  dawn: [9.7, 12.4], phone: 11.1, notif: 12.05, push: [12.75, 13.5], wipe: [13.25, 13.8],
+  headline: 13.7, logo: 15.9, slide: 16.65, live: 17.35, url: 17.6, badges: [17.8, 17.95],
+};
+window.BEATS = B;
+
+/* ---------- stars ---------- */
+const stars = [];
+for (let i = 0; i < 170; i++) stars.push({ el: mk("circle", { cx: rnd() * 1080, cy: rnd() * 1300, r: 0.8 + rnd() * 2.2, fill: "#fff" }, $("stars")), base: 0.3 + rnd() * 0.7, ph: rnd() * 6.28, sp: 0.8 + rnd() * 2 });
+
+/* ---------- skyline ---------- */
+const LAYERS = [
+  { night: "#141C3E", dawn: "#9A6A86", hMin: 380, hMax: 760, wMin: 70, wMax: 150, win: 0 },
+  { night: "#0E1533", dawn: "#56385F", hMin: 480, hMax: 940, wMin: 90, wMax: 190, win: 0.5 },
+  { night: "#080C22", dawn: "#261A34", hMin: 260, hMax: 640, wMin: 130, wMax: 260, win: 0.6 },
+];
+const windows = [];
+const layerEls = LAYERS.map((L, li) => {
+  const g = mk("g", {}, $("cityG"));
+  let x = -40;
+  while (x < 1100) {
+    const w = L.wMin + rnd() * (L.wMax - L.wMin), h = L.hMin + rnd() * (L.hMax - L.hMin), top = 1920 - h;
+    const b = mk("rect", { x, y: top, width: w, height: h + 40 }, g);
+    if (rnd() < 0.3) mk("rect", { x: x + w * 0.3, y: top - 40, width: w * 0.4, height: 42 }, g);
+    if (rnd() < 0.2) mk("rect", { x: x + w * 0.5 - 2, y: top - 110, width: 4, height: 112 }, g);
+    if (L.win) {
+      for (let wy = top + 34; wy < 1880; wy += 46) for (let wx = x + 18; wx < x + w - 30; wx += 34) {
+        if (rnd() > L.win) continue;
+        const r = mk("rect", { x: wx, y: wy, width: 14, height: 20, rx: 2, fill: "#FFD95A" }, g);
+        const staysOn = rnd() < 0.05;
+        windows.push({ r, off: staysOn ? 99 : 0.9 + rnd() * 1.7, on: rnd() < 0.18 ? 10.2 + rnd() * 1.6 : 99, flick: rnd() });
+      }
+    }
+    x += w + (li === 2 ? 0 : 4 + rnd() * 10);
+  }
+  return g;
+});
+
+/* ---------- radar ---------- */
+const RR = 360;
+[120, 240, 360].forEach((r, i) => mk("circle", { r, "stroke-opacity": 0.28 - i * 0.05, "stroke-width": 2 }, $("rings")));
+mk("line", { x1: -RR, x2: RR, y1: 0, y2: 0, "stroke-opacity": 0.12, "stroke-width": 2 }, $("rings"));
+mk("line", { y1: -RR, y2: RR, x1: 0, x2: 0, "stroke-opacity": 0.12, "stroke-width": 2 }, $("rings"));
+const SW = 26;
+for (let i = 0; i < SW; i++) {
+  const a0 = -(i + 1) * 2.4 * Math.PI / 180, a1 = -i * 2.4 * Math.PI / 180;
+  mk("path", { d: `M0 0 L${RR * Math.sin(a0)} ${-RR * Math.cos(a0)} A${RR} ${RR} 0 0 1 ${RR * Math.sin(a1)} ${-RR * Math.cos(a1)} Z`, fill: "#FFE500", "fill-opacity": (0.32 * Math.pow(1 - i / SW, 2)).toFixed(3) }, $("sweep"));
+}
+mk("line", { x1: 0, y1: 0, x2: 0, y2: -RR, stroke: "#FFE500", "stroke-width": 4 }, $("sweep"));
+const BLIPS = [
+  ["ROM", 292, 170, "€189", -1], ["BCN", 270, 280, "€142", -1], ["LIS", 255, 345, "€167", -1], ["PAR", 305, 290, "€121", -1],
+  ["LON", 322, 350, "€98", -1], ["AMS", 345, 300, "€133", 1], ["IST", 42, 140, "€74", 1], ["CAI", 150, 215, "€156", 1], ["DXB", 104, 320, "€212", 1],
+];
+const SWEEP_SPEED = 240; // deg/s
+const blips = BLIPS.map(([code, ang, r, price, side]) => {
+  const a = ang * Math.PI / 180, x = r * Math.sin(a), y = -r * Math.cos(a);
+  const g = mk("g", { transform: `translate(${x} ${y})` }, $("blips"));
+  const ring = mk("circle", { r: 10, fill: "none", stroke: "#FFE500", "stroke-width": 3 }, g);
+  const dot = mk("circle", { r: 10, fill: "#FFE500" }, g);
+  const right = side > 0;
+  const label = mk("text", { x: right ? 22 : -22, y: 10, "text-anchor": right ? "start" : "end", fill: "#fff", "font-family": "Inter", "font-weight": 600, "font-size": 28 }, g);
+  label.textContent = `${code} ${price}`;
+  return { code, ang, x, y, g, ring, dot, label, hitAt: B.sweepFrom + ang / SWEEP_SPEED };
+});
+const ROM = blips[0];
+const lockCorners = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sy]) => mk("path", { d: `M${sx * 36} ${sy * 14} L${sx * 36} ${sy * 36} L${sx * 14} ${sy * 36}` }, $("lock")));
+
+/* ---------- fare card ---------- */
+const priceEls = B.prices.map((p, i) => { const d = document.createElement("div"); d.className = "price"; d.textContent = "€" + p; if (i === B.prices.length - 1) d.style.color = "#FFE500"; $("priceBox").appendChild(d); return d; });
+const lowest = document.createElement("div"); lowest.id = "lowest";
+lowest.innerHTML = `<svg width="26" height="30" viewBox="0 0 24 28"><path fill="#fff" d="M12 1c1 5 7 8 7 15a7 7 0 0 1-14 0c0-3 1.5-5 3-6.5 0 2.5 1.2 4 2.8 4.5C10 9 11 5 12 1z"/></svg>LOWEST PRICE`;
+$("card").appendChild(lowest);
+$("card").appendChild($("was"));
+// fare over the night: noisy plateau, then a staircase down
+const CH_PTS = [];
+for (let i = 0; i <= 60; i++) {
+  const x = i / 60 * 780;
+  let p = 189 + Math.sin(i * 1.7) * 4 + Math.sin(i * 0.6) * 3;
+  if (i > 18) p = 152 + Math.sin(i * 2.1) * 3; if (i > 30) p = 118 + Math.sin(i * 1.3) * 3;
+  if (i > 40) p = 87 + Math.sin(i) * 2; if (i > 48) p = 64 + Math.sin(i * 1.9) * 2; if (i > 55) p = 39;
+  CH_PTS.push([x, 10 + (200 - p) / 170 * 150]);
+}
+const CHART_STOPS = [0.30, 0.50, 0.67, 0.80, 0.92, 1.0]; // how much of the chart is drawn at each price
+
+/* ---------- render ---------- */
+function render(t) {
+  $("turb").setAttribute("seed", Math.floor(t * FPS) % 97 + 1);
+  const dawn = inOutCubic(prog(t, B.dawn[0], B.dawn[1]));
+  const night = 1 - dawn;
+  const tilt = 430 * inOutCubic(prog(t, B.tilt[0], B.tilt[1])) - 430 * inOutCubic(prog(t, 9.6, 10.7));
+
+  // sky
+  $("sky").style.background = `linear-gradient(180deg, ${mixHex("#050816", "#2E3F8C", dawn)} 0%, ${mixHex("#0B1230", "#C76A86", dawn)} 48%, ${mixHex("#1B2452", "#FFC96E", dawn)} 100%)`;
+  stars.forEach((s) => s.el.setAttribute("opacity", (s.base * (0.75 + 0.25 * Math.sin(t * s.sp + s.ph)) * clamp(night * 1.3 - 0.2)).toFixed(3)));
+  $("stars").setAttribute("transform", `translate(0 ${tilt * 0.25})`);
+  const mp = prog(t, 0, 10.2);
+  $("moon").setAttribute("transform", `translate(${lerp(170, 930, mp)} ${520 - 260 * Math.sin(Math.PI * mp) + tilt * 0.3})`);
+  $("moon").setAttribute("opacity", 1 - prog(t, 9.6, 10.6));
+  const sunY = lerp(1780, 1040, outCubic(prog(t, 9.9, 11.6)));
+  $("sun").setAttribute("transform", `translate(560 ${sunY})`);
+  $("sun").setAttribute("opacity", prog(t, 9.9, 10.6));
+
+  // city
+  $("cityG").setAttribute("transform", `translate(0 ${tilt})`);
+  layerEls.forEach((g, i) => g.setAttribute("fill", mixHex(LAYERS[i].night, LAYERS[i].dawn, dawn)));
+  windows.forEach((w) => {
+    let on = t < w.off ? 1 : 0;
+    if (t >= w.off && t < w.off + 0.08) on = w.flick > 0.5 ? 0.4 : 0; // a little flicker as lights go out
+    if (t >= w.on) on = clamp((t - w.on) / 0.15);
+    w.r.setAttribute("opacity", (on * (0.95 - 0.5 * dawn)).toFixed(2));
+  });
+  show($("city"), 1);
+
+  // clock: 23:47, then the night fast-forwards to 07:00
+  const mins0 = 23 * 60 + 47, mins1 = 24 * 60 + 7 * 60;
+  const mins = Math.floor(lerp(mins0, mins1, inOutCubic(prog(t, 3.2, 10.4)))) % (24 * 60);
+  $("clockTime").textContent = `${String(Math.floor(mins / 60)).padStart(2, "0")}:${String(mins % 60).padStart(2, "0")}`;
+  $("clockLabel").textContent = mins >= 23 * 60 ? "TONIGHT" : mins < 6 * 60 + 50 ? "WHILE YOU SLEEP" : "GOOD MORNING";
+  show($("clock"), prog(t, 0.2, 0.9) * (1 - prog(t, 10.7, 11.1)));
+
+  // "You go to sleep."
+  const a1 = outExpo(prog(t, 0.7, 1.45)), b1 = outExpo(prog(t, 0.88, 1.63));
+  const x1 = inCubic(prog(t, 2.75, 3.1)), y1 = inCubic(prog(t, 2.82, 3.17));
+  $("t1a").style.transform = `translateY(${(1 - a1) * 115 - x1 * 115}%)`;
+  $("t1b").style.transform = `translateY(${(1 - b1) * 115 - y1 * 115}%)`;
+  show($("t1"), t > 0.6 && t < 3.25 ? 1 : 0);
+
+  // "Planera doesn't."
+  const a2 = outExpo(prog(t, 3.4, 4.1)), b2 = outExpo(prog(t, 3.58, 4.28));
+  const x2 = inCubic(prog(t, 5.85, 6.2)), y2 = inCubic(prog(t, 5.92, 6.27));
+  $("t2a").style.transform = `translateY(${(1 - a2) * 115 - x2 * 115}%)`;
+  $("t2b").style.transform = `translateY(${(1 - b2) * 115 - y2 * 115}%)`;
+  show($("t2"), t > 3.3 && t < 6.35 ? 1 : 0);
+
+  // radar
+  const rIn = outBack(prog(t, B.radarIn, B.radarIn + 0.6), 1.4);
+  const rOut = inOutCubic(prog(t, B.card - 0.05, B.card + 0.45));
+  // the radar dives toward Rome as the fare card takes over
+  const rs = lerp(0.6, 1, rIn) * (1 + rOut * 1.6);
+  $("radarG").setAttribute("transform", `translate(${540 - ROM.x * rOut * 1.6} ${960 + tilt * 0 - ROM.y * rOut * 1.6}) scale(${rs})`);
+  show($("radar"), clamp(prog(t, B.radarIn, B.radarIn + 0.3)) * (1 - prog(t, B.card + 0.1, B.card + 0.45)));
+  const sweepDeg = Math.max(0, t - B.sweepFrom) * SWEEP_SPEED;
+  $("sweep").setAttribute("transform", `rotate(${sweepDeg % 360})`);
+  $("sweep").setAttribute("opacity", clamp(prog(t, B.sweepFrom, B.sweepFrom + 0.3)) * (1 - prog(t, B.lockOn - 0.1, B.lockOn + 0.2)));
+  blips.forEach((b) => {
+    const since = t - b.hitAt;
+    const seen = since >= 0;
+    const lastPass = seen ? since % (360 / SWEEP_SPEED) : 0;
+    const isRom = b === ROM;
+    const dim = isRom ? 1 : 1 - 0.75 * prog(t, B.lockOn, B.lockOn + 0.3);
+    b.g.setAttribute("opacity", seen ? dim : 0);
+    b.dot.setAttribute("r", seen ? 10 + 6 * Math.exp(-since * 6) : 0);
+    const pr = clamp(lastPass / 0.9);
+    b.ring.setAttribute("r", 10 + pr * 46);
+    b.ring.setAttribute("stroke-opacity", seen && t < B.lockOn + 0.3 ? (1 - pr) * 0.9 : 0);
+    b.label.setAttribute("fill", isRom && t > B.lockOn ? "#FFE500" : "#fff");
+    b.label.setAttribute("opacity", seen ? clamp(since * 4) : 0);
+  });
+  const lk = outBack(prog(t, B.lockOn, B.lockOn + 0.35), 2);
+  $("lock").setAttribute("transform", `translate(${ROM.x} ${ROM.y}) scale(${lerp(3, 1, lk)})`);
+  $("lock").setAttribute("opacity", clamp(prog(t, B.lockOn, B.lockOn + 0.1)) * (Math.floor(t * 8) % 2 || t > B.lockOn + 0.35 ? 1 : 0.3));
+
+  // fare card
+  const cIn = prog(t, B.card, B.card + 0.55), cOut = inOutCubic(prog(t, 9.75, 10.3));
+  $("card").style.transform = `translateY(${(1 - outCubic(cIn)) * 160 + cOut * -120}px) scale(${lerp(0.82, 1, outBack(cIn, 1.5)) * lerp(1, 0.9, cOut)})`;
+  show($("card"), clamp(cIn * 3) * (1 - cOut));
+  $("cardPlane").setAttribute("transform", `translate(${lerp(20, 380, (t * 0.35) % 1)} 35)`);
+  // price staircase with a slot-roll on each drop
+  let idx = 0; B.drops.forEach((d) => { if (t >= d) idx++; });
+  priceEls.forEach((el, i) => {
+    let y = 120, op = 0;
+    if (i === idx) { const p = i === 0 ? 1 : outCubic(prog(t, B.drops[i - 1], B.drops[i - 1] + 0.28)); y = (1 - p) * 110; op = p; }
+    if (i === idx - 1) { const p = outCubic(prog(t, B.drops[i], B.drops[i] + 0.28)); y = -p * 110; op = 1 - p; }
+    el.style.transform = `translateY(${y}%)`; el.style.opacity = op;
+  });
+  const wasOp = prog(t, B.drops[0] + 0.1, B.drops[0] + 0.4);
+  $("was").style.opacity = wasOp;
+  const lw = outBack(prog(t, B.lowest, B.lowest + 0.4), 2.6);
+  lowest.style.transform = `scale(${Math.max(0.0001, lw)}) rotate(${(1 - lw) * -12}deg)`;
+  lowest.style.opacity = clamp(prog(t, B.lowest, B.lowest + 0.1));
+  $("card").style.borderColor = t > B.lowest ? `rgba(255,229,0,${0.28 + 0.6 * Math.exp(-(t - B.lowest) * 3)})` : "";
+  // chart draws toward the current stop
+  const target = idx === 0 ? lerp(0, CHART_STOPS[0], prog(t, B.card + 0.2, B.drops[0])) : lerp(CHART_STOPS[idx - 1], CHART_STOPS[idx], outCubic(prog(t, B.drops[idx - 1], B.drops[idx - 1] + 0.35)));
+  const n = Math.max(2, Math.round(target * (CH_PTS.length - 1)) + 1);
+  const pts = CH_PTS.slice(0, n);
+  $("chartLine").setAttribute("d", "M" + pts.map((p) => p.join(" ")).join(" L"));
+  $("chartArea").setAttribute("d", "M" + pts.map((p) => p.join(" ")).join(" L") + ` L${pts[pts.length - 1][0]} 168 L0 168 Z`);
+  $("chartDot").setAttribute("cx", pts[pts.length - 1][0]); $("chartDot").setAttribute("cy", pts[pts.length - 1][1]);
+
+  // phone: rises at dawn, buzzes, pushes in
+  const ph = outCubic(prog(t, B.phone, B.phone + 0.9));
+  const buzz = t > B.notif && t < B.notif + 0.45 ? 9 * Math.sin((t - B.notif) * 110) * (1 - (t - B.notif) / 0.45) : 0;
+  const push = inOutCubic(prog(t, B.push[0], B.push[1]));
+  $("phone").style.transform = `translate(${buzz}px, ${(1 - ph) * 1500}px) scale(${lerp(1, 2.3, push)})`;
+  show($("phone"), t > B.phone && t < B.wipe[1] + 0.05 ? 1 : 0);
+  const nIn = outBack(prog(t, B.notif, B.notif + 0.5), 1.5);
+  $("notif").style.transform = `translateY(${(1 - nIn) * -260}px) scale(${lerp(0.9, 1, nIn)})`;
+  $("notif").style.opacity = clamp(prog(t, B.notif, B.notif + 0.15));
+
+  // yellow wipe from the notification icon
+  const wy = inOutCubic(prog(t, B.wipe[0], B.wipe[1]));
+  $("wipeY").style.clipPath = `circle(${wy * 2100}px at 330px 820px)`;
+  show($("wipeY"), wy > 0 ? 1 : 0);
+  const hl = [["h1", 0], ["h2", 0.15], ["h3", 0.3]];
+  hl.forEach(([id, d]) => {
+    const p = outExpo(prog(t, B.headline + d, B.headline + d + 0.75));
+    const x = inCubic(prog(t, B.logo - 0.55 + d * 0.5, B.logo - 0.2 + d * 0.5));
+    $(id).style.transform = `translateY(${(1 - p) * 115 - x * 115}%)`;
+  });
+  show($("hl"), t < B.logo ? 1 : 0);
+
+  // end card
+  const mIn = prog(t, B.logo, B.logo + 0.7);
+  const slide = inOutCubic(prog(t, B.slide, B.slide + 0.75));
+  const markX = lerp(350, 0, slide);
+  $("mark").style.transform = `translateX(${markX}px) scale(${Math.max(0.0001, outBack(mIn, 2.4) * lerp(1.35, 1, slide))}) rotate(${(1 - outCubic(mIn)) * -140}deg)`;
+  $("wm").style.transform = `translateX(${lerp(-105, 0, slide)}%)`;
+  $("wmMask").style.clipPath = `inset(0 0 0 ${markX}px)`;
+  show($("end"), t > B.logo - 0.05 ? 1 : 0);
+  const lv = outBack(prog(t, B.live, B.live + 0.5), 1.8);
+  $("live").style.opacity = clamp(prog(t, B.live, B.live + 0.15));
+  $("live").style.transform = `translateX(-50%) scale(${lerp(0.7, 1, lv)})`;
+  $("live").querySelector("i").style.opacity = 0.55 + 0.45 * Math.cos(t * 6);
+  const ul = outCubic(prog(t, B.url, B.url + 0.5));
+  $("url").style.opacity = ul; $("url").style.transform = `translateY(${(1 - ul) * 30}px)`;
+  [["bApple", B.badges[0]], ["bGoogle", B.badges[1]]].forEach(([id, s]) => {
+    const p = prog(t, s, s + 0.5);
+    $(id).style.opacity = clamp(p * 4);
+    $(id).style.transform = `translateY(${(1 - outCubic(p)) * 40}px) scale(${lerp(0.75, 1, outBack(p, 1.8))})`;
+  });
+
+  // fade in from black
+  $("stage").style.opacity = clamp(t / 0.6);
+}
+
+window.render = render;
+window.DURATION = DURATION;
+window.FPS = FPS;
+window.ready = Promise.resolve();
+const q = new URLSearchParams(location.search);
+if (q.has("t")) render(parseFloat(q.get("t")));
+else if (!navigator.webdriver) { const t0 = performance.now(); const loop = () => { render(((performance.now() - t0) / 1000) % DURATION); requestAnimationFrame(loop); }; loop(); }
+</script>
+</body>
+</html>

@@ -489,6 +489,7 @@ export default function FlightsSearchScreen() {
             <PriceInsightsCard
               priceInsights={outbound.data.priceInsights}
               currency={currentCurrency}
+              outboundDate={lastInput?.outboundDate}
             />
             <View style={styles.stepRow}>
               <View style={styles.stepBadge}>

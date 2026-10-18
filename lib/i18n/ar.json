@@ -489,6 +489,16 @@
     "cards": {
       "cheapestDates": "أرخص التواريخ",
       "indicativeFares": "أسعار استرشادية — افتح بحث الرحلات للحجز.",
+      "flightOptions": "خيارات الرحلات",
+      "nonstop": "مباشرة",
+      "oneStop": "توقف واحد",
+      "multiStops": "{{count}} توقفات",
+      "nonstopFrom": "مباشرة من {{price}}",
+      "noNonstop": "لا توجد رحلات مباشرة في هذه التواريخ",
+      "returnFlights": "رحلات العودة",
+      "overnight": "ليلي",
+      "selfTransfer": "تحويل ذاتي",
+      "liveFares": "أسعار مباشرة قد تتغير. اضغط على رحلة لحجزها في بحث الرحلات.",
       "dealsFromYou": "عروض لك",
       "from": "من",
       "notableSights": "أبرز المعالم",
@@ -521,7 +531,18 @@
       "sixMonthRule": "تشترط دول كثيرة صلاحية 6 أشهر بعد تاريخ الدخول.",
       "guides": "أدلة Planera",
       "nowWatching": "تتم متابعة {{destination}} لانخفاض الأسعار",
-      "addedToWishlist": "تمت إضافة {{destination}} إلى قائمة أمنياتك"
+      "addedToWishlist": "تمت إضافة {{destination}} إلى قائمة أمنياتك",
+      "staysBooking": "إقامات على Booking.com",
+      "staysAirbnb": "منازل على Airbnb",
+      "nights_zero": "{{count}} ليلة",
+      "nights_one": "ليلة واحدة",
+      "nights_two": "ليلتان",
+      "nights_few": "{{count}} ليالٍ",
+      "nights_many": "{{count}} ليلة",
+      "nights_other": "{{count}} ليلة",
+      "freeCancellation": "إلغاء مجاني",
+      "perNightShort": "/ليلة",
+      "staysDisclaimer": "أسعار مباشرة قد تتغير. يتم الحجز على {{provider}}، ولا تتولى Planera الحجز."
     },
     "myTripWeather": "كيف سيكون الطقس في رحلتي القادمة؟",
     "dealsFromMe": "هل توجد عروض من مطاري؟",
@@ -2069,6 +2090,11 @@
     "inclDays": "{{count}} أيام مخططة"
   },
   "packages": {
+    "onRequest": "حسب الطلب",
+    "tailorMade": "مصمم حسب الطلب",
+    "requestQuote": "اطلب عرض سعر",
+    "visitPartner": "عرض على موقع الشريك",
+    "successWithRef": "استلمت {{partner}} طلبك وسترد عليك مباشرة. رقمك المرجعي {{ref}}. أرسلنا لك نسخة بالبريد أيضاً.",
     "title": "باقات مختارة",
     "subtitle": "عروض مختارة بعناية من شركائنا — مناسبة لرحلتك",
     "emptyTitle": "لا توجد باقات متاحة",
@@ -2318,6 +2344,26 @@
     "titleIn": "تذاكر لأبرز المعالم في {{place}}",
     "desc": "تجنّب الطوابير مع تذاكر فورية على الهاتف للمتاحف والمعالم والتجارب.",
     "cta": "ابحث عن التذاكر على Tiqets"
+  },
+  "fareVerdict": {
+    "title": "اشترِ الآن أم انتظر؟",
+    "buy": "وقت مناسب للشراء",
+    "fair": "سعر معقول",
+    "wait": "الانتظار أفضل",
+    "disclaimer": "قراءتنا لبيانات أسعار Google لهذه التواريخ، وليست توقعًا.",
+    "reason": {
+      "belowRange": "أقل بـ {{amount}} من النطاق المعتاد {{low}}–{{high}} لهذا المسار",
+      "underTypical": "أقل بـ {{amount}} من السعر المعتاد {{typical}}",
+      "aboveTypical": "أعلى بـ {{amount}} من السعر المعتاد {{typical}}",
+      "aboveRange": "أعلى بـ {{amount}} من النطاق المعتاد {{low}}–{{high}} لهذا المسار",
+      "googleLow": "تصنّف Google هذا السعر منخفضًا لهذا المسار",
+      "googleHigh": "تصنّف Google هذا السعر مرتفعًا لهذا المسار",
+      "lowestSeen": "أدنى سعر لهذه التواريخ خلال آخر {{days}} يومًا",
+      "pricesRising": "أسعار هذه التواريخ في ارتفاع",
+      "pricesFalling": "أسعار هذه التواريخ في انخفاض",
+      "departingSoon": "باقٍ {{days}} يومًا: نادرًا ما تنخفض الأسعار في هذا الوقت المتأخر",
+      "plentyOfTime": "باقٍ {{months}} أشهر: لديك وقت لمراقبة السعر"
+    }
   },
   "metaConsent": {
     "title": "ساعدنا في قياس إعلاناتنا",

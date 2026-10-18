@@ -213,9 +213,11 @@ export const quoteEvent = internalAction({
   args: {
     agencyId: v.id("agencies"),
     quoteId: v.string(),
-    event: v.union(v.literal("viewed"), v.literal("accepted"), v.literal("travellers")),
+    event: v.union(v.literal("viewed"), v.literal("accepted"), v.literal("travellers"), v.literal("paid")),
     tier: v.optional(v.string()),
     note: v.optional(v.string()),
+    /** "350.00 EUR" — for "paid" only. */
+    amount: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<null> => {
     const info = await ctx.runQuery(recipientsRef, {
@@ -223,6 +225,32 @@ export const quoteEvent = internalAction({
       quoteId: args.quoteId,
     });
     if (!info?.to) return null;
+
+    if (args.event === "paid") {
+      const amount = args.amount ?? "";
+      const res: { success: boolean; error?: string } = await ctx.runAction(
+        internal.postmark.sendRawEmail,
+        {
+          to: info.to,
+          subject: `Payment received ${amount} — ${info.route}`,
+          html: `
+<div style="font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.6;color:#111">
+  <p style="margin:0 0 14px">Your client paid <strong>${esc(amount)}</strong> online for ${esc(info.route)}.</p>
+  <p style="margin:0 0 14px;color:#666">Departing ${esc(info.departDate)} · quote ${esc(args.quoteId)}</p>
+  <p style="margin:0 0 14px;color:#444">The money went straight to your own payment account. It is already added to the quote's booking record.</p>
+</div>`.trim(),
+          text: [
+            `Your client paid ${amount} online for ${info.route}.`,
+            `Departing ${info.departDate} · quote ${args.quoteId}`,
+            "The money went straight to your own payment account.",
+          ].join(NEWLINE),
+          tag: "agency-quote-event",
+          ...(info.replyTo ? { replyTo: info.replyTo } : {}),
+        },
+      );
+      if (!res.success) console.error(`[agency-quote-event] send failed: ${res.error}`);
+      return null;
+    }
 
     if (args.event === "travellers") {
       const res: { success: boolean; error?: string } = await ctx.runAction(

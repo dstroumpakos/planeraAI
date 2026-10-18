@@ -3,10 +3,14 @@ import { StyleSheet, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { useTheme } from "@/lib/ThemeContext";
 import type { PriceInsights } from "@/types/flights";
+import { fareVerdict } from "@/lib/fareVerdict";
+import { FareVerdictView } from "@/components/flights/FareVerdictView";
 
 interface Props {
   priceInsights?: PriceInsights | null;
   currency?: string;
+  /** Outbound date ("YYYY-MM-DD") — lets the verdict weigh time left to wait. */
+  outboundDate?: string;
 }
 
 function formatPrice(value: number | null | undefined, currency: string) {
@@ -17,6 +21,7 @@ function formatPrice(value: number | null | undefined, currency: string) {
 export const PriceInsightsCard: React.FC<Props> = ({
   priceInsights,
   currency = "EUR",
+  outboundDate,
 }) => {
   const { colors } = useTheme();
   const { t } = useTranslation();
@@ -61,6 +66,18 @@ export const PriceInsightsCard: React.FC<Props> = ({
   });
 
   const [low, high] = priceInsights.typicalPriceRange ?? [];
+  // Buy-or-wait with the reasons written out. Replaces the generic one-liner
+  // whenever Google gave us enough to reason about.
+  const verdict =
+    priceInsights.lowestPrice != null
+      ? fareVerdict({
+          price: priceInsights.lowestPrice,
+          priceLevel: priceInsights.priceLevel,
+          typicalRange: priceInsights.typicalPriceRange,
+          priceHistory: priceInsights.priceHistory,
+          departureDate: outboundDate,
+        })
+      : null;
 
   return (
     <View style={styles.card}>
@@ -72,7 +89,14 @@ export const PriceInsightsCard: React.FC<Props> = ({
           {formatPrice(priceInsights.lowestPrice, currency)}
         </Text>
       </View>
-      <Text style={styles.body}>{body}</Text>
+      {verdict ? (
+        <FareVerdictView
+          result={verdict}
+          money={(n) => formatPrice(n, currency)}
+        />
+      ) : (
+        <Text style={styles.body}>{body}</Text>
+      )}
       {low != null && high != null && (
         <View style={styles.rangeRow}>
           <Text style={styles.rangeText}>

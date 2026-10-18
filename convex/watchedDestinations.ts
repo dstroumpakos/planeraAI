@@ -4,6 +4,7 @@ import { internal as _internal } from "./_generated/api";
 import { api } from "./_generated/api";
 import { authQuery, authMutation } from "./functions";
 import { PRICE_DROP_COOLDOWN_MS, homeAirportMatchesOrigin, isNotablePriceDrop } from "./lib/notificationInbox";
+import { fareVerdict } from "../lib/fareVerdict";
 
 // Type assertion: internal references won't exist until `npx convex dev` regenerates types
 const internal = _internal as any;
@@ -269,12 +270,18 @@ export const notifyMatchingUsers = internalAction({
             const title = getDealNotifText(r.language, "deal_watch_title", {
                 dest: deal.destinationCity,
             });
-            const body = getDealNotifText(r.language, "deal_watch_body", {
-                origin: deal.originCity,
-                dest: deal.destinationCity,
-                price: `${deal.price}`,
-                currency: deal.currency,
-            });
+            const under = underUsualBy(deal, deal.price);
+            const body = getDealNotifText(
+                r.language,
+                under != null ? "deal_watch_body_under" : "deal_watch_body",
+                {
+                    origin: deal.originCity,
+                    dest: deal.destinationCity,
+                    price: `${deal.price}`,
+                    currency: deal.currency,
+                    ...(under != null ? { amount: under } : {}),
+                }
+            );
 
             await ctx.runAction(internal.notifications.sendPushNotification, {
                 userId: r.userId,
@@ -330,13 +337,19 @@ export const notifyPriceDrop = internalAction({
             const title = getDealNotifText(r.language, "price_drop_title", {
                 dest: deal.destinationCity,
             });
-            const body = getDealNotifText(r.language, "price_drop_body", {
-                origin: deal.originCity,
-                dest: deal.destinationCity,
-                oldPrice: `${wasPrice}`,
-                newPrice: `${args.newPrice}`,
-                currency: deal.currency,
-            });
+            const under = underUsualBy(deal, args.newPrice);
+            const body = getDealNotifText(
+                r.language,
+                under != null ? "price_drop_body_under" : "price_drop_body",
+                {
+                    origin: deal.originCity,
+                    dest: deal.destinationCity,
+                    oldPrice: `${wasPrice}`,
+                    newPrice: `${args.newPrice}`,
+                    currency: deal.currency,
+                    ...(under != null ? { amount: under } : {}),
+                }
+            );
 
             await ctx.runAction(internal.notifications.sendPushNotification, {
                 userId: r.userId,
@@ -356,6 +369,25 @@ export const notifyPriceDrop = internalAction({
     },
 });
 
+/**
+ * How far the fare sits under the route's usual price, when the buy-or-wait
+ * verdict says so (below Google's typical range, or under its midpoint). The
+ * alert then names the saving — the strongest "why buy" reason in one line.
+ * Null when there's no range or no meaningful gap.
+ */
+function underUsualBy(deal: any, price: number): number | null {
+    if (deal?.typicalLow == null || deal?.typicalHigh == null) return null;
+    const v = fareVerdict({
+        price,
+        priceLevel: deal.priceLevel,
+        typicalRange: [deal.typicalLow, deal.typicalHigh],
+        departureDate: deal.outboundDate,
+    });
+    const r = v?.reasons.find((x) => x.key === "belowRange" || x.key === "underTypical");
+    const amount = r?.params.amount;
+    return typeof amount === "number" && amount >= 5 ? amount : null;
+}
+
 // ─── Deal notification translations ───
 const DEAL_NOTIF_TRANSLATIONS: Record<string, Record<string, string>> = {
     en: {
@@ -363,36 +395,48 @@ const DEAL_NOTIF_TRANSLATIONS: Record<string, Record<string, string>> = {
         deal_watch_body: "{{origin}} → {{dest}} from {{currency}}{{price}}. Tap to view the deal!",
         price_drop_title: "Price dropped for {{dest}}! 📉",
         price_drop_body: "{{origin}} → {{dest}} now {{currency}}{{newPrice}} (was {{currency}}{{oldPrice}}). Grab it!",
+        deal_watch_body_under: "{{origin}} → {{dest}} from {{currency}}{{price}}, {{currency}}{{amount}} under the usual fare. Tap to view the deal!",
+        price_drop_body_under: "{{origin}} → {{dest}} now {{currency}}{{newPrice}} (was {{currency}}{{oldPrice}}), {{currency}}{{amount}} under the usual fare. Grab it!",
     },
     el: {
         deal_watch_title: "Βρέθηκε προσφορά για {{dest}}! ✈️",
         deal_watch_body: "{{origin}} → {{dest}} από {{currency}}{{price}}. Πατήστε για να δείτε!",
         price_drop_title: "Πτώση τιμής για {{dest}}! 📉",
         price_drop_body: "{{origin}} → {{dest}} τώρα {{currency}}{{newPrice}} (ήταν {{currency}}{{oldPrice}}). Κλείστε το!",
+        deal_watch_body_under: "{{origin}} → {{dest}} από {{currency}}{{price}}, {{currency}}{{amount}} κάτω από τη συνήθη τιμή. Πατήστε για να δείτε!",
+        price_drop_body_under: "{{origin}} → {{dest}} τώρα {{currency}}{{newPrice}} (ήταν {{currency}}{{oldPrice}}), {{currency}}{{amount}} κάτω από τη συνήθη τιμή. Κλείστε το!",
     },
     es: {
         deal_watch_title: "¡Oferta para {{dest}}! ✈️",
         deal_watch_body: "{{origin}} → {{dest}} desde {{currency}}{{price}}. ¡Toca para ver la oferta!",
         price_drop_title: "¡Bajó el precio para {{dest}}! 📉",
         price_drop_body: "{{origin}} → {{dest}} ahora {{currency}}{{newPrice}} (era {{currency}}{{oldPrice}}). ¡Aprovecha!",
+        deal_watch_body_under: "{{origin}} → {{dest}} desde {{currency}}{{price}}, {{currency}}{{amount}} por debajo de lo habitual. ¡Toca para ver la oferta!",
+        price_drop_body_under: "{{origin}} → {{dest}} ahora {{currency}}{{newPrice}} (era {{currency}}{{oldPrice}}), {{currency}}{{amount}} por debajo de lo habitual. ¡Aprovecha!",
     },
     fr: {
         deal_watch_title: "Offre pour {{dest}} ! ✈️",
         deal_watch_body: "{{origin}} → {{dest}} à partir de {{currency}}{{price}}. Appuyez pour voir !",
         price_drop_title: "Prix en baisse pour {{dest}} ! 📉",
         price_drop_body: "{{origin}} → {{dest}} maintenant {{currency}}{{newPrice}} (était {{currency}}{{oldPrice}}). Foncez !",
+        deal_watch_body_under: "{{origin}} → {{dest}} à partir de {{currency}}{{price}}, {{currency}}{{amount}} sous le prix habituel. Appuyez pour voir !",
+        price_drop_body_under: "{{origin}} → {{dest}} maintenant {{currency}}{{newPrice}} (était {{currency}}{{oldPrice}}), {{currency}}{{amount}} sous le prix habituel. Foncez !",
     },
     de: {
         deal_watch_title: "Angebot für {{dest}} gefunden! ✈️",
         deal_watch_body: "{{origin}} → {{dest}} ab {{currency}}{{price}}. Tippen Sie, um das Angebot zu sehen!",
         price_drop_title: "Preissenkung für {{dest}}! 📉",
         price_drop_body: "{{origin}} → {{dest}} jetzt {{currency}}{{newPrice}} (war {{currency}}{{oldPrice}}). Zugreifen!",
+        deal_watch_body_under: "{{origin}} → {{dest}} ab {{currency}}{{price}}, {{currency}}{{amount}} unter dem üblichen Preis. Tippen Sie, um das Angebot zu sehen!",
+        price_drop_body_under: "{{origin}} → {{dest}} jetzt {{currency}}{{newPrice}} (war {{currency}}{{oldPrice}}), {{currency}}{{amount}} unter dem üblichen Preis. Zugreifen!",
     },
     ar: {
         deal_watch_title: "عرض لـ {{dest}}! ✈️",
         deal_watch_body: "{{origin}} → {{dest}} من {{currency}}{{price}}. اضغط لعرض العرض!",
         price_drop_title: "انخفض السعر لـ {{dest}}! 📉",
         price_drop_body: "{{origin}} → {{dest}} الآن {{currency}}{{newPrice}} (كان {{currency}}{{oldPrice}}). احجز الآن!",
+        deal_watch_body_under: "{{origin}} → {{dest}} من {{currency}}{{price}}، أقل من السعر المعتاد بـ {{currency}}{{amount}}. اضغط لعرض العرض!",
+        price_drop_body_under: "{{origin}} → {{dest}} الآن {{currency}}{{newPrice}} (كان {{currency}}{{oldPrice}})، أقل من السعر المعتاد بـ {{currency}}{{amount}}. احجز الآن!",
     },
 };
 

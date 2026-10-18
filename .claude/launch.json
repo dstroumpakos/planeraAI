@@ -37,6 +37,19 @@
         "-c-1"
       ],
       "port": 8090
+    },
+    {
+      "name": "atlas-mark-preview",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "-y",
+        "http-server",
+        "C:/Users/nioni/AppData/Local/Temp/claude/C--Users-nioni-Downloads-Bloom-planeraAI/b2cb030f-655b-4605-8c48-e89656247cbd/scratchpad/atlas",
+        "-p",
+        "8091",
+        "-c-1"
+      ],
+      "port": 8091
     }
   ]
 }

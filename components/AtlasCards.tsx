@@ -10,7 +10,7 @@
  */
 
 import React from "react";
-import { View, Text, StyleSheet, TouchableOpacity, Linking, ScrollView } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Linking, ScrollView, Image } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
@@ -375,6 +375,201 @@ const FlightPricesCard = ({ data }: { data: any }) => {
     );
 };
 
+/** 445 → "7h 25m". */
+const fmtDuration = (m: number | null | undefined) =>
+    typeof m === "number" && m > 0 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m` : "";
+
+/** Live dated search (search_flights): itineraries with stops and layovers. */
+const FlightOptionsCard = ({ data }: { data: any }) => {
+    const { colors } = useTheme();
+    const { t, i18n } = useTranslation();
+    const router = useRouter();
+    const options: any[] = data?.options ?? [];
+    const returnOptions: any[] = data?.returnOptions ?? [];
+    const summary = data?.summary ?? {};
+    const sym = currencySymbol(data?.currency);
+
+    const stopsLabel = (o: any) => {
+        if (!o?.stops) return t("atlas.cards.nonstop");
+        const via = (o.layovers ?? [])
+            .map((l: any) =>
+                [l.airport, fmtDuration(l.durationMinutes), l.overnight ? t("atlas.cards.overnight") : ""]
+                    .filter(Boolean)
+                    .join(" ")
+            )
+            .join(", ");
+        const count = o.stops === 1 ? t("atlas.cards.oneStop") : t("atlas.cards.multiStops", { count: o.stops });
+        return via ? `${count} · ${via}` : count;
+    };
+
+    const openSearch = () =>
+        router.push({
+            pathname: "/flights/search",
+            params: {
+                departureId: data.origin,
+                arrivalId: data.destination,
+                outboundDate: data.outboundDate,
+                ...(data.returnDate ? { returnDate: data.returnDate } : {}),
+                ...(data.adults ? { adults: String(data.adults) } : {}),
+                autoSearch: "1",
+            },
+        } as any);
+
+    const dates = [shortDate(data?.outboundDate, i18n.language), shortDate(data?.returnDate ?? "", i18n.language)]
+        .filter(Boolean)
+        .join(" – ");
+
+    const nonstopLine =
+        summary.nonstopCount > 0 && typeof summary.cheapestNonstop === "number"
+            ? t("atlas.cards.nonstopFrom", { price: `${sym}${summary.cheapestNonstop}` })
+            : data?.stopsFilter === "nonstop"
+              ? null
+              : t("atlas.cards.noNonstop");
+
+    const Row = ({ o }: { o: any }) => (
+        <View style={{ flex: 1 }}>
+            <Text style={[styles.itemTitle, { color: colors.text }]} numberOfLines={1}>
+                {o.departTime ?? "?"} → {o.arriveTime ?? "?"}
+                {o.durationMinutes ? ` · ${fmtDuration(o.durationMinutes)}` : ""}
+            </Text>
+            <Text style={[styles.itemMeta, { color: colors.textMuted }]} numberOfLines={2}>
+                {(o.airlines ?? []).join(" + ")}
+                {" · "}
+                {stopsLabel(o)}
+                {o.selfTransfer ? ` · ${t("atlas.cards.selfTransfer")}` : ""}
+            </Text>
+        </View>
+    );
+
+    return (
+        <CardShell
+            icon="airplane"
+            title={t("atlas.cards.flightOptions")}
+            subtitle={`${data.origin} → ${data.destination}${dates ? ` · ${dates}` : ""}`}
+        >
+            {!!nonstopLine && (
+                <Text style={[styles.flightSummary, { color: colors.textSecondary }]}>{nonstopLine}</Text>
+            )}
+            {options.map((o, i) => (
+                <ListRow key={`o-${i}`} last={i === options.length - 1} onPress={openSearch}>
+                    <Row o={o} />
+                    {typeof o.price === "number" && (
+                        <View style={styles.pricePill}>
+                            <Text style={styles.pricePillText}>
+                                {sym}
+                                {o.price}
+                            </Text>
+                        </View>
+                    )}
+                </ListRow>
+            ))}
+            {returnOptions.length > 0 && (
+                <>
+                    <Text style={[styles.flightSection, { color: colors.textSecondary }]}>
+                        {t("atlas.cards.returnFlights")}
+                    </Text>
+                    {returnOptions.map((o, i) => (
+                        <ListRow key={`r-${i}`} last={i === returnOptions.length - 1}>
+                            <Row o={o} />
+                        </ListRow>
+                    ))}
+                </>
+            )}
+            <Disclaimer>{t("atlas.cards.liveFares")}</Disclaimer>
+        </CardShell>
+    );
+};
+
+/** Live stays (search_hotels / search_airbnb): Booking.com hotels or Airbnb homes for set dates. */
+const StaysCard = ({ data }: { data: any }) => {
+    const { colors } = useTheme();
+    const { t, i18n } = useTranslation();
+    const listings: any[] = data?.listings ?? [];
+    const isAirbnb = data?.provider === "airbnb";
+    const providerName = isAirbnb ? "Airbnb" : "Booking.com";
+    const sym = currencySymbol(data?.currency);
+    if (listings.length === 0) return null;
+
+    const subtitle = [
+        data?.destination,
+        `${shortDate(data?.checkInDate, i18n.language)} – ${shortDate(data?.checkOutDate, i18n.language)}`,
+        t("atlas.cards.nights", { count: data?.nights ?? 1 }),
+    ]
+        .filter(Boolean)
+        .join(" · ");
+
+    return (
+        <CardShell
+            icon={isAirbnb ? "home" : "bed"}
+            title={isAirbnb ? t("atlas.cards.staysAirbnb") : t("atlas.cards.staysBooking")}
+            subtitle={subtitle}
+            badge={providerName}
+        >
+            {listings.map((l, i) => (
+                <ListRow
+                    key={`${l.name}-${i}`}
+                    last={i === listings.length - 1}
+                    onPress={l.url ? () => Linking.openURL(l.url).catch(() => {}) : undefined}
+                >
+                    {l.image ? (
+                        <Image source={{ uri: l.image }} style={styles.stayThumb} />
+                    ) : (
+                        <View style={[styles.stayThumb, { backgroundColor: colors.lightGray }]} />
+                    )}
+                    <View style={{ flex: 1 }}>
+                        <Text style={[styles.itemTitle, { color: colors.text }]} numberOfLines={2}>
+                            {l.name}
+                        </Text>
+                        <View style={styles.metaLine}>
+                            {l.score != null && (
+                                <>
+                                    <Ionicons name="star" size={11} color="#FF9500" />
+                                    <Text style={[styles.itemMeta, { color: colors.text, fontWeight: "700" }]}>
+                                        {l.score}
+                                        {isAirbnb ? "" : `/${l.scoreMax}`}
+                                    </Text>
+                                    {l.reviews != null && (
+                                        <Text style={[styles.itemMeta, { color: colors.textMuted }]}>
+                                            ({Number(l.reviews).toLocaleString()})
+                                        </Text>
+                                    )}
+                                </>
+                            )}
+                            {!!l.badge && (
+                                <Text style={[styles.itemMeta, { color: colors.textMuted, flexShrink: 1 }]} numberOfLines={1}>
+                                    {l.score != null ? " · " : ""}
+                                    {l.badge}
+                                </Text>
+                            )}
+                        </View>
+                        {l.freeCancellation === true && (
+                            <Text style={[styles.itemMeta, { color: "#22A45D", fontWeight: "600" }]}>
+                                {t("atlas.cards.freeCancellation")}
+                            </Text>
+                        )}
+                    </View>
+                    <View style={{ alignItems: "flex-end" }}>
+                        {l.total != null ? (
+                            <View style={styles.pricePill}>
+                                <Text style={styles.pricePillText}>
+                                    {sym}
+                                    {l.total}
+                                </Text>
+                            </View>
+                        ) : null}
+                        <Text style={[styles.itemMeta, { color: colors.textMuted, marginTop: 3 }]}>
+                            {sym}
+                            {l.perNight}
+                            {t("atlas.cards.perNightShort")}
+                        </Text>
+                    </View>
+                </ListRow>
+            ))}
+            <Disclaimer>{t("atlas.cards.staysDisclaimer", { provider: providerName })}</Disclaimer>
+        </CardShell>
+    );
+};
+
 const DealsCard = ({ data }: { data: any }) => {
     const { colors } = useTheme();
     const { t } = useTranslation();
@@ -712,6 +907,10 @@ export const AtlasCardRenderer = ({ card }: { card: AtlasCardData }) => {
             return <RestaurantsCard data={card.data} />;
         case "flightPrices":
             return <FlightPricesCard data={card.data} />;
+        case "flightOptions":
+            return <FlightOptionsCard data={card.data} />;
+        case "stays":
+            return <StaysCard data={card.data} />;
         case "deals":
             return <DealsCard data={card.data} />;
         case "sights":
@@ -829,6 +1028,7 @@ const styles = StyleSheet.create({
     priceChipDate: { fontSize: 12, fontWeight: "700" },
     priceChipReturn: { fontSize: 10, marginTop: 1 },
     priceChipPrice: { fontSize: 17, fontWeight: "800", marginTop: 4, letterSpacing: -0.3 },
+    stayThumb: { width: 56, height: 56, borderRadius: 12, alignSelf: "flex-start" },
     pricePill: {
         backgroundColor: YELLOW,
         borderRadius: 10,
@@ -836,6 +1036,8 @@ const styles = StyleSheet.create({
         paddingVertical: 5,
     },
     pricePillText: { color: INK, fontSize: 14, fontWeight: "800" },
+    flightSummary: { fontSize: 13, fontWeight: "600", marginBottom: 4 },
+    flightSection: { fontSize: 12, fontWeight: "700", marginTop: 10, textTransform: "uppercase", letterSpacing: 0.4 },
     datePill: {
         backgroundColor: YELLOW,
         borderRadius: 8,

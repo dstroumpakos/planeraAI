@@ -10,6 +10,7 @@ import {
 import type { Doc } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
 import { sha256Hex } from "./partnerApiAuth";
+import { partnerListingActive } from "./lib/partnerListingAccess";
 
 /**
  * Partner Portal — partner-facing self-service surface (V8 runtime).
@@ -185,6 +186,9 @@ export const createInvite = internalMutation({
         rateLimitPerMin,
         dailyCap,
         monthlyCap,
+        ...(isSupplier && existing.billingRequired === undefined
+          ? { billingRequired: true }
+          : {}),
       });
       return { accountId: existing._id, email, rawToken, kind };
     }
@@ -201,6 +205,8 @@ export const createInvite = internalMutation({
       dailyCap,
       monthlyCap,
       createdAt: now,
+      // New suppliers pay for listings (€20/month + VAT); see partnerBilling.ts.
+      ...(isSupplier ? { billingRequired: true } : {}),
     });
     return { accountId, email, rawToken, kind };
   },
@@ -396,6 +402,8 @@ export const signup = mutation({
         emailVerifyExpiresAt,
         acceptedTermsAt,
         termsVersion: PARTNER_TERMS_VERSION,
+        // Keep an operator waiver (false) if this row ever had one.
+        billingRequired: existing.billingRequired ?? true,
       });
     } else {
       await ctx.db.insert("partnerAccounts", {
@@ -413,6 +421,7 @@ export const signup = mutation({
         createdAt: now,
         acceptedTermsAt,
         termsVersion: PARTNER_TERMS_VERSION,
+        billingRequired: true,
       });
     }
 
@@ -619,11 +628,41 @@ export const getMe = query({
       });
     }
 
+    const openOffer = await ctx.db
+      .query("partnerAgreements")
+      .withIndex("by_account", (q) => q.eq("accountId", account._id))
+      .filter((q) => q.eq(q.field("status"), "offered"))
+      .first();
+
     return {
       email: account.email,
       partnerName: account.partnerName,
       partnerRef: account.partnerRef,
       kind: account.kind ?? "api",
+      // An unsigned, unexpired commission agreement is waiting for them.
+      agreementOffer:
+        openOffer && openOffer.expiresAt > Date.now()
+          ? { reference: openOffer.reference, expiresAt: openOffer.expiresAt }
+          : null,
+      // Paid-listing state for the supplier dashboard. `required: false` =
+      // grandfathered or waived; `active` is the one rule products obey.
+      // Signed commission agreement in force (no fee, takes quote requests).
+      commission: account.commission
+        ? {
+            pct: account.commission.commissionPct,
+            attributionDays: account.commission.attributionDays,
+            since: account.commission.since,
+          }
+        : null,
+      billing: {
+        // A commission agreement replaces the fee, so the portal stops asking.
+        required: !!account.billingRequired && !account.commission,
+        active: partnerListingActive(account),
+        status: account.subscriptionStatus ?? null,
+        periodEnd: account.subscriptionPeriodEnd ?? null,
+        cancelAtPeriodEnd: account.subscriptionCancelAtPeriodEnd ?? false,
+        hasDetails: !!account.billingDetails,
+      },
       limits: {
         rateLimitPerMin: account.rateLimitPerMin,
         dailyCap: account.dailyCap,

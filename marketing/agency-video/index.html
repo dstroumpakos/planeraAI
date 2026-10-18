@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="el">
+<head>
+<meta charset="utf-8">
+<title>Planera for Travel Agencies Film</title>
+<link rel="stylesheet" href="assets/tw.out.css">
+<link rel="stylesheet" href="assets/agency.css">
+<style>
+  @font-face { font-family: Inter; font-weight: 400; src: url(assets/Inter-Regular.ttf); }
+  @font-face { font-family: Inter; font-weight: 500 650; src: url(assets/Inter-SemiBold.ttf); }
+  @font-face { font-family: Inter; font-weight: 700 900; src: url(assets/Inter-ExtraBold.ttf); }
+  html, body { width: 1080px; height: 1350px; overflow: hidden; margin: 0; background: #0b0c10; font-family: Inter, system-ui, sans-serif; }
+  #stage { position: relative; width: 1080px; height: 1350px; overflow: hidden; background: radial-gradient(ellipse 70% 45% at 80% -5%, rgba(255,229,0,0.10), transparent 70%), #0b0c10; }
+  .abs { position: absolute; }
+  svg.lu { display: inline-block; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .spin { animation: none; }
+
+  /* browser window around the real workspace */
+  #cam { position: absolute; left: 0; top: 0; transform-origin: 0 0; will-change: transform; }
+  #spot { position: absolute; left: 0; top: 0; border-radius: 18px; box-shadow: 0 0 0 4000px rgba(4,5,8,0.62), 0 0 0 2px rgba(255,229,0,0.55); z-index: 40; pointer-events: none; will-change: transform, width, height; }
+  #win { position: relative; width: 1320px; border-radius: 18px; overflow: hidden; background: #0b0c10; box-shadow: 0 40px 120px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.08); }
+  #chrome { height: 46px; background: #17191e; display: flex; align-items: center; gap: 8px; padding: 0 16px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+  #chrome i { width: 12px; height: 12px; border-radius: 6px; display: block; }
+  #url { margin-left: 18px; flex: 1; height: 28px; border-radius: 8px; background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.6); font-size: 13px; display: flex; align-items: center; gap: 8px; padding: 0 12px; }
+  #vp { position: relative; width: 1320px; height: 1560px; overflow: hidden; }
+  #app { position: absolute; left: 0; top: 0; width: 1320px; }
+  .page { position: absolute; left: 0; top: 0; width: 100%; }
+  .flash { box-shadow: 0 0 0 2px rgba(255,229,0,0.75), 0 0 24px rgba(255,229,0,0.25) !important; }
+  .ag textarea.ag-input, .ag .fake-input { display: block; }
+  .fake-input { color: #f2f4f6; display: flex !important; align-items: center; justify-content: space-between; min-height: 42px; }
+
+  /* pointer + tap */
+  #ptr { position: absolute; left: 0; top: 0; z-index: 60; pointer-events: none; will-change: transform; filter: drop-shadow(0 3px 6px rgba(0,0,0,0.5)); }
+  #tap { position: absolute; width: 84px; height: 84px; margin: -42px 0 0 -42px; border-radius: 42px; background: rgba(30,30,30,0.25); border: 4px solid rgba(255,255,255,0.9); z-index: 61; }
+
+  /* hook: the client's email */
+  #mail { position: absolute; left: 90px; right: 90px; top: 300px; background: #fff; color: #16181d; border-radius: 26px; padding: 34px 38px 38px; box-shadow: 0 40px 100px rgba(0,0,0,0.5); z-index: 20; will-change: transform; }
+  #mail .mh { display: flex; align-items: center; gap: 16px; }
+  #mail .mav { width: 64px; height: 64px; border-radius: 32px; background: #E8794B; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 28px; }
+  #mail .from { font-weight: 700; font-size: 28px; }
+  #mail .addr { font-size: 21px; color: #5b6570; }
+  #mail .when { margin-left: auto; font-size: 20px; color: #5b6570; align-self: flex-start; }
+  #mail .subj { margin-top: 24px; font-weight: 800; font-size: 34px; letter-spacing: -0.02em; }
+  #mail .body { margin-top: 14px; font-size: 29px; line-height: 1.5; color: #2b2f36; }
+  #mail .body mark { background: rgba(255,229,0,0.55); color: inherit; border-radius: 4px; padding: 0 2px; }
+
+  /* the traveller's phone with the light quote document */
+  #phone { position: absolute; left: 255px; top: 70px; width: 570px; height: 1200px; border-radius: 80px; background: #0B0B0F; padding: 16px; box-shadow: 0 50px 120px rgba(0,0,0,0.6), inset 0 0 0 2px #2A2A33; z-index: 30; will-change: transform; }
+  #pscr { position: relative; width: 538px; height: 1168px; border-radius: 66px; overflow: hidden; background: #f7f5f0; }
+  #pscr .island { position: absolute; top: 14px; left: 50%; width: 150px; height: 42px; margin-left: -75px; border-radius: 21px; background: #000; z-index: 5; }
+  #pdoc { position: absolute; left: 0; top: 0; width: 390px; transform-origin: 0 0; will-change: transform; }
+  /* the document's own <=820px rules, applied by width of the phone rather than the render viewport */
+  #pdoc .aq-tiers { grid-template-columns: 1fr; }
+  #pdoc .aq-tier { border-right: 0; border-bottom: 1px solid var(--hair); }
+  #pdoc .aq-masthead { padding: 30px 24px 24px; }
+  #pdoc .aq-terms { padding: 24px 24px 32px; }
+  #pdoc .aq-route { font-size: 30px; }
+  #pdoc .aq-summary { margin: 0 16px 4px; }
+  #pdoc .aq-sheet { width: 100%; }
+
+  /* captions — LinkedIn autoplays muted, so the story has to read without sound */
+  .cap { position: absolute; left: 0; right: 0; display: flex; justify-content: center; z-index: 80; pointer-events: none; }
+  .cap span { display: inline-block; max-width: 960px; background: rgba(11,12,16,0.92); color: #fff; border: 1px solid rgba(255,255,255,0.12); border-radius: 26px; padding: 22px 34px 24px; font-weight: 800; font-size: 50px; letter-spacing: -0.025em; line-height: 1.12; text-align: center; box-shadow: 0 18px 50px rgba(0,0,0,0.45); will-change: transform; }
+  .cap b { color: #FFE500; font-weight: 800; }
+
+  /* end card */
+  #end { position: absolute; inset: 0; z-index: 90; display: flex; flex-direction: column; align-items: center; justify-content: center; background: radial-gradient(ellipse 70% 45% at 50% 0%, rgba(255,229,0,0.12), transparent 70%), #0b0c10; }
+  #endLogo { position: relative; width: 760px; height: 210px; }
+  #mark { position: absolute; left: 0; top: 0; width: 140px; height: 210px; transform-origin: 50% 60%; z-index: 2; will-change: transform; }
+  #wmMask { position: absolute; left: 151px; top: 0; width: 609px; height: 210px; overflow: hidden; }
+  #wm { width: 609px; height: 210px; display: block; will-change: transform; }
+  #endFor { margin-top: 10px; font-weight: 700; font-size: 44px; color: rgba(255,255,255,0.55); letter-spacing: -0.01em; }
+  #endLine1 { margin-top: 70px; font-weight: 800; font-size: 60px; letter-spacing: -0.035em; color: #fff; text-align: center; line-height: 1.1; }
+  #endLine2 { margin-top: 22px; font-weight: 600; font-size: 38px; color: rgba(255,255,255,0.6); text-align: center; line-height: 1.35; }
+  #endUrl { margin-top: 64px; background: #FFE500; color: #0b0c10; border-radius: 999px; padding: 22px 44px; font-weight: 800; font-size: 44px; box-shadow: 0 14px 40px rgba(255,229,0,0.25); }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="cam">
+    <div id="win">
+      <div id="chrome"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i>
+        <div id="url"><span id="lock"></span><span id="urlText">planeraai.app/agency/search</span></div></div>
+      <div id="vp"><div id="app"></div></div>
+      <div id="spot"></div>
+    </div>
+  </div>
+  <div id="mail">
+    <div class="mh"><div class="mav">Κ</div><div><div class="from">Κατερίνα Παπαδοπούλου</div><div class="addr">προς: εσάς</div></div><div class="when">09:12</div></div>
+    <div class="subj">Ρώμη τον Μάιο 🇮🇹</div>
+    <div class="body">Καλησπέρα, είμαστε <mark>2 ενήλικες και ένα παιδί 7 ετών</mark>, θέλουμε <mark>Ρώμη 5 νύχτες</mark> γύρω στις <mark>10 Μαΐου από Αθήνα</mark>, <mark>απευθείας πτήσεις</mark>, κεντρικό ξενοδοχείο <mark>με πρωινό</mark>. Ευχαριστώ!</div>
+  </div>
+  <div id="phone"><div id="pscr"><div class="island"></div><div id="pdoc"></div></div></div>
+  <div id="ptr"><svg width="34" height="40" viewBox="0 0 17 20"><path d="M1.5 1.2v15.6l4.1-3.7 2.6 5.7 2.6-1.2-2.6-5.5 5.6-.4z" fill="#fff" stroke="#0b0c10" stroke-width="1.2" stroke-linejoin="round"/></svg></div>
+  <div id="tap"></div>
+  <div class="cap" id="cap"><span id="capText"></span></div>
+  <div id="end">
+    <div id="endLogo"><img id="mark" src="assets/mark.png" alt=""><div id="wmMask"><img id="wm" src="assets/wordmark.png" alt=""></div></div>
+    <div id="endFor">for Travel Agencies</div>
+    <div id="endLine1">Από το αίτημα του πελάτη<br>σε προσφορά.</div>
+    <div id="endLine2">Οι τιμές σου. Το brand σου.<br>Εσύ παραμένεις ο πωλητής.</div>
+    <div id="endUrl">planeraai.app/agencies</div>
+  </div>
+</div>
+
+<script src="assets/icons.js"></script>
+<script>
+const DURATION = 30.5;
+const FPS = 30;
+const $ = (id) => document.getElementById(id);
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const lerp = (a, b, p) => a + (b - a) * p;
+const prog = (t, a, b) => clamp((t - a) / (b - a));
+const outCubic = (p) => 1 - Math.pow(1 - p, 3);
+const inCubic = (p) => p * p * p;
+const inOutCubic = (p) => p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+const outBack = (p, s = 1.7) => 1 + (s + 1) * Math.pow(p - 1, 3) + s * Math.pow(p - 1, 2);
+function show(el, v) { el.style.opacity = v; el.style.visibility = v <= 0.001 ? "hidden" : "visible"; }
+const ic = (name, size = 16, cls = "") => `<svg class="lu ${cls}" width="${size}" height="${size}" viewBox="0 0 24 24">${LUCIDE[name]}</svg>`;
+$("lock").innerHTML = ic("search", 13);
+
+/* ===================== the workspace (markup mirrors src/app/agency/*) ===================== */
+const NAV = [["layout-dashboard", "Επισκόπηση"], ["file-text", "Προσφορές"], ["search", "Αναζήτηση"], ["cable", "Συνδέσεις"], ["settings", "Ρυθμίσεις"]];
+const badge = (tone, inner) => {
+  const T = { live: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30", estimate: "bg-amber-500/15 text-amber-300 border-amber-500/30", margin: "bg-sky-500/15 text-sky-300 border-sky-500/30", neutral: "bg-white/8 text-white/70 border-white/15", danger: "bg-rose-500/15 text-rose-300 border-rose-500/30", accent: "bg-[#FFE500]/15 text-[#FFE500] border-[#FFE500]/30" };
+  return `<span class="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${T[tone]}">${inner}</span>`;
+};
+const field = (label, inner, hint) => `<label class="block"><span class="block text-[12px] font-medium text-white/55">${label}</span><div class="mt-1.5">${inner}</div>${hint ? `<span class="mt-1.5 block text-[11px] leading-relaxed text-white/35">${hint}</span>` : ""}</label>`;
+const chip = (inner, active, id = "") => `<button type="button" ${id ? `id="${id}"` : ""} class="inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[13px] transition ${active ? "border-[#FFE500]/60 bg-[#FFE500]/10 text-white" : "border-white/12 text-white/55"}">${inner}</button>`;
+const block = (icon, title, hint) => `<div><div class="flex items-center gap-2">${ic(icon, 15, "text-white/40")}<h2 class="text-[14px] font-medium">${title}</h2></div>${hint ? `<p class="mt-1 text-[12px] leading-relaxed text-white/35">${hint}</p>` : ""}</div>`;
+const stepper = (v, id) => `<div class="flex items-center gap-2"><button type="button" class="h-10 w-10 rounded-xl border border-white/12 text-[16px] text-white/60">−</button><span id="${id}" class="min-w-[2ch] text-center text-[15px] font-medium tabular-nums">${v}</span><button type="button" class="h-10 w-10 rounded-xl border border-white/12 text-[16px] text-white/60">+</button></div>`;
+const airportChip = (city, code, country) => `<div class="ag-airport-chip">${ic("map-pin", 14, "shrink-0 text-[#FFE500]")}<span class="min-w-0 truncate"><span class="font-medium">${city}</span> <span class="text-white/40">${code}</span><span class="ml-1 text-white/30">· ${country}</span></span><span class="ml-auto shrink-0 text-white/40">${ic("x", 14)}</span></div>`;
+const dateBox = (id, v) => `<div class="ag-input fake-input" id="${id}"><span class="tabular-nums">${v}</span>${ic("calendar-days", 15, "text-white/40")}</div>`;
+
+const REQUEST = "Καλησπέρα, είμαστε 2 ενήλικες και ένα παιδί 7 ετών, θέλουμε Ρώμη 5 νύχτες γύρω στις 10 Μαΐου από Αθήνα, απευθείας πτήσεις, κεντρικό ξενοδοχείο με πρωινό. Ευχαριστώ!";
+
+const searchPage = `
+<div class="space-y-6">
+  <div class="mb-5 flex flex-wrap items-end justify-between gap-4"><div><h1 class="text-[26px] font-bold tracking-tight">Νέα αναζήτηση</h1><p class="mt-1.5 text-[14px] text-white/50">Από το αίτημα του πελάτη σε προσφορά: πτήσεις, διαμονή και εκδρομές με τις δικές σου συμφωνίες, που προσαρμόζεις μετά ελεύθερα.</p></div></div>
+  <div class="space-y-4">
+    <div class="ag-card p-5" id="cardRequest">
+      ${block("mail", "Αίτημα πελάτη", "Επικόλλησε το email ή τις σημειώσεις του πελάτη. Το AI συμπληρώνει τη φόρμα για έλεγχο και το αίτημα μένει αποθηκευμένο στην προσφορά.")}
+      <div class="ag-input mt-3 min-h-[96px] leading-relaxed" id="reqBox"><span id="reqPh" class="text-white/25">π.χ. Καλησπέρα, είμαστε 2 ενήλικες και ένα παιδί 7 ετών, θέλουμε Ρώμη 5 νύχτες γύρω στις 10 Μαΐου από Αθήνα, απευθείας πτήσεις, κεντρικό ξενοδοχείο με πρωινό…</span><span id="reqText"></span></div>
+      <div class="mt-3 flex flex-wrap items-center gap-3">
+        <button type="button" class="ag-btn ag-btn-ghost" id="aiBtn"><span id="aiSpin" style="display:none">${ic("loader-2", 15)}</span>${ic("sparkles", 14)} Συμπλήρωση φόρμας με AI</button>
+        <span class="text-[12px] text-emerald-300" id="aiDone" style="opacity:0">Η φόρμα συμπληρώθηκε. Έλεγξέ τη πριν την αναζήτηση.</span>
+      </div>
+      <div class="mt-3 grid gap-3 sm:grid-cols-2" id="aiNotes" style="display:none">
+        <div class="rounded-xl border border-white/10 p-3 text-[12px] text-white/60"><div class="mb-1 font-semibold text-white/70">Προτιμήσεις πελάτη</div><ul class="list-disc space-y-0.5 pl-4"><li>Κεντρικό ξενοδοχείο</li><li>Με πρωινό</li></ul></div>
+        <div class="rounded-xl border border-amber-500/25 bg-amber-500/5 p-3 text-[12px] text-amber-100/80"><div class="mb-1 flex items-center gap-1 font-semibold text-amber-200">${ic("info", 12)} Να ελεγχθεί</div><ul class="list-disc space-y-0.5 pl-4"><li>«Γύρω στις 10 Μαΐου»: ορίστηκε 10/05</li></ul></div>
+      </div>
+    </div>
+    <div class="ag-card p-5" id="cardRoute">
+      ${block("plane", "Διαδρομή")}
+      <div class="mt-4 grid gap-3 sm:grid-cols-[1fr_auto_1fr] sm:items-end">
+        ${field("Αναχώρηση από", airportChip("Athens", "ATH", "Greece"))}
+        <button type="button" class="mb-1 hidden h-10 w-10 items-center justify-center rounded-xl border border-white/12 text-white/45 sm:flex">${ic("arrow-left-right", 15)}</button>
+        ${field("Προορισμός", `<div id="destEmpty" class="ag-input fake-input"><span class="text-white/25">Πόλη ή αεροδρόμιο</span></div><div id="destChip" style="display:none">${airportChip("Rome", "FCO", "Italy")}</div>`)}
+      </div>
+      <div class="mt-4"><div class="inline-flex rounded-xl border border-white/12 p-1"><button type="button" class="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] bg-[#FFE500]/12 text-white">${ic("arrow-left-right", 13)}Με επιστροφή</button><button type="button" class="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] text-white/50">${ic("arrow-right", 13)}Απλή μετάβαση</button></div></div>
+    </div>
+    <div class="ag-card p-5" id="cardDates">
+      ${block("calendar-days", "Ημερομηνίες")}
+      <div class="mt-4 grid gap-4 sm:grid-cols-2">
+        ${field("Αναχώρηση", dateBox("dDep", "03/11/2026"))}
+        ${field("Επιστροφή", dateBox("dRet", "07/11/2026"), `<span id="nightsHint">4 νύχτες</span>`)}
+      </div>
+      <div class="mt-3 flex flex-wrap items-center gap-2"><span class="text-[12px] text-white/35">Διάρκεια:</span>${[3, 4, 5, 7, 10, 14].map((d) => chip(`${d} νύχτες`, d === 4, `dur${d}`)).join("")}</div>
+    </div>
+    <div class="ag-card p-5" id="cardPax">
+      ${block("users", "Ταξιδιώτες")}
+      <div class="mt-4 grid gap-4 sm:grid-cols-3">
+        ${field("Ενήλικες", stepper(2, "adults"))}
+        ${field("Δωμάτια", stepper(1, "rooms"), "Οι προμηθευτές τιμολογούν ανά δωμάτιο.")}
+        ${field("Ηλικίες παιδιών", `<div class="ag-input fake-input" id="kids"><span class="text-white/25">—</span></div>`, "Χωρισμένες με κόμμα, π.χ. 4, 9")}
+      </div>
+    </div>
+    <div class="ag-card p-5" id="cardKinds">
+      ${block("sliders-horizontal", "Τι να τιμολογήσουμε", "Οι προμηθευτές που δεν πουλάνε ένα είδος παραλείπονται αυτόματα.")}
+      <div class="mt-4 flex flex-wrap gap-2">${chip(ic("plane", 13) + "Πτήσεις", true)}${chip(ic("bed-double", 13) + "Διαμονή", true)}${chip(ic("ticket", 13) + "Εκδρομές", true)}${chip(ic("bus", 13) + "Μεταφορές", true)}</div>
+      <div class="mt-5 grid gap-4 sm:grid-cols-2">
+        ${field("Θέση πτήσης", `<div class="flex flex-wrap gap-2">${chip("Economy", true)}${chip("Premium economy", false)}${chip("Business", false)}${chip("First", false)}</div>`)}
+        ${field("Στάσεις", `<div class="flex flex-wrap gap-2">${chip("Αδιάφορο", true, "stAny")}${chip("Απευθείας", false, "stDirect")}${chip("Έως 1 στάση", false)}</div>`)}
+      </div>
+    </div>
+    <div class="flex flex-wrap items-center justify-between gap-4">
+      <p class="max-w-md text-[11px] leading-relaxed text-white/35">Οι τιμές αναζήτησης είναι ενδεικτικές. Δεσμευτική τιμή μόνο μετά από επαναεπιβεβαίωση.</p>
+      <button type="submit" class="ag-btn ag-btn-primary" id="searchBtn"><span id="searchSpin" style="display:none">${ic("loader-2", 15)}</span>${ic("search", 15)} Αναζήτηση</button>
+    </div>
+  </div>
+  <div class="ag-card flex items-center gap-3 p-4 text-[13px] text-white/50" id="busyCard" style="display:none;margin-top:16px">${ic("plane", 16, "text-[#FFE500]")} Ερώτημα σε 4 προμηθευτές παράλληλα…</div>
+</div>`;
+
+/* ---------- the quote (illustrative data, shapes from PackageCard / QuoteDocument) ---------- */
+const eur = (n) => `${Math.floor(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".")},${String(Math.round((n % 1) * 100)).padStart(2, "0")} €`;
+const TIERS = [
+  { tier: "basic", label: "Basic", tag: "Χαμηλότερη συνολική τιμή, αποδεκτές παροχές", score: 78,
+    headline: "Απευθείας πτήσεις, 3★ στο κέντρο", food: 20, pay: 30,
+    lines: [
+      { icon: "plane", title: "ATH → FCO ⇄", sub: "ITA Airways · απευθείας · 06:50–08:15 · 2ω 25λ", ref: false, conn: "duffel", price: 642, cost: 584 },
+      { icon: "bed-double", title: "Hotel Via Nazionale", sub: "3★ · 8,1/10 · Πρωινό · Τρίκλινο · 5 νύχτες", ref: false, conn: "hotelbeds", price: 853, cost: 734 },
+    ], cost: 1318, markup: 132, fee: 45, comm: 0 },
+  { tier: "comfort", label: "Comfort", tag: "Ισορροπία τιμής, χρόνων και ανέσεων", score: 91,
+    headline: "Πρωινή πτήση, 4★ δίπλα στο Πάνθεον", food: 30, pay: 45,
+    lines: [
+      { icon: "plane", title: "ATH → FCO ⇄", sub: "Aegean Airlines · απευθείας · 09:35–11:00 · 2ω 25λ · 1 αποσκευή", ref: false, conn: "amadeus", price: 786, cost: 712 },
+      { icon: "bed-double", title: "Hotel Pantheon Centrale", sub: "4★ · 8,9/10 · Πρωινό · Οικογενειακό · 5 νύχτες", ref: true, conn: "hotelbeds", price: 1164, cost: 990 },
+      { icon: "ticket", title: "Κολοσσαίο & Ρωμαϊκή Αγορά", sub: "3ω", ref: true, conn: "tiqets", price: 158, cost: 158 },
+    ], cost: 1860, markup: 203, fee: 45, comm: 16 },
+  { tier: "premium", label: "Premium", tag: "Καλύτερες παροχές, ευελιξία και θέση", score: 84,
+    headline: "Σουίτα στη Ναβόνα, επιστρέψιμα εισιτήρια", food: 45, pay: 75,
+    lines: [
+      { icon: "plane", title: "ATH → FCO ⇄", sub: "Aegean Airlines · απευθείας · 09:35–11:00 · 2ω 25λ · 2 αποσκευή", ref: true, conn: "amadeus", price: 1044, cost: 948 },
+      { icon: "bed-double", title: "Palazzo Navona Suites", sub: "5★ · 9,3/10 · Πρωινό · Junior Suite · 5 νύχτες", ref: true, conn: "hotelbeds", price: 1869, cost: 1580 },
+      { icon: "ticket", title: "Μουσεία Βατικανού χωρίς ουρά", sub: "3ω", ref: true, conn: "tiqets", price: 158, cost: 158 },
+      { icon: "ticket", title: "Κολοσσαίο & Ρωμαϊκή Αγορά", sub: "3ω", ref: true, conn: "tiqets", price: 150, cost: 150 },
+    ], cost: 2836, markup: 340, fee: 45, comm: 31 },
+];
+TIERS.forEach((p) => { p.price = p.lines.reduce((n, l) => n + l.price, 0); p.profit = p.markup + p.fee + p.comm; });
+const stat = (label, value, tone) => `<div class="flex items-center justify-between py-1.5"><span class="text-[13px] text-white/55">${label}</span><span class="text-[13px] font-semibold tabular-nums ${tone === "margin" ? "text-sky-300" : "text-white"}">${value}</span></div>`;
+const tierCard = (p) => `
+<div class="ag-tier ag-tier-${p.tier} p-5" id="tc-${p.tier}">
+  <div class="flex items-start justify-between gap-3"><div class="min-w-0 flex-1"><div class="flex flex-wrap items-center gap-2"><span class="ag-tier-badge">${p.label}</span><span class="chosenBadge" style="display:none">${badge("live", "επιλογή πελάτη")}</span></div><p class="mt-2 text-[12px] leading-snug text-white/45">${p.tag}</p></div><span class="shrink-0 text-[11px] tabular-nums text-white/35">${p.score}</span></div>
+  <div class="mt-4 space-y-3">${p.lines.map((l) => `
+    <div class="rounded-xl border border-white/10 p-3"><div class="flex items-start gap-2.5">${ic(l.icon, 15, "mt-0.5 shrink-0 text-white/45")}<div class="min-w-0 flex-1"><div class="text-[13px] font-medium">${l.title}</div><div class="mt-0.5 text-[12px] text-white/45">${l.sub}</div><div class="mt-1 flex flex-wrap items-center gap-1.5">${badge(l.ref ? "live" : "neutral", l.ref ? "Επιστρέψιμο" : "Μη επιστρέψιμο")}${badge("neutral", l.conn)}</div></div>
+      <div class="text-right"><div class="text-[13px] font-semibold tabular-nums">${eur(l.price)}</div><div class="lineCost text-[11px] tabular-nums text-white/35">κόστος ${eur(l.cost)}</div></div></div></div>`).join("")}
+  </div>
+  <div class="mt-3 flex items-start gap-2 rounded-xl border border-amber-500/25 bg-amber-500/5 p-3">${ic("utensils", 14, "mt-0.5 shrink-0 text-amber-300")}<div class="text-[12px] text-white/60"><div class="flex items-center gap-2"><span class="font-medium">Διατροφή ${eur(p.food)}/ημέρα</span>${badge("estimate", "εκτίμηση")}</div><div class="text-white/40">≈ ${eur(p.food * 5 * 3)} συνολικά · δεν κρατείται</div></div></div>
+  <div class="mt-auto pt-4">
+    <div class="internal overflow-hidden"><div class="mb-3 rounded-xl border border-white/10 bg-white/[0.03] p-3">
+      <div class="mb-1 text-[11px] font-semibold uppercase tracking-wide text-white/35">Εσωτερικά — δεν φαίνονται στον πελάτη</div>
+      ${stat("Κόστος προμηθευτή", eur(p.cost))}${stat("Markup", eur(p.markup))}${stat("Χρέωση υπηρεσίας", eur(p.fee))}${stat("Αναμ. προμήθεια", eur(p.comm))}${stat("Αναμ. μικτό κέρδος", eur(p.profit), "margin")}
+    </div></div>
+    <div class="flex items-end justify-between"><span class="text-[12px] text-white/45">Τιμή πελάτη</span><span class="text-2xl font-bold tabular-nums">${eur(p.price)}</span></div>
+    <p class="mt-1 text-right text-[11px] text-white/40">+ ${eur(p.pay)} πληρωτέα στο κατάλυμα</p>
+  </div>
+</div>`;
+const quotePage = `
+<div class="space-y-6">
+  <div class="flex flex-wrap items-start justify-between gap-4">
+    <div>
+      <div class="flex flex-wrap items-center gap-2"><h1 class="text-2xl font-bold tracking-tight">ATH → FCO</h1><span id="qStatus"></span></div>
+      <p class="mt-1 text-[14px] text-white/50">10/05/2027 → 15/05/2027 · 5 ημέρες · 3 ταξιδιώτες · qte_8fK2xQ7mLp4Rt9Wd</p>
+      <div class="mt-2 flex flex-wrap items-center gap-2 text-[12px]" id="qBadges"></div>
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      <button class="ag-btn ag-btn-ghost">${ic("pencil", 15)} Επεξεργασία</button>
+      <button class="ag-btn ag-btn-ghost" id="viewBtn"></button>
+      <button class="ag-btn ag-btn-ghost">${ic("file-down", 15)} PDF</button>
+      <button class="ag-btn ag-btn-ghost">${ic("refresh-cw", 15)} Επαναεπιβεβαίωση</button>
+      <button class="ag-btn ag-btn-primary" id="sendBtn"><span id="sendSpin" style="display:none">${ic("loader-2", 15)}</span>${ic("send", 15)} Αποστολή</button>
+    </div>
+  </div>
+  <div id="shareWrap" style="display:none"><div class="ag-card flex flex-wrap items-center justify-between gap-3 border-[#FFE500]/30 p-4"><div class="min-w-0"><div class="text-[13px] font-medium">Σύνδεσμος πελάτη</div><div class="truncate font-mono text-[12px] text-white/45">https://planeraai.app/q/Vb3nK8sQe2Lw9XrT6yHc</div></div><button class="ag-btn ag-btn-ghost">${ic("copy", 14)} Αντιγραφή</button></div></div>
+  <div class="ag-card p-4"><div class="flex w-full items-center gap-2 text-left">${ic("mail", 15, "text-white/40")}<span class="text-[14px] font-medium">Αίτημα πελάτη</span><span class="ml-2 min-w-0 flex-1 truncate text-[12px] text-white/35">${REQUEST}</span>${ic("chevron-down", 16, "text-white/35")}</div></div>
+  <div class="grid gap-4 lg:grid-cols-3" id="tiers">${TIERS.map(tierCard).join("")}</div>
+</div>`;
+
+$("app").innerHTML = `
+<div class="ag" style="min-height:1560px">
+  <header class="sticky top-0 z-20 border-b border-white/[0.07] bg-[#0b0c10]/85">
+    <div class="mx-auto flex max-w-7xl items-center justify-between px-5 py-3">
+      <div class="flex items-center gap-2.5"><span class="grid h-8 w-8 place-items-center rounded-lg bg-[#FFE500] text-black">${ic("plane", 17)}</span><div class="leading-tight"><div class="text-[15px] font-bold tracking-tight">Planera <span class="text-white/50">for Travel Agencies</span></div></div></div>
+      <div class="flex items-center gap-3"><div class="hidden text-right sm:block"><div class="text-[13px] font-medium text-white/80">Το Πρακτορείο σας</div><div class="text-[11px] text-white/40">maria@example.com · agent</div></div><span class="grid h-8 w-8 place-items-center rounded-full bg-white/10 text-[12px] font-semibold">ΤΠ</span><span class="grid h-8 w-8 place-items-center rounded-lg text-white/50">${ic("log-out", 16)}</span></div>
+    </div>
+  </header>
+  <div class="mx-auto flex max-w-7xl gap-6 px-5 py-6">
+    <nav class="hidden w-56 shrink-0 md:block"><ul class="space-y-1" id="nav"></ul>
+      <p class="mt-6 px-3 text-[11px] leading-relaxed text-white/30">Το πρακτορείο παραμένει ο πωλητής/εκδότης. Οι τιμές αναζήτησης δεν είναι εγγυημένες μέχρι την επαναεπιβεβαίωση.</p></nav>
+    <main class="relative min-w-0 flex-1" style="height:1440px"><div class="page" id="pSearch">${searchPage}</div><div class="page" id="pQuote">${quotePage}</div></main>
+  </div>
+</div>`;
+function setNav(active) { $("nav").innerHTML = NAV.map(([icn, label]) => `<li><span class="ag-nav-link" data-active="${label === active}">${ic(icn, 17, label === active ? "" : "text-white/45")}${label}</span></li>`).join(""); }
+
+/* ---------- the traveller's document (QuoteDocument markup, agency-branded) ---------- */
+const BRAND = "#3CC0B0";
+$("pdoc").innerHTML = `
+<div class="aq" style="--brand:${BRAND};padding:58px 0 24px">
+  <article class="aq-sheet">
+    <header class="aq-masthead">
+      <div class="aq-agency">Το Πρακτορείο σας</div>
+      <h1 class="aq-route">ATH → FCO</h1>
+      <p class="aq-meta">10/05/2027 → 15/05/2027 · 5 ημέρες · 3 ταξιδιώτες</p>
+      <div class="aq-validity">${ic("clock", 13)} Ισχύει ακόμη 2η 23ω</div>
+    </header>
+    <p class="aq-summary">Τρεις προτάσεις για Ρώμη, 5 νύχτες για δύο ενήλικες και ένα παιδί, όλες με απευθείας πτήσεις και πρωινό. Η Comfort δίνει πρωινή πτήση, 4★ δίπλα στο Πάνθεον και ξενάγηση στο Κολοσσαίο.</p>
+    <div class="aq-tiers">${TIERS.map((p) => `
+      <section class="aq-tier" id="dt-${p.tier}">
+        <div class="aq-tier-name">${p.label}</div>
+        <p class="aq-tier-tag">${p.headline}</p>
+        <div class="mt-4">${p.lines.map((l) => `<div class="aq-line"><span class="aq-line-icon">${ic(l.icon, 15)}</span><span class="min-w-0"><span class="aq-line-title block">${l.title}</span><span class="aq-line-sub block">${l.sub}</span><span class="aq-line-sub block">${l.ref ? "Επιστρέψιμο" : "Μη επιστρέψιμο"}</span></span><span class="aq-line-price">${eur(l.price)}</span></div>`).join("")}</div>
+        <div class="aq-estimate">${ic("utensils", 12, "mr-1.5 inline align-[-1px]")}Διατροφή ${eur(p.food)}/ημέρα ανά άτομο — <strong>εκτίμηση</strong>, δεν περιλαμβάνεται στην τιμή.</div>
+        <div class="aq-total"><div class="aq-total-label">Σύνολο</div><div class="aq-total-value">${eur(p.price)}</div><div class="aq-total-note">+ ${eur(p.pay)} πληρωτέα επιτόπου</div></div>
+        <div class="aq-accept"><button type="button" class="acc">Επιλέγω αυτό</button><p class="aq-accept-note accNote" style="display:none">Ενημερώσαμε το πρακτορείο. Θα επιβεβαιώσουν διαθεσιμότητα και τιμές πριν την κράτηση.</p></div>
+      </section>`).join("")}
+    </div>
+  </article>
+</div>`;
+
+/* ===================== story beats ===================== */
+const B = {
+  mailIn: 0.25, toWin: [2.25, 2.85], paste: 3.35, tapAI: 4.1, parsed: 4.95, fill: [5.05, 5.9],
+  tapSearch: 7.95, toQuote: 9.85, zoomMargin: [11.45, 12.15], tapView: 14.15, tapSend: 16.35,
+  toPhone: [18.35, 18.95], docScroll: [20.35, 21.35], tapAccept: 22.35, toWin2: [24.45, 24.95], seen: 25.15, chose: 25.45,
+  end: [26.55, 27.0], logo: 27.0, slide: 27.65, line1: 28.0, line2: 28.35, url: 28.7,
+};
+window.BEATS = B;
+const CAPS = [
+  [0.55, 2.3, "Νέο αίτημα πελάτη.<br><b>Πόση ώρα σού παίρνει η προσφορά;</b>", 1105],
+  [3.0, 7.55, "Επικόλλησε το email.<br><b>Το AI συμπληρώνει τη φόρμα.</b>", 1105],
+  [7.75, 9.7, "Ψάχνει σε <b>όλους τους προμηθευτές σου</b> μαζί.", 1140],
+  [10.05, 13.85, "3 πακέτα. <b>Εσύ βλέπεις κόστος και κέρδος.</b>", 1140],
+  [14.3, 16.15, "Ο πελάτης βλέπει <b>μόνο την τελική τιμή.</b>", 1140],
+  [16.5, 18.25, "Ένα κλικ και <b>η προσφορά φεύγει.</b>", 1140],
+  [19.0, 24.35, "Με το <b>δικό σου brand.</b><br>Ο πελάτης επιλέγει online.", 1105],
+  [24.9, 26.45, "Και το <b>βλέπεις αμέσως.</b>", 1140],
+];
+
+/* camera keyframes: [t, focusX, focusY, scale] in window coordinates (page = chrome 46px + workspace) */
+const W = 1320;
+/*
+ * Camera shots frame WHOLE elements: the scale is capped so the element (plus a
+ * margin) fits the 1080px frame, and the shot is centred on it — never a
+ * half-cut panel. Wide shots frame the main column, so the crop lands cleanly on
+ * the sidebar edge instead of mid-word. Every hold drifts in slightly so no
+ * shot sits frozen.
+ */
+const mainCol = () => document.querySelector("main");
+const rectOf = (el) => { const [x, y] = centre(el); return { x, y, w: el.offsetWidth, h: el.offsetHeight }; };
+const fit = (el, want, pad = 90) => Math.min(want, (1080 - pad * 2) / el.offsetWidth);
+// shot(el-getter, desired scale, y offset in window px, x override getter)
+const shot = (get, want, dy = 0, xFrom = null) => () => {
+  const el = get(), r = rectOf(el), sc = fit(xFrom ? xFrom() : el, want, xFrom ? 44 : 90);
+  const x = xFrom ? rectOf(xFrom()).x : r.x;
+  return [x, r.y + dy, sc];
+};
+const wide = (get, dy = 0) => shot(get, 1.06, dy, mainCol);
+const whole = () => [W / 2, 700, 0.52];
+const CAM = [
+  [2.25, whole, 1], [2.85, () => [W / 2, 640, 0.8], 1], [3.05, () => [W / 2, 640, 0.8], 1],
+  [3.5, wide(() => $("cardRequest"), 10), 1], [4.95, wide(() => $("cardRequest"), 10), 1.03],
+  [5.6, wide(() => $("cardDates"), -30), 1], [7.45, wide(() => $("cardDates"), -30), 1.04],
+  [7.85, wide(() => $("searchBtn"), 60), 1], [9.7, wide(() => $("searchBtn"), 60), 1.04],
+  [9.85, wide(() => $("tiers"), -330), 1], [11.4, wide(() => $("tiers"), -170), 1],
+  [12.1, shot(() => document.querySelector("#tc-comfort .internal"), 1.7, 30), 1], [13.75, shot(() => document.querySelector("#tc-comfort .internal"), 1.7, 30), 1.05],
+  [14.0, shot(() => $("viewBtn"), 1.45, 0), 1], [14.45, shot(() => $("viewBtn"), 1.45, 0), 1],
+  [14.9, wide(() => $("tiers"), -200), 1], [16.15, wide(() => $("tiers"), -200), 1.03],
+  [16.4, wide(() => $("viewBtn"), 110), 1], [18.3, wide(() => $("viewBtn"), 110), 1.04],
+  [24.45, shot(() => $("qBadges"), 1.4, 0), 1], [26.6, shot(() => $("qBadges"), 1.4, 0), 1.05],
+];
+const SPOTS = [
+  [3.55, 4.95, () => $("cardRequest"), 10],
+  [7.9, 9.7, () => $("searchBtn").parentElement.parentElement.parentElement, 12],
+  [12.15, 13.75, () => document.querySelector("#tc-comfort .internal").firstElementChild, 8],
+  [14.0, 14.45, () => $("viewBtn"), 6],
+  [16.65, 18.3, () => $("shareWrap").firstElementChild, 8],
+  [24.5, 26.55, () => $("qBadges"), 8],
+];
+function spotAt(t) {
+  for (const [a, b, get, pad] of SPOTS) {
+    if (t > a - 0.05 && t < b + 0.3) {
+      const el = get(); if (!el || !el.offsetWidth) return null;
+      const [x, y] = centre(el), w = el.offsetWidth + pad * 2, h = el.offsetHeight + pad * 2;
+      const o = clamp(prog(t, a, a + 0.3)) * (1 - clamp(prog(t, b, b + 0.3)));
+      return { x: x - w / 2, y: y - h / 2, w, h, o };
+    }
+  }
+  return null;
+}
+function camAt(t) {
+  const ev = (k) => { const [x, y, sc] = CAM[k][1](); return [x, y, sc * CAM[k][2]]; };
+  if (t <= CAM[0][0]) return ev(0);
+  for (let i = 0; i < CAM.length - 1; i++) {
+    const t0 = CAM[i][0], t1 = CAM[i + 1][0];
+    if (t >= t0 && t <= t1) {
+      const a = ev(i), b = ev(i + 1);
+      // holds (same shot, only the drift changes) move linearly; cuts between shots ease
+      const hold = CAM[i][1] === CAM[i + 1][1] || Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) < 2;
+      const p = hold ? prog(t, t0, t1) : inOutCubic(prog(t, t0, t1));
+      return a.map((v, k) => lerp(v, b[k], p));
+    }
+  }
+  return ev(CAM.length - 1);
+}
+const toStage = (x, y, cam) => [540 - cam[0] * cam[2] + x * cam[2], 675 - cam[1] * cam[2] + y * cam[2]];
+// window-space centre of an element (the window is laid out unscaled, so offsets are stable)
+function centre(el) { let x = el.offsetWidth / 2, y = el.offsetHeight / 2, n = el; while (n && n.id !== "win") { x += n.offsetLeft; y += n.offsetTop; n = n.offsetParent; } return [x, y]; }
+
+const CLICKS = () => [[B.tapAI, $("aiBtn")], [B.tapSearch, $("searchBtn")], [B.tapView, $("viewBtn")], [B.tapSend, $("sendBtn")]];
+
+/* ===================== render ===================== */
+function render(t) {
+  /* ----- hook email ----- */
+  const mIn = outBack(prog(t, B.mailIn, B.mailIn + 0.5), 1.4), mOut = inOutCubic(prog(t, B.toWin[0], B.toWin[1]));
+  $("mail").style.transform = `translate(${mOut * 0}px, ${(1 - mIn) * 260 + mOut * -170}px) scale(${lerp(0.9, 1, mIn) * lerp(1, 0.42, mOut)})`;
+  show($("mail"), clamp(prog(t, B.mailIn, B.mailIn + 0.15)) * (1 - prog(t, B.toWin[0] + 0.25, B.toWin[1])));
+  $("mail").querySelectorAll("mark").forEach((mk, i) => { mk.style.background = `rgba(255,229,0,${0.55 * clamp(prog(t, 0.9 + i * 0.18, 1.1 + i * 0.18))})`; });
+
+  /* ----- workspace state ----- */
+  const onQuote = t >= B.toQuote;
+  setNav(onQuote ? "Προσφορές" : "Αναζήτηση");
+  $("urlText").textContent = t < B.toQuote ? "planeraai.app/agency/search" : "planeraai.app/agency/quote/qte_8fK2xQ7mLp4Rt9Wd";
+  show($("pSearch"), onQuote ? 0 : 1); show($("pQuote"), onQuote ? clamp(prog(t, B.toQuote, B.toQuote + 0.25)) : 0);
+  // paste + AI parse
+  const pasted = t >= B.paste;
+  $("reqPh").style.display = pasted ? "none" : "inline"; $("reqText").textContent = pasted ? REQUEST : "";
+  $("reqBox").classList.toggle("flash", pasted && t < B.paste + 0.6);
+  const parsing = t >= B.tapAI + 0.05 && t < B.parsed;
+  $("aiSpin").style.display = parsing ? "inline-flex" : "none";
+  $("aiSpin").querySelector("svg").style.transform = `rotate(${t * 720}deg)`;
+  $("aiBtn").disabled = parsing;
+  $("aiDone").style.opacity = t >= B.parsed ? 1 : 0;
+  $("aiNotes").style.display = t >= B.parsed ? "grid" : "none";
+  // the form fills itself, field by field
+  const F = (i) => t >= B.fill[0] + i * 0.14;
+  $("destEmpty").style.display = F(0) ? "none" : "flex"; $("destChip").style.display = F(0) ? "block" : "none";
+  $("dDep").querySelector("span").textContent = F(1) ? "10/05/2027" : "03/11/2026";
+  $("dRet").querySelector("span").textContent = F(2) ? "15/05/2027" : "07/11/2026";
+  $("nightsHint").textContent = F(2) ? "5 νύχτες" : "4 νύχτες";
+  [3, 4, 5, 7, 10, 14].forEach((d) => { const on = F(2) ? d === 5 : d === 4; $("dur" + d).className = `inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[13px] transition ${on ? "border-[#FFE500]/60 bg-[#FFE500]/10 text-white" : "border-white/12 text-white/55"}`; });
+  $("kids").innerHTML = F(3) ? `<span>7</span>` : `<span class="text-white/25">—</span>`;
+  const direct = F(4);
+  $("stAny").className = `inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[13px] transition ${!direct ? "border-[#FFE500]/60 bg-[#FFE500]/10 text-white" : "border-white/12 text-white/55"}`;
+  $("stDirect").className = `inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-[13px] transition ${direct ? "border-[#FFE500]/60 bg-[#FFE500]/10 text-white" : "border-white/12 text-white/55"}`;
+  [[$("destChip"), 0], [$("dDep"), 1], [$("dRet"), 2], [$("kids"), 3], [$("stDirect"), 4]].forEach(([el, i]) => el.classList.toggle("flash", F(i) && t < B.fill[0] + i * 0.14 + 0.7));
+  // search
+  const searching = t >= B.tapSearch + 0.05 && t < B.toQuote;
+  $("searchSpin").style.display = searching ? "inline-flex" : "none";
+  $("searchSpin").querySelector("svg").style.transform = `rotate(${t * 720}deg)`;
+  $("busyCard").style.display = searching ? "flex" : "none";
+  $("busyCard").querySelector("svg").style.opacity = 0.55 + 0.45 * Math.cos(t * 7);
+  // quote: agent ⇄ client view, send, the client's choice
+  const agentView = t < B.tapView + 0.05;
+  $("viewBtn").innerHTML = agentView ? `${ic("eye-off", 15)} Προβολή πράκτορα` : `${ic("eye", 15)} Προβολή πελάτη`;
+  const collapse = inOutCubic(prog(t, B.tapView + 0.05, B.tapView + 0.45));
+  document.querySelectorAll(".internal").forEach((el) => { const h = el.scrollHeight; el.style.height = (h * (1 - collapse)) + "px"; el.style.opacity = 1 - collapse; });
+  document.querySelectorAll(".lineCost").forEach((el) => { el.style.display = agentView ? "block" : "none"; });
+  const sent = t >= B.tapSend + 0.25, seen = t >= B.seen, chose = t >= B.chose;
+  $("sendSpin").style.display = t >= B.tapSend + 0.05 && !sent ? "inline-flex" : "none";
+  $("shareWrap").style.display = sent ? "block" : "none";
+  $("shareWrap").style.opacity = clamp(prog(t, B.tapSend + 0.25, B.tapSend + 0.45));
+  $("qStatus").innerHTML = badge(chose ? "live" : "neutral", chose ? "accepted" : sent ? "sent" : "draft");
+  $("qBadges").innerHTML = badge("neutral", `${ic("clock", 12)} Ισχύει ακόμη ${chose ? "2η 21ω" : "2η 23ω"}`)
+    + (sent ? badge("accent", `${ic("link-2", 12)} Ενεργός σύνδεσμος πελάτη`) : "")
+    + (sent ? (seen ? badge("live", `${ic("eye", 12)} Ανοίχτηκε 1×`) : badge("neutral", `${ic("eye", 12)} Δεν ανοίχτηκε ακόμη`)) : "")
+    + (chose ? badge("live", `${ic("check", 12)} Ο πελάτης επέλεξε Comfort`) : "");
+  $("tc-comfort").classList.toggle("ring-2", chose); $("tc-comfort").classList.toggle("ring-emerald-400/60", chose);
+  $("tc-comfort").querySelector(".chosenBadge").style.display = chose ? "inline" : "none";
+  [...$("qBadges").children].forEach((b, i, all) => { if ((chose && i === all.length - 1) || (seen && !chose && b.textContent.includes("Ανοίχτηκε"))) b.style.transform = `scale(${lerp(0.6, 1, outBack(prog(t, chose && i === all.length - 1 ? B.chose : B.seen, (chose && i === all.length - 1 ? B.chose : B.seen) + 0.35), 2.5))})`; });
+
+  /* ----- camera + window ----- */
+  const cam = camAt(t);
+  $("cam").style.transform = `translate(${540 - cam[0] * cam[2]}px, ${675 - cam[1] * cam[2]}px) scale(${cam[2]})`;
+  const winIn = outCubic(prog(t, B.toWin[0], B.toWin[1]));
+  const winAway = inOutCubic(prog(t, B.toPhone[0], B.toPhone[1])) * (1 - inOutCubic(prog(t, B.toWin2[0], B.toWin2[1])));
+  show($("cam"), winIn);
+  const sp = spotAt(t);
+  if (sp && sp.o > 0.001) { const st = $("spot").style; st.transform = `translate(${sp.x}px, ${sp.y}px)`; st.width = sp.w + "px"; st.height = sp.h + "px"; show($("spot"), sp.o); } else show($("spot"), 0);
+  $("win").style.filter = `brightness(${1 - 0.55 * winAway}) blur(${winAway * 6}px)`;
+
+  /* ----- the client's phone ----- */
+  const ph = outCubic(prog(t, B.toPhone[0], B.toPhone[1])) * (1 - inCubic(prog(t, B.toWin2[0], B.toWin2[1])));
+  // a slow drift so the client scene never sits frozen
+  const drift = 1 + 0.035 * prog(t, B.toPhone[1], B.toWin2[0]);
+  $("phone").style.transform = `translateY(${(1 - ph) * 1400}px) rotate(${(1 - ph) * 5}deg) scale(${drift})`;
+  show($("phone"), ph > 0.001 ? 1 : 0);
+  const docScale = 538 / 390;
+  const target = $("dt-comfort").offsetTop - 70;
+  const sc = inOutCubic(prog(t, B.docScroll[0], B.docScroll[1])) * target;
+  $("pdoc").style.transform = `scale(${docScale}) translateY(${-sc}px)`;
+  const accepted = t >= B.tapAccept + 0.1;
+  document.querySelectorAll("#pdoc .acc").forEach((btn, i) => {
+    const mine = i === 1;
+    btn.disabled = accepted; btn.dataset.chosen = accepted && mine ? "true" : "";
+    btn.innerHTML = accepted ? (mine ? `${ic("check", 14)} Το επέλεξες` : "—") : "Επιλέγω αυτό";
+    btn.style.transform = mine ? `scale(${1 - 0.05 * Math.sin(prog(t, B.tapAccept, B.tapAccept + 0.2) * Math.PI)})` : "";
+  });
+  document.querySelectorAll("#pdoc .accNote")[1].style.display = accepted ? "block" : "none";
+  $("dt-comfort").dataset.chosen = accepted ? "true" : "";
+
+  /* ----- pointer (desktop) and tap (phone) ----- */
+  const clicks = CLICKS();
+  let px = null, py = null, pressed = 0;
+  for (let i = 0; i < clicks.length; i++) {
+    const [at, el] = clicks[i];
+    if (t > at - 0.75 && t < at + 0.45) {
+      const [cx, cy] = centre(el);
+      const [sx, sy] = toStage(cx + 10, cy + 6, cam);
+      const p = inOutCubic(prog(t, at - 0.75, at - 0.05));
+      px = lerp(sx + 220, sx, p); py = lerp(sy + 160, sy, p);
+      pressed = t > at - 0.02 && t < at + 0.14 ? 1 : 0;
+    }
+  }
+  if (px !== null) { $("ptr").style.transform = `translate(${px}px, ${py}px) scale(${pressed ? 0.85 : 1})`; show($("ptr"), 1); } else show($("ptr"), 0);
+  if (t > B.tapAccept - 0.18 && t < B.tapAccept + 0.3) {
+    const r = document.querySelectorAll("#pdoc .acc")[1].getBoundingClientRect();
+    $("tap").style.left = (r.left + r.width / 2) + "px"; $("tap").style.top = (r.top + r.height / 2) + "px";
+    show($("tap"), Math.sin(prog(t, B.tapAccept - 0.18, B.tapAccept + 0.3) * Math.PI));
+  } else show($("tap"), 0);
+
+  /* ----- captions ----- */
+  let cap = null; for (const c of CAPS) if (t > c[0] && t < c[1] + 0.25) cap = c;
+  if (cap) {
+    $("capText").innerHTML = cap[2];
+    const ci = outBack(prog(t, cap[0], cap[0] + 0.4), 1.8), co = inCubic(prog(t, cap[1], cap[1] + 0.25));
+    $("capText").style.transform = `translateY(${(1 - ci) * 40}px) scale(${lerp(0.85, 1, ci)})`;
+    show($("cap"), clamp(prog(t, cap[0], cap[0] + 0.12)) * (1 - co));
+    $("cap").style.top = cap[3] + "px";
+  } else show($("cap"), 0);
+
+  /* ----- end card ----- */
+  const e = inOutCubic(prog(t, B.end[0], B.end[1]));
+  show($("end"), e);
+  const mInP = prog(t, B.logo, B.logo + 0.7), slide = inOutCubic(prog(t, B.slide, B.slide + 0.7)), markX = lerp(310, 0, slide);
+  $("mark").style.transform = `translateX(${markX}px) scale(${Math.max(0.0001, outBack(mInP, 2.4) * lerp(1.3, 1, slide))}) rotate(${(1 - outCubic(mInP)) * -140}deg)`;
+  $("wm").style.transform = `translateX(${lerp(-105, 0, slide)}%)`;
+  $("wmMask").style.clipPath = `inset(0 0 0 ${markX}px)`;
+  [["endFor", B.slide + 0.4], ["endLine1", B.line1], ["endLine2", B.line2], ["endUrl", B.url]].forEach(([id, s]) => {
+    const p = outCubic(prog(t, s, s + 0.5)); $(id).style.opacity = p; $(id).style.transform = `translateY(${(1 - p) * 30}px)`;
+  });
+}
+
+window.render = render;
+window.DURATION = DURATION;
+window.FPS = FPS;
+window.ready = document.fonts.ready;
+const q = new URLSearchParams(location.search);
+window.ready.then(() => {
+  if (q.has("t")) render(parseFloat(q.get("t")));
+  else if (!navigator.webdriver) { const t0 = performance.now(); const loop = () => { render(((performance.now() - t0) / 1000) % DURATION); requestAnimationFrame(loop); }; loop(); }
+});
+</script>
+</body>
+</html>

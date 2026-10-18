@@ -38,6 +38,16 @@ function minutesToHm(mins?: number | null): string | undefined {
   return `${h}h ${m}m`;
 }
 
+/** Valid per-person typical range → the deal's typical fields (else none). */
+function typicalFields(low?: number, high?: number) {
+  if (low == null || high == null || !(low > 0) || high < low) return {};
+  return {
+    typicalLow: low,
+    typicalHigh: high,
+    typicalPrice: Math.round((low + high) / 2),
+  };
+}
+
 export const upsertAutoDealFromSerpApi = internalMutation({
   args: {
     origin: v.string(),
@@ -73,6 +83,9 @@ export const upsertAutoDealFromSerpApi = internalMutation({
     originalPrice: v.optional(v.float64()),
     travelMonthFrom: v.optional(v.string()),
     travelMonthTo: v.optional(v.string()),
+    // Google's typical range for the route, per person (buy-or-wait verdict).
+    typicalLow: v.optional(v.float64()),
+    typicalHigh: v.optional(v.float64()),
   },
   handler: async (ctx, args) => {
     const level = (args.priceLevel || "").toLowerCase();
@@ -199,6 +212,10 @@ export const upsertAutoDealFromSerpApi = internalMutation({
       // Route's typical price (per-person) so the card can strike it through and
       // show a genuine "-X%" saving. Undefined when there's no real gap.
       originalPrice: args.originalPrice,
+      // Google's grade + typical range at seed time, so the card can explain
+      // its buy-or-wait verdict. The refresh cron keeps them current.
+      priceLevel: level === "low" || level === "typical" ? level : undefined,
+      ...typicalFields(args.typicalLow, args.typicalHigh),
       currency: args.currency.toUpperCase(),
       travelMonthFrom: args.travelMonthFrom,
       travelMonthTo: args.travelMonthTo,

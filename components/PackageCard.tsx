@@ -53,9 +53,13 @@ export interface PackageCardProps {
         description?: string;
         destinationCity?: string;
         destinationCountry: string;
-        durationDays: number;
-        priceFrom: number;
+        durationDays?: number;
+        priceFrom: number | null;
         priceCurrency: string;
+        /** Supplier listing with no fixed price ("On request"). */
+        priceOnRequest?: boolean;
+        /** Supplier listing that links out instead of taking a request. */
+        requestable?: boolean;
         priceUnit?: "per_person" | "per_couple" | "total";
         includes: string[];
         highlights?: string[];
@@ -115,13 +119,17 @@ export const PackageCard: React.FC<PackageCardProps> = ({ pkg, onPressInquire })
                                 {pkg.destinationCity ? `${pkg.destinationCity}, ${pkg.destinationCountry}` : pkg.destinationCountry}
                             </Text>
                         </View>
-                        <View style={styles.heroMetaDot} />
-                        <View style={styles.heroMetaItem}>
-                            <Ionicons name="calendar-outline" size={13} color="#fff" />
-                            <Text style={styles.heroMetaText}>
-                                {t("packages.durationDays", { count: pkg.durationDays })}
-                            </Text>
-                        </View>
+                        {typeof pkg.durationDays === "number" && (
+                            <>
+                                <View style={styles.heroMetaDot} />
+                                <View style={styles.heroMetaItem}>
+                                    <Ionicons name="calendar-outline" size={13} color="#fff" />
+                                    <Text style={styles.heroMetaText}>
+                                        {t("packages.durationDays", { count: pkg.durationDays })}
+                                    </Text>
+                                </View>
+                            </>
+                        )}
                     </View>
                 </View>
             </ImageBackground>
@@ -169,6 +177,16 @@ export const PackageCard: React.FC<PackageCardProps> = ({ pkg, onPressInquire })
 
                 {/* Footer: price + CTA */}
                 <View style={[styles.footer, { borderTopColor: colors.border }]}>
+                    {pkg.priceOnRequest || pkg.priceFrom == null ? (
+                        <View>
+                            <Text style={[styles.priceLabel, { color: colors.textMuted }]}>
+                                {t("packages.tailorMade")}
+                            </Text>
+                            <Text style={[styles.priceAmount, { color: colors.text, fontSize: 17 }]}>
+                                {t("packages.onRequest")}
+                            </Text>
+                        </View>
+                    ) : (
                     <View>
                         <Text style={[styles.priceLabel, { color: colors.textMuted }]}>
                             {t("packages.priceFrom")}
@@ -182,13 +200,20 @@ export const PackageCard: React.FC<PackageCardProps> = ({ pkg, onPressInquire })
                             </Text>
                         </View>
                     </View>
+                    )}
                     <TouchableOpacity
                         style={[styles.cta, { backgroundColor: colors.primary }]}
                         onPress={onPressInquire}
                         activeOpacity={0.85}
                     >
-                        <Ionicons name="mail" size={16} color="#fff" />
-                        <Text style={styles.ctaText}>{t("packages.requestInfo")}</Text>
+                        <Ionicons name={pkg.requestable === false ? "open-outline" : "mail"} size={16} color="#fff" />
+                        <Text style={styles.ctaText}>
+                            {pkg.requestable === false
+                                ? t("packages.visitPartner")
+                                : pkg.requestable
+                                ? t("packages.requestQuote")
+                                : t("packages.requestInfo")}
+                        </Text>
                     </TouchableOpacity>
                 </View>
             </View>

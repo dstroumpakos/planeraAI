@@ -210,6 +210,49 @@ export function calendarAirportFor(code: string): string {
   return METRO_PRIMARY_AIRPORT[upper] ?? upper;
 }
 
+/**
+ * Both `google_flights_calendar` and `google_flights` accept up to 10
+ * comma-separated airports per side, so a whole country is priced in ONE call
+ * instead of one per airport.
+ */
+export const MAX_MULTI_AIRPORTS = 10;
+
+/**
+ * `arrival_id` for a multi-airport search. `forCalendar` swaps metro codes for
+ * their main airport (the calendar engine prices nothing for PAR/NYC…; the
+ * flights engine handles metros fine). Deduped, origin excluded, capped.
+ */
+export function multiAirportId(
+  codes: string[],
+  origin: string,
+  forCalendar = false
+): string {
+  const o = origin.toUpperCase();
+  const out: string[] = [];
+  for (const raw of codes) {
+    const c = forCalendar ? calendarAirportFor(raw) : raw.toUpperCase();
+    if (c === o || out.includes(c)) continue;
+    out.push(c);
+    if (out.length >= MAX_MULTI_AIRPORTS) break;
+  }
+  return out.join(",");
+}
+
+/**
+ * The airport a multi-airport search option actually lands at: the arrival of
+ * its last OUTBOUND segment. The calendar can't tell (its rows carry no
+ * airport), but every flights-engine option names its own. Null when the option
+ * has no usable code — the caller then drops it rather than guess an airport.
+ */
+export function arrivalAirportOf(option: {
+  flights?: Array<{ arrivalAirport?: { id?: string | null } | null }>;
+}): string | null {
+  const segs = Array.isArray(option?.flights) ? option.flights : [];
+  const id = segs[segs.length - 1]?.arrivalAirport?.id;
+  const code = typeof id === "string" ? id.trim().toUpperCase() : "";
+  return /^[A-Z]{3}$/.test(code) ? code : null;
+}
+
 // ─── Countries as destinations ───
 //
 // People save whole countries ("Spain", "Αίγυπτος"). A country is searched as

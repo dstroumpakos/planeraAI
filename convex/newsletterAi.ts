@@ -325,13 +325,23 @@ export const insertAiCampaign = internalMutation({
   },
   returns: v.id("newsletterCampaigns"),
   handler: async (ctx, args) => {
-    return await ctx.db.insert("newsletterCampaigns", {
+    const id = await ctx.db.insert("newsletterCampaigns", {
       ...args,
       status: "pending_approval",
       generatedByAi: true,
       createdBy: "ai",
       createdAt: Date.now(),
     });
+    // Same background warm the composer's save runs: without it an AI draft
+    // pinned to a destination previews with the stock photo until a test send.
+    if (args.routeDestinationCity || args.routeDestination) {
+      await ctx.scheduler.runAfter(0, internal.newsletterCampaigns.warmDestinationHero, {
+        heroImg: args.heroImg,
+        routeDestination: args.routeDestination,
+        routeDestinationCity: args.routeDestinationCity,
+      });
+    }
+    return id;
   },
 });
 

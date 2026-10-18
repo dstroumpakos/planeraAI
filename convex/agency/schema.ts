@@ -41,6 +41,21 @@ export const agencyTables = {
     })),
     /** Tenant override for how long a new quote stays valid (ms). */
     quoteTtlMs: v.optional(v.float64()),
+    /**
+     * How the agency's clients pay the AGENCY (`PaymentSettings` in
+     * clientPayments.ts). Bank details and a payment link shown on the quote.
+     * Not secret: it is printed on a document the agency sends its client.
+     */
+    payments: v.optional(v.object({
+      beneficiary: v.optional(v.string()),
+      bankName: v.optional(v.string()),
+      iban: v.optional(v.string()),
+      bic: v.optional(v.string()),
+      paymentLinkUrl: v.optional(v.string()),
+      instructions: v.optional(v.string()),
+      depositPercent: v.optional(v.float64()),
+      payWhen: v.optional(v.union(v.literal("on_accept"), v.literal("on_request"))),
+    })),
     createdAt: v.float64(),
     updatedAt: v.optional(v.float64()),
   })
@@ -239,6 +254,11 @@ export const agencyTables = {
     travellers: v.optional(v.any()),
     /** The booking record for the accepted option (`Fulfilment`). */
     fulfilment: v.optional(v.any()),
+    /**
+     * When the agent asked the client to pay from the link. Only used when the
+     * agency's `payments.payWhen` is "on_request".
+     */
+    paymentRequestedAt: v.optional(v.float64()),
     createdAt: v.float64(),
     updatedAt: v.optional(v.float64()),
   })
@@ -288,6 +308,62 @@ export const agencyTables = {
   })
     .index("by_agency", ["agencyId"])
     .index("by_agency_connector_iata", ["agencyId", "connectorId", "iata"]),
+
+  // The agency's OWN payment account (Viva Wallet / Stripe), BYOK exactly like
+  // a supplier connection. Money from a client lands in this account; Planera
+  // only creates the checkout and reads back whether it was paid. Credentials
+  // are a vault envelope. Online payment stays OFF until a health check on
+  // these keys has passed (`lastHealthOk === true`).
+  agencyPaymentAccounts: defineTable({
+    agencyId: v.id("agencies"),
+    provider: v.union(v.literal("viva"), v.literal("stripe")),
+    environment: v.union(v.literal("sandbox"), v.literal("production")),
+    encryptedCredentials: v.string(), // vault envelope, NEVER plaintext
+    displayHint: v.optional(v.string()),
+    status: v.union(v.literal("active"), v.literal("disabled"), v.literal("error")),
+    lastHealthCheckAt: v.optional(v.float64()),
+    lastHealthOk: v.optional(v.boolean()),
+    lastHealthMessage: v.optional(v.string()),
+    createdByUserId: v.id("agencyUsers"),
+    createdAt: v.float64(),
+    updatedAt: v.optional(v.float64()),
+    revokedAt: v.optional(v.float64()),
+  }).index("by_agency", ["agencyId"]),
+
+  // One row per checkout the client opened. The amount is what we ASKED for;
+  // `status: "paid"` is set only after the provider confirmed it on the
+  // agency's own credentials, never from a redirect or webhook body alone.
+  agencyPayments: defineTable({
+    agencyId: v.id("agencies"),
+    quoteRowId: v.id("quotes"),
+    quoteId: v.string(),
+    accountId: v.id("agencyPaymentAccounts"),
+    provider: v.union(v.literal("viva"), v.literal("stripe")),
+    environment: v.union(v.literal("sandbox"), v.literal("production")),
+    kind: v.union(v.literal("deposit"), v.literal("full"), v.literal("balance")),
+    amountMinor: v.float64(),
+    currency: v.string(),
+    status: v.union(
+      v.literal("created"),
+      v.literal("paid"),
+      v.literal("failed"),
+      v.literal("expired"),
+    ),
+    /** Random id for the return URL. Not a credential: it can only trigger a re-check. */
+    publicId: v.string(),
+    /** Viva order code (as a string, it overflows a JS number) or Stripe session id. */
+    providerOrderId: v.optional(v.string()),
+    providerTransactionId: v.optional(v.string()),
+    checkoutUrl: v.optional(v.string()),
+    error: v.optional(v.string()),
+    lastCheckedAt: v.optional(v.float64()),
+    paidAt: v.optional(v.float64()),
+    createdAt: v.float64(),
+    updatedAt: v.optional(v.float64()),
+  })
+    .index("by_quoteRow", ["quoteRowId"])
+    .index("by_publicId", ["publicId"])
+    .index("by_provider_order", ["provider", "providerOrderId"]),
 
   // Fixed-window rate-limit + login-lockout counters. One row per key
   // ("login:<email>", "search:<agencyId>", "publicQuote:<tokenPrefix>"…). Keys

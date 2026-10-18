@@ -489,6 +489,16 @@
     "cards": {
       "cheapestDates": "Dates les moins chères",
       "indicativeFares": "Prix indicatifs — ouvrez la Recherche de vols pour réserver.",
+      "flightOptions": "Options de vol",
+      "nonstop": "Direct",
+      "oneStop": "1 escale",
+      "multiStops": "{{count}} escales",
+      "nonstopFrom": "Direct dès {{price}}",
+      "noNonstop": "Aucun vol direct à ces dates",
+      "returnFlights": "Vols retour",
+      "overnight": "de nuit",
+      "selfTransfer": "Correspondance autonome",
+      "liveFares": "Prix en direct susceptibles de changer. Touchez un vol pour le réserver dans la Recherche de vols.",
       "dealsFromYou": "Offres pour vous",
       "from": "depuis",
       "notableSights": "Sites remarquables",
@@ -521,7 +531,14 @@
       "sixMonthRule": "De nombreux pays exigent 6 mois de validité après la date d'entrée.",
       "guides": "Guides Planera",
       "nowWatching": "{{destination}} est suivi pour les baisses de prix",
-      "addedToWishlist": "{{destination}} ajouté à votre liste de souhaits"
+      "addedToWishlist": "{{destination}} ajouté à votre liste de souhaits",
+      "staysBooking": "Hébergements sur Booking.com",
+      "staysAirbnb": "Logements sur Airbnb",
+      "nights_one": "{{count}} nuit",
+      "nights_other": "{{count}} nuits",
+      "freeCancellation": "Annulation gratuite",
+      "perNightShort": "/nuit",
+      "staysDisclaimer": "Prix en direct, susceptibles de changer. La réservation se fait sur {{provider}} ; Planera ne prend pas la réservation."
     },
     "myTripWeather": "Quel temps fera-t-il pour mon prochain voyage ?",
     "dealsFromMe": "Des offres depuis mon aéroport ?",
@@ -2069,6 +2086,11 @@
     "inclDays": "{{count}} jours planifiés"
   },
   "packages": {
+    "onRequest": "Sur demande",
+    "tailorMade": "Sur mesure",
+    "requestQuote": "Demander un devis",
+    "visitPartner": "Voir sur le site du partenaire",
+    "successWithRef": "{{partner}} a reçu votre demande et vous répondra directement. Votre référence est {{ref}}. Nous vous en avons aussi envoyé une copie par e-mail.",
     "title": "Forfaits sélectionnés",
     "subtitle": "Offres choisies par nos partenaires — parfaites pour votre voyage",
     "emptyTitle": "Aucun forfait disponible",
@@ -2318,6 +2340,26 @@
     "titleIn": "Billets pour les meilleures attractions à {{place}}",
     "desc": "Évitez la file d'attente avec des billets mobiles instantanés pour musées, monuments et expériences.",
     "cta": "Trouver des billets sur Tiqets"
+  },
+  "fareVerdict": {
+    "title": "Acheter ou attendre ?",
+    "buy": "Bon moment pour acheter",
+    "fair": "Prix correct",
+    "wait": "Mieux vaut attendre",
+    "disclaimer": "Notre lecture des données de prix de Google pour ces dates, pas une prévision.",
+    "reason": {
+      "belowRange": "{{amount}} sous la fourchette habituelle {{low}}–{{high}} sur cette ligne",
+      "underTypical": "{{amount}} sous le prix typique de {{typical}}",
+      "aboveTypical": "{{amount}} au-dessus du prix typique de {{typical}}",
+      "aboveRange": "{{amount}} au-dessus de la fourchette habituelle {{low}}–{{high}} sur cette ligne",
+      "googleLow": "Google juge ce tarif bas pour cette ligne",
+      "googleHigh": "Google juge ce tarif élevé pour cette ligne",
+      "lowestSeen": "Le prix le plus bas pour ces dates depuis {{days}} jours",
+      "pricesRising": "Les prix pour ces dates augmentent",
+      "pricesFalling": "Les prix pour ces dates baissent",
+      "departingSoon": "Départ dans {{days}} jours : les prix baissent rarement si tard",
+      "plentyOfTime": "Départ dans {{months}} mois : vous avez le temps de surveiller"
+    }
   },
   "metaConsent": {
     "title": "Aidez-nous à mesurer nos publicités",

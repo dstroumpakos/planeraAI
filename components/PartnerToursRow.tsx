@@ -32,6 +32,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { api } from "@/convex/_generated/api";
 import { useTheme } from "@/lib/ThemeContext";
 import { useToken } from "@/lib/useAuthenticatedMutation";
+import PackageInquiryModal from "@/components/PackageInquiryModal";
 
 type PartnerProduct = {
     _id: string;
@@ -45,6 +46,10 @@ type PartnerProduct = {
     bookingUrl?: string;
     imageUrl?: string;
     partnerName: string;
+    // Tailor-made listing with no fixed price.
+    priceOnRequest?: boolean;
+    // Commission partner: takes quote requests through Planera (partnerLeads).
+    requestable?: boolean;
 };
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
@@ -97,6 +102,7 @@ export default function PartnerToursRow() {
     const trackClick = useMutation((api as any).partnerProducts.trackHomeClick);
     const [fallbacks, setFallbacks] = useState<Record<string, string | null>>(fallbackCache);
     const [selected, setSelected] = useState<PartnerProduct | null>(null);
+    const [requesting, setRequesting] = useState<PartnerProduct | null>(null);
 
     // Resolve a destination photo for every product that came without an image.
     useEffect(() => {
@@ -193,6 +199,21 @@ export default function PartnerToursRow() {
                 imageUrl={selected ? imageFor(selected) : null}
                 onClose={() => setSelected(null)}
                 onVisitSite={(p) => track(p, "site")}
+                onRequest={(p) => {
+                    // Close the sheet first: two RN modals at once misbehave on iOS.
+                    setSelected(null);
+                    setTimeout(() => setRequesting(p), 350);
+                }}
+            />
+            <PackageInquiryModal
+                visible={!!requesting}
+                onClose={() => setRequesting(null)}
+                packageInfo={
+                    requesting
+                        ? { _id: requesting._id, title: requesting.title, partner: { _id: "", name: requesting.partnerName } }
+                        : null
+                }
+                partnerProductId={requesting?._id}
             />
         </View>
     );
@@ -257,7 +278,12 @@ function ProductCard({
                     ) : (
                         <View style={{ flex: 1 }} />
                     )}
-                    {product.price != null && (
+                    {product.priceOnRequest && (
+                        <View style={styles.pricePill}>
+                            <Text style={styles.priceValue}>{t("packages.onRequest")}</Text>
+                        </View>
+                    )}
+                    {!product.priceOnRequest && product.price != null && (
                         <View style={styles.pricePill}>
                             <Text style={styles.priceFrom}>
                                 {t("partnerTours.from", { defaultValue: "from" })}
@@ -306,11 +332,13 @@ function ProductSheet({
     imageUrl,
     onClose,
     onVisitSite,
+    onRequest,
 }: {
     product: PartnerProduct | null;
     imageUrl: string | null;
     onClose: () => void;
     onVisitSite: (p: PartnerProduct) => void;
+    onRequest: (p: PartnerProduct) => void;
 }) {
     const { t } = useTranslation();
     const { colors } = useTheme();
@@ -350,12 +378,14 @@ function ProductSheet({
                                     <Text style={[styles.sheetMetaText, { color: colors.textMuted }]}>{place}</Text>
                                 </View>
                             )}
-                            {product.price != null && (
+                            {product.priceOnRequest ? (
+                                <Text style={[styles.sheetPrice, { color: colors.text }]}>{t("packages.onRequest")}</Text>
+                            ) : product.price != null ? (
                                 <Text style={[styles.sheetPrice, { color: colors.text }]}>
                                     {t("partnerTours.from", { defaultValue: "from" })}{" "}
                                     {formatPrice(product.price, product.currency)}
                                 </Text>
-                            )}
+                            ) : null}
                         </View>
 
                         {!!product.description && (
@@ -366,7 +396,17 @@ function ProductSheet({
                     </ScrollView>
 
                     <View style={{ paddingHorizontal: 20 }}>
-                        {product.bookingUrl ? (
+                        {product.requestable && (
+                            <TouchableOpacity
+                                style={[styles.cta, { backgroundColor: colors.primary, marginBottom: 10 }]}
+                                activeOpacity={0.85}
+                                onPress={() => onRequest(product)}
+                            >
+                                <Text style={styles.ctaText}>{t("packages.requestQuote")}</Text>
+                                <Ionicons name="mail-outline" size={18} color="#000" />
+                            </TouchableOpacity>
+                        )}
+                        {product.bookingUrl && !product.requestable ? (
                             <TouchableOpacity
                                 style={[styles.cta, { backgroundColor: colors.primary }]}
                                 activeOpacity={0.85}

@@ -222,6 +222,10 @@ async function _runSearch(
       ? all.reduce((m, o) => ((o.price ?? Infinity) < (m.price ?? Infinity) ? o : m))
       : null;
     if (cheapest) {
+      const seedAdults =
+        typeof input.adults === "number" && input.adults > 0 ? input.adults : 1;
+      const range = normalized.priceInsights?.typicalPriceRange;
+      const hasRange = Array.isArray(range) && range.length === 2;
       // Fire-and-forget: the seed action does up to 2 follow-up calls (return
       // leg + booking options). `provider: "searchapi"` is REQUIRED so those
       // calls resolve this search's searchapi token on searchapi, not SerpApi.
@@ -236,8 +240,11 @@ async function _runSearch(
           currency: (input.currency ?? "EUR").toUpperCase(),
           priceLevel: (normalized.priceInsights?.priceLevel as string) ?? undefined,
           option: cheapest,
-          adults: typeof input.adults === "number" && input.adults > 0 ? input.adults : 1,
+          adults: seedAdults,
           provider: "searchapi",
+          // Per person, like the stored deal price.
+          typicalLow: hasRange ? Math.round(range![0] / seedAdults) : undefined,
+          typicalHigh: hasRange ? Math.round(range![1] / seedAdults) : undefined,
         }
       );
     }

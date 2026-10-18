@@ -95,9 +95,19 @@ export const enrichAndSeedDeal = internalAction({
     originalPrice: v.optional(v.float64()),
     travelMonthFrom: v.optional(v.string()),
     travelMonthTo: v.optional(v.string()),
+    // Multi-airport (country) seeding: the comma-joined `arrival_id` the
+    // option's search ran with. Tokens are minted for that exact search, so
+    // the follow-up calls below send it instead of the single `destination`
+    // the deal is stored against.
+    searchArrivalId: v.optional(v.string()),
+    // Google's typical range for the route, per person — feeds the
+    // buy-or-wait verdict (see lib/fareVerdict.ts).
+    typicalLow: v.optional(v.float64()),
+    typicalHigh: v.optional(v.float64()),
   },
   handler: async (ctx, args): Promise<string | null> => {
     const opt = args.option;
+    const arrivalId = args.searchArrivalId || args.destination;
     if (!opt) return null;
 
     const useSearchApi = args.provider === "searchapi";
@@ -117,7 +127,7 @@ export const enrichAndSeedDeal = internalAction({
       const p = new URLSearchParams();
       p.append("engine", "google_flights");
       p.append("departure_id", args.origin);
-      p.append("arrival_id", args.destination);
+      p.append("arrival_id", arrivalId);
       p.append("outbound_date", args.outboundDate);
       p.append("return_date", args.returnDate);
       p.append("currency", currency);
@@ -165,7 +175,7 @@ export const enrichAndSeedDeal = internalAction({
       const p = new URLSearchParams();
       p.append("engine", "google_flights");
       p.append("departure_id", args.origin);
-      p.append("arrival_id", args.destination);
+      p.append("arrival_id", arrivalId);
       p.append("outbound_date", args.outboundDate);
       if (args.returnDate) {
         p.append("return_date", args.returnDate);
@@ -287,6 +297,8 @@ export const enrichAndSeedDeal = internalAction({
           originalPrice: args.originalPrice,
           travelMonthFrom: args.travelMonthFrom,
           travelMonthTo: args.travelMonthTo,
+          typicalLow: args.typicalLow,
+          typicalHigh: args.typicalHigh,
         }
       );
       return dealId ?? null;
