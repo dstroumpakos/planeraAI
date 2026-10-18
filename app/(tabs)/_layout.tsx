@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import FloatingTabBar from "@/components/FloatingTabBar";
 import { TabBarVisibilityProvider } from "@/lib/tabBarVisibility";
 import NewsletterPrompt from "@/components/NewsletterPrompt";
+import MetaConsentPrompt from "@/components/MetaConsentPrompt";
 
 export default function TabLayout() {
     const { t } = useTranslation();
@@ -21,6 +22,8 @@ export default function TabLayout() {
             </Tabs>
             {/* Fallback newsletter opt-in for users not auto-enrolled at signup. */}
             <NewsletterPrompt />
+            {/* One-time Meta ad-measurement consent (ATT on iOS). */}
+            <MetaConsentPrompt />
         </TabBarVisibilityProvider>
     );
 }

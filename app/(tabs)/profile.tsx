@@ -10,7 +10,7 @@ import { useQuery, useConvex } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useToken, useAuthenticatedMutation } from "@/lib/useAuthenticatedMutation";
 import { clearOfflineCache } from "@/lib/offlineTripCache";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import * as ImagePicker from "expo-image-picker";
 import { useTheme } from "@/lib/ThemeContext";
 import { useHideTabBarOnScroll } from "@/lib/tabBarVisibility";
@@ -22,6 +22,7 @@ import * as Updates from "expo-updates";
 import { useMutation } from "convex/react";
 import { useTranslation } from "react-i18next";
 import { useUnreadNotificationCount } from "@/lib/useNotificationInbox";
+import { getMetaConsent, isMetaSdkConfigured, setMetaConsent, type MetaConsent } from "@/lib/metaSdk";
 
 const INSIGHT_CATEGORIES = [
   { id: "food", labelKey: "profile.foodDrink", icon: "restaurant" },
@@ -185,6 +186,17 @@ export default function Profile() {
                 },
             ]
         );
+    };
+
+    // Meta ad-measurement consent (lib/metaSdk.ts); refreshed whenever the menu opens
+    const [metaConsent, setMetaConsentState] = useState<MetaConsent | null>(null);
+    useEffect(() => {
+        if (!menuVisible || !isMetaSdkConfigured()) return;
+        getMetaConsent().then(setMetaConsentState).catch(() => {});
+    }, [menuVisible]);
+    const handleToggleMetaConsent = async () => {
+        const next = await setMetaConsent(metaConsent !== "granted");
+        setMetaConsentState(next);
     };
 
     const handleToggleDarkMode = async () => {
@@ -514,6 +526,26 @@ export default function Profile() {
                                 ]} />
                             </View>
                         </TouchableOpacity>
+
+                        {/* Ad measurement (Meta SDK consent) */}
+                        {metaConsent !== null && (
+                            <TouchableOpacity 
+                                style={styles.menuDropdownItem}
+                                onPress={handleToggleMetaConsent}
+                            >
+                                <Ionicons name="stats-chart-outline" size={20} color={colors.text} />
+                                <Text style={styles.menuDropdownText}>{t('metaConsent.menuLabel')}</Text>
+                                <View style={[
+                                    styles.toggleSwitch,
+                                    metaConsent === "granted" && styles.toggleSwitchActive
+                                ]}>
+                                    <View style={[
+                                        styles.toggleKnob,
+                                        metaConsent === "granted" && styles.toggleKnobActive
+                                    ]} />
+                                </View>
+                            </TouchableOpacity>
+                        )}
 
                         {/* Divider */}
                         <View style={styles.menuDivider} />

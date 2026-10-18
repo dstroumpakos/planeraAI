@@ -2,7 +2,7 @@
   "expo": {
     "name": "Planera AI Travel Planner",
     "slug": "planera-ai-travel-planner",
-    "version": "1.4.2",
+    "version": "1.4.3",
     "orientation": "portrait",
     "icon": "./assets/images/appicon-1024x1024-01-9h6cls.jpg",
     "scheme": "planeraai",
@@ -139,6 +139,24 @@
               "contentMarginsDisabled": false
             }
           ]
+        }
+      ],
+      [
+        "react-native-fbsdk-next",
+        {
+          "appID": "1725494741854801",
+          "clientToken": "a4ea8a226c6b8f6bd554ec3892415258",
+          "displayName": "Planera AI",
+          "scheme": "fb1725494741854801",
+          "isAutoInitEnabled": false,
+          "autoLogAppEventsEnabled": false,
+          "advertiserIDCollectionEnabled": false
+        }
+      ],
+      [
+        "expo-tracking-transparency",
+        {
+          "userTrackingPermission": "Planera uses this to measure which of our ads brought you to the app, so we spend less on ads that don't work. We never sell your data."
         }
       ]
     ],

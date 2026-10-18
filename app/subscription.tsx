@@ -11,6 +11,7 @@ import { useIAP } from "@/lib/useIAP";
 import { finishRestoredPurchase, type PurchaseResult } from "@/lib/iap";
 import { useTranslation } from "react-i18next";
 import { PremiumCelebration } from "@/components/PremiumCelebration";
+import { trackMetaPurchase } from "@/lib/metaSdk";
 
 export default function SubscriptionScreen() {
     const router = useRouter();
@@ -163,6 +164,7 @@ export default function SubscriptionScreen() {
                 if (!verifyRes?.success) {
                     throw new Error(verifyRes?.error || t('subscription.couldNotVerify'));
                 }
+                trackMetaPurchase(selectedPlan, productToPurchase);
 
                 if (Platform.OS !== "web") {
                     // Celebrate the unlock; the screen closes when they tap Continue.

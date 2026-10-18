@@ -1595,7 +1595,7 @@
   },
   "privacy": {
     "title": "Politique de Confidentialité",
-    "lastUpdated": "Dernière mise à jour : août 2026",
+    "lastUpdated": "Dernière mise à jour : octobre 2026",
     "intro": "Planera respecte votre vie privée et s'engage à protéger vos données personnelles. Cette Politique de Confidentialité explique comment nous collectons, utilisons, divulguons et protégeons vos informations lorsque vous utilisez l'application mobile Planera, le site planeraai.app, nos e-mails et les services associés.",
     "s1Title": "1. Qui Sommes-Nous",
     "s1Text": "Planera est une plateforme de planification de voyages propulsée par l'IA qui propose des itinéraires personnalisés, la recherche de vols et d'hébergements et des recommandations de destinations. Planera n'opère pas en tant qu'agence de voyages et n'effectue ni réservation ni paiement de voyage — les résultats de recherche renvoient vers les compagnies aériennes, les prestataires et les plateformes de réservation. Planera vend en revanche ses propres abonnements et crédits de voyage, traités par Apple, Google ou Stripe selon l'endroit où vous achetez (voir Section 12).",
@@ -1687,10 +1687,14 @@
     "s12bP1": "Planera envoie une newsletter voyage avec des idées de destinations, des offres sélectionnées et des nouveautés produit. Vous êtes inscrit soit en saisissant votre e-mail dans un formulaire, soit en créant un compte Planera — ce qui est indiqué lors de l'inscription.",
     "s12bP2": "Chaque e-mail marketing contient un lien de désinscription, et vous pouvez aussi désactiver les notifications par e-mail dans les Réglages. La désinscription arrête immédiatement les e-mails marketing ; vous continuerez à recevoir les messages transactionnels tels que les réinitialisations de mot de passe et les avis de facturation.",
     "s12bP3": "Les e-mails marketing intègrent un suivi des ouvertures et des clics afin de mesurer quels contenus sont utiles. Si un message est définitivement rejeté ou signalé comme spam, l'adresse est ajoutée à une liste de suppression et nous cessons de lui écrire. Lorsque la loi l'exige, nous nous fondons sur votre consentement ; sinon, sur notre intérêt légitime à promouvoir nos propres services similaires. Vous pouvez retirer votre consentement à tout moment.",
-    "s12Title": "14. Modifications de cette Politique de Confidentialité",
+    "s12cTitle": "14. Mesure Publicitaire (Meta)",
+    "s12cP1": "L'application mobile Planera intègre le SDK Meta (Facebook) afin de mesurer quelles publicités Facebook et Instagram génèrent des installations, des inscriptions et des abonnements. Le SDK reste désactivé tant que vous n'avez pas donné votre accord : sur iOS via la demande de transparence du suivi des apps d'Apple, et sur Android via notre propre demande de consentement.",
+    "s12cP2": "Si vous acceptez, le SDK transmet à Meta Platforms Ireland Ltd. des événements de l'app (ouvertures, installations, inscription terminée, abonnement ou achat et son prix), des informations de base sur l'appareil (modèle, système d'exploitation, version de l'app, adresse IP) et, lorsque c'est autorisé, l'identifiant publicitaire de votre appareil. Nous n'envoyons ni votre nom, ni votre adresse e-mail, ni vos voyages, messages ou position. Meta traite ces données selon sa propre politique de confidentialité et peut les utiliser pour mesurer et améliorer la diffusion des publicités.",
+    "s12cP3": "La base juridique est votre consentement. Vous pouvez le retirer à tout moment depuis le menu de votre profil (Mesure publicitaire) ou, sur iOS, dans Réglages → Confidentialité et sécurité → Suivi. Si vous refusez, le SDK n'est jamais démarré et rien n'est envoyé à Meta.",
+    "s12Title": "15. Modifications de cette Politique de Confidentialité",
     "s12p1": "Nous pouvons mettre à jour cette Politique de Confidentialité de temps en temps. Toute modification sera publiée au sein du Service.",
     "s12p2": "L'utilisation continue de Planera après les mises à jour constitue l'acceptation de la Politique de Confidentialité révisée.",
-    "s13Title": "15. Nous Contacter",
+    "s13Title": "16. Nous Contacter",
     "s13Text": "Si vous avez des questions ou des préoccupations concernant cette Politique de Confidentialité ou vos données, contactez-nous à :",
     "s13Contact": "📧 privacy@planeraai.app",
     "footer": "Planera – Votre voyage, planifié avec intelligence."
@@ -2314,5 +2318,15 @@
     "titleIn": "Billets pour les meilleures attractions à {{place}}",
     "desc": "Évitez la file d'attente avec des billets mobiles instantanés pour musées, monuments et expériences.",
     "cta": "Trouver des billets sur Tiqets"
+  },
+  "metaConsent": {
+    "title": "Aidez-nous à mesurer nos publicités",
+    "body": "Autorisez Planera à partager avec Meta l'activité de l'app, comme les installations et les inscriptions, pour savoir quelles publicités Facebook et Instagram fonctionnent vraiment. Nous ne partageons jamais vos voyages, vos messages ni vos coordonnées.",
+    "bodyIos": "iOS va ensuite vous demander si Planera peut suivre votre activité. Si vous l'autorisez, nous verrons quelles publicités Facebook et Instagram vous ont amené ici et dépenserons moins pour celles qui ne fonctionnent pas. Nous ne partageons jamais vos voyages, vos messages ni vos coordonnées.",
+    "continue": "Continuer",
+    "allow": "Autoriser",
+    "decline": "Ne pas autoriser",
+    "footnote": "Vous pouvez modifier ce choix à tout moment depuis le menu de votre profil.",
+    "menuLabel": "Mesure publicitaire"
   }
 }

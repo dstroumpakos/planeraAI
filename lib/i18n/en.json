@@ -1595,7 +1595,7 @@
   },
   "privacy": {
     "title": "Privacy Policy",
-    "lastUpdated": "Last updated: August 2026",
+    "lastUpdated": "Last updated: October 2026",
     "intro": "Planera respects your privacy and is committed to protecting your personal data. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use the Planera mobile application, the Planera website (planeraai.app), our emails, and related services.",
     "s1Title": "1. Who We Are",
     "s1Text": "Planera is an AI-powered travel planning platform that provides personalized travel itineraries, flight and accommodation search, and destination recommendations. Planera does not operate as a travel agency and does not book travel or process travel payments — search results link you out to airlines, providers, and booking platforms. Planera does sell its own subscriptions and trip credits, processed by Apple, Google, or Stripe depending on where you buy (see Section 12).",
@@ -1687,10 +1687,14 @@
     "s12bP1": "Planera sends a travel newsletter with destination inspiration, curated deals, and product news. You are subscribed either by entering your email in a signup form, or by creating a Planera account — which is disclosed at signup.",
     "s12bP2": "Every marketing email contains an unsubscribe link, and you can also turn off email notifications in Settings. Unsubscribing stops marketing email immediately; you will still receive transactional messages such as password resets and billing notices.",
     "s12bP3": "Marketing emails include open and click tracking so we can measure which content is useful. If a message hard-bounces or is reported as spam, the address is added to a suppression list and we stop sending to it. Where required by law we rely on your consent; otherwise on our legitimate interest in marketing our own similar services. You may withdraw consent at any time.",
-    "s12Title": "14. Changes to This Privacy Policy",
+    "s12cTitle": "14. Advertising Measurement (Meta)",
+    "s12cP1": "The Planera mobile app includes the Meta (Facebook) SDK so we can measure which of our Facebook and Instagram ads lead to installs, sign-ups and subscriptions. The SDK stays switched off until you agree: on iOS through Apple's App Tracking Transparency prompt, and on Android through our own consent prompt.",
+    "s12cP2": "If you agree, the SDK sends Meta Platforms Ireland Ltd. app events (app opens, installs, completed sign-up, subscription or purchase and its price), basic device information (model, operating system, app version, IP address) and, where permitted, your device's advertising identifier. We do not send your name, email address, trips, messages or location. Meta processes this data under its own privacy policy and may use it to measure and improve ad delivery.",
+    "s12cP3": "The legal basis is your consent. You can withdraw it at any time from the menu on your profile (Ad measurement), or on iOS under Settings → Privacy & Security → Tracking. If you decline, the SDK is never started and nothing is sent to Meta.",
+    "s12Title": "15. Changes to This Privacy Policy",
     "s12p1": "We may update this Privacy Policy from time to time. Any changes will be posted within the Service.",
     "s12p2": "Continued use of Planera after updates constitutes acceptance of the revised Privacy Policy.",
-    "s13Title": "15. Contact Us",
+    "s13Title": "16. Contact Us",
     "s13Text": "If you have any questions or concerns about this Privacy Policy or your data, contact us at:",
     "s13Contact": "📧 privacy@planeraai.app",
     "footer": "Planera – Your journey, planned with intelligence."
@@ -2314,5 +2318,15 @@
     "titleIn": "Tickets for top attractions in {{place}}",
     "desc": "Skip the queue with instant mobile tickets for museums, landmarks and experiences.",
     "cta": "Find tickets on Tiqets"
+  },
+  "metaConsent": {
+    "title": "Help us measure our ads",
+    "body": "Allow Planera to share app activity, like installs and sign-ups, with Meta so we can see which Facebook and Instagram ads actually work. We never share your trips, messages or contact details.",
+    "bodyIos": "Next, iOS will ask whether Planera may track activity. Allowing it lets us see which Facebook and Instagram ads brought you here, so we spend less on ads that don't work. We never share your trips, messages or contact details.",
+    "continue": "Continue",
+    "allow": "Allow",
+    "decline": "Don't allow",
+    "footnote": "You can change this anytime from the menu on your profile.",
+    "menuLabel": "Ad measurement"
   }
 }

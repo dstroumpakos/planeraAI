@@ -1595,7 +1595,7 @@
   },
   "privacy": {
     "title": "Datenschutzrichtlinie",
-    "lastUpdated": "Zuletzt aktualisiert: August 2026",
+    "lastUpdated": "Zuletzt aktualisiert: Oktober 2026",
     "intro": "Planera respektiert deine Privatsphäre und verpflichtet sich, deine personenbezogenen Daten zu schützen. Diese Datenschutzerklärung erläutert, wie wir deine Daten erheben, nutzen, weitergeben und schützen, wenn du die Planera-App, die Website planeraai.app, unsere E-Mails und die zugehörigen Dienste nutzt.",
     "s1Title": "1. Wer Wir Sind",
     "s1Text": "Planera ist eine KI-gestützte Reiseplanungsplattform mit personalisierten Reiserouten, Flug- und Unterkunftssuche sowie Reisezielempfehlungen. Planera agiert nicht als Reisebüro und nimmt weder Buchungen vor noch wickelt es Reisezahlungen ab — Suchergebnisse verlinken auf Fluggesellschaften, Anbieter und Buchungsplattformen. Planera verkauft jedoch eigene Abonnements und Trip-Credits, die je nach Kaufort von Apple, Google oder Stripe abgewickelt werden (siehe Abschnitt 12).",
@@ -1687,10 +1687,14 @@
     "s12bP1": "Planera versendet einen Reise-Newsletter mit Reiseinspiration, ausgewählten Angeboten und Produktneuheiten. Du wirst entweder durch Eintragen deiner E-Mail-Adresse in ein Anmeldeformular oder durch Erstellen eines Planera-Kontos angemeldet — worauf bei der Registrierung hingewiesen wird.",
     "s12bP2": "Jede Marketing-E-Mail enthält einen Abmeldelink; zusätzlich kannst du E-Mail-Benachrichtigungen in den Einstellungen deaktivieren. Eine Abmeldung stoppt Marketing-E-Mails sofort; transaktionale Nachrichten wie Passwort-Zurücksetzungen und Abrechnungshinweise erhältst du weiterhin.",
     "s12bP3": "Marketing-E-Mails enthalten Öffnungs- und Klick-Tracking, damit wir messen können, welche Inhalte nützlich sind. Wird eine Nachricht dauerhaft unzustellbar oder als Spam gemeldet, wird die Adresse auf eine Sperrliste gesetzt und wir versenden nicht mehr an sie. Soweit gesetzlich erforderlich stützen wir uns auf deine Einwilligung, andernfalls auf unser berechtigtes Interesse an der Bewerbung eigener ähnlicher Leistungen. Du kannst deine Einwilligung jederzeit widerrufen.",
-    "s12Title": "14. Änderungen dieser Datenschutzerklärung",
+    "s12cTitle": "14. Werbemessung (Meta)",
+    "s12cP1": "Die mobile Planera-App enthält das Meta (Facebook) SDK, damit wir messen können, welche unserer Facebook- und Instagram-Anzeigen zu Installationen, Registrierungen und Abonnements führen. Das SDK bleibt ausgeschaltet, bis du zustimmst: unter iOS über Apples App-Tracking-Transparenz-Abfrage und unter Android über unsere eigene Einwilligungsabfrage.",
+    "s12cP2": "Wenn du zustimmst, übermittelt das SDK an Meta Platforms Ireland Ltd. App-Ereignisse (App-Starts, Installationen, abgeschlossene Registrierung, Abonnement oder Kauf und dessen Preis), grundlegende Geräteinformationen (Modell, Betriebssystem, App-Version, IP-Adresse) und, soweit zulässig, die Werbe-ID deines Geräts. Deinen Namen, deine E-Mail-Adresse, Reisen, Nachrichten oder deinen Standort übermitteln wir nicht. Meta verarbeitet diese Daten gemäß seiner eigenen Datenschutzrichtlinie und kann sie zur Messung und Verbesserung der Anzeigenauslieferung nutzen.",
+    "s12cP3": "Rechtsgrundlage ist deine Einwilligung. Du kannst sie jederzeit im Menü deines Profils (Werbemessung) oder unter iOS in Einstellungen → Datenschutz & Sicherheit → Tracking widerrufen. Wenn du ablehnst, wird das SDK nie gestartet und nichts an Meta gesendet.",
+    "s12Title": "15. Änderungen dieser Datenschutzerklärung",
     "s12p1": "Wir können diese Datenschutzrichtlinie von Zeit zu Zeit aktualisieren. Änderungen werden innerhalb des Dienstes veröffentlicht.",
     "s12p2": "Die fortgesetzte Nutzung von Planera nach Aktualisierungen gilt als Akzeptanz der überarbeiteten Datenschutzrichtlinie.",
-    "s13Title": "15. Kontakt",
+    "s13Title": "16. Kontakt",
     "s13Text": "Wenn Sie Fragen oder Bedenken bezüglich dieser Datenschutzrichtlinie oder Ihrer Daten haben, kontaktieren Sie uns unter:",
     "s13Contact": "📧 privacy@planeraai.app",
     "footer": "Planera – Ihre Reise, intelligent geplant."
@@ -2314,5 +2318,15 @@
     "titleIn": "Tickets für Top-Sehenswürdigkeiten in {{place}}",
     "desc": "Spar dir die Warteschlange mit sofortigen Handytickets für Museen, Wahrzeichen und Erlebnisse.",
     "cta": "Tickets auf Tiqets finden"
+  },
+  "metaConsent": {
+    "title": "Hilf uns, unsere Werbung zu messen",
+    "body": "Erlaube Planera, App-Aktivitäten wie Installationen und Registrierungen mit Meta zu teilen, damit wir sehen, welche Facebook- und Instagram-Anzeigen wirklich funktionieren. Deine Reisen, Nachrichten und Kontaktdaten teilen wir nie.",
+    "bodyIos": "Als Nächstes fragt iOS, ob Planera Aktivitäten erfassen darf. Wenn du zustimmst, sehen wir, welche Facebook- und Instagram-Anzeigen dich hergebracht haben, und geben weniger für Anzeigen aus, die nicht funktionieren. Deine Reisen, Nachrichten und Kontaktdaten teilen wir nie.",
+    "continue": "Weiter",
+    "allow": "Erlauben",
+    "decline": "Nicht erlauben",
+    "footnote": "Du kannst das jederzeit im Menü deines Profils ändern.",
+    "menuLabel": "Werbemessung"
   }
 }

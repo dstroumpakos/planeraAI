@@ -14,6 +14,7 @@ import { authClient } from "@/lib/auth-client";
 import { useNotifications } from "@/lib/useNotifications";
 import { useActivityPing } from "@/lib/useActivityPing";
 import { useTripWidgets } from "@/lib/useTripWidgets";
+import { initMetaSdkFromStoredConsent } from "@/lib/metaSdk";
 import "@/lib/i18n"; // Initialize i18n
 
 // Keep the native splash up until <AnimatedSplash> is on screen to take over
@@ -102,6 +103,10 @@ function NotificationInitializer() {
     useNotifications();
     useActivityPing();
     useTripWidgets();
+    // Starts the Meta SDK only if this device already consented (lib/metaSdk.ts)
+    useEffect(() => {
+        void initMetaSdkFromStoredConsent();
+    }, []);
     return null;
 }
 

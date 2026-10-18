@@ -156,6 +156,12 @@ export default function PrivacyPolicy() {
                     <Text style={styles.text}>{t('privacy.s12bP3')}</Text>
                 </Section>
 
+                <Section title={t('privacy.s12cTitle')}>
+                    <Text style={styles.text}>{t('privacy.s12cP1')}</Text>
+                    <Text style={styles.text}>{t('privacy.s12cP2')}</Text>
+                    <Text style={styles.text}>{t('privacy.s12cP3')}</Text>
+                </Section>
+
                 <Section title={t('privacy.s12Title')}>
                     <Text style={styles.text}>{t('privacy.s12p1')}</Text>
                     <Text style={styles.text}>{t('privacy.s12p2')}</Text>

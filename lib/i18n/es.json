@@ -1595,7 +1595,7 @@
   },
   "privacy": {
     "title": "Política de Privacidad",
-    "lastUpdated": "Última actualización: agosto de 2026",
+    "lastUpdated": "Última actualización: octubre de 2026",
     "intro": "Planera respeta tu privacidad y se compromete a proteger tus datos personales. Esta Política de Privacidad explica cómo recopilamos, usamos, divulgamos y protegemos tu información cuando utilizas la aplicación móvil de Planera, el sitio web planeraai.app, nuestros correos y los servicios relacionados.",
     "s1Title": "1. Quiénes Somos",
     "s1Text": "Planera es una plataforma de planificación de viajes impulsada por IA que ofrece itinerarios personalizados, búsqueda de vuelos y alojamiento, y recomendaciones de destinos. Planera no opera como agencia de viajes y no realiza reservas ni procesa pagos de viaje: los resultados de búsqueda te enlazan con aerolíneas, proveedores y plataformas de reserva. Planera sí vende sus propias suscripciones y créditos de viaje, procesados por Apple, Google o Stripe según dónde compres (véase la Sección 12).",
@@ -1687,10 +1687,14 @@
     "s12bP1": "Planera envía un boletín de viajes con inspiración de destinos, ofertas seleccionadas y novedades del producto. Te suscribes al introducir tu correo en un formulario de registro o al crear una cuenta de Planera, lo cual se indica en el momento del registro.",
     "s12bP2": "Todos los correos de marketing incluyen un enlace para darte de baja, y también puedes desactivar las notificaciones por correo en Ajustes. Darte de baja detiene el correo de marketing de inmediato; seguirás recibiendo mensajes transaccionales, como restablecimientos de contraseña y avisos de facturación.",
     "s12bP3": "Los correos de marketing incluyen seguimiento de aperturas y clics para medir qué contenido resulta útil. Si un mensaje rebota de forma permanente o se marca como spam, la dirección se añade a una lista de supresión y dejamos de enviarle correos. Cuando la ley lo exige nos basamos en tu consentimiento; en caso contrario, en nuestro interés legítimo de promocionar servicios propios similares. Puedes retirar tu consentimiento en cualquier momento.",
-    "s12Title": "14. Cambios en Esta Política de Privacidad",
+    "s12cTitle": "14. Medición de Anuncios (Meta)",
+    "s12cP1": "La app móvil de Planera incluye el SDK de Meta (Facebook) para que podamos medir qué anuncios de Facebook e Instagram generan instalaciones, registros y suscripciones. El SDK permanece desactivado hasta que des tu consentimiento: en iOS mediante el aviso de Transparencia de Seguimiento de Apps de Apple y en Android mediante nuestro propio aviso de consentimiento.",
+    "s12cP2": "Si aceptas, el SDK envía a Meta Platforms Ireland Ltd. eventos de la app (aperturas, instalaciones, registro completado, suscripción o compra y su precio), información básica del dispositivo (modelo, sistema operativo, versión de la app, dirección IP) y, cuando esté permitido, el identificador publicitario de tu dispositivo. No enviamos tu nombre, correo electrónico, viajes, mensajes ni ubicación. Meta trata estos datos conforme a su propia política de privacidad y puede usarlos para medir y mejorar la entrega de anuncios.",
+    "s12cP3": "La base jurídica es tu consentimiento. Puedes retirarlo en cualquier momento desde el menú de tu perfil (Medición de anuncios) o, en iOS, en Ajustes → Privacidad y seguridad → Rastreo. Si lo rechazas, el SDK nunca se inicia y no se envía nada a Meta.",
+    "s12Title": "15. Cambios en Esta Política de Privacidad",
     "s12p1": "Podemos actualizar esta Política de Privacidad periódicamente. Cualquier cambio se publicará dentro del Servicio.",
     "s12p2": "El uso continuado de Planera después de las actualizaciones constituye la aceptación de la Política de Privacidad revisada.",
-    "s13Title": "15. Contacto",
+    "s13Title": "16. Contacto",
     "s13Text": "Si tienes preguntas o inquietudes sobre esta Política de Privacidad o tus datos, contáctanos en:",
     "s13Contact": "📧 privacy@planeraai.app",
     "footer": "Planera – Tu viaje, planificado con inteligencia."
@@ -2314,5 +2318,15 @@
     "titleIn": "Entradas para las mejores atracciones de {{place}}",
     "desc": "Evita las colas con entradas móviles al instante para museos, monumentos y experiencias.",
     "cta": "Buscar entradas en Tiqets"
+  },
+  "metaConsent": {
+    "title": "Ayúdanos a medir nuestros anuncios",
+    "body": "Permite que Planera comparta con Meta la actividad de la app, como instalaciones y registros, para ver qué anuncios de Facebook e Instagram funcionan de verdad. Nunca compartimos tus viajes, mensajes ni datos de contacto.",
+    "bodyIos": "A continuación, iOS te preguntará si Planera puede rastrear actividad. Si lo permites, veremos qué anuncios de Facebook e Instagram te trajeron aquí y gastaremos menos en los que no funcionan. Nunca compartimos tus viajes, mensajes ni datos de contacto.",
+    "continue": "Continuar",
+    "allow": "Permitir",
+    "decline": "No permitir",
+    "footnote": "Puedes cambiarlo cuando quieras desde el menú de tu perfil.",
+    "menuLabel": "Medición de anuncios"
   }
 }

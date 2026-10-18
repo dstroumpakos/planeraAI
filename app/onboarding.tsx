@@ -11,6 +11,7 @@ import { canonicalHomeAirport, hasNonLatinScript, needsAiHomeAirportLookup, sear
 import { resolveIATA } from "@/lib/destinationAirports";
 import { WORLD_CITIES } from "@/lib/worldCities";
 import { useTrackMarketing } from "@/lib/trackMarketing";
+import { trackMetaRegistration } from "@/lib/metaSdk";
 import * as Haptics from "expo-haptics";
 import { useToken } from "@/lib/useAuthenticatedMutation";
 import { useTranslation } from "react-i18next";
@@ -248,6 +249,7 @@ export default function Onboarding() {
     setSaving(true);
     try {
       await completeOnboarding({ token: token || "" });
+      trackMetaRegistration();
       hapticFeedback();
       router.replace("/(tabs)");
     } catch (error) {
